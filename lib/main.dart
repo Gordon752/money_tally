@@ -31,6 +31,8 @@ import 'src/domain/transaction.dart';
 import 'src/domain/user_preferences.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
 import 'src/persistence/backup_codec.dart';
+import 'src/persistence/finance_record_repository.dart';
+import 'src/persistence/firestore_record_repository.dart';
 import 'src/persistence/local_finance_data_set_repository.dart';
 import 'src/store/finance_data_store.dart';
 import 'src/store/finance_data_store_scope.dart';
@@ -123,6 +125,7 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
             dataStore: stores.dataStore,
             authService: FirebaseAuthService(),
             remoteRepository: FirestoreFinanceRepository(),
+            recordRepository: FirestoreRecordRepository(),
           );
         },
       ),
@@ -159,6 +162,7 @@ class LegacyV2StoreMirror {
   }
 
   void _queueRefresh() {
+    if (dataStore.userId != null) return;
     if (_isRefreshing) {
       _queuedRefresh = true;
       return;
@@ -358,6 +362,7 @@ class MoneyTallyApp extends StatelessWidget {
     FinanceDataStore? dataStore,
     AuthService? authService,
     FinanceRemoteRepository? remoteRepository,
+    FinanceRecordRepository? recordRepository,
     Key? key,
   }) {
     final legacyStore = store ?? FinanceStore.seeded();
@@ -373,6 +378,7 @@ class MoneyTallyApp extends StatelessWidget {
       dataStore: financeDataStore,
       authService: authService ?? LocalOnlyAuthService(),
       remoteRepository: remoteRepository,
+      recordRepository: recordRepository,
       key: key,
     );
   }
@@ -382,6 +388,7 @@ class MoneyTallyApp extends StatelessWidget {
     required this.dataStore,
     required this.authService,
     this.remoteRepository,
+    this.recordRepository,
     super.key,
   });
 
@@ -389,6 +396,7 @@ class MoneyTallyApp extends StatelessWidget {
   final FinanceDataStore dataStore;
   final AuthService authService;
   final FinanceRemoteRepository? remoteRepository;
+  final FinanceRecordRepository? recordRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -410,6 +418,7 @@ class MoneyTallyApp extends StatelessWidget {
               home: AuthGate(
                 authService: authService,
                 remoteRepository: remoteRepository,
+                recordRepository: recordRepository,
               ),
             );
           },

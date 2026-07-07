@@ -297,6 +297,53 @@ void main() {
     expect(remote.savedTransactions.single.type, TransactionType.income);
   });
 
+  test('store seeds empty per-record remote when sync attaches', () async {
+    final remote = FakeRecordRepository(dataSet: _emptyDataSet());
+    final store = FinanceDataStore(dataSet: _dataSet());
+
+    await store.attachRemoteSync(remoteRepository: remote, userId: 'user-1');
+
+    expect(remote.savedAccounts.map((account) => account.id), [
+      'checking',
+      'cash',
+    ]);
+    expect(remote.savedCategories.map((category) => category.id), [
+      'dining',
+      'snacks',
+      'income',
+    ]);
+    expect(remote.savedPreferences, isNotNull);
+
+    await store.addIncome(
+      accountId: 'checking',
+      categoryId: 'income',
+      date: DateTime(2026, 7, 6),
+      payee: 'Settlement',
+      amountMinor: 120000,
+    );
+
+    expect(remote.savedTransactions.single.payee, 'Settlement');
+  });
+
+  test('store loads existing per-record remote when sync attaches', () async {
+    final remoteDataSet = _dataSet().copyWith(
+      accounts: [
+        for (final account in _dataSet().accounts)
+          if (account.id == 'checking')
+            account.copyWith(name: 'Cloud Checking')
+          else
+            account,
+      ],
+    );
+    final remote = FakeRecordRepository(dataSet: remoteDataSet);
+    final store = FinanceDataStore(dataSet: _emptyDataSet());
+
+    await store.attachRemoteSync(remoteRepository: remote, userId: 'user-1');
+
+    expect(store.accountById('checking').name, 'Cloud Checking');
+    expect(remote.savedAccounts, isEmpty);
+  });
+
   test(
     'budget spending includes matching transaction and split categories',
     () {
@@ -706,6 +753,17 @@ FinanceDataSet _dataSet() {
   );
 }
 
+FinanceDataSet _emptyDataSet() {
+  return const FinanceDataSet(
+    accounts: [],
+    categories: [],
+    transactions: [],
+    scheduledTransactions: [],
+    budgets: [],
+    preferences: UserPreferences(),
+  );
+}
+
 ScheduledTransactionRecord _scheduledTransaction({
   required String id,
   required DateTime nextDate,
@@ -728,6 +786,10 @@ ScheduledTransactionRecord _scheduledTransaction({
 }
 
 class FakeRecordRepository implements FinanceRecordRepository {
+  FakeRecordRepository({FinanceDataSet? dataSet})
+    : remoteDataSet = dataSet ?? _dataSet();
+
+  FinanceDataSet remoteDataSet;
   final savedAccounts = <AccountRecord>[];
   final savedCategories = <CategoryRecord>[];
   final savedTransactions = <TransactionRecord>[];
@@ -736,7 +798,7 @@ class FakeRecordRepository implements FinanceRecordRepository {
   UserPreferences? savedPreferences;
 
   @override
-  Future<FinanceDataSet> loadDataSet(String userId) async => _dataSet();
+  Future<FinanceDataSet> loadDataSet(String userId) async => remoteDataSet;
 
   @override
   Future<void> saveAccount({

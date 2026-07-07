@@ -126,10 +126,16 @@ String _randomNonce([int length = 32]) {
 }
 
 class AuthGate extends StatefulWidget {
-  const AuthGate({required this.authService, this.remoteRepository, super.key});
+  const AuthGate({
+    required this.authService,
+    this.remoteRepository,
+    this.recordRepository,
+    super.key,
+  });
 
   final AuthService authService;
   final FinanceRemoteRepository? remoteRepository;
+  final FinanceRecordRepository? recordRepository;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -157,6 +163,7 @@ class _AuthGateState extends State<AuthGate> {
   Widget build(BuildContext context) {
     if (_localOnly) {
       _detachStoreSync();
+      FinanceDataStoreScope.read(context).detachRemoteSync();
       _syncedUid = null;
       _syncingUid = null;
       return const FinanceHome(syncLabel: 'Local only');
@@ -173,6 +180,7 @@ class _AuthGateState extends State<AuthGate> {
         }
         if (user == null) {
           _detachStoreSync();
+          FinanceDataStoreScope.read(context).detachRemoteSync();
           _syncedUid = null;
           _syncingUid = null;
           return SignInView(
@@ -184,8 +192,9 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         final store = FinanceStoreScope.watch(context);
+        final dataStore = FinanceDataStoreScope.watch(context);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _syncIfNeeded(user, store);
+          if (mounted) _syncIfNeeded(user, store, dataStore);
         });
         return FinanceHome(
           syncLabel: user.isLocalOnly ? 'Local only' : _syncLabel,
@@ -215,29 +224,49 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  void _syncIfNeeded(MoneyTallyUser user, FinanceStore store) {
+  void _syncIfNeeded(
+    MoneyTallyUser user,
+    FinanceStore store,
+    FinanceDataStore dataStore,
+  ) {
     final remoteRepository = widget.remoteRepository;
-    if (user.isLocalOnly || remoteRepository == null) return;
+    final recordRepository = widget.recordRepository;
+    if (user.isLocalOnly ||
+        (remoteRepository == null && recordRepository == null)) {
+      return;
+    }
     if (_syncedUid == user.uid || _syncingUid == user.uid) return;
 
     _syncingUid = user.uid;
     setState(() => _syncLabel = 'Syncing');
-    unawaited(_syncUser(user.uid, remoteRepository, store));
+    unawaited(
+      _syncUser(user.uid, remoteRepository, recordRepository, store, dataStore),
+    );
   }
 
   Future<void> _syncUser(
     String userId,
-    FinanceRemoteRepository remoteRepository,
+    FinanceRemoteRepository? remoteRepository,
+    FinanceRecordRepository? recordRepository,
     FinanceStore store,
+    FinanceDataStore dataStore,
   ) async {
     try {
-      final pulled = await store.pullSnapshot(
-        remoteRepository: remoteRepository,
-        userId: userId,
-      );
-      if (!pulled) {
-        await store.pushSnapshot(
+      if (remoteRepository != null) {
+        final pulled = await store.pullSnapshot(
           remoteRepository: remoteRepository,
+          userId: userId,
+        );
+        if (!pulled) {
+          await store.pushSnapshot(
+            remoteRepository: remoteRepository,
+            userId: userId,
+          );
+        }
+      }
+      if (recordRepository != null) {
+        await dataStore.attachRemoteSync(
+          remoteRepository: recordRepository,
           userId: userId,
         );
       }
@@ -247,7 +276,9 @@ class _AuthGateState extends State<AuthGate> {
         _syncingUid = null;
         _syncLabel = 'Synced';
       });
-      _attachStoreSync(userId, remoteRepository, store);
+      if (remoteRepository != null) {
+        _attachStoreSync(userId, remoteRepository, store);
+      }
     } on Exception {
       if (!mounted) return;
       setState(() {

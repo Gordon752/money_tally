@@ -108,9 +108,9 @@ class FinanceDataStore extends ChangeNotifier {
 
   FinanceDataSet _dataSet;
   final LocalFinanceDataSetRepository? localRepository;
-  final FinanceRecordRepository? remoteRepository;
+  FinanceRecordRepository? remoteRepository;
   final NotificationScheduler notificationScheduler;
-  final String? userId;
+  String? userId;
   final String deviceId;
 
   FinanceDataSet get dataSet => _dataSet;
@@ -283,6 +283,59 @@ class FinanceDataStore extends ChangeNotifier {
     }
     await refreshScheduledNotificationBadge();
     notifyListeners();
+  }
+
+  Future<void> attachRemoteSync({
+    required FinanceRecordRepository remoteRepository,
+    required String userId,
+  }) async {
+    this.remoteRepository = remoteRepository;
+    this.userId = userId;
+
+    final remoteDataSet = await remoteRepository.loadDataSet(userId);
+    if (financeDataSetHasRecords(remoteDataSet)) {
+      await replaceDataSet(remoteDataSet);
+      return;
+    }
+
+    await pushAllRecordsToRemote();
+  }
+
+  void detachRemoteSync() {
+    remoteRepository = null;
+    userId = null;
+  }
+
+  Future<void> pushAllRecordsToRemote() async {
+    final remote = remoteRepository;
+    final currentUserId = userId;
+    if (remote == null || currentUserId == null) return;
+
+    for (final account in accounts) {
+      await remote.saveAccount(userId: currentUserId, account: account);
+    }
+    for (final category in categories) {
+      await remote.saveCategory(userId: currentUserId, category: category);
+    }
+    for (final transaction in transactions) {
+      await remote.saveTransaction(
+        userId: currentUserId,
+        transaction: transaction,
+      );
+    }
+    for (final scheduledTransaction in scheduledTransactions) {
+      await remote.saveScheduledTransaction(
+        userId: currentUserId,
+        scheduledTransaction: scheduledTransaction,
+      );
+    }
+    for (final budget in budgets) {
+      await remote.saveBudget(userId: currentUserId, budget: budget);
+    }
+    await remote.savePreferences(
+      userId: currentUserId,
+      preferences: preferences,
+    );
   }
 
   Future<void> saveAccount(AccountRecord account) async {
@@ -719,4 +772,12 @@ bool isScheduledDueOrOverdue(
     scheduledTransaction.nextDate.day,
   );
   return !dueDate.isAfter(today);
+}
+
+bool financeDataSetHasRecords(FinanceDataSet dataSet) {
+  return dataSet.accounts.isNotEmpty ||
+      dataSet.categories.isNotEmpty ||
+      dataSet.transactions.isNotEmpty ||
+      dataSet.scheduledTransactions.isNotEmpty ||
+      dataSet.budgets.isNotEmpty;
 }

@@ -1477,6 +1477,33 @@ void main() {
       contains('v2-scheduled'),
     );
   });
+
+  test('legacy v2 mirror does not overwrite remote-attached v2 data', () async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataSet = migrated.copyWith(
+      accounts: [
+        for (final account in migrated.accounts)
+          if (account.id == 'checking')
+            account.copyWith(name: 'Cloud Checking')
+          else
+            account,
+      ],
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet, userId: 'user-1');
+    final mirror = LegacyV2StoreMirror(
+      legacyStore: legacyStore,
+      dataStore: dataStore,
+    )..start();
+    addTearDown(mirror.dispose);
+
+    legacyStore.adjustAccountBalance('checking', 200000);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(dataStore.accountById('checking').name, 'Cloud Checking');
+  });
 }
 
 class FakeRemoteFinanceRepository implements FinanceRemoteRepository {
