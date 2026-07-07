@@ -216,6 +216,67 @@ void main() {
     expect(restored.transactions.single.transferAccountId, 'cash');
   });
 
+  test('backup codec exports ledger transactions as csv', () {
+    const codec = BackupCodec();
+    final dataSet = _dataSet().copyWith(
+      transactions: [
+        TransactionRecord(
+          id: 'expense-1',
+          type: TransactionType.expense,
+          accountId: 'checking',
+          categoryId: 'dining',
+          date: DateTime(2026, 7, 6),
+          payee: 'Cafe, Inc.',
+          amountMinor: 1250,
+          scheduledTransactionId: 'sched-cafe',
+          sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+        ),
+        TransactionRecord(
+          id: 'split-1',
+          type: TransactionType.expense,
+          accountId: 'checking',
+          categoryId: 'dining',
+          date: DateTime(2026, 7, 7),
+          payee: 'Store',
+          amountMinor: 3000,
+          splitLines: const [
+            TransactionSplitLine(
+              id: 'line-1',
+              categoryId: 'dining',
+              amountMinor: 1200,
+            ),
+            TransactionSplitLine(
+              id: 'line-2',
+              categoryId: 'snacks',
+              amountMinor: 1800,
+            ),
+          ],
+          sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+        ),
+      ],
+    );
+
+    final csv = codec.encodeTransactionsCsv(dataSet);
+    final lines = csv.split('\n');
+
+    expect(
+      lines.first,
+      'transaction_id,split_line_id,date,type,account,transfer_account,category,payee,amount,status,scheduled_transaction_id,deleted',
+    );
+    expect(
+      lines,
+      contains(
+        'expense-1,,2026-07-06,expense,Checking,,Dining,"Cafe, Inc.",12.50,cleared,sched-cafe,false',
+      ),
+    );
+    expect(
+      lines,
+      contains(
+        'split-1,line-2,2026-07-07,expense,Checking,,Snacks,Store,18.00,cleared,,false',
+      ),
+    );
+  });
+
   test('store writes changed records to per-record repository', () async {
     final remote = FakeRecordRepository();
     final store = FinanceDataStore(
