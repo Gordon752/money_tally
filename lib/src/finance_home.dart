@@ -54,10 +54,7 @@ class _FinanceHomeState extends State<FinanceHome> {
     final isWide = MediaQuery.sizeOf(context).width >= 880;
     final dataStore = FinanceDataStoreScope.watch(context);
     final preferences = dataStore.preferences;
-    final dueScheduledCount = scheduledDueCount(
-      dataStore.scheduledTransactions,
-      DateTime.now(),
-    );
+    final dueScheduledCount = dataStore.scheduledDueOrOverdueCount();
 
     return Scaffold(
       body: SafeArea(child: isWide ? _wideLayout() : _compactLayout()),
@@ -96,10 +93,9 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   Widget _wideLayout() {
-    final dueScheduledCount = scheduledDueCount(
-      FinanceDataStoreScope.watch(context).scheduledTransactions,
-      DateTime.now(),
-    );
+    final dueScheduledCount = FinanceDataStoreScope.watch(
+      context,
+    ).scheduledDueOrOverdueCount();
     return Row(
       children: [
         NavigationRail(
@@ -337,7 +333,7 @@ class DashboardView extends StatelessWidget {
     final incomeThisMonth = store.incomeThisMonthMinor();
     final expensesThisMonth = store.expensesThisMonthMinor();
     final currency = store.preferences.currency;
-    final dueCount = scheduledDueCount(scheduled, DateTime.now());
+    final dueCount = store.scheduledDueOrOverdueCount();
     return Column(
       children: [
         ResponsiveGrid(
@@ -2038,7 +2034,7 @@ class UpcomingPanel extends StatelessWidget {
     final scheduled = [...store.scheduledTransactions]
       ..removeWhere((item) => item.isDeleted)
       ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
-    final dueCount = scheduledDueCount(scheduled, DateTime.now());
+    final dueCount = store.scheduledDueOrOverdueCount();
     return AppCard(
       title: 'Scheduled',
       child: Column(
@@ -3672,7 +3668,7 @@ Future<void> advanceOrCloseScheduledTransaction(
   await dataStore.saveScheduledTransaction(
     item.copyWith(
       nextDate: nextDate,
-      lastAction: action,
+      lastAction: v2_scheduled.ScheduledAction.none,
       sync: item.sync.touched(deviceId: dataStore.deviceId),
     ),
   );
@@ -4515,15 +4511,8 @@ int scheduledDueCount(
   Iterable<v2_scheduled.ScheduledTransactionRecord> scheduledTransactions,
   DateTime now,
 ) {
-  final today = DateTime(now.year, now.month, now.day);
   return scheduledTransactions.where((item) {
-    if (item.isDeleted) return false;
-    final dueDate = DateTime(
-      item.nextDate.year,
-      item.nextDate.month,
-      item.nextDate.day,
-    );
-    return !dueDate.isAfter(today);
+    return isScheduledDueOrOverdue(item, now);
   }).length;
 }
 

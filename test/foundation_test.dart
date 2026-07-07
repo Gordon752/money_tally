@@ -562,6 +562,54 @@ void main() {
       expect(cancelled.lastReminderScheduledAt, isNull);
     },
   );
+
+  test('store counts only active due scheduled transactions', () {
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        scheduledTransactions: [
+          _scheduledTransaction(id: 'overdue', nextDate: DateTime(2026, 7, 5)),
+          _scheduledTransaction(id: 'today', nextDate: DateTime(2026, 7, 6)),
+          _scheduledTransaction(id: 'future', nextDate: DateTime(2026, 7, 7)),
+          _scheduledTransaction(
+            id: 'skipped',
+            nextDate: DateTime(2026, 7, 4),
+            lastAction: ScheduledAction.skipped,
+          ),
+          _scheduledTransaction(
+            id: 'deleted',
+            nextDate: DateTime(2026, 7, 4),
+            sync: SyncMetadata.fresh(
+              now: DateTime(2026, 7, 1),
+            ).deleted(deviceId: 'test'),
+          ),
+        ],
+      ),
+    );
+
+    expect(store.scheduledDueOrOverdueCount(now: DateTime(2026, 7, 6, 18)), 2);
+  });
+
+  test('store refreshes scheduled notification badge count', () async {
+    final scheduler = RecordingNotificationScheduler();
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        preferences: const UserPreferences(notificationsEnabled: true),
+        scheduledTransactions: [
+          _scheduledTransaction(id: 'today', nextDate: DateTime(2026, 7, 6)),
+          _scheduledTransaction(id: 'future', nextDate: DateTime(2026, 7, 8)),
+        ],
+      ),
+      notificationScheduler: scheduler,
+    );
+
+    await store.refreshScheduledNotificationBadge(now: DateTime(2026, 7, 6));
+    expect(scheduler.badgeCounts, [1]);
+
+    await store.savePreferences(
+      store.preferences.copyWith(notificationsEnabled: false),
+    );
+    expect(scheduler.badgeCounts.last, 0);
+  });
 }
 
 class RecordingNotificationScheduler implements NotificationScheduler {
@@ -655,6 +703,27 @@ FinanceDataSet _dataSet() {
     scheduledTransactions: const [],
     budgets: const [],
     preferences: const UserPreferences(),
+  );
+}
+
+ScheduledTransactionRecord _scheduledTransaction({
+  required String id,
+  required DateTime nextDate,
+  ScheduledAction lastAction = ScheduledAction.none,
+  SyncMetadata? sync,
+}) {
+  return ScheduledTransactionRecord(
+    id: id,
+    type: TransactionType.expense,
+    accountId: 'checking',
+    categoryId: 'dining',
+    payee: 'Rent',
+    amountMinor: 90000,
+    nextDate: nextDate,
+    frequency: RecurrenceFrequency.monthly,
+    alertPreference: AlertPreference.sameDay,
+    lastAction: lastAction,
+    sync: sync ?? SyncMetadata.fresh(now: DateTime(2026, 7, 1)),
   );
 }
 

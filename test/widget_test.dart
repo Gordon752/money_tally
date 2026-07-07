@@ -790,7 +790,7 @@ void main() {
       (item) => item.id == 'sched-rent',
     );
     expect(scheduled.nextDate, DateTime(2026, 9));
-    expect(scheduled.lastAction, v2_scheduled.ScheduledAction.paid);
+    expect(scheduled.lastAction, v2_scheduled.ScheduledAction.none);
   });
 
   testWidgets('scheduled long press can duplicate and delete item', (

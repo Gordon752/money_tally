@@ -197,6 +197,14 @@ class FinanceDataStore extends ChangeNotifier {
     return _totalThisMonth(type: TransactionType.expense, now: now);
   }
 
+  int scheduledDueOrOverdueCount({DateTime? now}) {
+    final anchor = now ?? DateTime.now();
+    final today = DateTime(anchor.year, anchor.month, anchor.day);
+    return scheduledTransactions
+        .where((item) => isScheduledDueOrOverdue(item, today))
+        .length;
+  }
+
   int _totalThisMonth({required TransactionType type, DateTime? now}) {
     final anchor = now ?? DateTime.now();
     final periodStart = DateTime(anchor.year, anchor.month);
@@ -273,6 +281,7 @@ class FinanceDataStore extends ChangeNotifier {
     if (persistLocal) {
       await localRepository?.save(_dataSet);
     }
+    await refreshScheduledNotificationBadge();
     notifyListeners();
   }
 
@@ -349,6 +358,7 @@ class FinanceDataStore extends ChangeNotifier {
     );
     _dataSet = _dataSet.copyWith(scheduledTransactions: updated);
     await _commit(scheduledTransaction: notificationAdjusted);
+    await refreshScheduledNotificationBadge();
   }
 
   Future<void> savePreferences(UserPreferences preferences) async {
@@ -372,10 +382,21 @@ class FinanceDataStore extends ChangeNotifier {
       updated.add(adjusted);
       changed = changed || !identical(adjusted, scheduledTransaction);
     }
-    if (!changed) return;
+    if (!changed) {
+      await refreshScheduledNotificationBadge();
+      return;
+    }
 
     _dataSet = _dataSet.copyWith(scheduledTransactions: updated);
     await _commit();
+    await refreshScheduledNotificationBadge();
+  }
+
+  Future<void> refreshScheduledNotificationBadge({DateTime? now}) async {
+    final count = preferences.notificationsEnabled
+        ? scheduledDueOrOverdueCount(now: now)
+        : 0;
+    await notificationScheduler.updateBadgeCount(count);
   }
 
   Future<ScheduledTransactionRecord> _applyScheduledNotificationState(
@@ -681,4 +702,21 @@ int compareAccountDisplayOrder(
   final sortComparison = a.sortOrder.compareTo(b.sortOrder);
   if (sortComparison != 0) return sortComparison;
   return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+}
+
+bool isScheduledDueOrOverdue(
+  ScheduledTransactionRecord scheduledTransaction,
+  DateTime now,
+) {
+  if (scheduledTransaction.isDeleted ||
+      scheduledTransaction.lastAction != ScheduledAction.none) {
+    return false;
+  }
+  final today = DateTime(now.year, now.month, now.day);
+  final dueDate = DateTime(
+    scheduledTransaction.nextDate.year,
+    scheduledTransaction.nextDate.month,
+    scheduledTransaction.nextDate.day,
+  );
+  return !dueDate.isAfter(today);
 }
