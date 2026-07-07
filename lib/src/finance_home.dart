@@ -2842,20 +2842,23 @@ Future<void> showAdjustBalanceDialog(
   BuildContext context,
   Account account,
 ) async {
-  final store = FinanceStoreScope.watch(context);
-  final controller = TextEditingController(text: dollars(account.balanceCents));
+  final dataStore = FinanceDataStoreScope.read(context);
+  var targetBalanceMinor = dataStore.balanceForAccount(account.id);
   final value = await showDialog<int>(
     context: context,
     builder: (context) => AlertDialog(
       title: Text('Adjust ${account.name}'),
-      content: TextField(
-        controller: controller,
-        keyboardType: const TextInputType.numberWithOptions(
-          decimal: true,
-          signed: true,
+      content: SizedBox(
+        width: 360,
+        child: AmountEntryField(
+          fieldKey: const ValueKey('account-adjust-balance'),
+          initialMinor: targetBalanceMinor,
+          currency: dataStore.preferences.currency,
+          labelText: 'Target balance',
+          autofocus: true,
+          allowNegative: true,
+          onChanged: (value) => targetBalanceMinor = value,
         ),
-        decoration: const InputDecoration(labelText: 'Balance'),
-        autofocus: true,
       ),
       actions: [
         TextButton(
@@ -2863,13 +2866,18 @@ Future<void> showAdjustBalanceDialog(
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, parseCents(controller.text)),
+          onPressed: () => Navigator.pop(context, targetBalanceMinor),
           child: const Text('Save'),
         ),
       ],
     ),
   );
-  if (value != null) store.adjustAccountBalance(account.id, value);
+  if (value == null) return;
+  await dataStore.adjustAccountBalance(
+    accountId: account.id,
+    targetBalanceMinor: value,
+    date: DateTime.now(),
+  );
 }
 
 Future<void> showAccountOptions(BuildContext context, String accountId) async {

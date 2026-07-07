@@ -941,6 +941,51 @@ void main() {
     expect(transaction.type, v2_transaction.TransactionType.expense);
   });
 
+  testWidgets('account long press can adjust balance with ledger entry', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            launchScreen: LaunchScreen.accounts,
+          ),
+        );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    final checkingCard = find.byWidgetPredicate(
+      (widget) => widget is AccountCard && widget.account.id == 'checking',
+    );
+    await tester.ensureVisible(checkingCard);
+    await tester.pumpAndSettle();
+    await tester.longPress(checkingCard);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Adjust Balance'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('account-adjust-balance')),
+      '200000',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final adjustment = dataStore.transactions.last;
+    expect(adjustment.type, v2_transaction.TransactionType.adjustment);
+    expect(adjustment.accountId, 'checking');
+    expect(dataStore.balanceForAccount('checking'), 200000);
+  });
+
   testWidgets('account long press can archive account', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(
