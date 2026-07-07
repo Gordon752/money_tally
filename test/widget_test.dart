@@ -12,6 +12,7 @@ import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
 import 'package:money_tally/src/domain/transaction.dart' as v2_transaction;
 import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
+import 'package:money_tally/src/persistence/backup_codec.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
@@ -1143,6 +1144,91 @@ void main() {
     await tester.pump();
     expect(clipboardWrites.length, 2);
     expect(clipboardWrites.last, contains('"accounts"'));
+  });
+
+  testWidgets('settings restores JSON backup from clipboard', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final restoredDataSet = dataSet.copyWith(
+      accounts: [
+        for (final account in dataSet.accounts)
+          if (account.id == 'checking')
+            account.copyWith(name: 'Restored Checking')
+          else
+            account,
+      ],
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+    final restoredJson = const BackupCodec().encodeJson(restoredDataSet);
+
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.getData') {
+          return {'text': restoredJson};
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Backup and restore'));
+    await tester.pump();
+
+    expect(dataStore.accountById('checking').name, 'Restored Checking');
+    expect(find.text('JSON backup restored'), findsOneWidget);
+  });
+
+  testWidgets('settings reports invalid JSON restore clipboard', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.getData') {
+          return {'text': 'not json'};
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Backup and restore'));
+    await tester.pump();
+
+    expect(find.text('Could not restore JSON backup'), findsOneWidget);
   });
 
   testWidgets('launch screen preference selects initial finance section', (

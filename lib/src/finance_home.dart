@@ -1690,10 +1690,11 @@ class SettingsView extends StatelessWidget {
                   payload: const BackupCodec().encodeJson(store.dataSet),
                 ),
               ),
-              const SettingsActionRow(
+              SettingsActionRow(
                 icon: Icons.restore_outlined,
                 title: 'Backup and restore',
-                trailingText: 'Later',
+                trailingText: 'Restore JSON',
+                onTap: () => restoreJsonBackupFromClipboard(context),
               ),
             ],
           ),
@@ -1972,6 +1973,34 @@ Future<void> copyExportToClipboard(
   await Clipboard.setData(ClipboardData(text: payload));
   if (!context.mounted) return;
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(title)));
+}
+
+Future<void> restoreJsonBackupFromClipboard(BuildContext context) async {
+  final store = FinanceDataStoreScope.read(context);
+  final clipboardData = await Clipboard.getData('text/plain');
+  final rawJson = clipboardData?.text;
+  if (rawJson == null || rawJson.trim().isEmpty) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Clipboard does not contain a JSON backup')),
+    );
+    return;
+  }
+
+  try {
+    final restored = const BackupCodec().decodeJson(rawJson);
+    await store.replaceDataSet(restored);
+    await store.refreshScheduledNotifications();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('JSON backup restored')));
+  } catch (_) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not restore JSON backup')),
+    );
+  }
 }
 
 class AccountBalancePanel extends StatelessWidget {
