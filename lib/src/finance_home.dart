@@ -1897,46 +1897,81 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
       accountIndex >= 0 && accountIndex < groupAccounts.length - 1;
   final action = await showModalBottomSheet<String>(
     context: context,
+    isScrollControlled: true,
     showDragHandle: true,
     builder: (context) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.tune),
-            title: const Text('Adjust Balance'),
-            onTap: () => Navigator.pop(context, 'adjust'),
-          ),
-          ListTile(
-            enabled: canMoveUp,
-            leading: const Icon(Icons.arrow_upward),
-            title: const Text('Move Up'),
-            onTap: canMoveUp ? () => Navigator.pop(context, 'moveUp') : null,
-          ),
-          ListTile(
-            enabled: canMoveDown,
-            leading: const Icon(Icons.arrow_downward),
-            title: const Text('Move Down'),
-            onTap: canMoveDown
-                ? () => Navigator.pop(context, 'moveDown')
-                : null,
-          ),
-          ListTile(
-            leading: const Icon(Icons.edit_outlined),
-            title: const Text('Edit'),
-            onTap: () => Navigator.pop(context, 'edit'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.archive_outlined),
-            title: const Text('Archive'),
-            onTap: () => Navigator.pop(context, 'archive'),
-          ),
-        ],
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.remove_circle_outline),
+              title: const Text('Add Expense'),
+              onTap: () => Navigator.pop(context, 'expense'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_circle_outline),
+              title: const Text('Add Income'),
+              onTap: () => Navigator.pop(context, 'income'),
+            ),
+            ListTile(
+              enabled: dataStore.activeAccountsInDisplayOrder.length > 1,
+              leading: const Icon(Icons.swap_horiz),
+              title: const Text('Transfer'),
+              onTap: dataStore.activeAccountsInDisplayOrder.length > 1
+                  ? () => Navigator.pop(context, 'transfer')
+                  : null,
+            ),
+            ListTile(
+              leading: const Icon(Icons.tune),
+              title: const Text('Adjust Balance'),
+              onTap: () => Navigator.pop(context, 'adjust'),
+            ),
+            ListTile(
+              enabled: canMoveUp,
+              leading: const Icon(Icons.arrow_upward),
+              title: const Text('Move Up'),
+              onTap: canMoveUp ? () => Navigator.pop(context, 'moveUp') : null,
+            ),
+            ListTile(
+              enabled: canMoveDown,
+              leading: const Icon(Icons.arrow_downward),
+              title: const Text('Move Down'),
+              onTap: canMoveDown
+                  ? () => Navigator.pop(context, 'moveDown')
+                  : null,
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit'),
+              onTap: () => Navigator.pop(context, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.archive_outlined),
+              title: const Text('Archive'),
+              onTap: () => Navigator.pop(context, 'archive'),
+            ),
+          ],
+        ),
       ),
     ),
   );
 
-  if (action == 'adjust' && context.mounted) {
+  if (action == 'expense' && context.mounted) {
+    await showTransactionDialog(
+      context,
+      initialIsExpense: true,
+      initialAccountId: account.id,
+    );
+  } else if (action == 'income' && context.mounted) {
+    await showTransactionDialog(
+      context,
+      initialIsExpense: false,
+      initialAccountId: account.id,
+    );
+  } else if (action == 'transfer' && context.mounted) {
+    await showTransferDialog(context, initialFromAccountId: account.id);
+  } else if (action == 'adjust' && context.mounted) {
     await showAdjustBalanceDialog(context, account);
   } else if (action == 'moveUp') {
     await dataStore.moveAccountWithinGroup(accountId: accountId, direction: -1);
@@ -2235,7 +2270,10 @@ Future<void> saveLegacyAccountToV2(
   await targetStore.saveAccount(record);
 }
 
-Future<void> showTransferDialog(BuildContext context) async {
+Future<void> showTransferDialog(
+  BuildContext context, {
+  String? initialFromAccountId,
+}) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final accounts = dataStore.accounts
       .where((account) => !account.isArchived)
@@ -2249,7 +2287,10 @@ Future<void> showTransferDialog(BuildContext context) async {
 
   final payee = TextEditingController(text: 'Transfer');
   final amount = TextEditingController();
-  var fromAccountId = accounts.first.id;
+  var fromAccountId =
+      accounts.any((account) => account.id == initialFromAccountId)
+      ? initialFromAccountId!
+      : accounts.first.id;
   var toAccountId = accounts
       .firstWhere((account) => account.id != fromAccountId)
       .id;
@@ -2844,12 +2885,16 @@ void showMissingScheduledTransferMessage(BuildContext context) {
 Future<void> showTransactionDialog(
   BuildContext context, {
   bool? initialIsExpense,
+  String? initialAccountId,
 }) async {
   final store = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
   final payee = TextEditingController();
   final amount = TextEditingController();
-  var accountId = store.accounts.first.id;
+  var accountId =
+      store.accounts.any((account) => account.id == initialAccountId)
+      ? initialAccountId!
+      : store.accounts.first.id;
   var isExpense = initialIsExpense ?? isExpenseDefault(dataStore.preferences);
   var categoryId = defaultCategoryIdForTransactionKind(store, isExpense);
 

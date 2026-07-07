@@ -44,6 +44,9 @@ class AccountCard extends StatelessWidget {
                   children: [
                     Text(
                       account.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
@@ -51,6 +54,9 @@ class AccountCard extends StatelessWidget {
                     const SizedBox(height: AppSpacing.xxs),
                     Text(
                       _groupLabel(account.group.name),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),

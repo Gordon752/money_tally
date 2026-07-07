@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
+import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/domain/category.dart' as v2_category;
 import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart'
@@ -397,6 +398,53 @@ void main() {
     final account = dataStore.accountById('checking');
     expect(account.includeInGroupBalance, isFalse);
     expect(account.includeInNetWorth, isFalse);
+  });
+
+  testWidgets('account long press can add expense for selected account', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            launchScreen: LaunchScreen.accounts,
+          ),
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    final cashCard = find.byWidgetPredicate(
+      (widget) => widget is AccountCard && widget.account.id == 'cash',
+    );
+    await tester.ensureVisible(cashCard);
+    await tester.pumpAndSettle();
+    await tester.longPress(cashCard);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add Expense'));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Coffee');
+    await tester.enterText(fields.at(1), '4.50');
+    await tester.tap(find.text('Add').last);
+    await tester.pumpAndSettle();
+
+    final transaction = legacyStore.transactions.singleWhere(
+      (item) => item.payee == 'Coffee',
+    );
+    expect(transaction.accountId, 'cash');
+    expect(transaction.amountCents, -450);
   });
 
   testWidgets('account long press can archive account', (tester) async {
