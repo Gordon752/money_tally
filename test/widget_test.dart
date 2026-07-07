@@ -164,6 +164,32 @@ void main() {
     expect(find.text('Checking'), findsOneWidget);
   });
 
+  testWidgets('accounts group long press can reorder fixed groups', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Accounts').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byKey(const ValueKey('account-group-cash')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Move Up'));
+    await tester.pumpAndSettle();
+
+    expect(dataStore.preferences.accountGroupOrderNames.take(2), [
+      'cash',
+      'banking',
+    ]);
+  });
+
   testWidgets('ledger screen renders v2 transaction rows', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 

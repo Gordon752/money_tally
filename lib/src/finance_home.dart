@@ -430,6 +430,7 @@ class AccountsView extends StatelessWidget {
                 final isCollapsed = store.preferences.collapsedAccountGroupNames
                     .contains(group.name);
                 return SectionHeader(
+                  key: ValueKey('account-group-${group.name}'),
                   title: accountGroupLabel(group),
                   subtitle: money(
                     accounts
@@ -460,6 +461,7 @@ class AccountsView extends StatelessWidget {
                           : Icons.keyboard_arrow_down,
                     ),
                   ),
+                  onLongPress: () => showAccountGroupActions(context, group),
                 );
               },
             ),
@@ -506,6 +508,52 @@ Future<void> toggleAccountGroupCollapsed(
   await store.savePreferences(
     store.preferences.copyWith(collapsedAccountGroupNames: collapsedNames),
   );
+}
+
+Future<void> showAccountGroupActions(
+  BuildContext context,
+  v2_account.AccountGroup group,
+) async {
+  final store = FinanceDataStoreScope.read(context);
+  final groups = store.accountGroupsInDisplayOrder;
+  final groupIndex = groups.indexOf(group);
+  final canMoveUp = groupIndex > 0;
+  final canMoveDown = groupIndex >= 0 && groupIndex < groups.length - 1;
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            enabled: canMoveUp,
+            leading: const Icon(Icons.arrow_upward),
+            title: const Text('Move Up'),
+            onTap: canMoveUp
+                ? () => Navigator.pop(sheetContext, 'moveUp')
+                : null,
+          ),
+          ListTile(
+            enabled: canMoveDown,
+            leading: const Icon(Icons.arrow_downward),
+            title: const Text('Move Down'),
+            onTap: canMoveDown
+                ? () => Navigator.pop(sheetContext, 'moveDown')
+                : null,
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (!context.mounted || action == null) return;
+  switch (action) {
+    case 'moveUp':
+      await store.moveAccountGroup(group: group, direction: -1);
+    case 'moveDown':
+      await store.moveAccountGroup(group: group, direction: 1);
+  }
 }
 
 class LedgerView extends StatefulWidget {
