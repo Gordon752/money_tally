@@ -316,6 +316,8 @@ Example:
 
 `Spent $200 of $90 - Over by $110`
 
+Budget grouping rule: keep budgets as individual editable records for now. Do not add editable budget groups unless user testing shows a clear need; extra budget grouping may add clutter and confusion.
+
 ### User Preferences
 
 Target fields:
@@ -540,6 +542,8 @@ Budget cards should show:
 - Progress bar
 
 Budgets must support assigned categories.
+
+Do not add budget groups in the near term. Keep budget management focused on clear individual budgets with category assignment, edit, archive, delete, and plain-language progress.
 
 ### Categories
 
