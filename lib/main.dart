@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'firebase_options.dart';
+import 'src/design/design_tokens.dart';
 import 'src/design/widgets/budget_progress_bar.dart';
 import 'src/design/widgets/account_card.dart';
 import 'src/design/widgets/scheduled_transaction_row.dart';
@@ -93,6 +94,8 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
       debugShowCheckedModeBanner: false,
       title: 'Money Tally',
       theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      themeMode: ThemeMode.system,
       home: FutureBuilder<AppStores>(
         future: _startup,
         builder: (context, snapshot) {
@@ -290,14 +293,23 @@ class MoneyTallyApp extends StatelessWidget {
       store: store,
       child: FinanceDataStoreScope(
         store: dataStore,
-        child: MaterialApp(
-          debugShowCheckedModeBanner: false,
-          title: 'Money Tally',
-          theme: AppTheme.light(),
-          home: AuthGate(
-            authService: authService,
-            remoteRepository: remoteRepository,
-          ),
+        child: Builder(
+          builder: (context) {
+            final preferences = FinanceDataStoreScope.watch(
+              context,
+            ).preferences;
+            return MaterialApp(
+              debugShowCheckedModeBanner: false,
+              title: 'Money Tally',
+              theme: AppTheme.light(),
+              darkTheme: AppTheme.dark(),
+              themeMode: themeModeFor(preferences.appearanceMode),
+              home: AuthGate(
+                authService: authService,
+                remoteRepository: remoteRepository,
+              ),
+            );
+          },
         ),
       ),
     );

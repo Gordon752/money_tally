@@ -13,48 +13,55 @@ class AppTheme {
   static const blue = Color(0xFF5378BD);
 
   static ThemeData light() {
+    return _theme(Brightness.light);
+  }
+
+  static ThemeData dark() {
+    return _theme(Brightness.dark);
+  }
+
+  static ThemeData _theme(Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
     final scheme = ColorScheme.fromSeed(
       seedColor: accent,
-      brightness: Brightness.light,
-      surface: panel,
+      brightness: brightness,
+      surface: isDark ? AppColors.panelDark : panel,
     );
 
-    return ThemeData(
+    return AppThemeBuilder.theme(brightness).copyWith(
       colorScheme: scheme,
-      scaffoldBackgroundColor: page,
-      useMaterial3: true,
-      fontFamily: 'SF Pro Display',
-      cardTheme: const CardThemeData(
-        color: panel,
+      scaffoldBackgroundColor: isDark ? AppColors.pageDark : page,
+      cardTheme: CardThemeData(
+        color: isDark ? AppColors.panelDark : panel,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(8)),
-          side: BorderSide(color: line),
+          borderRadius: const BorderRadius.all(Radius.circular(8)),
+          side: BorderSide(color: isDark ? AppColors.lineDark : line),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: Colors.white,
+        fillColor: isDark ? AppColors.panelDark : Colors.white,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: line),
+          borderSide: BorderSide(color: isDark ? AppColors.lineDark : line),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: accent, width: 1.4),
         ),
       ),
-      navigationRailTheme: const NavigationRailThemeData(
-        backgroundColor: page,
-        selectedIconTheme: IconThemeData(color: accent),
-        selectedLabelTextStyle: TextStyle(
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: isDark ? AppColors.pageDark : page,
+        selectedIconTheme: const IconThemeData(color: accent),
+        selectedLabelTextStyle: const TextStyle(
           color: accent,
           fontWeight: FontWeight.w800,
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? AppColors.panelDark : Colors.white,
         indicatorColor: accent.withValues(alpha: 0.12),
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
@@ -66,4 +73,12 @@ class AppTheme {
       ),
     );
   }
+}
+
+ThemeMode themeModeFor(AppearanceMode mode) {
+  return switch (mode) {
+    AppearanceMode.system => ThemeMode.system,
+    AppearanceMode.light => ThemeMode.light,
+    AppearanceMode.dark => ThemeMode.dark,
+  };
 }

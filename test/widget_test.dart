@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
+import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
@@ -175,6 +176,31 @@ void main() {
     expect(find.text('Launch screen'), findsOneWidget);
     expect(find.text('Money Format'), findsOneWidget);
     expect(find.text('Data Ownership'), findsOneWidget);
+  });
+
+  testWidgets('applies v2 appearance preference to app theme mode', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            appearanceMode: AppearanceMode.dark,
+          ),
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+
+    expect(app.themeMode, ThemeMode.dark);
+    expect(app.darkTheme, isNotNull);
   });
 
   test('legacy v2 mirror refreshes in-memory v2 balances', () async {
