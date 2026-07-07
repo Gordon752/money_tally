@@ -210,6 +210,7 @@ Target fields:
 - `name`
 - `type`: banking, cash, creditCard, loan
 - `openingBalanceMinor`
+- `creditLimitMinor` for credit card accounts only
 - `currentBalanceMinor` or derived balance strategy
 - `isArchived`
 - `includeInGroupBalance`
@@ -217,6 +218,8 @@ Target fields:
 - sync metadata
 
 Settled balance rule: account balances are derived from opening balance plus ledger activity. Expenses, income, transfers, and balance adjustments are all ledger transactions. The app should not silently mutate account balances. `Adjust Balance` creates an explicit adjustment transaction so the balance change remains auditable, exportable, and syncable. The app can cache computed balances for performance later, but the ledger remains the source of truth.
+
+Credit card rule: credit cards may optionally store a `creditLimitMinor`. Credit used should be derived from the account balance, not stored separately. Account cards for credit cards can show used credit, available credit, and a clean minimalist utilization bar. The Credit Cards group card can show total used versus total limit across included cards. If a card has no limit, hide utilization for that card or exclude it from group utilization calculations rather than showing misleading percentages.
 
 ### Category
 
@@ -449,6 +452,9 @@ Features:
 - Reorder account groups
 - Include in group balance
 - Include in net worth
+- Optional credit limit for credit card accounts
+- Credit utilization bar on credit card account cards
+- Total credit utilization bar on the Credit Cards group card
 
 Long press account actions:
 
