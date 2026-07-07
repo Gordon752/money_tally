@@ -454,6 +454,10 @@ void main() {
       '2026-07-03',
     );
     await tester.enterText(
+      find.byKey(const ValueKey('transaction-note')),
+      'Pickup order',
+    );
+    await tester.enterText(
       find.byKey(const ValueKey('transaction-amount')),
       '1234',
     );
@@ -465,6 +469,7 @@ void main() {
     );
     expect(edited.amountMinor, 1234);
     expect(edited.date, DateTime(2026, 7, 3));
+    expect(edited.note, 'Pickup order');
     expect(edited.type, v2_transaction.TransactionType.expense);
     expect(find.text('Walmart Grocery'), findsOneWidget);
   });
@@ -597,6 +602,10 @@ void main() {
       '2026-07-04',
     );
     await tester.enterText(
+      find.byKey(const ValueKey('transaction-note')),
+      'Paint and fasteners',
+    );
+    await tester.enterText(
       find.byKey(const ValueKey('transaction-amount')),
       '4599',
     );
@@ -608,6 +617,7 @@ void main() {
     );
     expect(transaction.date, DateTime(2026, 7, 4));
     expect(transaction.amountMinor, 4599);
+    expect(transaction.note, 'Paint and fasteners');
   });
 
   testWidgets('floating add menu opens income transaction dialog', (

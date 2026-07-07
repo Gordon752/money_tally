@@ -4141,6 +4141,7 @@ Future<void> showTransactionDialog(
   final activeAccounts = dataStore.activeAccountsInDisplayOrder;
   if (activeAccounts.isEmpty) return;
   final payee = TextEditingController(text: transaction?.payee ?? '');
+  final note = TextEditingController(text: transaction?.note ?? '');
   final date = TextEditingController(
     text: dateInput(transaction?.date ?? DateTime.now()),
   );
@@ -4165,6 +4166,7 @@ Future<void> showTransactionDialog(
           String accountId,
           String categoryId,
           String payee,
+          String note,
           DateTime date,
           int amountMinor,
           bool isExpense,
@@ -4232,6 +4234,14 @@ Future<void> showTransactionDialog(
                         ),
                       ),
                       const SizedBox(height: 12),
+                      TextField(
+                        key: const ValueKey('transaction-note'),
+                        controller: note,
+                        decoration: const InputDecoration(labelText: 'Note'),
+                        minLines: 1,
+                        maxLines: 3,
+                      ),
+                      const SizedBox(height: 12),
                       AmountEntryField(
                         fieldKey: const ValueKey('transaction-amount'),
                         initialMinor: amountMinor,
@@ -4286,6 +4296,7 @@ Future<void> showTransactionDialog(
                             payee: payee.text.trim().isEmpty
                                 ? 'Transaction'
                                 : payee.text.trim(),
+                            note: note.text.trim(),
                             date: parseDateInput(
                               date.text,
                               transaction?.date ?? DateTime.now(),
@@ -4311,6 +4322,7 @@ Future<void> showTransactionDialog(
         date: result.date,
         payee: result.payee,
         amountMinor: result.amountMinor,
+        note: result.note,
       );
     } else {
       await dataStore.addIncome(
@@ -4319,6 +4331,7 @@ Future<void> showTransactionDialog(
         date: result.date,
         payee: result.payee,
         amountMinor: result.amountMinor,
+        note: result.note,
       );
     }
   } else {
@@ -4331,6 +4344,7 @@ Future<void> showTransactionDialog(
         categoryId: result.categoryId,
         date: result.date,
         payee: result.payee,
+        note: result.note,
         amountMinor: result.amountMinor,
         clearTransferAccount: true,
       ),
