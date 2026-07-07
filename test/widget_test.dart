@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/domain/money.dart';
+import 'package:money_tally/src/domain/scheduled_transaction.dart'
+    as v2_scheduled;
 import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
 import 'package:money_tally/src/domain/transaction.dart' as v2_transaction;
 import 'package:money_tally/src/domain/user_preferences.dart';
@@ -296,6 +298,46 @@ void main() {
     expect(find.text(r'$297.00'), findsOneWidget);
   });
 
+  testWidgets('floating add scheduled transaction creates v2 schedule', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Scheduled Transaction'));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Rent');
+    await tester.enterText(fields.at(1), '900.00');
+    await tester.enterText(fields.at(2), '2026-08-01');
+    await tester.tap(find.text('Add').last);
+    await tester.pumpAndSettle();
+
+    final scheduled = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.payee == 'Rent',
+    );
+    expect(scheduled.type, v2_transaction.TransactionType.expense);
+    expect(scheduled.amountMinor, 90000);
+    expect(scheduled.nextDate, DateTime(2026, 8));
+    expect(scheduled.frequency, v2_scheduled.RecurrenceFrequency.monthly);
+    expect(scheduled.categoryId, isNotNull);
+
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rent'), findsOneWidget);
+  });
+
   testWidgets('account long press can edit account name', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(
@@ -526,6 +568,42 @@ void main() {
     expect(
       dataStore.transactions.map((transaction) => transaction.id),
       contains('v2-transfer'),
+    );
+  });
+
+  test('legacy v2 mirror preserves v2-only scheduled transactions', () async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator()
+          .migrate(legacyStore.snapshot().toJson())
+          .copyWith(
+            scheduledTransactions: [
+              v2_scheduled.ScheduledTransactionRecord(
+                id: 'v2-scheduled',
+                type: v2_transaction.TransactionType.expense,
+                accountId: 'checking',
+                categoryId: 'dining',
+                payee: 'Rent',
+                amountMinor: 90000,
+                nextDate: DateTime(2026, 8),
+                frequency: v2_scheduled.RecurrenceFrequency.monthly,
+                sync: v2_sync.SyncMetadata.fresh(),
+              ),
+            ],
+          ),
+    );
+    final mirror = LegacyV2StoreMirror(
+      legacyStore: legacyStore,
+      dataStore: dataStore,
+    )..start();
+    addTearDown(mirror.dispose);
+
+    legacyStore.adjustAccountBalance('checking', 200000);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      dataStore.scheduledTransactions.map((scheduled) => scheduled.id),
+      contains('v2-scheduled'),
     );
   });
 }

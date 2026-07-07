@@ -21,7 +21,9 @@ import 'src/design/widgets/scheduled_transaction_row.dart';
 import 'src/design/widgets/transaction_row.dart';
 import 'src/domain/budget.dart';
 import 'src/domain/account.dart' as v2_account;
+import 'src/domain/category.dart' as v2_category;
 import 'src/domain/money.dart';
+import 'src/domain/scheduled_transaction.dart' as v2_scheduled;
 import 'src/domain/sync_metadata.dart' as v2_sync;
 import 'src/domain/transaction.dart';
 import 'src/domain/user_preferences.dart';
@@ -174,6 +176,10 @@ class LegacyV2StoreMirror {
             migrated: migrated.transactions,
             current: dataStore.transactions,
           ),
+          scheduledTransactions: mergeV2OnlyScheduledTransactions(
+            migrated: migrated.scheduledTransactions,
+            current: dataStore.scheduledTransactions,
+          ),
           preferences: dataStore.preferences,
         );
         await dataStore.replaceDataSet(dataSet, persistLocal: false);
@@ -193,6 +199,18 @@ List<TransactionRecord> mergeV2OnlyTransactions({
     ...migrated,
     for (final transaction in current)
       if (!migratedIds.contains(transaction.id)) transaction,
+  ];
+}
+
+List<v2_scheduled.ScheduledTransactionRecord> mergeV2OnlyScheduledTransactions({
+  required List<v2_scheduled.ScheduledTransactionRecord> migrated,
+  required List<v2_scheduled.ScheduledTransactionRecord> current,
+}) {
+  final migratedIds = migrated.map((scheduled) => scheduled.id).toSet();
+  return [
+    ...migrated,
+    for (final scheduled in current)
+      if (!migratedIds.contains(scheduled.id)) scheduled,
   ];
 }
 

@@ -1321,9 +1321,7 @@ Future<void> showFloatingAddMenu(BuildContext context) async {
     case 'transfer':
       await showTransferDialog(context);
     case 'scheduled':
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${floatingAddActionLabel(selected)} is next')),
-      );
+      await showScheduledTransactionDialog(context);
   }
 }
 
@@ -1557,6 +1555,273 @@ Future<void> showTransferDialog(BuildContext context) async {
     date: DateTime.now(),
     payee: result.payee,
     amountMinor: result.amountMinor,
+  );
+}
+
+Future<void> showScheduledTransactionDialog(BuildContext context) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final accounts = dataStore.accounts
+      .where((account) => !account.isArchived)
+      .toList(growable: false);
+  if (accounts.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Add an account before scheduling')),
+    );
+    return;
+  }
+
+  final payee = TextEditingController();
+  final amount = TextEditingController();
+  final nextDate = TextEditingController(text: dateInput(DateTime.now()));
+  var type = TransactionType.expense;
+  var accountId = accounts.first.id;
+  var transferAccountId = accounts.length > 1 ? accounts[1].id : null;
+  var categoryId = defaultCategoryIdForScheduledTransaction(dataStore, type);
+  var frequency = v2_scheduled.RecurrenceFrequency.monthly;
+  var alertPreference = v2_scheduled.AlertPreference.none;
+
+  final result =
+      await showDialog<
+        ({
+          TransactionType type,
+          String accountId,
+          String? transferAccountId,
+          String? categoryId,
+          String payee,
+          int amountMinor,
+          DateTime nextDate,
+          v2_scheduled.RecurrenceFrequency frequency,
+          v2_scheduled.AlertPreference alertPreference,
+        })
+      >(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) {
+            final categories = scheduledCategoriesForType(dataStore, type);
+            if (categoryId != null &&
+                !categories.any((category) => category.id == categoryId)) {
+              categoryId = categories.isEmpty ? null : categories.first.id;
+            }
+            if (transferAccountId == accountId) {
+              transferAccountId = firstDestinationAccountId(
+                accounts,
+                accountId,
+              );
+            }
+
+            return AlertDialog(
+              title: const Text('Add scheduled transaction'),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SegmentedButton<TransactionType>(
+                        segments: [
+                          const ButtonSegment(
+                            value: TransactionType.expense,
+                            label: Text('Expense'),
+                            icon: Icon(Icons.remove),
+                          ),
+                          const ButtonSegment(
+                            value: TransactionType.income,
+                            label: Text('Income'),
+                            icon: Icon(Icons.add),
+                          ),
+                          if (accounts.length > 1)
+                            const ButtonSegment(
+                              value: TransactionType.transfer,
+                              label: Text('Transfer'),
+                              icon: Icon(Icons.swap_horiz),
+                            ),
+                        ],
+                        selected: {type},
+                        onSelectionChanged: (values) => setDialogState(() {
+                          type = values.first;
+                          categoryId = defaultCategoryIdForScheduledTransaction(
+                            dataStore,
+                            type,
+                          );
+                          if (type == TransactionType.transfer) {
+                            transferAccountId = accounts
+                                .where((account) => account.id != accountId)
+                                .first
+                                .id;
+                          }
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: payee,
+                        decoration: const InputDecoration(labelText: 'Payee'),
+                        autofocus: true,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: amount,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(labelText: 'Amount'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: nextDate,
+                        keyboardType: TextInputType.datetime,
+                        decoration: const InputDecoration(
+                          labelText: 'Next date',
+                          helperText: 'YYYY-MM-DD',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: accountId,
+                        decoration: InputDecoration(
+                          labelText: type == TransactionType.transfer
+                              ? 'From'
+                              : 'Account',
+                        ),
+                        items: [
+                          for (final account in accounts)
+                            DropdownMenuItem(
+                              value: account.id,
+                              child: Text(account.name),
+                            ),
+                        ],
+                        onChanged: (value) => setDialogState(() {
+                          accountId = value ?? accountId;
+                          if (transferAccountId == accountId) {
+                            transferAccountId = firstDestinationAccountId(
+                              accounts,
+                              accountId,
+                            );
+                          }
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      if (type == TransactionType.transfer)
+                        DropdownButtonFormField<String>(
+                          initialValue: transferAccountId,
+                          decoration: const InputDecoration(labelText: 'To'),
+                          items: [
+                            for (final account in accounts)
+                              if (account.id != accountId)
+                                DropdownMenuItem(
+                                  value: account.id,
+                                  child: Text(account.name),
+                                ),
+                          ],
+                          onChanged: (value) =>
+                              setDialogState(() => transferAccountId = value),
+                        )
+                      else
+                        DropdownButtonFormField<String>(
+                          initialValue: categoryId,
+                          decoration: const InputDecoration(
+                            labelText: 'Category',
+                          ),
+                          items: [
+                            for (final category in categories)
+                              DropdownMenuItem(
+                                value: category.id,
+                                child: Text(category.name),
+                              ),
+                          ],
+                          onChanged: (value) =>
+                              setDialogState(() => categoryId = value),
+                        ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<v2_scheduled.RecurrenceFrequency>(
+                        initialValue: frequency,
+                        decoration: const InputDecoration(labelText: 'Repeat'),
+                        items: [
+                          for (final item
+                              in v2_scheduled.RecurrenceFrequency.values)
+                            DropdownMenuItem(
+                              value: item,
+                              child: Text(recurrenceFrequencyLabel(item)),
+                            ),
+                        ],
+                        onChanged: (value) => setDialogState(
+                          () => frequency = value ?? frequency,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<v2_scheduled.AlertPreference>(
+                        initialValue: alertPreference,
+                        decoration: const InputDecoration(labelText: 'Alert'),
+                        items: [
+                          for (final item
+                              in v2_scheduled.AlertPreference.values)
+                            DropdownMenuItem(
+                              value: item,
+                              child: Text(alertPreferenceLabel(item)),
+                            ),
+                        ],
+                        onChanged: (value) => setDialogState(
+                          () => alertPreference = value ?? alertPreference,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, (
+                    type: type,
+                    accountId: accountId,
+                    transferAccountId: type == TransactionType.transfer
+                        ? transferAccountId
+                        : null,
+                    categoryId: type == TransactionType.transfer
+                        ? null
+                        : categoryId,
+                    payee: payee.text.trim().isEmpty
+                        ? scheduledPayeeFallback(type)
+                        : payee.text.trim(),
+                    amountMinor: parseCents(amount.text).abs(),
+                    nextDate: parseDateInput(nextDate.text, DateTime.now()),
+                    frequency: frequency,
+                    alertPreference: alertPreference,
+                  )),
+                  child: const Text('Add'),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+  if (result == null) return;
+  if (result.type == TransactionType.transfer &&
+      result.transferAccountId == null) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Choose a destination account')),
+    );
+    return;
+  }
+
+  await dataStore.saveScheduledTransaction(
+    v2_scheduled.ScheduledTransactionRecord(
+      id: 'sched_${DateTime.now().microsecondsSinceEpoch}',
+      type: result.type,
+      accountId: result.accountId,
+      transferAccountId: result.transferAccountId,
+      categoryId: result.categoryId,
+      payee: result.payee,
+      amountMinor: result.amountMinor,
+      nextDate: result.nextDate,
+      frequency: result.frequency,
+      alertPreference: result.alertPreference,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+    ),
   );
 }
 
@@ -1841,12 +2106,32 @@ String defaultTransactionTypeLabel(DefaultTransactionType type) {
   };
 }
 
-String floatingAddActionLabel(String action) {
-  return switch (action) {
-    'transfer' => 'Transfer',
-    'account' => 'Account',
-    'scheduled' => 'Scheduled transaction',
-    _ => 'Action',
+String recurrenceFrequencyLabel(v2_scheduled.RecurrenceFrequency frequency) {
+  return switch (frequency) {
+    v2_scheduled.RecurrenceFrequency.once => 'Once',
+    v2_scheduled.RecurrenceFrequency.weekly => 'Weekly',
+    v2_scheduled.RecurrenceFrequency.biweekly => 'Biweekly',
+    v2_scheduled.RecurrenceFrequency.monthly => 'Monthly',
+    v2_scheduled.RecurrenceFrequency.yearly => 'Yearly',
+  };
+}
+
+String alertPreferenceLabel(v2_scheduled.AlertPreference preference) {
+  return switch (preference) {
+    v2_scheduled.AlertPreference.none => 'No alert',
+    v2_scheduled.AlertPreference.sameDay => 'Same day',
+    v2_scheduled.AlertPreference.oneDayBefore => '1 day before',
+    v2_scheduled.AlertPreference.threeDaysBefore => '3 days before',
+    v2_scheduled.AlertPreference.oneWeekBefore => '1 week before',
+    v2_scheduled.AlertPreference.custom => 'Custom',
+  };
+}
+
+String scheduledPayeeFallback(TransactionType type) {
+  return switch (type) {
+    TransactionType.income => 'Scheduled income',
+    TransactionType.transfer => 'Scheduled transfer',
+    _ => 'Scheduled expense',
   };
 }
 
@@ -1868,6 +2153,36 @@ String defaultCategoryIdForTransactionKind(FinanceStore store, bool isExpense) {
         orElse: () => store.categories.first,
       )
       .id;
+}
+
+List<v2_category.CategoryRecord> scheduledCategoriesForType(
+  FinanceDataStore dataStore,
+  TransactionType type,
+) {
+  final kindName = type == TransactionType.income ? 'income' : 'expense';
+  return dataStore.categories
+      .where(
+        (category) => !category.isArchived && category.kind.name == kindName,
+      )
+      .toList(growable: false);
+}
+
+String? defaultCategoryIdForScheduledTransaction(
+  FinanceDataStore dataStore,
+  TransactionType type,
+) {
+  final categories = scheduledCategoriesForType(dataStore, type);
+  return categories.isEmpty ? null : categories.first.id;
+}
+
+String? firstDestinationAccountId(
+  List<v2_account.AccountRecord> accounts,
+  String fromAccountId,
+) {
+  for (final account in accounts) {
+    if (account.id != fromAccountId) return account.id;
+  }
+  return null;
 }
 
 String thousandsSeparatorLabel(String value) {
@@ -1896,6 +2211,21 @@ int parseCents(String value) {
   final cleaned = value.replaceAll(RegExp(r'[$,\s]'), '');
   final parsed = double.tryParse(cleaned) ?? 0;
   return (parsed * 100).round();
+}
+
+String dateInput(DateTime date) {
+  final year = date.year.toString().padLeft(4, '0');
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  return '$year-$month-$day';
+}
+
+DateTime parseDateInput(String value, DateTime fallback) {
+  final parsed = DateTime.tryParse(value.trim());
+  if (parsed == null) {
+    return DateTime(fallback.year, fallback.month, fallback.day);
+  }
+  return DateTime(parsed.year, parsed.month, parsed.day);
 }
 
 String dateShort(DateTime date) {
