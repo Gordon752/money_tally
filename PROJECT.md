@@ -448,6 +448,7 @@ Features:
 - Archive account
 - Delete account
 - Collapsible account groups
+- Rename fixed account group display labels
 - Create custom account groups
 - Rename custom account groups
 - Archive/delete custom account groups
@@ -478,7 +479,7 @@ Long press account group actions:
 - Move Group Up / Move Group Down
 - Archive/Delete custom group
 
-Initial rule: ship fixed account groups derived from account type first. Custom user-defined account groups are planned for a later phase after fixed-group collapse, ordering, and account movement are stable.
+Current rule: fixed account groups are derived from account type for financial behavior, but their display labels can be renamed by the user. Custom user-defined account groups are planned for a later phase after fixed-group collapse, ordering, renaming, and account movement are stable.
 
 Remove the standalone Adjust Balance button. Balance adjustments should live in account actions and should create auditable records if the ledger model supports it.
 
