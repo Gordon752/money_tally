@@ -165,7 +165,8 @@ class FinanceDataStore extends ChangeNotifier {
     final periodEnd = DateTime(anchor.year, anchor.month + 1);
     return transactions
         .where((transaction) {
-          return transaction.type == type &&
+          return !transaction.isDeleted &&
+              transaction.type == type &&
               !transaction.date.isBefore(periodStart) &&
               transaction.date.isBefore(periodEnd);
         })
@@ -180,7 +181,8 @@ class FinanceDataStore extends ChangeNotifier {
 
     return transactions
         .where((transaction) {
-          return transaction.type == TransactionType.expense &&
+          return !transaction.isDeleted &&
+              transaction.type == TransactionType.expense &&
               !transaction.date.isBefore(periodStart) &&
               transaction.date.isBefore(periodEnd);
         })

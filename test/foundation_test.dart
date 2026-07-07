@@ -67,6 +67,25 @@ void main() {
     },
   );
 
+  test('deleted transactions are ignored by balances and summaries', () async {
+    final store = FinanceDataStore(dataSet: _dataSet());
+
+    final expense = await store.addExpense(
+      accountId: 'checking',
+      categoryId: 'dining',
+      date: DateTime(2026, 7, 6),
+      payee: 'Void',
+      amountMinor: 1000,
+    );
+
+    await store.saveTransaction(
+      expense.copyWith(sync: expense.sync.deleted(deviceId: store.deviceId)),
+    );
+
+    expect(store.balanceForAccount('checking'), 100000);
+    expect(store.expensesThisMonthMinor(now: DateTime(2026, 7, 10)), 0);
+  });
+
   test('store can reorder accounts within a fixed group', () async {
     final sync = SyncMetadata.fresh(now: DateTime(2026, 7, 6));
     final repository = FakeRecordRepository();

@@ -515,6 +515,7 @@ class LedgerView extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final transactions = [...store.transactions]
+      ..removeWhere((transaction) => transaction.isDeleted)
       ..sort((a, b) => b.date.compareTo(a.date));
     final accountsById = {
       for (final account in store.accounts) account.id: account,
@@ -549,6 +550,8 @@ class LedgerView extends StatelessWidget {
                     categoryName: transaction.categoryId == null
                         ? null
                         : categoriesById[transaction.categoryId]?.name,
+                    onLongPress: () =>
+                        showTransactionOptions(context, transaction.id),
                   ),
               ],
             ),
@@ -557,6 +560,83 @@ class LedgerView extends StatelessWidget {
       ],
     );
   }
+}
+
+Future<void> showTransactionOptions(
+  BuildContext context,
+  String transactionId,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final transaction = dataStore.transactions.firstWhere(
+    (item) => item.id == transactionId,
+  );
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.copy_outlined),
+            title: const Text('Duplicate'),
+            onTap: () => Navigator.pop(sheetContext, 'duplicate'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Delete'),
+            textColor: AppTheme.rose,
+            iconColor: AppTheme.rose,
+            onTap: () => Navigator.pop(sheetContext, 'delete'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (!context.mounted || action == null) return;
+  switch (action) {
+    case 'duplicate':
+      await duplicateTransaction(context, transaction);
+    case 'delete':
+      await deleteTransaction(context, transaction);
+  }
+}
+
+Future<void> duplicateTransaction(
+  BuildContext context,
+  TransactionRecord transaction,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  await dataStore.saveTransaction(
+    TransactionRecord(
+      id: 'txn_${DateTime.now().microsecondsSinceEpoch}',
+      type: transaction.type,
+      accountId: transaction.accountId,
+      transferAccountId: transaction.transferAccountId,
+      categoryId: transaction.categoryId,
+      date: transaction.date,
+      payee: '${transaction.payee} copy',
+      amountMinor: transaction.amountMinor,
+      note: transaction.note,
+      status: transaction.status,
+      splitLines: transaction.splitLines,
+      scheduledTransactionId: transaction.scheduledTransactionId,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+    ),
+  );
+}
+
+Future<void> deleteTransaction(
+  BuildContext context,
+  TransactionRecord transaction,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  await dataStore.saveTransaction(
+    transaction.copyWith(
+      sync: transaction.sync.deleted(deviceId: dataStore.deviceId),
+    ),
+  );
 }
 
 class BudgetsView extends StatelessWidget {
@@ -1409,6 +1489,7 @@ class RecentTransactionsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final transactions = [...store.transactions]
+      ..removeWhere((transaction) => transaction.isDeleted)
       ..sort((a, b) => b.date.compareTo(a.date));
     final accountsById = {
       for (final account in store.accounts) account.id: account,
@@ -3406,7 +3487,8 @@ Map<String, int> spendingByCategoryThisMonth(
   final periodEnd = DateTime(anchor.year, anchor.month + 1);
   final totals = <String, int>{};
   for (final transaction in store.transactions) {
-    if (transaction.type != TransactionType.expense ||
+    if (transaction.isDeleted ||
+        transaction.type != TransactionType.expense ||
         transaction.date.isBefore(periodStart) ||
         !transaction.date.isBefore(periodEnd)) {
       continue;

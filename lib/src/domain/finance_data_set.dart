@@ -44,10 +44,13 @@ class FinanceDataSet {
 
   int balanceForAccount(String accountId) {
     final account = accounts.firstWhere((item) => item.id == accountId);
-    return transactions.fold(
-      account.openingBalanceMinor,
-      (total, transaction) => total + transaction.deltaForAccount(accountId),
-    );
+    return transactions
+        .where((transaction) => !transaction.isDeleted)
+        .fold(
+          account.openingBalanceMinor,
+          (total, transaction) =>
+              total + transaction.deltaForAccount(accountId),
+        );
   }
 
   Map<String, Object?> toJson() {

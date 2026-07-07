@@ -68,6 +68,7 @@ class TransactionRecord {
   final String? scheduledTransactionId;
   final SyncMetadata sync;
 
+  bool get isDeleted => sync.isDeleted;
   bool get isSplit => splitLines.isNotEmpty;
   bool get isTransfer => type == TransactionType.transfer;
 

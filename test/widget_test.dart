@@ -173,6 +173,45 @@ void main() {
     expect(find.textContaining('Checking'), findsWidgets);
   });
 
+  testWidgets('ledger long press can duplicate and delete transaction', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Walmart').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Duplicate'));
+    await tester.pumpAndSettle();
+
+    expect(
+      dataStore.transactions.map((transaction) => transaction.payee),
+      contains('Walmart copy'),
+    );
+    expect(find.text('Walmart copy'), findsOneWidget);
+
+    await tester.longPress(find.text('Walmart').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    final original = dataStore.transactions.singleWhere(
+      (transaction) => transaction.payee == 'Walmart',
+    );
+    expect(original.isDeleted, isTrue);
+    expect(find.text('Walmart'), findsNothing);
+    expect(find.text('Walmart copy'), findsOneWidget);
+  });
+
   testWidgets('add transaction dialog honors default income preference', (
     tester,
   ) async {
