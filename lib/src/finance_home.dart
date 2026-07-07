@@ -776,6 +776,12 @@ class CategoriesView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
+    final categories = store.categories
+        .where((category) => !category.isArchived)
+        .toList(growable: false);
+    final categoriesById = {
+      for (final category in categories) category.id: category,
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -792,14 +798,15 @@ class CategoriesView extends StatelessWidget {
           padding: EdgeInsets.zero,
           child: Column(
             children: [
-              for (final category in store.categories)
+              for (final category in categories)
                 ListTile(
+                  onLongPress: () => showCategoryActions(context, category),
                   leading: CircleAvatar(
                     backgroundColor: category.colorValue == null
                         ? AppTheme.line
                         : Color(category.colorValue!),
                     child: Icon(
-                      categoryKindIcon(category.kind.name),
+                      categoryIcon(category),
                       color: AppTheme.ink,
                       size: 18,
                     ),
@@ -808,7 +815,7 @@ class CategoriesView extends StatelessWidget {
                     category.name,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
-                  subtitle: Text(categoryKindLabel(category.kind.name)),
+                  subtitle: Text(categorySubtitle(category, categoriesById)),
                   trailing: IconButton(
                     icon: const Icon(Icons.edit_outlined),
                     onPressed: () =>
@@ -2558,37 +2565,236 @@ Future<void> showCategoryDialog(
   LedgerCategory? category,
   String? categoryId,
 }) async {
-  final store = FinanceStoreScope.watch(context);
-  final legacyCategory = categoryId == null
-      ? category
-      : store.categoryById(categoryId);
-  final controller = TextEditingController(text: legacyCategory?.name ?? '');
-  final value = await showDialog<String>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(category == null ? 'Add category' : 'Rename category'),
-      content: TextField(
-        controller: controller,
-        decoration: const InputDecoration(labelText: 'Category name'),
-        autofocus: true,
+  final legacyStore = FinanceStoreScope.watch(context);
+  final dataStore = FinanceDataStoreScope.read(context);
+  final existingCategory = categoryId == null
+      ? null
+      : dataStore.categoryById(categoryId);
+  final name = TextEditingController(
+    text: existingCategory?.name ?? category?.name ?? '',
+  );
+  var kind = existingCategory?.kind ?? v2_category.CategoryKind.expense;
+  var parentCategoryId = existingCategory?.parentCategoryId;
+  var iconName = existingCategory?.iconName;
+  var colorValue = existingCategory?.colorValue;
+
+  final result =
+      await showDialog<
+        ({
+          String name,
+          v2_category.CategoryKind kind,
+          String? parentCategoryId,
+          String? iconName,
+          int? colorValue,
+        })
+      >(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) {
+            final parentOptions = dataStore.categories
+                .where(
+                  (item) =>
+                      !item.isArchived &&
+                      item.kind == kind &&
+                      item.id != existingCategory?.id,
+                )
+                .toList(growable: false);
+            if (parentCategoryId != null &&
+                !parentOptions.any((item) => item.id == parentCategoryId)) {
+              parentCategoryId = null;
+            }
+
+            return AlertDialog(
+              title: Text(
+                existingCategory == null ? 'Add category' : 'Edit category',
+              ),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: name,
+                        decoration: const InputDecoration(
+                          labelText: 'Category name',
+                        ),
+                        autofocus: true,
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<v2_category.CategoryKind>(
+                        initialValue: kind,
+                        decoration: const InputDecoration(labelText: 'Type'),
+                        items: [
+                          for (final item in v2_category.CategoryKind.values)
+                            if (item != v2_category.CategoryKind.system)
+                              DropdownMenuItem(
+                                value: item,
+                                child: Text(categoryKindLabel(item.name)),
+                              ),
+                        ],
+                        onChanged: (value) => setDialogState(() {
+                          kind = value ?? kind;
+                          parentCategoryId = null;
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String?>(
+                        initialValue: parentCategoryId,
+                        decoration: const InputDecoration(
+                          labelText: 'Parent category',
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(child: Text('None')),
+                          for (final item in parentOptions)
+                            DropdownMenuItem<String?>(
+                              value: item.id,
+                              child: Text(item.name),
+                            ),
+                        ],
+                        onChanged: (value) =>
+                            setDialogState(() => parentCategoryId = value),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String?>(
+                        initialValue: iconName,
+                        decoration: const InputDecoration(labelText: 'Icon'),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            child: Text('No icon'),
+                          ),
+                          for (final item in v2_category.curatedCategoryIcons)
+                            DropdownMenuItem<String?>(
+                              value: item.sfSymbolName,
+                              child: Text(item.label),
+                            ),
+                        ],
+                        onChanged: (value) =>
+                            setDialogState(() => iconName = value),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<int?>(
+                        initialValue: colorValue,
+                        decoration: const InputDecoration(labelText: 'Color'),
+                        items: [
+                          const DropdownMenuItem<int?>(child: Text('Default')),
+                          for (final item in categoryColorOptions)
+                            DropdownMenuItem<int?>(
+                              value: item.value,
+                              child: Text(item.label),
+                            ),
+                        ],
+                        onChanged: (value) =>
+                            setDialogState(() => colorValue = value),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, (
+                    name: name.text.trim(),
+                    kind: kind,
+                    parentCategoryId: parentCategoryId,
+                    iconName: iconName,
+                    colorValue: colorValue,
+                  )),
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+  if (result == null || result.name.isEmpty) return;
+  if (existingCategory == null) {
+    final legacyCategory = legacyStore.addCategory(
+      result.name,
+      kind: legacyCategoryKindFor(result.kind),
+    );
+    await dataStore.saveCategory(
+      v2_category.CategoryRecord(
+        id:
+            legacyCategory?.id ??
+            'cat_${DateTime.now().microsecondsSinceEpoch}',
+        name: result.name,
+        kind: result.kind,
+        parentCategoryId: result.parentCategoryId,
+        iconName: result.iconName,
+        colorValue: result.colorValue,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, controller.text.trim()),
-          child: const Text('Save'),
-        ),
-      ],
+    );
+    return;
+  }
+
+  try {
+    legacyStore.renameCategory(existingCategory.id, result.name);
+  } on StateError {
+    // V2-only categories are expected while category management is migrated.
+  }
+  await dataStore.saveCategory(
+    existingCategory.copyWith(
+      name: result.name,
+      kind: result.kind,
+      parentCategoryId: result.parentCategoryId,
+      iconName: result.iconName,
+      colorValue: result.colorValue,
+      clearParentCategory: result.parentCategoryId == null,
+      clearIcon: result.iconName == null,
+      clearColor: result.colorValue == null,
     ),
   );
-  if (value == null || value.isEmpty) return;
-  if (legacyCategory == null) {
-    store.addCategory(value);
-  } else {
-    store.renameCategory(legacyCategory.id, value);
+}
+
+Future<void> showCategoryActions(
+  BuildContext context,
+  v2_category.CategoryRecord category,
+) async {
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit'),
+            onTap: () => Navigator.pop(sheetContext, 'edit'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.archive_outlined),
+            title: const Text('Archive'),
+            onTap: () => Navigator.pop(sheetContext, 'archive'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Delete'),
+            textColor: AppTheme.rose,
+            iconColor: AppTheme.rose,
+            onTap: () => Navigator.pop(sheetContext, 'delete'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (!context.mounted || action == null) return;
+  switch (action) {
+    case 'edit':
+      await showCategoryDialog(context, categoryId: category.id);
+    case 'archive':
+    case 'delete':
+      await FinanceDataStoreScope.read(
+        context,
+      ).saveCategory(category.copyWith(isArchived: true));
   }
 }
 
@@ -2640,6 +2846,33 @@ IconData categoryKindIcon(String kindName) {
   };
 }
 
+IconData categoryIcon(v2_category.CategoryRecord category) {
+  return switch (category.iconName) {
+    'fork.knife' => Icons.restaurant_outlined,
+    'cart' => Icons.shopping_cart_outlined,
+    'car' => Icons.directions_car_outlined,
+    'fuelpump' => Icons.local_gas_station_outlined,
+    'film' => Icons.movie_outlined,
+    'house' => Icons.home_outlined,
+    'cross.case' => Icons.medical_services_outlined,
+    'phone' => Icons.phone_outlined,
+    'bolt' => Icons.bolt_outlined,
+    'shield' => Icons.shield_outlined,
+    'wrench.adjustable' => Icons.build_outlined,
+    'tag' => Icons.sell_outlined,
+    _ => categoryKindIcon(category.kind.name),
+  };
+}
+
+String categorySubtitle(
+  v2_category.CategoryRecord category,
+  Map<String, v2_category.CategoryRecord> categoriesById,
+) {
+  final kind = categoryKindLabel(category.kind.name);
+  final parent = categoriesById[category.parentCategoryId];
+  return parent == null ? kind : '$kind · ${parent.name}';
+}
+
 String categoryKindLabel(String kindName) {
   return switch (kindName) {
     'income' => 'Income',
@@ -2648,6 +2881,30 @@ String categoryKindLabel(String kindName) {
     _ => 'Expense',
   };
 }
+
+CategoryKind legacyCategoryKindFor(v2_category.CategoryKind kind) {
+  return switch (kind) {
+    v2_category.CategoryKind.income => CategoryKind.income,
+    v2_category.CategoryKind.transfer => CategoryKind.transfer,
+    _ => CategoryKind.expense,
+  };
+}
+
+class CategoryColorOption {
+  const CategoryColorOption({required this.label, required this.value});
+
+  final String label;
+  final int value;
+}
+
+const categoryColorOptions = [
+  CategoryColorOption(label: 'Teal', value: 0xFF0F766E),
+  CategoryColorOption(label: 'Blue', value: 0xFF2563EB),
+  CategoryColorOption(label: 'Green', value: 0xFF16A34A),
+  CategoryColorOption(label: 'Amber', value: 0xFFD97706),
+  CategoryColorOption(label: 'Rose', value: 0xFFE11D48),
+  CategoryColorOption(label: 'Slate', value: 0xFF475569),
+];
 
 String launchScreenLabel(LaunchScreen screen) {
   return switch (screen) {

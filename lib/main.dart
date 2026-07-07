@@ -172,6 +172,10 @@ class LegacyV2StoreMirror {
           legacyStore.snapshot().toJson(),
         );
         final dataSet = migrated.copyWith(
+          categories: mergeCategoriesPreferCurrent(
+            migrated: migrated.categories,
+            current: dataStore.categories,
+          ),
           transactions: mergeV2OnlyTransactions(
             migrated: migrated.transactions,
             current: dataStore.transactions,
@@ -199,6 +203,19 @@ List<TransactionRecord> mergeV2OnlyTransactions({
     ...migrated,
     for (final transaction in current)
       if (!migratedIds.contains(transaction.id)) transaction,
+  ];
+}
+
+List<v2_category.CategoryRecord> mergeCategoriesPreferCurrent({
+  required List<v2_category.CategoryRecord> migrated,
+  required List<v2_category.CategoryRecord> current,
+}) {
+  final currentById = {for (final category in current) category.id: category};
+  final migratedIds = migrated.map((category) => category.id).toSet();
+  return [
+    for (final category in migrated) currentById[category.id] ?? category,
+    for (final category in current)
+      if (!migratedIds.contains(category.id)) category,
   ];
 }
 

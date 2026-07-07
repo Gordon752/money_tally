@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
+import 'package:money_tally/src/domain/category.dart' as v2_category;
 import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart'
     as v2_scheduled;
@@ -525,6 +526,68 @@ void main() {
     expect(find.text('Expense'), findsWidgets);
   });
 
+  testWidgets('category dialog creates v2 and legacy category', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Categories').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add category'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Fuel');
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Fuel'), findsOneWidget);
+    expect(
+      dataStore.categories.map((category) => category.name),
+      contains('Fuel'),
+    );
+    expect(
+      legacyStore.categories.map((category) => category.name),
+      contains('Fuel'),
+    );
+  });
+
+  testWidgets('category long press archives category', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Categories').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Dining'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Archive'));
+    await tester.pumpAndSettle();
+
+    expect(dataStore.categoryById('dining').isArchived, isTrue);
+    expect(find.text('Dining'), findsNothing);
+  });
+
   testWidgets('settings screen renders v2 preferences on wide layout', (
     tester,
   ) async {
@@ -695,6 +758,44 @@ void main() {
       dataStore.transactions.map((transaction) => transaction.id),
       contains('v2-transfer'),
     );
+  });
+
+  test('legacy v2 mirror preserves enriched v2 categories', () async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        categories: [
+          for (final category in migrated.categories)
+            if (category.id == 'dining')
+              category.copyWith(iconName: 'fork.knife', colorValue: 0xFF0F766E)
+            else
+              category,
+          v2_category.CategoryRecord(
+            id: 'snacks',
+            name: 'Snacks',
+            kind: v2_category.CategoryKind.expense,
+            parentCategoryId: 'dining',
+            iconName: 'tag',
+            sync: v2_sync.SyncMetadata.fresh(),
+          ),
+        ],
+      ),
+    );
+    final mirror = LegacyV2StoreMirror(
+      legacyStore: legacyStore,
+      dataStore: dataStore,
+    )..start();
+    addTearDown(mirror.dispose);
+
+    legacyStore.adjustAccountBalance('checking', 200000);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(dataStore.categoryById('dining').iconName, 'fork.knife');
+    expect(dataStore.categoryById('dining').colorValue, 0xFF0F766E);
+    expect(dataStore.categoryById('snacks').parentCategoryId, 'dining');
   });
 
   test('legacy v2 mirror preserves v2-only scheduled transactions', () async {

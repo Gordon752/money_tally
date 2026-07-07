@@ -299,23 +299,25 @@ class FinanceStore extends ChangeNotifier {
     _commit();
   }
 
-  void addCategory(String name) {
+  LedgerCategory? addCategory(
+    String name, {
+    CategoryKind kind = CategoryKind.expense,
+  }) {
     final slug = name.trim().toLowerCase().replaceAll(
       RegExp(r'[^a-z0-9]+'),
       '-',
     );
-    if (slug.isEmpty) return;
-    categories = [
-      ...categories,
-      LedgerCategory(
-        id: '${slug}_${DateTime.now().millisecondsSinceEpoch}',
-        name: name.trim(),
-        kind: CategoryKind.expense,
-        color: AppTheme.accent,
-        sync: SyncMetadata.fresh(),
-      ),
-    ];
+    if (slug.isEmpty) return null;
+    final category = LedgerCategory(
+      id: '${slug}_${DateTime.now().millisecondsSinceEpoch}',
+      name: name.trim(),
+      kind: kind,
+      color: AppTheme.accent,
+      sync: SyncMetadata.fresh(),
+    );
+    categories = [...categories, category];
     _commit();
+    return category;
   }
 
   void renameCategory(String id, String name) {
