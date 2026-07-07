@@ -11,6 +11,7 @@ class AccountCard extends StatelessWidget {
     required this.account,
     required this.balanceMinor,
     this.currency = const CurrencyFormatSettings(),
+    this.groupLabel,
     this.leading,
     this.onTap,
     this.onLongPress,
@@ -20,6 +21,7 @@ class AccountCard extends StatelessWidget {
   final AccountRecord account;
   final int balanceMinor;
   final CurrencyFormatSettings currency;
+  final String? groupLabel;
   final Widget? leading;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
@@ -56,7 +58,7 @@ class AccountCard extends StatelessWidget {
                         ),
                         const SizedBox(height: AppSpacing.xxs),
                         Text(
-                          _groupLabel(account.group.name),
+                          groupLabel ?? _groupLabel(account.group.name),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           softWrap: false,

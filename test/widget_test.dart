@@ -192,6 +192,37 @@ void main() {
     ]);
   });
 
+  testWidgets('accounts group long press can rename fixed group label', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Accounts').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byKey(const ValueKey('account-group-banking')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rename'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).last, 'Everyday Money');
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    expect(dataStore.preferences.accountGroupLabelOverrides, {
+      'banking': 'Everyday Money',
+    });
+    expect(find.text('Everyday Money'), findsWidgets);
+    expect(find.byTooltip('Collapse Everyday Money'), findsOneWidget);
+  });
+
   testWidgets('ledger screen renders v2 transaction rows', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 

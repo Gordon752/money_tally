@@ -426,12 +426,13 @@ class AccountsView extends StatelessWidget {
                 final isCollapsed = store.preferences.collapsedAccountGroupNames
                     .contains(group.name);
                 final progress = accountGroupProgress(context, store, group);
+                final label = store.accountGroupLabel(group);
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     SectionHeader(
                       key: ValueKey('account-group-${group.name}'),
-                      title: accountGroupLabel(group),
+                      title: label,
                       subtitle: money(
                         accounts
                             .where(
@@ -448,8 +449,8 @@ class AccountsView extends StatelessWidget {
                       ),
                       trailing: IconButton(
                         tooltip: isCollapsed
-                            ? 'Expand ${accountGroupLabel(group)}'
-                            : 'Collapse ${accountGroupLabel(group)}',
+                            ? 'Expand $label'
+                            : 'Collapse $label',
                         onPressed: () => toggleAccountGroupCollapsed(
                           context,
                           group,
@@ -482,6 +483,7 @@ class AccountsView extends StatelessWidget {
                       account: account,
                       balanceMinor: store.balanceForAccount(account.id),
                       currency: store.preferences.currency,
+                      groupLabel: store.accountGroupLabel(account.group),
                       leading: Icon(
                         accountGroupIcon(account.group.name),
                         color: AppTheme.accent,
@@ -618,6 +620,11 @@ Future<void> showAccountGroupActions(
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Rename'),
+            onTap: () => Navigator.pop(sheetContext, 'rename'),
+          ),
+          ListTile(
             enabled: canMoveUp,
             leading: const Icon(Icons.arrow_upward),
             title: const Text('Move Up'),
@@ -640,11 +647,52 @@ Future<void> showAccountGroupActions(
 
   if (!context.mounted || action == null) return;
   switch (action) {
+    case 'rename':
+      await showRenameAccountGroupDialog(context, group);
     case 'moveUp':
       await store.moveAccountGroup(group: group, direction: -1);
     case 'moveDown':
       await store.moveAccountGroup(group: group, direction: 1);
   }
+}
+
+Future<void> showRenameAccountGroupDialog(
+  BuildContext context,
+  v2_account.AccountGroup group,
+) async {
+  final store = FinanceDataStoreScope.read(context);
+  final controller = TextEditingController(
+    text: store.accountGroupLabel(group),
+  );
+  final label = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Rename account group'),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        textCapitalization: TextCapitalization.words,
+        decoration: InputDecoration(
+          labelText: 'Group name',
+          hintText: group.defaultLabel,
+        ),
+        onSubmitted: (value) => Navigator.pop(dialogContext, value),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext, controller.text),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+
+  if (!context.mounted || label == null) return;
+  await store.renameAccountGroup(group: group, label: label);
 }
 
 class LedgerView extends StatefulWidget {
@@ -4382,15 +4430,6 @@ IconData accountGroupIcon(String groupName) {
     'creditCards' => Icons.credit_card_outlined,
     'loans' => Icons.request_quote_outlined,
     _ => Icons.account_balance_outlined,
-  };
-}
-
-String accountGroupLabel(v2_account.AccountGroup group) {
-  return switch (group) {
-    v2_account.AccountGroup.banking => 'Banking',
-    v2_account.AccountGroup.cash => 'Cash',
-    v2_account.AccountGroup.creditCards => 'Credit Cards',
-    v2_account.AccountGroup.loans => 'Loans',
   };
 }
 

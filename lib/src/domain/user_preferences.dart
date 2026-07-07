@@ -28,6 +28,7 @@ class UserPreferences {
     this.notificationsEnabled = false,
     this.collapsedAccountGroupNames = const {},
     this.accountGroupOrderNames = defaultAccountGroupOrderNames,
+    this.accountGroupLabelOverrides = const {},
   });
 
   final LaunchScreen launchScreen;
@@ -39,6 +40,7 @@ class UserPreferences {
   final bool notificationsEnabled;
   final Set<String> collapsedAccountGroupNames;
   final List<String> accountGroupOrderNames;
+  final Map<String, String> accountGroupLabelOverrides;
 
   UserPreferences copyWith({
     LaunchScreen? launchScreen,
@@ -50,6 +52,7 @@ class UserPreferences {
     bool? notificationsEnabled,
     Set<String>? collapsedAccountGroupNames,
     List<String>? accountGroupOrderNames,
+    Map<String, String>? accountGroupLabelOverrides,
   }) {
     return UserPreferences(
       launchScreen: launchScreen ?? this.launchScreen,
@@ -66,6 +69,8 @@ class UserPreferences {
           collapsedAccountGroupNames ?? this.collapsedAccountGroupNames,
       accountGroupOrderNames:
           accountGroupOrderNames ?? this.accountGroupOrderNames,
+      accountGroupLabelOverrides:
+          accountGroupLabelOverrides ?? this.accountGroupLabelOverrides,
     );
   }
 
@@ -80,6 +85,7 @@ class UserPreferences {
       'notificationsEnabled': notificationsEnabled,
       'collapsedAccountGroupNames': collapsedAccountGroupNames.toList()..sort(),
       'accountGroupOrderNames': accountGroupOrderNames,
+      'accountGroupLabelOverrides': accountGroupLabelOverrides,
     };
   }
 
@@ -122,6 +128,10 @@ class UserPreferences {
               ?.whereType<String>()
               .toList() ??
           defaultAccountGroupOrderNames,
+      accountGroupLabelOverrides:
+          stringMap(json['accountGroupLabelOverrides']).map(
+            (key, value) => MapEntry(key, value is String ? value : ''),
+          )..removeWhere((key, value) => value.trim().isEmpty),
     );
   }
 }

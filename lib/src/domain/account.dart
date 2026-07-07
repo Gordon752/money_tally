@@ -5,6 +5,17 @@ enum AccountGroup { banking, cash, creditCards, loans }
 
 enum AccountType { checking, savings, cash, creditCard, loan, otherBanking }
 
+extension AccountGroupDefaults on AccountGroup {
+  String get defaultLabel {
+    return switch (this) {
+      AccountGroup.banking => 'Banking',
+      AccountGroup.cash => 'Cash',
+      AccountGroup.creditCards => 'Credit Cards',
+      AccountGroup.loans => 'Loans',
+    };
+  }
+}
+
 extension AccountTypeGroup on AccountType {
   AccountGroup get group {
     return switch (this) {

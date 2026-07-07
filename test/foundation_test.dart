@@ -148,6 +148,29 @@ void main() {
     ]);
   });
 
+  test('store can rename fixed account group display labels', () async {
+    final store = FinanceDataStore(dataSet: _dataSet());
+
+    await store.renameAccountGroup(
+      group: AccountGroup.banking,
+      label: 'Everyday Money',
+    );
+
+    expect(store.accountGroupLabel(AccountGroup.banking), 'Everyday Money');
+    expect(
+      store.preferences.accountGroupLabelOverrides,
+      containsPair('banking', 'Everyday Money'),
+    );
+
+    await store.renameAccountGroup(group: AccountGroup.banking, label: '');
+
+    expect(store.accountGroupLabel(AccountGroup.banking), 'Banking');
+    expect(
+      store.preferences.accountGroupLabelOverrides,
+      isNot(contains('banking')),
+    );
+  });
+
   test('store derives credit card and loan progress values', () {
     final sync = SyncMetadata.fresh(now: DateTime(2026, 7, 6));
     final store = FinanceDataStore(
@@ -521,6 +544,7 @@ void main() {
       defaultTransactionType: DefaultTransactionType.lastUsed,
       collapsedAccountGroupNames: {'cash'},
       accountGroupOrderNames: ['cash', 'banking', 'creditCards', 'loans'],
+      accountGroupLabelOverrides: {'banking': 'Everyday Money'},
     );
 
     final updated = preferences.copyWith(
@@ -537,10 +561,14 @@ void main() {
     expect(updated.defaultTransactionType, DefaultTransactionType.lastUsed);
     expect(updated.collapsedAccountGroupNames, {'cash'});
     expect(updated.accountGroupOrderNames.take(2), ['cash', 'banking']);
+    expect(updated.accountGroupLabelOverrides, {'banking': 'Everyday Money'});
 
     final roundTripped = UserPreferences.fromJson(updated.toJson());
     expect(roundTripped.collapsedAccountGroupNames, {'cash'});
     expect(roundTripped.accountGroupOrderNames.take(2), ['cash', 'banking']);
+    expect(roundTripped.accountGroupLabelOverrides, {
+      'banking': 'Everyday Money',
+    });
   });
 
   test('notification planner converts alert preferences into requests', () {

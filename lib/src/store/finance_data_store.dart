@@ -155,6 +155,12 @@ class FinanceDataStore extends ChangeNotifier {
     };
   }
 
+  String accountGroupLabel(AccountGroup group) {
+    final override = preferences.accountGroupLabelOverrides[group.name]?.trim();
+    if (override != null && override.isNotEmpty) return override;
+    return group.defaultLabel;
+  }
+
   int balanceForAccount(String accountId) {
     return _dataSet.balanceForAccount(accountId);
   }
@@ -812,6 +818,22 @@ class FinanceDataStore extends ChangeNotifier {
           for (final reorderedGroup in reordered) reorderedGroup.name,
         ],
       ),
+    );
+  }
+
+  Future<void> renameAccountGroup({
+    required AccountGroup group,
+    required String label,
+  }) async {
+    final trimmed = label.trim();
+    final overrides = {...preferences.accountGroupLabelOverrides};
+    if (trimmed.isEmpty || trimmed == group.defaultLabel) {
+      overrides.remove(group.name);
+    } else {
+      overrides[group.name] = trimmed;
+    }
+    await savePreferences(
+      preferences.copyWith(accountGroupLabelOverrides: overrides),
     );
   }
 
