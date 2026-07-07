@@ -290,13 +290,10 @@ Target fields:
 - `alertPreference`
 - `customAlertTime`
 - `repeatAlertUntilResolved`
-- `autoPostEnabled`
-- `autoPostAt`
-- `autoPostNotificationEnabled`
 - `lastAction`: paid, skipped, none
 - sync metadata
 
-Scheduled transactions should not silently post by default. Auto-posting is an explicit per-scheduled-transaction option. When enabled, the app creates the real ledger transaction at the configured scheduled date/time if the item has not already been marked paid or skipped. If the user manually marks it paid before the due date, auto-posting should not create a duplicate transaction and no auto-post notification should fire. If the app auto-posts the transaction, the user should receive a clear notification that the transaction was posted, unless they disabled that notification for the item.
+Scheduled transactions are reminder-only. The app should not automatically create ledger transactions. Users explicitly choose Mark Paid, Skip Once, Edit, Duplicate, or Delete.
 
 ### Budget
 
@@ -381,7 +378,7 @@ Do not build all export features immediately, but keep models serializable, stab
 
 ## Notifications
 
-Use local notifications for scheduled transaction alerts and auto-post confirmations through a dedicated `NotificationScheduler` service. UI screens should not schedule notifications directly.
+Use local notifications for scheduled transaction alerts through a dedicated `NotificationScheduler` service. UI screens should not schedule notifications directly.
 
 Required alert options:
 
@@ -400,7 +397,7 @@ Notification scheduling should live outside UI screens in a notification service
 
 Platform note: iOS, iPadOS, macOS, and Android notification permissions and badge behavior differ. Hide platform-specific details behind `NotificationScheduler`.
 
-Settled notification rule: use `flutter_local_notifications`, ask permission only when the user enables alerts or auto-post confirmations, keep auto-posting opt-in per item, and keep badge counts focused on due or overdue scheduled items that still need attention.
+Settled notification rule: use `flutter_local_notifications`, ask permission only when the user enables alerts, keep scheduled transactions reminder-only with no auto-posting, and keep badge counts focused on due or overdue scheduled items.
 
 ## Coding Conventions
 
@@ -515,8 +512,6 @@ Features:
 - Scheduled expense
 - Scheduled income
 - Scheduled transfer
-- Optional auto-post at scheduled date/time
-- Notification when an auto-posted transaction is created
 - Collapsible calendar at top
 - Mark dates that have scheduled items
 - List scheduled items below calendar
