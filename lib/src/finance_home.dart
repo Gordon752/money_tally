@@ -3265,6 +3265,8 @@ Future<void> showBudgetDialog(
                     for (final category in categories)
                       CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
                         title: Text(category.name),
                         value: selectedCategoryIds.contains(category.id),
                         activeColor: AppTheme.accent,

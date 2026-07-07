@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../domain/money.dart';
+import '../design_tokens.dart';
 import '../money_format.dart';
 
 class AmountEntryField extends StatefulWidget {
@@ -66,6 +67,7 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
         signed: widget.allowNegative,
       ),
       textAlign: TextAlign.right,
+      textAlignVertical: TextAlignVertical.center,
       autofocus: widget.autofocus,
       inputFormatters: [
         widget.allowNegative
@@ -75,10 +77,14 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
       decoration: InputDecoration(
         labelText: widget.labelText,
         floatingLabelBehavior: FloatingLabelBehavior.always,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
       ),
-      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+      style: Theme.of(context).textTheme.titleLarge?.copyWith(
         fontFeatures: const [FontFeature.tabularFigures()],
-        fontWeight: FontWeight.w800,
+        fontWeight: FontWeight.w900,
       ),
       onChanged: _handleChanged,
     );
