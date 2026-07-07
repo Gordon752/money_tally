@@ -445,9 +445,18 @@ void main() {
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
 
-    final fields = find.byType(TextField);
-    await tester.enterText(fields.at(1), 'Walmart Grocery');
-    await tester.enterText(fields.at(2), '12.34');
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-payee')),
+      'Walmart Grocery',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-date')),
+      '2026-07-03',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-amount')),
+      '1234',
+    );
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -455,6 +464,7 @@ void main() {
       (transaction) => transaction.payee == 'Walmart Grocery',
     );
     expect(edited.amountMinor, 1234);
+    expect(edited.date, DateTime(2026, 7, 3));
     expect(edited.type, v2_transaction.TransactionType.expense);
     expect(find.text('Walmart Grocery'), findsOneWidget);
   });
@@ -560,6 +570,44 @@ void main() {
     );
 
     expect(segmented.selected, {false});
+  });
+
+  testWidgets('add transaction dialog saves entered date', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add transaction'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-payee')),
+      'Hardware Store',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-date')),
+      '2026-07-04',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-amount')),
+      '4599',
+    );
+    await tester.tap(find.text('Add').last);
+    await tester.pumpAndSettle();
+
+    final transaction = dataStore.transactions.singleWhere(
+      (item) => item.payee == 'Hardware Store',
+    );
+    expect(transaction.date, DateTime(2026, 7, 4));
+    expect(transaction.amountMinor, 4599);
   });
 
   testWidgets('floating add menu opens income transaction dialog', (
@@ -874,9 +922,14 @@ void main() {
     await tester.tap(find.text('Add Expense'));
     await tester.pumpAndSettle();
 
-    final fields = find.byType(TextField);
-    await tester.enterText(fields.at(0), 'Coffee');
-    await tester.enterText(fields.at(1), '4.50');
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-payee')),
+      'Coffee',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-amount')),
+      '450',
+    );
     await tester.tap(find.text('Add').last);
     await tester.pumpAndSettle();
 

@@ -4133,6 +4133,9 @@ Future<void> showTransactionDialog(
   final activeAccounts = dataStore.activeAccountsInDisplayOrder;
   if (activeAccounts.isEmpty) return;
   final payee = TextEditingController(text: transaction?.payee ?? '');
+  final date = TextEditingController(
+    text: dateInput(transaction?.date ?? DateTime.now()),
+  );
   var amountMinor = transaction?.amountMinor.abs() ?? 0;
   var accountId =
       activeAccounts.any(
@@ -4154,6 +4157,7 @@ Future<void> showTransactionDialog(
           String accountId,
           String categoryId,
           String payee,
+          DateTime date,
           int amountMinor,
           bool isExpense,
         })
@@ -4177,70 +4181,86 @@ Future<void> showTransactionDialog(
               ),
               content: SizedBox(
                 width: 420,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(
-                          value: true,
-                          label: Text('Expense'),
-                          icon: Icon(Icons.remove),
-                        ),
-                        ButtonSegment(
-                          value: false,
-                          label: Text('Income'),
-                          icon: Icon(Icons.add),
-                        ),
-                      ],
-                      selected: {isExpense},
-                      onSelectionChanged: (values) => setDialogState(() {
-                        isExpense = values.first;
-                        categoryId = defaultV2CategoryIdForTransactionKind(
-                          dataStore,
-                          isExpense,
-                        );
-                      }),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: payee,
-                      decoration: const InputDecoration(labelText: 'Payee'),
-                    ),
-                    const SizedBox(height: 12),
-                    AmountEntryField(
-                      initialMinor: amountMinor,
-                      currency: dataStore.preferences.currency,
-                      labelText: 'Amount',
-                      onChanged: (value) => amountMinor = value,
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: accountId,
-                      decoration: const InputDecoration(labelText: 'Account'),
-                      items: [
-                        for (final account in activeAccounts)
-                          DropdownMenuItem(
-                            value: account.id,
-                            child: Text(account.name),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment(
+                            value: true,
+                            label: Text('Expense'),
+                            icon: Icon(Icons.remove),
                           ),
-                      ],
-                      onChanged: (value) => accountId = value ?? accountId,
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: categoryId.isEmpty ? null : categoryId,
-                      decoration: const InputDecoration(labelText: 'Category'),
-                      items: [
-                        for (final category in categoryOptions)
-                          DropdownMenuItem(
-                            value: category.id,
-                            child: Text(category.name),
+                          ButtonSegment(
+                            value: false,
+                            label: Text('Income'),
+                            icon: Icon(Icons.add),
                           ),
-                      ],
-                      onChanged: (value) => categoryId = value ?? categoryId,
-                    ),
-                  ],
+                        ],
+                        selected: {isExpense},
+                        onSelectionChanged: (values) => setDialogState(() {
+                          isExpense = values.first;
+                          categoryId = defaultV2CategoryIdForTransactionKind(
+                            dataStore,
+                            isExpense,
+                          );
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const ValueKey('transaction-payee'),
+                        controller: payee,
+                        decoration: const InputDecoration(labelText: 'Payee'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const ValueKey('transaction-date'),
+                        controller: date,
+                        keyboardType: TextInputType.datetime,
+                        decoration: const InputDecoration(
+                          labelText: 'Date',
+                          hintText: 'YYYY-MM-DD',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      AmountEntryField(
+                        fieldKey: const ValueKey('transaction-amount'),
+                        initialMinor: amountMinor,
+                        currency: dataStore.preferences.currency,
+                        labelText: 'Amount',
+                        onChanged: (value) => amountMinor = value,
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: accountId,
+                        decoration: const InputDecoration(labelText: 'Account'),
+                        items: [
+                          for (final account in activeAccounts)
+                            DropdownMenuItem(
+                              value: account.id,
+                              child: Text(account.name),
+                            ),
+                        ],
+                        onChanged: (value) => accountId = value ?? accountId,
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: categoryId.isEmpty ? null : categoryId,
+                        decoration: const InputDecoration(
+                          labelText: 'Category',
+                        ),
+                        items: [
+                          for (final category in categoryOptions)
+                            DropdownMenuItem(
+                              value: category.id,
+                              child: Text(category.name),
+                            ),
+                        ],
+                        onChanged: (value) => categoryId = value ?? categoryId,
+                      ),
+                    ],
+                  ),
                 ),
               ),
               actions: [
@@ -4258,6 +4278,10 @@ Future<void> showTransactionDialog(
                             payee: payee.text.trim().isEmpty
                                 ? 'Transaction'
                                 : payee.text.trim(),
+                            date: parseDateInput(
+                              date.text,
+                              transaction?.date ?? DateTime.now(),
+                            ),
                             amountMinor: amountMinor.abs(),
                             isExpense: isExpense,
                           ));
@@ -4276,7 +4300,7 @@ Future<void> showTransactionDialog(
       await dataStore.addExpense(
         accountId: result.accountId,
         categoryId: result.categoryId,
-        date: DateTime.now(),
+        date: result.date,
         payee: result.payee,
         amountMinor: result.amountMinor,
       );
@@ -4284,7 +4308,7 @@ Future<void> showTransactionDialog(
       await dataStore.addIncome(
         accountId: result.accountId,
         categoryId: result.categoryId,
-        date: DateTime.now(),
+        date: result.date,
         payee: result.payee,
         amountMinor: result.amountMinor,
       );
@@ -4297,6 +4321,7 @@ Future<void> showTransactionDialog(
             : TransactionType.income,
         accountId: result.accountId,
         categoryId: result.categoryId,
+        date: result.date,
         payee: result.payee,
         amountMinor: result.amountMinor,
         clearTransferAccount: true,
