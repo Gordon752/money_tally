@@ -187,6 +187,58 @@ void main() {
     expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
   });
 
+  testWidgets('ledger filters by account type category and date', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('ledger-account-')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Credit Card').last);
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(TransactionRow, 'Diner'), findsOneWidget);
+    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
+    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
+
+    await tester.tap(find.text('Clear'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-type-')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Income').last);
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsOneWidget);
+    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
+    expect(find.widgetWithText(TransactionRow, 'Diner'), findsNothing);
+
+    await tester.tap(find.text('Clear'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-category-')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dining').last);
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(TransactionRow, 'Diner'), findsOneWidget);
+    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
+    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
+
+    await tester.tap(find.text('Clear'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-date-all')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Today').last);
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(TransactionRow, 'Diner'), findsNothing);
+    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
+    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
+    expect(find.text('No transactions match'), findsOneWidget);
+  });
+
   testWidgets('ledger long press can duplicate and delete transaction', (
     tester,
   ) async {

@@ -517,10 +517,18 @@ class LedgerView extends StatefulWidget {
 
 class _LedgerViewState extends State<LedgerView> {
   var query = '';
+  var typeFilterName = '';
+  var accountFilterId = '';
+  var categoryFilterId = '';
+  var dateFilter = LedgerDateFilter.all;
 
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
+    final activeAccounts = store.activeAccountsInDisplayOrder;
+    final activeCategories = store.categories
+        .where((category) => !category.isArchived)
+        .toList(growable: false);
     final accountsById = {
       for (final account in store.accounts) account.id: account,
     };
@@ -541,8 +549,23 @@ class _LedgerViewState extends State<LedgerView> {
                     : categoriesById[transaction.categoryId]?.name,
               ),
             )
+            .where(
+              (transaction) => transactionMatchesLedgerFilters(
+                transaction,
+                typeFilterName: typeFilterName,
+                accountFilterId: accountFilterId,
+                categoryFilterId: categoryFilterId,
+                dateFilter: dateFilter,
+                now: DateTime.now(),
+              ),
+            )
             .toList()
           ..sort((a, b) => b.date.compareTo(a.date));
+    final hasFilters =
+        typeFilterName.isNotEmpty ||
+        accountFilterId.isNotEmpty ||
+        categoryFilterId.isNotEmpty ||
+        dateFilter != LedgerDateFilter.all;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -562,6 +585,107 @@ class _LedgerViewState extends State<LedgerView> {
             prefixIcon: Icon(Icons.search),
           ),
           onChanged: (value) => setState(() => query = value),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: 160,
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('ledger-type-$typeFilterName'),
+                initialValue: typeFilterName,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Type'),
+                items: [
+                  const DropdownMenuItem(value: '', child: Text('All types')),
+                  for (final type in TransactionType.values)
+                    DropdownMenuItem(
+                      value: type.name,
+                      child: Text(transactionTypeLabel(type)),
+                    ),
+                ],
+                onChanged: (value) =>
+                    setState(() => typeFilterName = value ?? ''),
+              ),
+            ),
+            SizedBox(
+              width: 180,
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('ledger-account-$accountFilterId'),
+                initialValue: accountFilterId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Account'),
+                items: [
+                  const DropdownMenuItem(
+                    value: '',
+                    child: Text('All accounts'),
+                  ),
+                  for (final account in activeAccounts)
+                    DropdownMenuItem(
+                      value: account.id,
+                      child: Text(account.name),
+                    ),
+                ],
+                onChanged: (value) =>
+                    setState(() => accountFilterId = value ?? ''),
+              ),
+            ),
+            SizedBox(
+              width: 180,
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('ledger-category-$categoryFilterId'),
+                initialValue: categoryFilterId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Category'),
+                items: [
+                  const DropdownMenuItem(
+                    value: '',
+                    child: Text('All categories'),
+                  ),
+                  for (final category in activeCategories)
+                    DropdownMenuItem(
+                      value: category.id,
+                      child: Text(category.name),
+                    ),
+                ],
+                onChanged: (value) =>
+                    setState(() => categoryFilterId = value ?? ''),
+              ),
+            ),
+            SizedBox(
+              width: 170,
+              child: DropdownButtonFormField<LedgerDateFilter>(
+                key: ValueKey('ledger-date-${dateFilter.name}'),
+                initialValue: dateFilter,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Date'),
+                items: [
+                  for (final filter in LedgerDateFilter.values)
+                    DropdownMenuItem(
+                      value: filter,
+                      child: Text(ledgerDateFilterLabel(filter)),
+                    ),
+                ],
+                onChanged: (value) =>
+                    setState(() => dateFilter = value ?? LedgerDateFilter.all),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: hasFilters
+                  ? () => setState(() {
+                      typeFilterName = '';
+                      accountFilterId = '';
+                      categoryFilterId = '';
+                      dateFilter = LedgerDateFilter.all;
+                    })
+                  : null,
+              icon: const Icon(Icons.filter_alt_off_outlined),
+              label: const Text('Clear'),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         AppCard(
@@ -614,6 +738,67 @@ bool transactionMatchesSearch(
     categoryName,
     transaction.type.name,
   ].whereType<String>().any((value) => value.toLowerCase().contains(query));
+}
+
+enum LedgerDateFilter { all, today, thisMonth, last30Days }
+
+bool transactionMatchesLedgerFilters(
+  TransactionRecord transaction, {
+  required String typeFilterName,
+  required String accountFilterId,
+  required String categoryFilterId,
+  required LedgerDateFilter dateFilter,
+  required DateTime now,
+}) {
+  if (typeFilterName.isNotEmpty && transaction.type.name != typeFilterName) {
+    return false;
+  }
+  if (accountFilterId.isNotEmpty &&
+      transaction.accountId != accountFilterId &&
+      transaction.transferAccountId != accountFilterId) {
+    return false;
+  }
+  if (categoryFilterId.isNotEmpty &&
+      transaction.categoryId != categoryFilterId &&
+      !transaction.splitLines.any(
+        (line) => line.categoryId == categoryFilterId,
+      )) {
+    return false;
+  }
+
+  final transactionDay = DateTime(
+    transaction.date.year,
+    transaction.date.month,
+    transaction.date.day,
+  );
+  final today = DateTime(now.year, now.month, now.day);
+  return switch (dateFilter) {
+    LedgerDateFilter.all => true,
+    LedgerDateFilter.today => transactionDay == today,
+    LedgerDateFilter.thisMonth =>
+      transaction.date.year == now.year && transaction.date.month == now.month,
+    LedgerDateFilter.last30Days =>
+      !transactionDay.isBefore(today.subtract(const Duration(days: 30))) &&
+          !transactionDay.isAfter(today),
+  };
+}
+
+String transactionTypeLabel(TransactionType type) {
+  return switch (type) {
+    TransactionType.expense => 'Expense',
+    TransactionType.income => 'Income',
+    TransactionType.transfer => 'Transfer',
+    TransactionType.adjustment => 'Adjustment',
+  };
+}
+
+String ledgerDateFilterLabel(LedgerDateFilter filter) {
+  return switch (filter) {
+    LedgerDateFilter.all => 'All dates',
+    LedgerDateFilter.today => 'Today',
+    LedgerDateFilter.thisMonth => 'This month',
+    LedgerDateFilter.last30Days => 'Last 30 days',
+  };
 }
 
 Future<void> showTransactionOptions(
