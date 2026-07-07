@@ -1230,13 +1230,104 @@ Future<void> showFloatingAddMenu(BuildContext context) async {
       await showTransactionDialog(context, initialIsExpense: false);
     case 'category':
       await showCategoryDialog(context);
-    case 'transfer':
     case 'account':
+      await showAccountDialog(context);
+    case 'transfer':
     case 'scheduled':
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${floatingAddActionLabel(selected)} is next')),
       );
   }
+}
+
+Future<void> showAccountDialog(BuildContext context) async {
+  final store = FinanceStoreScope.watch(context);
+  final dataStore = FinanceDataStoreScope.read(context);
+  final name = TextEditingController();
+  final openingBalance = TextEditingController(text: '0.00');
+  var type = AccountType.checking;
+
+  final result =
+      await showDialog<
+        ({String name, AccountType type, int openingBalanceCents})
+      >(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Add account'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: name,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                    autofocus: true,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<AccountType>(
+                    initialValue: type,
+                    decoration: const InputDecoration(labelText: 'Type'),
+                    items: [
+                      for (final item in AccountType.values)
+                        DropdownMenuItem(
+                          value: item,
+                          child: Text(accountTypeLabel(item)),
+                        ),
+                    ],
+                    onChanged: (value) =>
+                        setDialogState(() => type = value ?? type),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: openingBalance,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                      signed: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Opening balance',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, (
+                  name: name.text.trim().isEmpty
+                      ? accountTypeLabel(type)
+                      : name.text.trim(),
+                  type: type,
+                  openingBalanceCents: parseCents(openingBalance.text),
+                )),
+                child: const Text('Add'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  if (result == null) return;
+  final account = store.addAccount(
+    name: result.name,
+    type: result.type,
+    balanceCents: result.openingBalanceCents,
+  );
+  await dataStore.saveAccount(
+    v2_account.AccountRecord(
+      id: account.id,
+      name: account.name,
+      type: v2AccountTypeFor(account.type),
+      openingBalanceMinor: account.balanceCents,
+      sync: v2_sync.SyncMetadata.fresh(),
+    ),
+  );
 }
 
 Future<void> showTransactionDialog(
@@ -1424,6 +1515,26 @@ IconData accountIcon(AccountType type) {
     AccountType.savings => Icons.savings_outlined,
     AccountType.creditCard => Icons.credit_card_outlined,
     AccountType.loan => Icons.request_quote_outlined,
+  };
+}
+
+String accountTypeLabel(AccountType type) {
+  return switch (type) {
+    AccountType.cash => 'Cash',
+    AccountType.checking => 'Checking',
+    AccountType.savings => 'Savings',
+    AccountType.creditCard => 'Credit Card',
+    AccountType.loan => 'Loan',
+  };
+}
+
+v2_account.AccountType v2AccountTypeFor(AccountType type) {
+  return switch (type) {
+    AccountType.cash => v2_account.AccountType.cash,
+    AccountType.checking => v2_account.AccountType.checking,
+    AccountType.savings => v2_account.AccountType.savings,
+    AccountType.creditCard => v2_account.AccountType.creditCard,
+    AccountType.loan => v2_account.AccountType.loan,
   };
 }
 

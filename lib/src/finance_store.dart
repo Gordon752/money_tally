@@ -219,6 +219,25 @@ class FinanceStore extends ChangeNotifier {
     _commit();
   }
 
+  Account addAccount({
+    required String name,
+    required AccountType type,
+    required int balanceCents,
+  }) {
+    final trimmed = name.trim();
+    final slug = trimmed.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    final account = Account(
+      id: '${slug.isEmpty ? 'account' : slug}_${DateTime.now().millisecondsSinceEpoch}',
+      name: trimmed.isEmpty ? 'Account' : trimmed,
+      type: type,
+      balanceCents: balanceCents,
+      sync: SyncMetadata.fresh(),
+    );
+    accounts = [...accounts, account];
+    _commit();
+    return account;
+  }
+
   void addTransaction({
     required String accountId,
     required String categoryId,

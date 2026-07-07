@@ -228,6 +228,38 @@ void main() {
     );
   });
 
+  testWidgets('floating add account creates visible account', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Account'));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Travel Fund');
+    await tester.enterText(fields.at(1), '123.45');
+    await tester.tap(find.text('Add').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Travel Fund'), findsOneWidget);
+    expect(find.text(r'$123.45'), findsOneWidget);
+    expect(
+      legacyStore.accounts.map((account) => account.name),
+      contains('Travel Fund'),
+    );
+  });
+
   testWidgets('scheduled screen renders v2 scheduled rows', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 
