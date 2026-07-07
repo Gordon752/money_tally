@@ -1222,7 +1222,10 @@ void main() {
 
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListTile, 'Manage accounts'));
+    final manageAccounts = find.widgetWithText(ListTile, 'Manage accounts');
+    await tester.ensureVisible(manageAccounts);
+    await tester.pumpAndSettle();
+    await tester.tap(manageAccounts);
     await tester.pumpAndSettle();
 
     expect(find.text('Accounts'), findsWidgets);
@@ -1230,10 +1233,7 @@ void main() {
 
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
-    final manageCategories = find.widgetWithText(
-      ListTile,
-      'Manage categories',
-    );
+    final manageCategories = find.widgetWithText(ListTile, 'Manage categories');
     await tester.ensureVisible(manageCategories);
     await tester.pumpAndSettle();
     await tester.tap(manageCategories);
@@ -1267,6 +1267,42 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(dataStore.preferences.notificationsEnabled, isTrue);
+  });
+
+  testWidgets('settings can save custom currency code and symbol', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Custom currency'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Currency code'),
+      'mxn',
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Symbol'), r'MX$ ');
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    expect(dataStore.preferences.currency.currencyCode, 'MXN');
+    expect(dataStore.preferences.currency.symbol, r'MX$ ');
+    expect(find.text(r'MXN MX$ '), findsOneWidget);
   });
 
   testWidgets('settings export rows copy data', (tester) async {

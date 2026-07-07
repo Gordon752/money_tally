@@ -1760,8 +1760,22 @@ class SettingsView extends StatelessWidget {
                 values: _currencyOptions,
                 labelOf: (value) => value.currencyCode,
                 onChanged: (value) => store.savePreferences(
-                  preferences.copyWith(currency: value),
+                  preferences.copyWith(
+                    currency: value.copyWith(
+                      decimalPlaces: preferences.currency.decimalPlaces,
+                      thousandsSeparator:
+                          preferences.currency.thousandsSeparator,
+                    ),
+                  ),
                 ),
+              ),
+              const SizedBox(height: 12),
+              SettingsActionRow(
+                icon: Icons.edit_outlined,
+                title: 'Custom currency',
+                trailingText:
+                    '${preferences.currency.currencyCode} ${preferences.currency.symbol}',
+                onTap: () => showCustomCurrencyDialog(context),
               ),
               const SizedBox(height: 12),
               SettingsDropdown<int>(
@@ -1871,6 +1885,67 @@ class SettingsView extends StatelessWidget {
       orElse: () => _currencyOptions.first,
     );
   }
+}
+
+Future<void> showCustomCurrencyDialog(BuildContext context) async {
+  final store = FinanceDataStoreScope.read(context);
+  final preferences = store.preferences;
+  final code = TextEditingController(text: preferences.currency.currencyCode);
+  final symbol = TextEditingController(text: preferences.currency.symbol);
+  final result = await showDialog<({String currencyCode, String symbol})>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Custom currency'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: code,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(labelText: 'Currency code'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: symbol,
+              decoration: const InputDecoration(labelText: 'Symbol'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext, (
+            currencyCode: code.text.trim().toUpperCase(),
+            symbol: symbol.text,
+          )),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+
+  if (result == null) return;
+  final currencyCode = result.currencyCode.isEmpty
+      ? preferences.currency.currencyCode
+      : result.currencyCode;
+  final currencySymbol = result.symbol.trim().isEmpty
+      ? preferences.currency.symbol
+      : result.symbol;
+  await store.savePreferences(
+    preferences.copyWith(
+      currency: preferences.currency.copyWith(
+        currencyCode: currencyCode,
+        symbol: currencySymbol,
+      ),
+    ),
+  );
 }
 
 class ReportsView extends StatelessWidget {
