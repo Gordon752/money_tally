@@ -42,6 +42,24 @@ const curatedCategoryIcons = [
   CategoryIconOption(id: 'tag', sfSymbolName: 'tag', label: 'General'),
 ];
 
+bool wouldCreateCategoryParentCycle(
+  Iterable<CategoryRecord> categories, {
+  required String categoryId,
+  required String? parentCategoryId,
+}) {
+  var nextParentId = parentCategoryId;
+  final byId = {for (final category in categories) category.id: category};
+  final visited = <String>{};
+
+  while (nextParentId != null) {
+    if (nextParentId == categoryId) return true;
+    if (!visited.add(nextParentId)) return true;
+    nextParentId = byId[nextParentId]?.parentCategoryId;
+  }
+
+  return false;
+}
+
 class CategoryRecord {
   const CategoryRecord({
     required this.id,

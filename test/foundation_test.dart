@@ -171,6 +171,71 @@ void main() {
     );
   });
 
+  test('category parent validation prevents hierarchy cycles', () {
+    final sync = SyncMetadata.fresh(now: DateTime(2026, 7, 6));
+    final categories = [
+      CategoryRecord(
+        id: 'food',
+        name: 'Food',
+        kind: CategoryKind.expense,
+        sync: sync,
+      ),
+      CategoryRecord(
+        id: 'dining',
+        name: 'Dining',
+        kind: CategoryKind.expense,
+        parentCategoryId: 'food',
+        sync: sync,
+      ),
+      CategoryRecord(
+        id: 'snacks',
+        name: 'Snacks',
+        kind: CategoryKind.expense,
+        parentCategoryId: 'dining',
+        sync: sync,
+      ),
+      CategoryRecord(
+        id: 'transportation',
+        name: 'Transportation',
+        kind: CategoryKind.expense,
+        sync: sync,
+      ),
+    ];
+
+    expect(
+      wouldCreateCategoryParentCycle(
+        categories,
+        categoryId: 'food',
+        parentCategoryId: 'food',
+      ),
+      isTrue,
+    );
+    expect(
+      wouldCreateCategoryParentCycle(
+        categories,
+        categoryId: 'food',
+        parentCategoryId: 'snacks',
+      ),
+      isTrue,
+    );
+    expect(
+      wouldCreateCategoryParentCycle(
+        categories,
+        categoryId: 'food',
+        parentCategoryId: 'transportation',
+      ),
+      isFalse,
+    );
+    expect(
+      wouldCreateCategoryParentCycle(
+        categories,
+        categoryId: 'food',
+        parentCategoryId: null,
+      ),
+      isFalse,
+    );
+  });
+
   test('store derives credit card and loan progress values', () {
     final sync = SyncMetadata.fresh(now: DateTime(2026, 7, 6));
     final store = FinanceDataStore(

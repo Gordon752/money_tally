@@ -4497,7 +4497,13 @@ Future<void> showCategoryDialog(
                   (item) =>
                       item.isVisible &&
                       item.kind == kind &&
-                      item.id != existingCategory?.id,
+                      item.id != existingCategory?.id &&
+                      (existingCategory == null ||
+                          !v2_category.wouldCreateCategoryParentCycle(
+                            dataStore.categories,
+                            categoryId: existingCategory.id,
+                            parentCategoryId: item.id,
+                          )),
                 )
                 .toList(growable: false);
             if (parentCategoryId != null &&
@@ -4614,6 +4620,15 @@ Future<void> showCategoryDialog(
       );
 
   if (result == null || result.name.isEmpty) return;
+  final sanitizedParentCategoryId =
+      existingCategory != null &&
+          v2_category.wouldCreateCategoryParentCycle(
+            dataStore.categories,
+            categoryId: existingCategory.id,
+            parentCategoryId: result.parentCategoryId,
+          )
+      ? null
+      : result.parentCategoryId;
   if (existingCategory == null) {
     final legacyCategory = legacyStore.addCategory(
       result.name,
@@ -4626,7 +4641,7 @@ Future<void> showCategoryDialog(
             'cat_${DateTime.now().microsecondsSinceEpoch}',
         name: result.name,
         kind: result.kind,
-        parentCategoryId: result.parentCategoryId,
+        parentCategoryId: sanitizedParentCategoryId,
         iconName: result.iconName,
         colorValue: result.colorValue,
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
@@ -4644,10 +4659,10 @@ Future<void> showCategoryDialog(
     existingCategory.copyWith(
       name: result.name,
       kind: result.kind,
-      parentCategoryId: result.parentCategoryId,
+      parentCategoryId: sanitizedParentCategoryId,
       iconName: result.iconName,
       colorValue: result.colorValue,
-      clearParentCategory: result.parentCategoryId == null,
+      clearParentCategory: sanitizedParentCategoryId == null,
       clearIcon: result.iconName == null,
       clearColor: result.colorValue == null,
     ),
