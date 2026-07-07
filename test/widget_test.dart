@@ -96,6 +96,25 @@ void main() {
       legacyStore.accountById('checking').balanceCents,
     );
   });
+
+  test('legacy v2 mirror refreshes in-memory v2 balances', () async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    final mirror = LegacyV2StoreMirror(
+      legacyStore: legacyStore,
+      dataStore: dataStore,
+    )..start();
+    addTearDown(mirror.dispose);
+
+    legacyStore.adjustAccountBalance('checking', 200000);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(dataStore.balanceForAccount('checking'), 200000);
+  });
 }
 
 class FakeRemoteFinanceRepository implements FinanceRemoteRepository {

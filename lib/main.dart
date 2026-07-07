@@ -42,6 +42,7 @@ class MoneyTallyBootstrap extends StatefulWidget {
 
 class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
   late final Future<AppStores> _startup = _load();
+  AppStores? _stores;
 
   Future<AppStores> _load() async {
     await Firebase.initializeApp(
@@ -49,7 +50,23 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
     );
     final legacyStore = await FinanceStore.load();
     final dataStore = await _loadV2StoreFromLegacy(legacyStore);
-    return AppStores(legacyStore: legacyStore, dataStore: dataStore);
+    final mirror = LegacyV2StoreMirror(
+      legacyStore: legacyStore,
+      dataStore: dataStore,
+    )..start();
+    final stores = AppStores(
+      legacyStore: legacyStore,
+      dataStore: dataStore,
+      mirror: mirror,
+    );
+    _stores = stores;
+    return stores;
+  }
+
+  @override
+  void dispose() {
+    _stores?.mirror.dispose();
+    super.dispose();
   }
 
   Future<FinanceDataStore> _loadV2StoreFromLegacy(
@@ -93,10 +110,55 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
 }
 
 class AppStores {
-  const AppStores({required this.legacyStore, required this.dataStore});
+  const AppStores({
+    required this.legacyStore,
+    required this.dataStore,
+    required this.mirror,
+  });
 
   final FinanceStore legacyStore;
   final FinanceDataStore dataStore;
+  final LegacyV2StoreMirror mirror;
+}
+
+class LegacyV2StoreMirror {
+  LegacyV2StoreMirror({required this.legacyStore, required this.dataStore});
+
+  final FinanceStore legacyStore;
+  final FinanceDataStore dataStore;
+  var _isRefreshing = false;
+  var _queuedRefresh = false;
+
+  void start() {
+    legacyStore.addListener(_queueRefresh);
+  }
+
+  void dispose() {
+    legacyStore.removeListener(_queueRefresh);
+  }
+
+  void _queueRefresh() {
+    if (_isRefreshing) {
+      _queuedRefresh = true;
+      return;
+    }
+    unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    _isRefreshing = true;
+    try {
+      do {
+        _queuedRefresh = false;
+        final dataSet = const V1SnapshotMigrator().migrate(
+          legacyStore.snapshot().toJson(),
+        );
+        await dataStore.replaceDataSet(dataSet, persistLocal: false);
+      } while (_queuedRefresh);
+    } finally {
+      _isRefreshing = false;
+    }
+  }
 }
 
 class StartupLoadingView extends StatelessWidget {

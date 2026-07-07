@@ -140,6 +140,17 @@ class FinanceDataStore extends ChangeNotifier {
     return categories.firstWhere((category) => category.id == id);
   }
 
+  Future<void> replaceDataSet(
+    FinanceDataSet dataSet, {
+    bool persistLocal = true,
+  }) async {
+    _dataSet = dataSet;
+    if (persistLocal) {
+      await localRepository?.save(_dataSet);
+    }
+    notifyListeners();
+  }
+
   Future<void> saveAccount(AccountRecord account) async {
     final updated = _upsert(accounts, account, (item) => item.id);
     _dataSet = _dataSet.copyWith(accounts: updated);
