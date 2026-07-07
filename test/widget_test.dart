@@ -1204,7 +1204,43 @@ void main() {
     expect(find.text('Launch screen'), findsOneWidget);
     expect(find.text('Money Format'), findsOneWidget);
     expect(find.text('Notifications'), findsOneWidget);
+    expect(find.text('Manage'), findsOneWidget);
+    expect(find.text('Manage accounts'), findsOneWidget);
+    expect(find.text('Manage categories'), findsOneWidget);
     expect(find.text('Data Ownership'), findsOneWidget);
+  });
+
+  testWidgets('settings management rows navigate to accounts and categories', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Manage accounts'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Accounts'), findsWidgets);
+    expect(find.text('Checking'), findsOneWidget);
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    final manageCategories = find.widgetWithText(
+      ListTile,
+      'Manage categories',
+    );
+    await tester.ensureVisible(manageCategories);
+    await tester.pumpAndSettle();
+    await tester.tap(manageCategories);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Categories'), findsWidgets);
+    expect(find.text('Dining'), findsOneWidget);
   });
 
   testWidgets('settings toggles notification preference', (tester) async {

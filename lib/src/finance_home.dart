@@ -149,7 +149,11 @@ class _FinanceHomeState extends State<FinanceHome> {
               FinanceSection.scheduled => const ScheduledView(),
               FinanceSection.reports => const ReportsView(),
               FinanceSection.categories => const CategoriesView(),
-              FinanceSection.settings => const SettingsView(),
+              FinanceSection.settings => SettingsView(
+                onSelectSection: (section) => setState(() {
+                  selected = section;
+                }),
+              ),
             },
           ),
         ),
@@ -1677,7 +1681,9 @@ class CategoriesView extends StatelessWidget {
 }
 
 class SettingsView extends StatelessWidget {
-  const SettingsView({super.key});
+  const SettingsView({this.onSelectSection, super.key});
+
+  final ValueChanged<FinanceSection>? onSelectSection;
 
   static const _currencyOptions = [
     CurrencyFormatSettings(currencyCode: 'USD', symbol: r'$'),
@@ -1797,6 +1803,26 @@ class SettingsView extends StatelessWidget {
             onChanged: (value) => store.savePreferences(
               preferences.copyWith(notificationsEnabled: value),
             ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        AppCard(
+          title: 'Manage',
+          child: Column(
+            children: [
+              SettingsActionRow(
+                icon: Icons.account_balance_wallet_outlined,
+                title: 'Manage accounts',
+                trailingText: 'Open',
+                onTap: () => onSelectSection?.call(FinanceSection.accounts),
+              ),
+              SettingsActionRow(
+                icon: Icons.sell_outlined,
+                title: 'Manage categories',
+                trailingText: 'Open',
+                onTap: () => onSelectSection?.call(FinanceSection.categories),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 16),
