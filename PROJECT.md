@@ -19,7 +19,7 @@ Core product values:
 
 Money Tally is a Flutter app targeting iPhone, iPad, macOS, and future Android. Firebase Authentication and Firestore are configured for Apple sign-in and cross-device sync. The current UI still runs on the original v1 snapshot store, while the v2 record-based foundation is being built underneath it.
 
-Local v1 persistence uses a snapshot stored through `shared_preferences`, with Firestore currently storing each user's full finance snapshot. V2 persistence uses `FinanceDataSet` records, a local `shared_preferences` repository, and a migration bridge that can convert existing v1 snapshots into the v2 data model.
+Local v1 persistence uses a snapshot stored through `shared_preferences`, with Firestore snapshot sync retained as a compatibility bridge. V2 persistence uses `FinanceDataSet` records, a local `shared_preferences` repository, a per-record Firestore repository, and a migration bridge that can convert existing v1 snapshots into the v2 data model.
 
 Current important files:
 
@@ -327,11 +327,11 @@ Most preferences should sync, but some device-specific preferences may remain lo
 
 ## Sync and Data Ownership
 
-Current sync uses full snapshot push/pull at:
+Snapshot sync is retained as a compatibility and migration bridge at:
 
 `users/{userId}/finance/snapshot`
 
-This is acceptable for the prototype, but the target architecture is per-record sync before the app becomes a daily driver. A v1-to-v2 migration bridge now exists so existing snapshot data can be converted to ledger-derived v2 records without losing visible account balances.
+Signed-in sessions also attach v2 per-record sync. If per-record remote data exists, the v2 store loads it. If the per-record remote is empty, the app seeds it from the local v2 data set. Future v2 edits save individual records to Firestore. A v1-to-v2 migration bridge remains in place so existing snapshot data can be converted to ledger-derived v2 records without losing visible account balances.
 
 ```text
 users/{userId}/accounts/{accountId}
@@ -350,7 +350,7 @@ Before larger multi-device use, define merge rules:
 - Balance adjustment conflicts should be represented by explicit adjustment records.
 - Snapshot backup export/import must preserve ids and sync metadata.
 
-Settled sync rule: per-record Firestore sync is the real implementation target. Snapshot sync may remain only as a migration or backup bridge.
+Settled sync rule: per-record Firestore sync is the real implementation path. Snapshot sync may remain only as a migration or backup bridge.
 
 Migration rules:
 
@@ -358,7 +358,7 @@ Migration rules:
 - Existing v1 expenses and income become v2 transaction records with positive minor-unit amounts.
 - Legacy v1 transfer transactions do not have a destination account, so they migrate as explicit adjustment transactions with a migration note.
 - V2 data should be loaded first; v1 migration should run only when no v2 local data exists.
-- During the screen migration phase, v1 saves also write a local v2 mirror. This is temporary and should be removed once v2 is the single source of truth.
+- During the screen migration phase, v1 saves also write a local v2 mirror. This is temporary and should be removed once v2 is the single source of truth. Once v2 per-record remote sync is attached, the mirror should not overwrite v2 remote-loaded state.
 
 Prepare for:
 
@@ -634,8 +634,7 @@ Do not rush into screen-by-screen patching. Build the reusable foundation first,
 
 Near term:
 
-- Wire app bootstrap to the v2 migration loader when screens are ready to move off the v1 store.
-- Move Accounts and Ledger screens onto the v2 `FinanceDataStore`.
+- Continue retiring remaining v1 store usage now that the main screens are moving through `FinanceDataStore`.
 - Refactor remaining file structure into app/auth/features boundaries.
 - Finish user preferences UI and appearance mode wiring.
 - Continue expanding reusable design components where screens need them.
@@ -643,15 +642,14 @@ Near term:
 
 Mid term:
 
-- Add scheduled transaction calendar and local notifications.
-- Add budget/category management.
-- Add simple reports.
-- Add JSON backup and restore.
-- Add CSV export.
+- Add platform implementations for local notifications and app badge counts.
+- Continue improving budget/category management.
+- Expand simple reports.
+- Add file-based backup/restore after clipboard export/import.
 
 Later:
 
-- Replace full-snapshot Firestore sync with per-record Firestore sync.
+- Remove full-snapshot Firestore sync after v2 is the only app data path.
 - Add iCloud backup support.
 - Add Android build and Play Store setup.
 - Add App Store/TestFlight archive workflow.
