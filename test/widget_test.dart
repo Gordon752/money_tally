@@ -726,7 +726,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Monthly spending'), findsOneWidget);
+    expect(find.text('Category breakdown'), findsOneWidget);
     expect(find.text('Budget history'), findsOneWidget);
+    expect(find.text(r'$82.78'), findsWidgets);
+    expect(find.text(r'$1,264.00'), findsWidgets);
+    expect(find.text('Walmart'), findsWidgets);
     expect(find.byTooltip('Add'), findsNothing);
   });
 

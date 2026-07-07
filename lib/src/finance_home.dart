@@ -990,34 +990,161 @@ class ReportsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const AppCard(
-      title: 'Reports',
-      child: Column(
+    final store = FinanceDataStoreScope.watch(context);
+    final currency = store.preferences.currency;
+    final now = DateTime.now();
+    final income = store.incomeThisMonthMinor(now: now);
+    final expenses = store.expensesThisMonthMinor(now: now);
+    final categoryTotals = spendingByCategoryThisMonth(store, now: now);
+    final categoriesById = {
+      for (final category in store.categories) category.id: category,
+    };
+    final budgets = store.budgets.where((budget) => !budget.isArchived);
+
+    return Column(
+      children: [
+        ResponsiveGrid(
+          minTileWidth: 320,
+          children: [
+            AppCard(
+              title: 'Monthly spending',
+              child: Column(
+                children: [
+                  ReportMetricRow(
+                    icon: Icons.calendar_month_outlined,
+                    label: 'Expenses',
+                    value: money(expenses, currency),
+                  ),
+                  ReportMetricRow(
+                    icon: Icons.compare_arrows_outlined,
+                    label: 'Income',
+                    value: money(income, currency),
+                  ),
+                ],
+              ),
+            ),
+            AppCard(
+              title: 'Income vs expenses',
+              child: Column(
+                children: [
+                  ReportMetricRow(
+                    icon: Icons.add_circle_outline,
+                    label: 'Income',
+                    value: money(income, currency),
+                  ),
+                  ReportMetricRow(
+                    icon: Icons.remove_circle_outline,
+                    label: 'Expenses',
+                    value: money(expenses, currency),
+                    isWarning: expenses > income,
+                  ),
+                ],
+              ),
+            ),
+            AppCard(
+              title: 'Cash flow',
+              child: ReportMetricRow(
+                icon: Icons.waterfall_chart_outlined,
+                label: 'This month',
+                value: money(income - expenses, currency),
+                isWarning: income - expenses < 0,
+              ),
+            ),
+            AppCard(
+              title: 'Net worth history',
+              child: ReportMetricRow(
+                icon: Icons.show_chart_outlined,
+                label: 'Current',
+                value: money(store.netWorthMinor, currency),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        AppCard(
+          title: 'Category breakdown',
+          child: Column(
+            children: [
+              if (categoryTotals.isEmpty)
+                const ReportMetricRow(
+                  icon: Icons.pie_chart_outline,
+                  label: 'No spending this month',
+                  value: '',
+                ),
+              for (final entry in sortedCategoryTotals(categoryTotals).take(6))
+                ReportMetricRow(
+                  icon: categoryIconForId(entry.key, categoriesById),
+                  label: categoriesById[entry.key]?.name ?? 'Uncategorized',
+                  value: money(entry.value, currency),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        AppCard(
+          title: 'Budget history',
+          child: Column(
+            children: [
+              if (budgets.isEmpty)
+                const ReportMetricRow(
+                  icon: Icons.ssid_chart_outlined,
+                  label: 'No active budgets',
+                  value: '',
+                ),
+              for (final budget in budgets.take(6))
+                ReportMetricRow(
+                  icon: Icons.ssid_chart_outlined,
+                  label: budget.name,
+                  value:
+                      '${money(store.spentThisMonthForBudget(budget, now: now), currency)} / ${money(budget.amountMinor, currency)}',
+                  isWarning: budget.isOverBudget(
+                    store.spentThisMonthForBudget(budget, now: now),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class ReportMetricRow extends StatelessWidget {
+  const ReportMetricRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.isWarning = false,
+    super.key,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool isWarning;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
         children: [
-          SettingsPlaceholderRow(
-            icon: Icons.calendar_month_outlined,
-            title: 'Monthly spending',
+          Icon(icon, color: isWarning ? AppTheme.rose : AppTheme.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
           ),
-          SettingsPlaceholderRow(
-            icon: Icons.compare_arrows_outlined,
-            title: 'Income vs expenses',
-          ),
-          SettingsPlaceholderRow(
-            icon: Icons.pie_chart_outline,
-            title: 'Category breakdown',
-          ),
-          SettingsPlaceholderRow(
-            icon: Icons.waterfall_chart_outlined,
-            title: 'Cash flow',
-          ),
-          SettingsPlaceholderRow(
-            icon: Icons.show_chart_outlined,
-            title: 'Net worth history',
-          ),
-          SettingsPlaceholderRow(
-            icon: Icons.ssid_chart_outlined,
-            title: 'Budget history',
-          ),
+          if (value.isNotEmpty)
+            Text(
+              value,
+              style: TextStyle(
+                color: isWarning ? AppTheme.rose : AppTheme.ink,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
         ],
       ),
     );
@@ -3047,6 +3174,14 @@ IconData categoryIcon(v2_category.CategoryRecord category) {
   };
 }
 
+IconData categoryIconForId(
+  String categoryId,
+  Map<String, v2_category.CategoryRecord> categoriesById,
+) {
+  final category = categoriesById[categoryId];
+  return category == null ? Icons.pie_chart_outline : categoryIcon(category);
+}
+
 String categorySubtitle(
   v2_category.CategoryRecord category,
   Map<String, v2_category.CategoryRecord> categoriesById,
@@ -3054,6 +3189,41 @@ String categorySubtitle(
   final kind = categoryKindLabel(category.kind.name);
   final parent = categoriesById[category.parentCategoryId];
   return parent == null ? kind : '$kind · ${parent.name}';
+}
+
+Map<String, int> spendingByCategoryThisMonth(
+  FinanceDataStore store, {
+  DateTime? now,
+}) {
+  final anchor = now ?? DateTime.now();
+  final periodStart = DateTime(anchor.year, anchor.month);
+  final periodEnd = DateTime(anchor.year, anchor.month + 1);
+  final totals = <String, int>{};
+  for (final transaction in store.transactions) {
+    if (transaction.type != TransactionType.expense ||
+        transaction.date.isBefore(periodStart) ||
+        !transaction.date.isBefore(periodEnd)) {
+      continue;
+    }
+    if (transaction.isSplit) {
+      for (final split in transaction.splitLines) {
+        totals[split.categoryId] =
+            (totals[split.categoryId] ?? 0) + split.amountMinor.abs();
+      }
+      continue;
+    }
+    final categoryId = transaction.categoryId ?? '';
+    totals[categoryId] =
+        (totals[categoryId] ?? 0) + transaction.amountMinor.abs();
+  }
+  return totals;
+}
+
+List<MapEntry<String, int>> sortedCategoryTotals(Map<String, int> totals) {
+  return totals.entries.toList()..sort((a, b) {
+    final amountComparison = b.value.compareTo(a.value);
+    return amountComparison == 0 ? a.key.compareTo(b.key) : amountComparison;
+  });
 }
 
 String categoryKindLabel(String kindName) {
