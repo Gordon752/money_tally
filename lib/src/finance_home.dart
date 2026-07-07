@@ -2683,6 +2683,7 @@ class BudgetProgressRow extends StatelessWidget {
     final spent = store.spentThisMonthForBudget(budget);
     final remaining = budget.remainingMinor(spent);
     final isOver = budget.isOverBudget(spent);
+    final categorySummary = budgetCategorySummary(store, budget);
 
     return InkWell(
       onLongPress: () => showBudgetActions(context, budget),
@@ -2715,6 +2716,14 @@ class BudgetProgressRow extends StatelessWidget {
               'Spent ${money(spent, currency)} of ${money(budget.amountMinor, currency)}',
               style: const TextStyle(color: AppTheme.muted),
             ),
+            const SizedBox(height: 4),
+            Text(
+              categorySummary,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: const TextStyle(color: AppTheme.muted),
+            ),
             const SizedBox(height: 8),
             BudgetProgressBar(
               spentMinor: spent,
@@ -2725,6 +2734,21 @@ class BudgetProgressRow extends StatelessWidget {
       ),
     );
   }
+}
+
+String budgetCategorySummary(FinanceDataStore store, BudgetRecord budget) {
+  if (budget.categoryIds.isEmpty) return 'No categories selected';
+  final categoriesById = {
+    for (final category in store.categories) category.id: category,
+  };
+  final names = [
+    for (final categoryId in budget.categoryIds)
+      categoriesById[categoryId]?.name ?? 'Unknown category',
+  ];
+  final visibleNames = names.take(3).join(', ');
+  final hiddenCount = names.length - 3;
+  if (hiddenCount <= 0) return 'Categories: $visibleNames';
+  return 'Categories: $visibleNames, +$hiddenCount more';
 }
 
 Future<void> showBudgetDialog(

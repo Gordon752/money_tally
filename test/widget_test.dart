@@ -1466,6 +1466,7 @@ void main() {
 
     expect(find.text('Dining'), findsOneWidget);
     expect(find.textContaining('Spent'), findsWidgets);
+    expect(find.text('Categories: Dining'), findsOneWidget);
   });
 
   testWidgets('budget dialog creates budget with categories', (tester) async {
