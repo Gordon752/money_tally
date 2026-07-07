@@ -67,6 +67,48 @@ void main() {
     },
   );
 
+  test('store can reorder accounts within a fixed group', () async {
+    final sync = SyncMetadata.fresh(now: DateTime(2026, 7, 6));
+    final repository = FakeRecordRepository();
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        accounts: [
+          ..._dataSet().accounts,
+          AccountRecord(
+            id: 'savings',
+            name: 'Savings',
+            type: AccountType.savings,
+            openingBalanceMinor: 50000,
+            sortOrder: 100,
+            sync: sync,
+          ),
+        ],
+      ),
+      remoteRepository: repository,
+      userId: 'user-1',
+    );
+
+    expect(
+      store.activeAccountsInDisplayOrder
+          .where((account) => account.group == AccountGroup.banking)
+          .map((account) => account.id),
+      ['checking', 'savings'],
+    );
+
+    await store.moveAccountWithinGroup(accountId: 'checking', direction: 1);
+
+    expect(
+      store.activeAccountsInDisplayOrder
+          .where((account) => account.group == AccountGroup.banking)
+          .map((account) => account.id),
+      ['savings', 'checking'],
+    );
+    expect(repository.savedAccounts.map((account) => account.id), [
+      'savings',
+      'checking',
+    ]);
+  });
+
   test('split transactions must match the parent amount', () async {
     final store = FinanceDataStore(dataSet: _dataSet());
 

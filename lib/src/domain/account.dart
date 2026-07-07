@@ -28,6 +28,7 @@ class AccountRecord {
     this.isArchived = false,
     this.includeInGroupBalance = true,
     this.includeInNetWorth = true,
+    this.sortOrder = 0,
   });
 
   final String id;
@@ -37,6 +38,7 @@ class AccountRecord {
   final bool isArchived;
   final bool includeInGroupBalance;
   final bool includeInNetWorth;
+  final int sortOrder;
   final SyncMetadata sync;
 
   AccountGroup get group => type.group;
@@ -48,6 +50,7 @@ class AccountRecord {
     bool? isArchived,
     bool? includeInGroupBalance,
     bool? includeInNetWorth,
+    int? sortOrder,
     SyncMetadata? sync,
   }) {
     return AccountRecord(
@@ -59,6 +62,7 @@ class AccountRecord {
       includeInGroupBalance:
           includeInGroupBalance ?? this.includeInGroupBalance,
       includeInNetWorth: includeInNetWorth ?? this.includeInNetWorth,
+      sortOrder: sortOrder ?? this.sortOrder,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -72,6 +76,7 @@ class AccountRecord {
       'isArchived': isArchived,
       'includeInGroupBalance': includeInGroupBalance,
       'includeInNetWorth': includeInNetWorth,
+      'sortOrder': sortOrder,
       'sync': sync.toJson(),
     };
   }
@@ -85,6 +90,7 @@ class AccountRecord {
       isArchived: json['isArchived'] as bool? ?? false,
       includeInGroupBalance: json['includeInGroupBalance'] as bool? ?? true,
       includeInNetWorth: json['includeInNetWorth'] as bool? ?? true,
+      sortOrder: json['sortOrder'] as int? ?? 0,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

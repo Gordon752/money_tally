@@ -139,7 +139,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Checking'), findsOneWidget);
-    expect(find.text('Banking'), findsOneWidget);
+    expect(find.text('Banking'), findsWidgets);
     expect(find.text('Adjust balance'), findsNothing);
   });
 
@@ -295,8 +295,8 @@ void main() {
     expect(transfer.transferAccountId, 'cash');
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
-    expect(find.text(r'$1,802.40'), findsOneWidget);
-    expect(find.text(r'$297.00'), findsOneWidget);
+    expect(find.text(r'$1,802.40'), findsWidgets);
+    expect(find.text(r'$297.00'), findsWidgets);
   });
 
   testWidgets('floating add scheduled transaction creates v2 schedule', (

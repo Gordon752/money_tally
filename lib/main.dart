@@ -18,6 +18,7 @@ import 'src/design/widgets/account_card.dart';
 import 'src/design/widgets/floating_action_button.dart';
 import 'src/design/widgets/floating_action_menu.dart';
 import 'src/design/widgets/scheduled_transaction_row.dart';
+import 'src/design/widgets/section_header.dart';
 import 'src/design/widgets/transaction_row.dart';
 import 'src/domain/budget.dart';
 import 'src/domain/account.dart' as v2_account;
@@ -172,6 +173,10 @@ class LegacyV2StoreMirror {
           legacyStore.snapshot().toJson(),
         );
         final dataSet = migrated.copyWith(
+          accounts: mergeAccountsPreferCurrent(
+            migrated: migrated.accounts,
+            current: dataStore.accounts,
+          ),
           categories: mergeCategoriesPreferCurrent(
             migrated: migrated.categories,
             current: dataStore.categories,
@@ -203,6 +208,33 @@ List<TransactionRecord> mergeV2OnlyTransactions({
     ...migrated,
     for (final transaction in current)
       if (!migratedIds.contains(transaction.id)) transaction,
+  ];
+}
+
+List<v2_account.AccountRecord> mergeAccountsPreferCurrent({
+  required List<v2_account.AccountRecord> migrated,
+  required List<v2_account.AccountRecord> current,
+}) {
+  final currentById = {for (final account in current) account.id: account};
+  final migratedIds = migrated.map((account) => account.id).toSet();
+  return [
+    for (final account in migrated)
+      if (currentById[account.id] case final current?)
+        v2_account.AccountRecord(
+          id: account.id,
+          name: account.name,
+          type: account.type,
+          openingBalanceMinor: account.openingBalanceMinor,
+          isArchived: account.isArchived,
+          includeInGroupBalance: current.includeInGroupBalance,
+          includeInNetWorth: current.includeInNetWorth,
+          sortOrder: current.sortOrder,
+          sync: account.sync,
+        )
+      else
+        account,
+    for (final account in current)
+      if (!migratedIds.contains(account.id)) account,
   ];
 }
 

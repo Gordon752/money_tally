@@ -110,6 +110,13 @@ class FinanceDataStore extends ChangeNotifier {
   List<BudgetRecord> get budgets => _dataSet.budgets;
   UserPreferences get preferences => _dataSet.preferences;
 
+  List<AccountRecord> get activeAccountsInDisplayOrder {
+    return accounts
+        .where((account) => !account.isArchived)
+        .toList(growable: false)
+      ..sort(compareAccountDisplayOrder);
+  }
+
   int balanceForAccount(String accountId) {
     return _dataSet.balanceForAccount(accountId);
   }
@@ -215,12 +222,49 @@ class FinanceDataStore extends ChangeNotifier {
   Future<void> saveAccount(AccountRecord account) async {
     final updated = _upsert(accounts, account, (item) => item.id);
     _dataSet = _dataSet.copyWith(accounts: updated);
-    await _commit(account: account);
+    await _commit(accounts: [account]);
   }
 
   Future<void> archiveAccount(String accountId) async {
     final account = accountById(accountId).copyWith(isArchived: true);
     await saveAccount(account);
+  }
+
+  Future<void> moveAccountWithinGroup({
+    required String accountId,
+    required int direction,
+  }) async {
+    if (direction == 0) return;
+    final account = accountById(accountId);
+    final groupAccounts =
+        accounts
+            .where((item) => !item.isArchived && item.group == account.group)
+            .toList(growable: false)
+          ..sort(compareAccountDisplayOrder);
+    final fromIndex = groupAccounts.indexWhere((item) => item.id == accountId);
+    final toIndex = fromIndex + direction.sign;
+    if (fromIndex < 0 || toIndex < 0 || toIndex >= groupAccounts.length) {
+      return;
+    }
+
+    final reordered = [...groupAccounts];
+    final moving = reordered.removeAt(fromIndex);
+    reordered.insert(toIndex, moving);
+
+    final changedAccounts = <AccountRecord>[];
+    for (var index = 0; index < reordered.length; index += 1) {
+      final normalizedSortOrder = index * 100;
+      final item = reordered[index];
+      if (item.sortOrder != normalizedSortOrder) {
+        changedAccounts.add(item.copyWith(sortOrder: normalizedSortOrder));
+      }
+    }
+    if (changedAccounts.isEmpty) return;
+
+    final changedById = {for (final item in changedAccounts) item.id: item};
+    final updated = [for (final item in accounts) changedById[item.id] ?? item];
+    _dataSet = _dataSet.copyWith(accounts: updated);
+    await _commit(accounts: changedAccounts);
   }
 
   Future<void> saveCategory(CategoryRecord category) async {
@@ -411,7 +455,7 @@ class FinanceDataStore extends ChangeNotifier {
   }
 
   Future<void> _commit({
-    AccountRecord? account,
+    List<AccountRecord> accounts = const [],
     CategoryRecord? category,
     TransactionRecord? transaction,
     ScheduledTransactionRecord? scheduledTransaction,
@@ -422,7 +466,7 @@ class FinanceDataStore extends ChangeNotifier {
     final remote = remoteRepository;
     final currentUserId = userId;
     if (remote != null && currentUserId != null) {
-      if (account != null) {
+      for (final account in accounts) {
         await remote.saveAccount(userId: currentUserId, account: account);
       }
       if (category != null) {
@@ -472,4 +516,12 @@ class FinanceDataStore extends ChangeNotifier {
   String _newId(String prefix) {
     return '${prefix}_${DateTime.now().microsecondsSinceEpoch}';
   }
+}
+
+int compareAccountDisplayOrder(AccountRecord a, AccountRecord b) {
+  final groupComparison = a.group.index.compareTo(b.group.index);
+  if (groupComparison != 0) return groupComparison;
+  final sortComparison = a.sortOrder.compareTo(b.sortOrder);
+  if (sortComparison != 0) return sortComparison;
+  return a.name.toLowerCase().compareTo(b.name.toLowerCase());
 }

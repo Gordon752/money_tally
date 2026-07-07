@@ -410,22 +410,57 @@ class AccountsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
-    return ResponsiveGrid(
-      minTileWidth: 300,
+    final accounts = store.activeAccountsInDisplayOrder;
+    if (accounts.isEmpty) {
+      return const AppCard(
+        child: Text(
+          'No accounts yet',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final account in store.accounts.where(
-          (account) => !account.isArchived,
-        ))
-          AccountCard(
-            account: account,
-            balanceMinor: store.balanceForAccount(account.id),
-            currency: store.preferences.currency,
-            leading: Icon(
-              accountGroupIcon(account.group.name),
-              color: AppTheme.accent,
+        for (final group in v2_account.AccountGroup.values)
+          if (accounts.any((account) => account.group == group)) ...[
+            SectionHeader(
+              title: accountGroupLabel(group),
+              subtitle: money(
+                accounts
+                    .where(
+                      (account) =>
+                          account.group == group &&
+                          account.includeInGroupBalance,
+                    )
+                    .fold(
+                      0,
+                      (total, account) =>
+                          total + store.balanceForAccount(account.id),
+                    ),
+                store.preferences.currency,
+              ),
             ),
-            onLongPress: () => showAccountOptions(context, account.id),
-          ),
+            ResponsiveGrid(
+              minTileWidth: 300,
+              children: [
+                for (final account in accounts.where(
+                  (account) => account.group == group,
+                ))
+                  AccountCard(
+                    account: account,
+                    balanceMinor: store.balanceForAccount(account.id),
+                    currency: store.preferences.currency,
+                    leading: Icon(
+                      accountGroupIcon(account.group.name),
+                      color: AppTheme.accent,
+                    ),
+                    onLongPress: () => showAccountOptions(context, account.id),
+                  ),
+              ],
+            ),
+          ],
       ],
     );
   }
@@ -1850,7 +1885,16 @@ Future<void> showAdjustBalanceDialog(
 
 Future<void> showAccountOptions(BuildContext context, String accountId) async {
   final store = FinanceStoreScope.watch(context);
+  final dataStore = FinanceDataStoreScope.read(context);
   final account = store.accountById(accountId);
+  final v2Account = dataStore.accountById(accountId);
+  final groupAccounts = dataStore.activeAccountsInDisplayOrder
+      .where((item) => item.group == v2Account.group)
+      .toList(growable: false);
+  final accountIndex = groupAccounts.indexWhere((item) => item.id == accountId);
+  final canMoveUp = accountIndex > 0;
+  final canMoveDown =
+      accountIndex >= 0 && accountIndex < groupAccounts.length - 1;
   final action = await showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
@@ -1862,6 +1906,20 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
             leading: const Icon(Icons.tune),
             title: const Text('Adjust Balance'),
             onTap: () => Navigator.pop(context, 'adjust'),
+          ),
+          ListTile(
+            enabled: canMoveUp,
+            leading: const Icon(Icons.arrow_upward),
+            title: const Text('Move Up'),
+            onTap: canMoveUp ? () => Navigator.pop(context, 'moveUp') : null,
+          ),
+          ListTile(
+            enabled: canMoveDown,
+            leading: const Icon(Icons.arrow_downward),
+            title: const Text('Move Down'),
+            onTap: canMoveDown
+                ? () => Navigator.pop(context, 'moveDown')
+                : null,
           ),
           ListTile(
             leading: const Icon(Icons.edit_outlined),
@@ -1880,6 +1938,10 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
 
   if (action == 'adjust' && context.mounted) {
     await showAdjustBalanceDialog(context, account);
+  } else if (action == 'moveUp') {
+    await dataStore.moveAccountWithinGroup(accountId: accountId, direction: -1);
+  } else if (action == 'moveDown') {
+    await dataStore.moveAccountWithinGroup(accountId: accountId, direction: 1);
   } else if (action == 'edit' && context.mounted) {
     await showEditAccountDialog(context, account);
   } else if (action == 'archive' && context.mounted) {
@@ -2113,12 +2175,17 @@ Future<void> saveLegacyAccountToV2(
           isArchived: account.isArchived,
         );
   } on StateError {
+    final v2Type = v2AccountTypeFor(account.type);
+    final nextSortOrder = targetStore.activeAccountsInDisplayOrder
+        .where((item) => item.group == v2Type.group)
+        .fold(0, (highest, item) => max(highest, item.sortOrder + 100));
     record = v2_account.AccountRecord(
       id: account.id,
       name: account.name,
-      type: v2AccountTypeFor(account.type),
+      type: v2Type,
       openingBalanceMinor: account.balanceCents,
       isArchived: account.isArchived,
+      sortOrder: nextSortOrder,
       sync: v2_sync.SyncMetadata.fresh(),
     );
   }
@@ -3144,6 +3211,15 @@ IconData accountGroupIcon(String groupName) {
     'creditCards' => Icons.credit_card_outlined,
     'loans' => Icons.request_quote_outlined,
     _ => Icons.account_balance_outlined,
+  };
+}
+
+String accountGroupLabel(v2_account.AccountGroup group) {
+  return switch (group) {
+    v2_account.AccountGroup.banking => 'Banking',
+    v2_account.AccountGroup.cash => 'Cash',
+    v2_account.AccountGroup.creditCards => 'Credit Cards',
+    v2_account.AccountGroup.loans => 'Loans',
   };
 }
 
