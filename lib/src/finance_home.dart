@@ -772,7 +772,7 @@ class _LedgerViewState extends State<LedgerView> {
         Align(
           alignment: Alignment.centerRight,
           child: FilledButton.icon(
-            onPressed: () => showTransactionDialog(context),
+            onPressed: () => showDefaultTransactionDialog(context),
             icon: const Icon(Icons.add),
             label: const Text('Add transaction'),
           ),
@@ -989,6 +989,30 @@ String transactionTypeLabel(TransactionType type) {
     TransactionType.transfer => 'Transfer',
     TransactionType.adjustment => 'Adjustment',
   };
+}
+
+Future<void> showDefaultTransactionDialog(
+  BuildContext context, {
+  String? initialAccountId,
+}) async {
+  final preferences = FinanceDataStoreScope.read(context).preferences;
+  final shouldOpenTransfer = switch (preferences.defaultTransactionType) {
+    DefaultTransactionType.transfer => true,
+    DefaultTransactionType.lastUsed =>
+      preferences.lastUsedTransactionType == TransactionType.transfer,
+    DefaultTransactionType.expense || DefaultTransactionType.income => false,
+  };
+
+  if (shouldOpenTransfer) {
+    await showTransferDialog(context, initialFromAccountId: initialAccountId);
+    return;
+  }
+
+  await showTransactionDialog(
+    context,
+    initialIsExpense: isExpenseDefault(preferences),
+    initialAccountId: initialAccountId,
+  );
 }
 
 String ledgerDateFilterLabel(LedgerDateFilter filter) {
@@ -3598,6 +3622,11 @@ Future<void> showTransferDialog(
     payee: result.payee,
     amountMinor: result.amountMinor,
     note: result.note,
+  );
+  await dataStore.savePreferences(
+    dataStore.preferences.copyWith(
+      lastUsedTransactionType: TransactionType.transfer,
+    ),
   );
 }
 
