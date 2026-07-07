@@ -13,6 +13,8 @@ enum FinanceSection {
   const FinanceSection(this.icon, this.label);
   final IconData icon;
   final String label;
+
+  bool get supportsFloatingAdd => this != FinanceSection.reports;
 }
 
 class FinanceHome extends StatefulWidget {
@@ -50,9 +52,22 @@ class _FinanceHomeState extends State<FinanceHome> {
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.sizeOf(context).width >= 880;
+    final preferences = FinanceDataStoreScope.watch(context).preferences;
 
     return Scaffold(
       body: SafeArea(child: isWide ? _wideLayout() : _compactLayout()),
+      floatingActionButton: selected.supportsFloatingAdd
+          ? MoneyTallyFloatingActionButton(
+              tooltip: 'Add',
+              onPressed: () => showFloatingAddMenu(context),
+              child: const Icon(Icons.add),
+            )
+          : null,
+      floatingActionButtonLocation:
+          preferences.floatingAddButtonPosition ==
+              FloatingAddButtonPosition.left
+          ? FloatingActionButtonLocation.startFloat
+          : FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: isWide
           ? null
           : NavigationBar(
@@ -1165,13 +1180,75 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
   }
 }
 
-Future<void> showTransactionDialog(BuildContext context) async {
+Future<void> showFloatingAddMenu(BuildContext context) async {
+  final selected = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: MoneyTallyFloatingActionMenu(
+        items: [
+          FloatingActionMenuItem(
+            label: 'Expense',
+            leading: const Icon(Icons.remove_circle_outline),
+            onSelected: () => Navigator.pop(sheetContext, 'expense'),
+          ),
+          FloatingActionMenuItem(
+            label: 'Income',
+            leading: const Icon(Icons.add_circle_outline),
+            onSelected: () => Navigator.pop(sheetContext, 'income'),
+          ),
+          FloatingActionMenuItem(
+            label: 'Transfer',
+            leading: const Icon(Icons.swap_horiz),
+            onSelected: () => Navigator.pop(sheetContext, 'transfer'),
+          ),
+          FloatingActionMenuItem(
+            label: 'Account',
+            leading: const Icon(Icons.account_balance_wallet_outlined),
+            onSelected: () => Navigator.pop(sheetContext, 'account'),
+          ),
+          FloatingActionMenuItem(
+            label: 'Category',
+            leading: const Icon(Icons.sell_outlined),
+            onSelected: () => Navigator.pop(sheetContext, 'category'),
+          ),
+          FloatingActionMenuItem(
+            label: 'Scheduled Transaction',
+            leading: const Icon(Icons.event_repeat_outlined),
+            onSelected: () => Navigator.pop(sheetContext, 'scheduled'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (!context.mounted || selected == null) return;
+  switch (selected) {
+    case 'expense':
+      await showTransactionDialog(context, initialIsExpense: true);
+    case 'income':
+      await showTransactionDialog(context, initialIsExpense: false);
+    case 'category':
+      await showCategoryDialog(context);
+    case 'transfer':
+    case 'account':
+    case 'scheduled':
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${floatingAddActionLabel(selected)} is next')),
+      );
+  }
+}
+
+Future<void> showTransactionDialog(
+  BuildContext context, {
+  bool? initialIsExpense,
+}) async {
   final store = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
   final payee = TextEditingController();
   final amount = TextEditingController();
   var accountId = store.accounts.first.id;
-  var isExpense = isExpenseDefault(dataStore.preferences);
+  var isExpense = initialIsExpense ?? isExpenseDefault(dataStore.preferences);
   var categoryId = defaultCategoryIdForTransactionKind(store, isExpense);
 
   final result =
@@ -1420,6 +1497,15 @@ String defaultTransactionTypeLabel(DefaultTransactionType type) {
     DefaultTransactionType.income => 'Income',
     DefaultTransactionType.transfer => 'Transfer',
     DefaultTransactionType.lastUsed => 'Last used',
+  };
+}
+
+String floatingAddActionLabel(String action) {
+  return switch (action) {
+    'transfer' => 'Transfer',
+    'account' => 'Account',
+    'scheduled' => 'Scheduled transaction',
+    _ => 'Action',
   };
 }
 

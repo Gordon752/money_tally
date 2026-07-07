@@ -24,20 +24,22 @@ class MoneyTallyFloatingActionMenu extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final item in items)
-              ListTile(
-                dense: true,
-                leading: item.leading,
-                title: Text(
-                  item.label,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final item in items)
+                ListTile(
+                  dense: true,
+                  leading: item.leading,
+                  title: Text(
+                    item.label,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  onTap: item.onSelected,
                 ),
-                onTap: item.onSelected,
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

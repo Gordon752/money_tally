@@ -179,6 +179,55 @@ void main() {
     expect(segmented.selected, {false});
   });
 
+  testWidgets('floating add menu opens income transaction dialog', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Expense'), findsOneWidget);
+    expect(find.text('Income'), findsOneWidget);
+    expect(find.text('Transfer'), findsOneWidget);
+
+    await tester.tap(find.text('Income'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add transaction'), findsOneWidget);
+    final segmented = tester.widget<SegmentedButton<bool>>(
+      find.byType(SegmentedButton<bool>),
+    );
+    expect(segmented.selected, {false});
+  });
+
+  testWidgets('floating add button honors left placement preference', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            floatingAddButtonPosition: FloatingAddButtonPosition.left,
+          ),
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+
+    expect(
+      scaffold.floatingActionButtonLocation,
+      FloatingActionButtonLocation.startFloat,
+    );
+  });
+
   testWidgets('scheduled screen renders v2 scheduled rows', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 
@@ -274,6 +323,7 @@ void main() {
 
     expect(find.text('Monthly spending'), findsOneWidget);
     expect(find.text('Budget history'), findsOneWidget);
+    expect(find.byTooltip('Add'), findsNothing);
   });
 
   testWidgets('applies v2 appearance preference to app theme mode', (
