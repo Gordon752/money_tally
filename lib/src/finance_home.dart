@@ -1223,9 +1223,9 @@ class _ScheduledViewState extends State<ScheduledView> {
                 Icons.notifications_outlined,
                 color: AppTheme.accent,
               ),
-              title: Text('Alerts are required'),
+              title: Text('Local alerts'),
               subtitle: Text(
-                'Local notification wiring will be added before device builds.',
+                'Enabled alerts are scheduled locally for this device.',
               ),
             ),
           ],

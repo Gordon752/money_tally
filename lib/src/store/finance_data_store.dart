@@ -10,6 +10,7 @@ import '../domain/scheduled_transaction.dart';
 import '../domain/sync_metadata.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
+import '../notifications/notification_scheduler.dart';
 import '../persistence/finance_record_repository.dart';
 import '../persistence/local_finance_data_set_repository.dart';
 
@@ -27,6 +28,8 @@ class FinanceDataStore extends ChangeNotifier {
     required FinanceDataSet dataSet,
     LocalFinanceDataSetRepository? localRepository,
     FinanceRecordRepository? remoteRepository,
+    NotificationScheduler notificationScheduler =
+        const NoopNotificationScheduler(),
     String? userId,
     String deviceId = 'local',
   }) {
@@ -34,6 +37,7 @@ class FinanceDataStore extends ChangeNotifier {
       dataSet,
       localRepository: localRepository,
       remoteRepository: remoteRepository,
+      notificationScheduler: notificationScheduler,
       userId: userId,
       deviceId: deviceId,
     );
@@ -43,6 +47,7 @@ class FinanceDataStore extends ChangeNotifier {
     this._dataSet, {
     this.localRepository,
     this.remoteRepository,
+    this.notificationScheduler = const NoopNotificationScheduler(),
     this.userId,
     this.deviceId = 'local',
   });
@@ -50,6 +55,8 @@ class FinanceDataStore extends ChangeNotifier {
   factory FinanceDataStore.empty({
     LocalFinanceDataSetRepository? localRepository,
     FinanceRecordRepository? remoteRepository,
+    NotificationScheduler notificationScheduler =
+        const NoopNotificationScheduler(),
     String? userId,
     String deviceId = 'local',
   }) {
@@ -64,6 +71,7 @@ class FinanceDataStore extends ChangeNotifier {
       ),
       localRepository: localRepository,
       remoteRepository: remoteRepository,
+      notificationScheduler: notificationScheduler,
       userId: userId,
       deviceId: deviceId,
     );
@@ -73,6 +81,8 @@ class FinanceDataStore extends ChangeNotifier {
     LocalFinanceDataSetRepository localRepository =
         const LocalFinanceDataSetRepository(),
     FinanceRecordRepository? remoteRepository,
+    NotificationScheduler notificationScheduler =
+        const NoopNotificationScheduler(),
     String? userId,
     String deviceId = 'local',
   }) async {
@@ -90,6 +100,7 @@ class FinanceDataStore extends ChangeNotifier {
           ),
       localRepository: localRepository,
       remoteRepository: remoteRepository,
+      notificationScheduler: notificationScheduler,
       userId: userId,
       deviceId: deviceId,
     );
@@ -98,6 +109,7 @@ class FinanceDataStore extends ChangeNotifier {
   FinanceDataSet _dataSet;
   final LocalFinanceDataSetRepository? localRepository;
   final FinanceRecordRepository? remoteRepository;
+  final NotificationScheduler notificationScheduler;
   final String? userId;
   final String deviceId;
 
@@ -284,18 +296,91 @@ class FinanceDataStore extends ChangeNotifier {
   Future<void> saveScheduledTransaction(
     ScheduledTransactionRecord scheduledTransaction,
   ) async {
+    final notificationAdjusted = await _applyScheduledNotificationState(
+      scheduledTransaction,
+    );
     final updated = _upsert(
       scheduledTransactions,
-      scheduledTransaction,
+      notificationAdjusted,
       (item) => item.id,
     );
     _dataSet = _dataSet.copyWith(scheduledTransactions: updated);
-    await _commit(scheduledTransaction: scheduledTransaction);
+    await _commit(scheduledTransaction: notificationAdjusted);
   }
 
   Future<void> savePreferences(UserPreferences preferences) async {
+    final notificationsChanged =
+        _dataSet.preferences.notificationsEnabled !=
+        preferences.notificationsEnabled;
     _dataSet = _dataSet.copyWith(preferences: preferences);
     await _commit(preferences: preferences);
+    if (notificationsChanged) {
+      await refreshScheduledNotifications();
+    }
+  }
+
+  Future<void> refreshScheduledNotifications() async {
+    var changed = false;
+    final updated = <ScheduledTransactionRecord>[];
+    for (final scheduledTransaction in scheduledTransactions) {
+      final adjusted = await _applyScheduledNotificationState(
+        scheduledTransaction,
+      );
+      updated.add(adjusted);
+      changed = changed || !identical(adjusted, scheduledTransaction);
+    }
+    if (!changed) return;
+
+    _dataSet = _dataSet.copyWith(scheduledTransactions: updated);
+    await _commit();
+  }
+
+  Future<ScheduledTransactionRecord> _applyScheduledNotificationState(
+    ScheduledTransactionRecord scheduledTransaction,
+  ) async {
+    final existing = _existingScheduledTransaction(scheduledTransaction.id);
+    if (existing != null && existing.scheduledNotificationIds.isNotEmpty) {
+      await notificationScheduler.cancelScheduledTransaction(existing);
+    }
+
+    final shouldSchedule =
+        preferences.notificationsEnabled &&
+        !scheduledTransaction.isDeleted &&
+        scheduledTransaction.hasAlert &&
+        scheduledTransaction.lastAction == ScheduledAction.none;
+    if (!shouldSchedule) {
+      if (scheduledTransaction.scheduledNotificationIds.isEmpty &&
+          scheduledTransaction.lastReminderScheduledAt == null) {
+        return scheduledTransaction;
+      }
+      return scheduledTransaction.copyWith(
+        scheduledNotificationIds: const [],
+        clearLastReminderScheduledAt: true,
+      );
+    }
+
+    final hasPermission = await notificationScheduler
+        .requestPermissionIfNeeded();
+    if (!hasPermission) {
+      return scheduledTransaction.copyWith(
+        scheduledNotificationIds: const [],
+        clearLastReminderScheduledAt: true,
+      );
+    }
+
+    final notificationIds = await notificationScheduler
+        .scheduleScheduledTransaction(scheduledTransaction);
+    return scheduledTransaction.copyWith(
+      scheduledNotificationIds: notificationIds,
+      lastReminderScheduledAt: DateTime.now(),
+    );
+  }
+
+  ScheduledTransactionRecord? _existingScheduledTransaction(String id) {
+    for (final scheduledTransaction in scheduledTransactions) {
+      if (scheduledTransaction.id == id) return scheduledTransaction;
+    }
+    return null;
   }
 
   Future<void> saveTransaction(TransactionRecord transaction) async {

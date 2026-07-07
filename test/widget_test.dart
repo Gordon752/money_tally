@@ -706,7 +706,7 @@ void main() {
     await tester.tap(find.byTooltip('Collapse calendar'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Expand calendar'), findsOneWidget);
-    expect(find.text('Alerts are required'), findsOneWidget);
+    expect(find.text('Local alerts'), findsOneWidget);
   });
 
   testWidgets('dashboard shows scheduled due count', (tester) async {

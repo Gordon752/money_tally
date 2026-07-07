@@ -415,6 +415,97 @@ void main() {
       isNull,
     );
   });
+
+  test(
+    'store schedules and cancels scheduled transaction notifications',
+    () async {
+      final scheduler = RecordingNotificationScheduler(idsToReturn: [42]);
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          preferences: const UserPreferences(notificationsEnabled: true),
+        ),
+        notificationScheduler: scheduler,
+      );
+
+      await store.saveScheduledTransaction(
+        ScheduledTransactionRecord(
+          id: 'sched-rent',
+          type: TransactionType.expense,
+          accountId: 'checking',
+          categoryId: 'dining',
+          payee: 'Rent',
+          amountMinor: 90000,
+          nextDate: DateTime(2026, 8, 1),
+          frequency: RecurrenceFrequency.monthly,
+          alertPreference: AlertPreference.sameDay,
+          sync: SyncMetadata.fresh(now: DateTime(2026, 7, 1)),
+        ),
+      );
+
+      final scheduled = store.scheduledTransactions.single;
+      expect(scheduler.permissionRequests, 1);
+      expect(scheduler.scheduledIds, ['sched-rent']);
+      expect(scheduled.scheduledNotificationIds, [42]);
+      expect(scheduled.lastReminderScheduledAt, isNotNull);
+
+      await store.savePreferences(
+        store.preferences.copyWith(notificationsEnabled: false),
+      );
+
+      final cancelled = store.scheduledTransactions.single;
+      expect(scheduler.cancelledIds, ['sched-rent']);
+      expect(cancelled.scheduledNotificationIds, isEmpty);
+      expect(cancelled.lastReminderScheduledAt, isNull);
+    },
+  );
+}
+
+class RecordingNotificationScheduler implements NotificationScheduler {
+  RecordingNotificationScheduler({
+    this.permissionGranted = true,
+    this.idsToReturn = const [],
+  });
+
+  final bool permissionGranted;
+  final List<int> idsToReturn;
+  var permissionRequests = 0;
+  final scheduledIds = <String>[];
+  final cancelledIds = <String>[];
+  final badgeCounts = <int>[];
+
+  @override
+  Future<void> cancelScheduledTransaction(
+    ScheduledTransactionRecord scheduledTransaction,
+  ) async {
+    cancelledIds.add(scheduledTransaction.id);
+  }
+
+  @override
+  Future<bool> requestPermissionIfNeeded() async {
+    permissionRequests += 1;
+    return permissionGranted;
+  }
+
+  @override
+  Future<void> rescheduleScheduledTransaction(
+    ScheduledTransactionRecord scheduledTransaction,
+  ) async {
+    cancelledIds.add(scheduledTransaction.id);
+    scheduledIds.add(scheduledTransaction.id);
+  }
+
+  @override
+  Future<List<int>> scheduleScheduledTransaction(
+    ScheduledTransactionRecord scheduledTransaction,
+  ) async {
+    scheduledIds.add(scheduledTransaction.id);
+    return idsToReturn;
+  }
+
+  @override
+  Future<void> updateBadgeCount(int dueOrOverdueCount) async {
+    badgeCounts.add(dueOrOverdueCount);
+  }
 }
 
 FinanceDataSet _dataSet() {
