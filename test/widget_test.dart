@@ -366,6 +366,39 @@ void main() {
     expect(legacyStore.accountById('checking').name, 'Main Checking');
   });
 
+  testWidgets('account edit can toggle balance inclusion flags', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Accounts').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Checking'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.widgetWithText(SwitchListTile, 'Include in group balance'),
+    );
+    await tester.tap(
+      find.widgetWithText(SwitchListTile, 'Include in net worth'),
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final account = dataStore.accountById('checking');
+    expect(account.includeInGroupBalance, isFalse);
+    expect(account.includeInNetWorth, isFalse);
+  });
+
   testWidgets('account long press can archive account', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(

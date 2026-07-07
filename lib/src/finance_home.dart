@@ -1955,57 +1955,88 @@ Future<void> showEditAccountDialog(
   Account account,
 ) async {
   final store = FinanceStoreScope.watch(context);
+  final dataStore = FinanceDataStoreScope.read(context);
+  final v2Account = dataStore.accountById(account.id);
   final name = TextEditingController(text: account.name);
   var type = account.type;
+  var includeInGroupBalance = v2Account.includeInGroupBalance;
+  var includeInNetWorth = v2Account.includeInNetWorth;
 
-  final result = await showDialog<({String name, AccountType type})>(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
-        title: const Text('Edit account'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: name,
-                decoration: const InputDecoration(labelText: 'Name'),
-                autofocus: true,
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<AccountType>(
-                initialValue: type,
-                decoration: const InputDecoration(labelText: 'Type'),
-                items: [
-                  for (final item in AccountType.values)
-                    DropdownMenuItem(
-                      value: item,
-                      child: Text(accountTypeLabel(item)),
-                    ),
+  final result =
+      await showDialog<
+        ({
+          String name,
+          AccountType type,
+          bool includeInGroupBalance,
+          bool includeInNetWorth,
+        })
+      >(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Edit account'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: name,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                    autofocus: true,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<AccountType>(
+                    initialValue: type,
+                    decoration: const InputDecoration(labelText: 'Type'),
+                    items: [
+                      for (final item in AccountType.values)
+                        DropdownMenuItem(
+                          value: item,
+                          child: Text(accountTypeLabel(item)),
+                        ),
+                    ],
+                    onChanged: (value) =>
+                        setDialogState(() => type = value ?? type),
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Include in group balance'),
+                    value: includeInGroupBalance,
+                    onChanged: (value) =>
+                        setDialogState(() => includeInGroupBalance = value),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Include in net worth'),
+                    value: includeInNetWorth,
+                    onChanged: (value) =>
+                        setDialogState(() => includeInNetWorth = value),
+                  ),
                 ],
-                onChanged: (value) =>
-                    setDialogState(() => type = value ?? type),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, (
+                  name: name.text.trim().isEmpty
+                      ? account.name
+                      : name.text.trim(),
+                  type: type,
+                  includeInGroupBalance: includeInGroupBalance,
+                  includeInNetWorth: includeInNetWorth,
+                )),
+                child: const Text('Save'),
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, (
-              name: name.text.trim().isEmpty ? account.name : name.text.trim(),
-              type: type,
-            )),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    ),
-  );
+      );
 
   if (result == null) return;
   final updated = store.editAccount(
@@ -2014,7 +2045,13 @@ Future<void> showEditAccountDialog(
     type: result.type,
   );
   if (!context.mounted) return;
-  await saveLegacyAccountToV2(context, updated);
+  await saveLegacyAccountToV2(
+    context,
+    updated,
+    dataStore: dataStore,
+    includeInGroupBalance: result.includeInGroupBalance,
+    includeInNetWorth: result.includeInNetWorth,
+  );
 }
 
 Future<void> showFloatingAddMenu(BuildContext context) async {
@@ -2163,6 +2200,8 @@ Future<void> saveLegacyAccountToV2(
   BuildContext context,
   Account account, {
   FinanceDataStore? dataStore,
+  bool? includeInGroupBalance,
+  bool? includeInNetWorth,
 }) async {
   final targetStore = dataStore ?? FinanceDataStoreScope.read(context);
   v2_account.AccountRecord record;
@@ -2173,6 +2212,8 @@ Future<void> saveLegacyAccountToV2(
           name: account.name,
           type: v2AccountTypeFor(account.type),
           isArchived: account.isArchived,
+          includeInGroupBalance: includeInGroupBalance,
+          includeInNetWorth: includeInNetWorth,
         );
   } on StateError {
     final v2Type = v2AccountTypeFor(account.type);
@@ -2185,6 +2226,8 @@ Future<void> saveLegacyAccountToV2(
       type: v2Type,
       openingBalanceMinor: account.balanceCents,
       isArchived: account.isArchived,
+      includeInGroupBalance: includeInGroupBalance ?? true,
+      includeInNetWorth: includeInNetWorth ?? true,
       sortOrder: nextSortOrder,
       sync: v2_sync.SyncMetadata.fresh(),
     );
