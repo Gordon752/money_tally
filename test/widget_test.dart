@@ -957,6 +957,49 @@ void main() {
     );
   });
 
+  test('legacy v2 mirror preserves newer v2 transaction changes', () async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final editedTransaction = migrated.transactions.first.copyWith(
+      payee: 'Edited payee',
+    );
+    final deletedTransaction = migrated.transactions[1].copyWith(
+      sync: migrated.transactions[1].sync.deleted(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        transactions: [
+          editedTransaction,
+          deletedTransaction,
+          ...migrated.transactions.skip(2),
+        ],
+      ),
+    );
+    final mirror = LegacyV2StoreMirror(
+      legacyStore: legacyStore,
+      dataStore: dataStore,
+    )..start();
+    addTearDown(mirror.dispose);
+
+    legacyStore.adjustAccountBalance('checking', 200000);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      dataStore.transactions
+          .singleWhere((transaction) => transaction.id == editedTransaction.id)
+          .payee,
+      'Edited payee',
+    );
+    expect(
+      dataStore.transactions
+          .singleWhere((transaction) => transaction.id == deletedTransaction.id)
+          .isDeleted,
+      isTrue,
+    );
+  });
+
   test('legacy v2 mirror preserves enriched v2 categories', () async {
     final legacyStore = FinanceStore.seeded();
     final migrated = const V1SnapshotMigrator().migrate(

@@ -203,9 +203,18 @@ List<TransactionRecord> mergeV2OnlyTransactions({
   required List<TransactionRecord> migrated,
   required List<TransactionRecord> current,
 }) {
+  final currentById = {
+    for (final transaction in current) transaction.id: transaction,
+  };
   final migratedIds = migrated.map((transaction) => transaction.id).toSet();
   return [
-    ...migrated,
+    for (final transaction in migrated)
+      if (currentById[transaction.id] case final current?)
+        current.sync.updatedAt.isAfter(transaction.sync.updatedAt)
+            ? current
+            : transaction
+      else
+        transaction,
     for (final transaction in current)
       if (!migratedIds.contains(transaction.id)) transaction,
   ];
