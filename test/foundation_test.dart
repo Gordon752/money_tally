@@ -363,6 +363,7 @@ void main() {
           categoryId: 'dining',
           date: DateTime(2026, 7, 6),
           payee: 'Cafe, Inc.',
+          note: 'Morning coffee',
           amountMinor: 1250,
           scheduledTransactionId: 'sched-cafe',
           sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
@@ -385,6 +386,7 @@ void main() {
               id: 'line-2',
               categoryId: 'snacks',
               amountMinor: 1800,
+              note: 'Snacks, drinks',
             ),
           ],
           sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
@@ -397,18 +399,18 @@ void main() {
 
     expect(
       lines.first,
-      'transaction_id,split_line_id,date,type,account,transfer_account,category,payee,amount,status,scheduled_transaction_id,deleted',
+      'transaction_id,split_line_id,date,type,account,transfer_account,category,payee,note,amount,status,scheduled_transaction_id,deleted',
     );
     expect(
       lines,
       contains(
-        'expense-1,,2026-07-06,expense,Checking,,Dining,"Cafe, Inc.",12.50,cleared,sched-cafe,false',
+        'expense-1,,2026-07-06,expense,Checking,,Dining,"Cafe, Inc.",Morning coffee,12.50,cleared,sched-cafe,false',
       ),
     );
     expect(
       lines,
       contains(
-        'split-1,line-2,2026-07-07,expense,Checking,,Snacks,Store,18.00,cleared,,false',
+        'split-1,line-2,2026-07-07,expense,Checking,,Snacks,Store,"Snacks, drinks",18.00,cleared,,false',
       ),
     );
   });
