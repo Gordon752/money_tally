@@ -607,6 +607,46 @@ void main() {
     expect(transaction.scheduledTransactionId, schedule.id);
   });
 
+  testWidgets('ledger long press can make transfer scheduled', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+    await dataStore.addTransfer(
+      fromAccountId: 'checking',
+      toAccountId: 'cash',
+      date: DateTime(2026, 7, 5),
+      payee: 'ATM transfer',
+      amountMinor: 5000,
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('ATM transfer').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Make Scheduled'));
+    await tester.pumpAndSettle();
+
+    final schedule = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.payee == 'ATM transfer',
+    );
+    expect(schedule.type, v2_transaction.TransactionType.transfer);
+    expect(schedule.accountId, 'checking');
+    expect(schedule.transferAccountId, 'cash');
+    expect(schedule.categoryId, isNull);
+    expect(schedule.frequency, v2_scheduled.RecurrenceFrequency.monthly);
+
+    final transaction = dataStore.transactions.singleWhere(
+      (item) => item.payee == 'ATM transfer',
+    );
+    expect(transaction.scheduledTransactionId, schedule.id);
+  });
+
   testWidgets('add transaction dialog honors default income preference', (
     tester,
   ) async {
