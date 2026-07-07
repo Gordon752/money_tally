@@ -189,7 +189,7 @@ class FinanceDataStore extends ChangeNotifier {
     final anchor = now ?? DateTime.now();
     final periodStart = DateTime(anchor.year, anchor.month);
     final periodEnd = DateTime(anchor.year, anchor.month + 1);
-    final categoryIds = budget.categoryIds.toSet();
+    final categoryIds = _categoryAndDescendantIds(budget.categoryIds);
 
     return transactions
         .where((transaction) {
@@ -212,6 +212,23 @@ class FinanceDataStore extends ChangeNotifier {
               ? total + transaction.amountMinor.abs()
               : total;
         });
+  }
+
+  Set<String> _categoryAndDescendantIds(Iterable<String> rootCategoryIds) {
+    final categoryIds = rootCategoryIds.toSet();
+    var changed = true;
+    while (changed) {
+      changed = false;
+      for (final category in categories) {
+        final parentId = category.parentCategoryId;
+        if (parentId != null &&
+            categoryIds.contains(parentId) &&
+            categoryIds.add(category.id)) {
+          changed = true;
+        }
+      }
+    }
+    return categoryIds;
   }
 
   AccountRecord accountById(String id) {

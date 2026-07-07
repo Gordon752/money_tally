@@ -220,6 +220,16 @@ void main() {
     'budget spending includes matching transaction and split categories',
     () {
       final dataSet = _dataSet().copyWith(
+        categories: [
+          ..._dataSet().categories,
+          CategoryRecord(
+            id: 'coffee',
+            name: 'Coffee',
+            kind: CategoryKind.expense,
+            parentCategoryId: 'dining',
+            sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+          ),
+        ],
         budgets: [
           BudgetRecord(
             id: 'food-budget',
@@ -238,6 +248,16 @@ void main() {
             date: DateTime(2026, 7, 6),
             payee: 'Cafe',
             amountMinor: 1250,
+            sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+          ),
+          TransactionRecord(
+            id: 'expense-2',
+            type: TransactionType.expense,
+            accountId: 'checking',
+            categoryId: 'coffee',
+            date: DateTime(2026, 7, 6),
+            payee: 'Coffee',
+            amountMinor: 950,
             sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
           ),
           TransactionRecord(
@@ -271,7 +291,7 @@ void main() {
           dataSet.budgets.single,
           now: DateTime(2026, 7, 10),
         ),
-        2050,
+        3000,
       );
     },
   );
