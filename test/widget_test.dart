@@ -1259,6 +1259,43 @@ void main() {
     expect(find.text('Expense'), findsWidgets);
   });
 
+  testWidgets('categories screen indents subcategories', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataSet = migrated.copyWith(
+      categories: [
+        for (final category in migrated.categories)
+          if (category.id == 'snacks')
+            category.copyWith(parentCategoryId: 'dining')
+          else
+            category,
+      ],
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    await tester.tap(find.text('Categories').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Expense · Dining'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Snacks')).dx,
+      greaterThan(tester.getTopLeft(find.text('Dining')).dx),
+    );
+  });
+
   testWidgets('category dialog creates v2 and legacy category', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;

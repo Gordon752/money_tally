@@ -1637,6 +1637,7 @@ class CategoriesView extends StatelessWidget {
     final categories = store.categories
         .where((category) => category.isVisible)
         .toList(growable: false);
+    final displayCategories = categoriesInDisplayOrder(categories);
     final categoriesById = {
       for (final category in categories) category.id: category,
     };
@@ -1656,28 +1657,33 @@ class CategoriesView extends StatelessWidget {
           padding: EdgeInsets.zero,
           child: Column(
             children: [
-              for (final category in categories)
-                ListTile(
-                  onLongPress: () => showCategoryActions(context, category),
-                  leading: CircleAvatar(
-                    backgroundColor: category.colorValue == null
-                        ? AppTheme.line
-                        : Color(category.colorValue!),
-                    child: Icon(
-                      categoryIcon(category),
-                      color: AppTheme.ink,
-                      size: 18,
+              for (final category in displayCategories)
+                Padding(
+                  padding: EdgeInsets.only(
+                    left: category.parentCategoryId == null ? 0 : 20,
+                  ),
+                  child: ListTile(
+                    onLongPress: () => showCategoryActions(context, category),
+                    leading: CircleAvatar(
+                      backgroundColor: category.colorValue == null
+                          ? AppTheme.line
+                          : Color(category.colorValue!),
+                      child: Icon(
+                        categoryIcon(category),
+                        color: AppTheme.ink,
+                        size: 18,
+                      ),
                     ),
-                  ),
-                  title: Text(
-                    category.name,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  subtitle: Text(categorySubtitle(category, categoriesById)),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.edit_outlined),
-                    onPressed: () =>
-                        showCategoryDialog(context, categoryId: category.id),
+                    title: Text(
+                      category.name,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    subtitle: Text(categorySubtitle(category, categoriesById)),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () =>
+                          showCategoryDialog(context, categoryId: category.id),
+                    ),
                   ),
                 ),
             ],
@@ -4589,6 +4595,44 @@ IconData categoryKindIcon(String kindName) {
     'system' => Icons.settings_outlined,
     _ => Icons.sell_outlined,
   };
+}
+
+List<v2_category.CategoryRecord> categoriesInDisplayOrder(
+  List<v2_category.CategoryRecord> categories,
+) {
+  final categoriesById = {for (final category in categories) category.id};
+  final childrenByParent = <String?, List<v2_category.CategoryRecord>>{};
+  for (final category in categories) {
+    final parentId = categoriesById.contains(category.parentCategoryId)
+        ? category.parentCategoryId
+        : null;
+    childrenByParent.putIfAbsent(parentId, () => []).add(category);
+  }
+  for (final children in childrenByParent.values) {
+    children.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
+  }
+
+  final ordered = <v2_category.CategoryRecord>[];
+  final visited = <String>{};
+
+  void visit(String? parentId) {
+    for (final category in childrenByParent[parentId] ?? const []) {
+      if (!visited.add(category.id)) continue;
+      ordered.add(category);
+      visit(category.id);
+    }
+  }
+
+  visit(null);
+  for (final category in [
+    ...categories,
+  ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()))) {
+    if (!visited.add(category.id)) continue;
+    ordered.add(category);
+  }
+  return ordered;
 }
 
 IconData categoryIcon(v2_category.CategoryRecord category) {
