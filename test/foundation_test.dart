@@ -3,6 +3,7 @@ import 'package:money_tally/src/domain/account.dart';
 import 'package:money_tally/src/domain/budget.dart';
 import 'package:money_tally/src/domain/category.dart';
 import 'package:money_tally/src/domain/finance_data_set.dart';
+import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart';
 import 'package:money_tally/src/domain/transaction.dart';
@@ -253,6 +254,27 @@ void main() {
     expect(store.availableCashMinor, 157850);
     expect(store.incomeThisMonthMinor(now: DateTime(2026, 7, 10)), 50000);
     expect(store.expensesThisMonthMinor(now: DateTime(2026, 7, 10)), 1250);
+  });
+
+  test('user preferences copy without losing unrelated settings', () {
+    const preferences = UserPreferences(
+      appearanceMode: AppearanceMode.dark,
+      currency: CurrencyFormatSettings(currencyCode: 'USD', symbol: r'$'),
+      defaultTransactionType: DefaultTransactionType.lastUsed,
+    );
+
+    final updated = preferences.copyWith(
+      launchScreen: LaunchScreen.ledger,
+      currency: preferences.currency.copyWith(
+        currencyCode: 'CAD',
+        symbol: r'C$',
+      ),
+    );
+
+    expect(updated.launchScreen, LaunchScreen.ledger);
+    expect(updated.appearanceMode, AppearanceMode.dark);
+    expect(updated.currency.currencyCode, 'CAD');
+    expect(updated.defaultTransactionType, DefaultTransactionType.lastUsed);
   });
 }
 

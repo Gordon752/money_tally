@@ -158,6 +158,25 @@ void main() {
     expect(find.text('Expense'), findsWidgets);
   });
 
+  testWidgets('settings screen renders v2 preferences on wide layout', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('App Preferences'), findsOneWidget);
+    expect(find.text('Launch screen'), findsOneWidget);
+    expect(find.text('Money Format'), findsOneWidget);
+    expect(find.text('Data Ownership'), findsOneWidget);
+  });
+
   test('legacy v2 mirror refreshes in-memory v2 balances', () async {
     final legacyStore = FinanceStore.seeded();
     final dataStore = FinanceDataStore(

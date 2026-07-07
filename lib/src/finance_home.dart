@@ -6,7 +6,8 @@ enum FinanceSection {
   ledger(Icons.receipt_long_outlined, 'Ledger'),
   budgets(Icons.pie_chart_outline, 'Budgets'),
   scheduled(Icons.event_repeat_outlined, 'Scheduled'),
-  categories(Icons.sell_outlined, 'Categories');
+  categories(Icons.sell_outlined, 'Categories'),
+  settings(Icons.settings_outlined, 'Settings');
 
   const FinanceSection(this.icon, this.label);
   final IconData icon;
@@ -24,6 +25,14 @@ class FinanceHome extends StatefulWidget {
 }
 
 class _FinanceHomeState extends State<FinanceHome> {
+  static const compactSections = [
+    FinanceSection.dashboard,
+    FinanceSection.accounts,
+    FinanceSection.ledger,
+    FinanceSection.budgets,
+    FinanceSection.scheduled,
+  ];
+
   var selected = FinanceSection.dashboard;
 
   @override
@@ -35,11 +44,13 @@ class _FinanceHomeState extends State<FinanceHome> {
       bottomNavigationBar: isWide
           ? null
           : NavigationBar(
-              selectedIndex: FinanceSection.values.indexOf(selected),
+              selectedIndex: compactSections.contains(selected)
+                  ? compactSections.indexOf(selected)
+                  : 0,
               onDestinationSelected: (index) =>
-                  setState(() => selected = FinanceSection.values[index]),
+                  setState(() => selected = compactSections[index]),
               destinations: [
-                for (final section in FinanceSection.values.take(5))
+                for (final section in compactSections)
                   NavigationDestination(
                     icon: Icon(section.icon),
                     label: section.label,
@@ -99,6 +110,7 @@ class _FinanceHomeState extends State<FinanceHome> {
               FinanceSection.budgets => const BudgetsView(),
               FinanceSection.scheduled => const ScheduledView(),
               FinanceSection.categories => const CategoriesView(),
+              FinanceSection.settings => const SettingsView(),
             },
           ),
         ),
@@ -442,6 +454,206 @@ class CategoriesView extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class SettingsView extends StatelessWidget {
+  const SettingsView({super.key});
+
+  static const _currencyOptions = [
+    CurrencyFormatSettings(currencyCode: 'USD', symbol: r'$'),
+    CurrencyFormatSettings(currencyCode: 'PHP', symbol: 'PHP '),
+    CurrencyFormatSettings(currencyCode: 'EUR', symbol: 'EUR '),
+    CurrencyFormatSettings(currencyCode: 'GBP', symbol: 'GBP '),
+    CurrencyFormatSettings(currencyCode: 'CAD', symbol: r'C$'),
+    CurrencyFormatSettings(currencyCode: 'AUD', symbol: r'A$'),
+    CurrencyFormatSettings(currencyCode: 'JPY', symbol: 'JPY '),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final store = FinanceDataStoreScope.watch(context);
+    final preferences = store.preferences;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppCard(
+          title: 'App Preferences',
+          child: Column(
+            children: [
+              SettingsDropdown<LaunchScreen>(
+                label: 'Launch screen',
+                value: preferences.launchScreen,
+                values: LaunchScreen.values,
+                labelOf: launchScreenLabel,
+                onChanged: (value) => store.savePreferences(
+                  preferences.copyWith(launchScreen: value),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SettingsDropdown<AppearanceMode>(
+                label: 'Appearance',
+                value: preferences.appearanceMode,
+                values: AppearanceMode.values,
+                labelOf: appearanceModeLabel,
+                onChanged: (value) => store.savePreferences(
+                  preferences.copyWith(appearanceMode: value),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SettingsDropdown<FloatingAddButtonPosition>(
+                label: 'Floating add button',
+                value: preferences.floatingAddButtonPosition,
+                values: FloatingAddButtonPosition.values,
+                labelOf: floatingAddButtonPositionLabel,
+                onChanged: (value) => store.savePreferences(
+                  preferences.copyWith(floatingAddButtonPosition: value),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SettingsDropdown<DefaultTransactionType>(
+                label: 'Default transaction type',
+                value: preferences.defaultTransactionType,
+                values: DefaultTransactionType.values,
+                labelOf: defaultTransactionTypeLabel,
+                onChanged: (value) => store.savePreferences(
+                  preferences.copyWith(defaultTransactionType: value),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        AppCard(
+          title: 'Money Format',
+          child: Column(
+            children: [
+              SettingsDropdown<CurrencyFormatSettings>(
+                label: 'Currency',
+                value: _currencyFor(preferences.currency.currencyCode),
+                values: _currencyOptions,
+                labelOf: (value) => value.currencyCode,
+                onChanged: (value) => store.savePreferences(
+                  preferences.copyWith(currency: value),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SettingsDropdown<int>(
+                label: 'Decimal places',
+                value: preferences.currency.decimalPlaces,
+                values: const [0, 2],
+                labelOf: (value) => '$value',
+                onChanged: (value) => store.savePreferences(
+                  preferences.copyWith(
+                    currency: preferences.currency.copyWith(
+                      decimalPlaces: value,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SettingsDropdown<String>(
+                label: 'Thousands separator',
+                value: preferences.currency.thousandsSeparator,
+                values: const [',', '.', ' ', ''],
+                labelOf: thousandsSeparatorLabel,
+                onChanged: (value) => store.savePreferences(
+                  preferences.copyWith(
+                    currency: preferences.currency.copyWith(
+                      thousandsSeparator: value,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        const AppCard(
+          title: 'Data Ownership',
+          child: Column(
+            children: [
+              SettingsPlaceholderRow(
+                icon: Icons.file_download_outlined,
+                title: 'Export CSV',
+              ),
+              SettingsPlaceholderRow(
+                icon: Icons.data_object_outlined,
+                title: 'Export JSON',
+              ),
+              SettingsPlaceholderRow(
+                icon: Icons.restore_outlined,
+                title: 'Backup and restore',
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  static CurrencyFormatSettings _currencyFor(String code) {
+    return _currencyOptions.firstWhere(
+      (option) => option.currencyCode == code,
+      orElse: () => _currencyOptions.first,
+    );
+  }
+}
+
+class SettingsDropdown<T> extends StatelessWidget {
+  const SettingsDropdown({
+    required this.label,
+    required this.value,
+    required this.values,
+    required this.labelOf,
+    required this.onChanged,
+    super.key,
+  });
+
+  final String label;
+  final T value;
+  final List<T> values;
+  final String Function(T value) labelOf;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<T>(
+      initialValue: value,
+      decoration: InputDecoration(labelText: label),
+      borderRadius: BorderRadius.circular(8),
+      items: [
+        for (final item in values)
+          DropdownMenuItem<T>(value: item, child: Text(labelOf(item))),
+      ],
+      onChanged: (value) {
+        if (value != null) {
+          onChanged(value);
+        }
+      },
+    );
+  }
+}
+
+class SettingsPlaceholderRow extends StatelessWidget {
+  const SettingsPlaceholderRow({
+    required this.icon,
+    required this.title,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, color: AppTheme.accent),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      trailing: const Text('Later', style: TextStyle(color: AppTheme.muted)),
     );
   }
 }
@@ -1081,6 +1293,50 @@ String categoryKindLabel(String kindName) {
     'transfer' => 'Transfer',
     'system' => 'System',
     _ => 'Expense',
+  };
+}
+
+String launchScreenLabel(LaunchScreen screen) {
+  return switch (screen) {
+    LaunchScreen.dashboard => 'Dashboard',
+    LaunchScreen.ledger => 'Ledger',
+    LaunchScreen.accounts => 'Accounts',
+    LaunchScreen.budgets => 'Budgets',
+    LaunchScreen.scheduled => 'Scheduled',
+    LaunchScreen.reports => 'Reports',
+  };
+}
+
+String appearanceModeLabel(AppearanceMode mode) {
+  return switch (mode) {
+    AppearanceMode.system => 'System',
+    AppearanceMode.light => 'Light',
+    AppearanceMode.dark => 'Dark',
+  };
+}
+
+String floatingAddButtonPositionLabel(FloatingAddButtonPosition position) {
+  return switch (position) {
+    FloatingAddButtonPosition.left => 'Left',
+    FloatingAddButtonPosition.right => 'Right',
+  };
+}
+
+String defaultTransactionTypeLabel(DefaultTransactionType type) {
+  return switch (type) {
+    DefaultTransactionType.expense => 'Expense',
+    DefaultTransactionType.income => 'Income',
+    DefaultTransactionType.transfer => 'Transfer',
+    DefaultTransactionType.lastUsed => 'Last used',
+  };
+}
+
+String thousandsSeparatorLabel(String value) {
+  return switch (value) {
+    ',' => 'Comma',
+    '.' => 'Period',
+    ' ' => 'Space',
+    _ => 'None',
   };
 }
 

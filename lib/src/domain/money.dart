@@ -34,6 +34,20 @@ class CurrencyFormatSettings {
   final int decimalPlaces;
   final String thousandsSeparator;
 
+  CurrencyFormatSettings copyWith({
+    String? currencyCode,
+    String? symbol,
+    int? decimalPlaces,
+    String? thousandsSeparator,
+  }) {
+    return CurrencyFormatSettings(
+      currencyCode: currencyCode ?? this.currencyCode,
+      symbol: symbol ?? this.symbol,
+      decimalPlaces: decimalPlaces ?? this.decimalPlaces,
+      thousandsSeparator: thousandsSeparator ?? this.thousandsSeparator,
+    );
+  }
+
   Map<String, Object?> toJson() {
     return {
       'currencyCode': currencyCode,

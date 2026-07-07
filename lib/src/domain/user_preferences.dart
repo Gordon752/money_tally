@@ -29,6 +29,29 @@ class UserPreferences {
   final TransactionType lastUsedTransactionType;
   final bool notificationsEnabled;
 
+  UserPreferences copyWith({
+    LaunchScreen? launchScreen,
+    AppearanceMode? appearanceMode,
+    FloatingAddButtonPosition? floatingAddButtonPosition,
+    CurrencyFormatSettings? currency,
+    DefaultTransactionType? defaultTransactionType,
+    TransactionType? lastUsedTransactionType,
+    bool? notificationsEnabled,
+  }) {
+    return UserPreferences(
+      launchScreen: launchScreen ?? this.launchScreen,
+      appearanceMode: appearanceMode ?? this.appearanceMode,
+      floatingAddButtonPosition:
+          floatingAddButtonPosition ?? this.floatingAddButtonPosition,
+      currency: currency ?? this.currency,
+      defaultTransactionType:
+          defaultTransactionType ?? this.defaultTransactionType,
+      lastUsedTransactionType:
+          lastUsedTransactionType ?? this.lastUsedTransactionType,
+      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+    );
+  }
+
   Map<String, Object?> toJson() {
     return {
       'launchScreen': launchScreen.name,
