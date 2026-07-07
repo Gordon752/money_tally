@@ -139,7 +139,12 @@ class _FinanceHomeState extends State<FinanceHome> {
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            selected.supportsFloatingAdd ? 112 : 24,
+          ),
           sliver: SliverToBoxAdapter(
             child: switch (selected) {
               FinanceSection.dashboard => const DashboardView(),
@@ -485,28 +490,59 @@ class AccountsView extends StatelessWidget {
             if (!store.preferences.collapsedAccountGroupNames.contains(
               group.name,
             ))
-              ResponsiveGrid(
-                minTileWidth: 300,
-                children: [
-                  for (final account in accounts.where(
-                    (account) => account.group == group,
-                  ))
-                    AccountCard(
-                      account: account,
-                      balanceMinor: store.balanceForAccount(account.id),
-                      currency: store.preferences.currency,
-                      groupLabel: store.accountGroupLabel(account.group),
-                      leading: Icon(
-                        accountGroupIcon(account.group.name),
-                        color: AppTheme.accent,
-                      ),
-                      onLongPress: () =>
-                          showAccountOptions(context, account.id),
-                    ),
-                ],
+              AccountCardList(
+                accounts: accounts
+                    .where((account) => account.group == group)
+                    .toList(growable: false),
+                store: store,
               ),
           ],
       ],
+    );
+  }
+}
+
+class AccountCardList extends StatelessWidget {
+  const AccountCardList({
+    required this.accounts,
+    required this.store,
+    super.key,
+  });
+
+  final List<v2_account.AccountRecord> accounts;
+  final FinanceDataStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = [
+      for (final account in accounts)
+        AccountCard(
+          account: account,
+          balanceMinor: store.balanceForAccount(account.id),
+          currency: store.preferences.currency,
+          groupLabel: store.accountGroupLabel(account.group),
+          leading: Icon(
+            accountGroupIcon(account.group.name),
+            color: AppTheme.accent,
+          ),
+          onLongPress: () => showAccountOptions(context, account.id),
+        ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 700) {
+          return Column(
+            children: [
+              for (var index = 0; index < cards.length; index++) ...[
+                cards[index],
+                if (index != cards.length - 1)
+                  const SizedBox(height: AppSpacing.sm),
+              ],
+            ],
+          );
+        }
+        return ResponsiveGrid(minTileWidth: 300, children: cards);
+      },
     );
   }
 }
@@ -1392,6 +1428,8 @@ class _ScheduledViewState extends State<ScheduledView> {
     DateTime.now().year,
     DateTime.now().month,
   );
+  DateTime? _selectedDate;
+  var _hasAlignedVisibleMonth = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1399,7 +1437,8 @@ class _ScheduledViewState extends State<ScheduledView> {
     final scheduled = [...store.scheduledTransactions]
       ..removeWhere((item) => item.isDeleted)
       ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
-    if (scheduled.isNotEmpty &&
+    if (!_hasAlignedVisibleMonth &&
+        scheduled.isNotEmpty &&
         scheduled.every(
           (item) =>
               item.nextDate.year != _visibleMonth.year ||
@@ -1410,6 +1449,13 @@ class _ScheduledViewState extends State<ScheduledView> {
         scheduled.first.nextDate.month,
       );
     }
+    _hasAlignedVisibleMonth = true;
+    final visibleScheduled = _selectedDate == null
+        ? scheduled
+        : scheduled
+              .where((item) => isSameDay(item.nextDate, _selectedDate!))
+              .toList(growable: false);
+    final groupedScheduled = scheduledByDate(visibleScheduled);
     return AppCard(
       padding: EdgeInsets.zero,
       child: Padding(
@@ -1434,15 +1480,48 @@ class _ScheduledViewState extends State<ScheduledView> {
                   _visibleMonth.month + 1,
                 ),
               ),
+              selectedDate: _selectedDate,
+              onSelectDate: (date) => setState(() {
+                _selectedDate = date;
+                _visibleMonth = DateTime(date.year, date.month);
+              }),
             ),
             const Divider(height: 1),
-            for (final item in scheduled)
-              ScheduledTransactionRow(
-                scheduledTransaction: item,
-                currency: store.preferences.currency,
-                onLongPress: () =>
-                    showScheduledTransactionActions(context, item),
-              ),
+            if (visibleScheduled.isEmpty)
+              ListTile(
+                leading: const Icon(
+                  Icons.event_busy_outlined,
+                  color: AppTheme.muted,
+                ),
+                title: Text(
+                  _selectedDate == null
+                      ? 'No scheduled transactions'
+                      : 'No scheduled transactions for ${shortDate(_selectedDate!)}',
+                ),
+              )
+            else
+              for (final entry in groupedScheduled.entries) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      shortDate(entry.key),
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: AppTheme.muted,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+                for (final item in entry.value)
+                  ScheduledTransactionRow(
+                    scheduledTransaction: item,
+                    currency: store.preferences.currency,
+                    onLongPress: () =>
+                        showScheduledTransactionActions(context, item),
+                  ),
+              ],
             const Divider(height: 1),
             const ListTile(
               leading: Icon(
@@ -1469,6 +1548,8 @@ class ScheduledCalendarPreview extends StatelessWidget {
     required this.onToggleCollapsed,
     required this.onPreviousMonth,
     required this.onNextMonth,
+    required this.selectedDate,
+    required this.onSelectDate,
     super.key,
   });
 
@@ -1478,6 +1559,8 @@ class ScheduledCalendarPreview extends StatelessWidget {
   final VoidCallback onToggleCollapsed;
   final VoidCallback onPreviousMonth;
   final VoidCallback onNextMonth;
+  final DateTime? selectedDate;
+  final ValueChanged<DateTime> onSelectDate;
 
   @override
   Widget build(BuildContext context) {
@@ -1532,6 +1615,8 @@ class ScheduledCalendarPreview extends StatelessWidget {
             firstChild: ScheduledCalendarGrid(
               month: month,
               markedDays: markedDays,
+              selectedDate: selectedDate,
+              onSelectDate: onSelectDate,
             ),
             secondChild: const SizedBox.shrink(),
           ),
@@ -1545,11 +1630,15 @@ class ScheduledCalendarGrid extends StatelessWidget {
   const ScheduledCalendarGrid({
     required this.month,
     required this.markedDays,
+    required this.selectedDate,
+    required this.onSelectDate,
     super.key,
   });
 
   final DateTime month;
   final Set<int> markedDays;
+  final DateTime? selectedDate;
+  final ValueChanged<DateTime> onSelectDate;
 
   @override
   Widget build(BuildContext context) {
@@ -1579,16 +1668,28 @@ class ScheduledCalendarGrid extends StatelessWidget {
           Row(
             children: [
               for (var column = 0; column < 7; column++)
-                Expanded(
-                  child: ScheduledCalendarDayCell(
-                    day: dayForCalendarCell(
+                Builder(
+                  builder: (context) {
+                    final day = dayForCalendarCell(
                       row: row,
                       column: column,
                       firstWeekdayOffset: firstWeekdayOffset,
                       daysInMonth: days,
-                    ),
-                    markedDays: markedDays,
-                  ),
+                    );
+                    return Expanded(
+                      child: ScheduledCalendarDayCell(
+                        day: day,
+                        month: month,
+                        markedDays: markedDays,
+                        isSelected:
+                            selectedDate != null &&
+                            selectedDate!.year == month.year &&
+                            selectedDate!.month == month.month &&
+                            selectedDate!.day == day,
+                        onSelectDate: onSelectDate,
+                      ),
+                    );
+                  },
                 ),
             ],
           ),
@@ -1600,12 +1701,18 @@ class ScheduledCalendarGrid extends StatelessWidget {
 class ScheduledCalendarDayCell extends StatelessWidget {
   const ScheduledCalendarDayCell({
     required this.day,
+    required this.month,
     required this.markedDays,
+    required this.isSelected,
+    required this.onSelectDate,
     super.key,
   });
 
   final int? day;
+  final DateTime month;
   final Set<int> markedDays;
+  final bool isSelected;
+  final ValueChanged<DateTime> onSelectDate;
 
   @override
   Widget build(BuildContext context) {
@@ -1617,40 +1724,57 @@ class ScheduledCalendarDayCell extends StatelessWidget {
     return SizedBox(
       height: 36,
       child: Center(
-        child: Container(
-          width: 30,
-          height: 30,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isMarked ? AppTheme.accent.withValues(alpha: 0.12) : null,
-            borderRadius: BorderRadius.circular(15),
-            border: isMarked
-                ? Border.all(color: AppTheme.accent.withValues(alpha: 0.35))
-                : null,
+        child: InkWell(
+          key: ValueKey(
+            'scheduled-calendar-day-${month.year}-${month.month}-$day',
           ),
-          child: Stack(
+          borderRadius: BorderRadius.circular(15),
+          onTap: () => onSelectDate(DateTime(month.year, month.month, day!)),
+          child: Container(
+            width: 30,
+            height: 30,
             alignment: Alignment.center,
-            children: [
-              Text(
-                '$day',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontWeight: isMarked ? FontWeight.w900 : FontWeight.w600,
-                  color: isMarked ? AppTheme.accent : null,
-                ),
-              ),
-              if (isMarked)
-                Positioned(
-                  bottom: 3,
-                  child: Container(
-                    width: 4,
-                    height: 4,
-                    decoration: const BoxDecoration(
-                      color: AppTheme.accent,
-                      shape: BoxShape.circle,
-                    ),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppTheme.accent
+                  : isMarked
+                  ? AppTheme.accent.withValues(alpha: 0.12)
+                  : null,
+              borderRadius: BorderRadius.circular(15),
+              border: isMarked && !isSelected
+                  ? Border.all(color: AppTheme.accent.withValues(alpha: 0.35))
+                  : null,
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Text(
+                  '$day',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: isMarked || isSelected
+                        ? FontWeight.w900
+                        : FontWeight.w600,
+                    color: isSelected
+                        ? Colors.white
+                        : isMarked
+                        ? AppTheme.accent
+                        : null,
                   ),
                 ),
-            ],
+                if (isMarked)
+                  Positioned(
+                    bottom: 3,
+                    child: Container(
+                      width: 4,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isSelected ? Colors.white : AppTheme.accent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3113,16 +3237,8 @@ Future<void> showEditAccountDialog(
   final dataStore = FinanceDataStoreScope.read(context);
   final v2Account = dataStore.accountById(account.id);
   final name = TextEditingController(text: account.name);
-  final creditLimit = TextEditingController(
-    text: v2Account.creditLimitMinor == null
-        ? ''
-        : dollars(v2Account.creditLimitMinor!),
-  );
-  final originalLoanAmount = TextEditingController(
-    text: v2Account.originalLoanAmountMinor == null
-        ? ''
-        : dollars(v2Account.originalLoanAmountMinor!),
-  );
+  var creditLimitMinor = v2Account.creditLimitMinor ?? 0;
+  var originalLoanAmountMinor = v2Account.originalLoanAmountMinor ?? 0;
   var type = account.type;
   var includeInGroupBalance = v2Account.includeInGroupBalance;
   var includeInNetWorth = v2Account.includeInNetWorth;
@@ -3168,26 +3284,23 @@ Future<void> showEditAccountDialog(
                   ),
                   if (type == AccountType.creditCard) ...[
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: creditLimit,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Credit limit',
-                      ),
+                    AmountEntryField(
+                      fieldKey: const ValueKey('account-credit-limit'),
+                      initialMinor: creditLimitMinor,
+                      currency: dataStore.preferences.currency,
+                      labelText: 'Credit limit',
+                      onChanged: (value) => creditLimitMinor = value.abs(),
                     ),
                   ],
                   if (type == AccountType.loan) ...[
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: originalLoanAmount,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Original loan amount',
-                      ),
+                    AmountEntryField(
+                      fieldKey: const ValueKey('account-original-loan-amount'),
+                      initialMinor: originalLoanAmountMinor,
+                      currency: dataStore.preferences.currency,
+                      labelText: 'Original loan amount',
+                      onChanged: (value) =>
+                          originalLoanAmountMinor = value.abs(),
                     ),
                   ],
                   const SizedBox(height: 12),
@@ -3220,10 +3333,10 @@ Future<void> showEditAccountDialog(
                       : name.text.trim(),
                   type: type,
                   creditLimitMinor: type == AccountType.creditCard
-                      ? parseOptionalCents(creditLimit.text)?.abs()
+                      ? optionalPositiveMinor(creditLimitMinor)
                       : null,
                   originalLoanAmountMinor: type == AccountType.loan
-                      ? parseOptionalCents(originalLoanAmount.text)?.abs()
+                      ? optionalPositiveMinor(originalLoanAmountMinor)
                       : null,
                   includeInGroupBalance: includeInGroupBalance,
                   includeInNetWorth: includeInNetWorth,
@@ -3318,8 +3431,8 @@ Future<void> showAccountDialog(BuildContext context) async {
   final store = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
   final name = TextEditingController();
-  final creditLimit = TextEditingController();
-  final originalLoanAmount = TextEditingController();
+  var creditLimitMinor = 0;
+  var originalLoanAmountMinor = 0;
   var type = AccountType.checking;
   var openingBalanceCents = 0;
 
@@ -3363,26 +3476,23 @@ Future<void> showAccountDialog(BuildContext context) async {
                   ),
                   if (type == AccountType.creditCard) ...[
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: creditLimit,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Credit limit',
-                      ),
+                    AmountEntryField(
+                      fieldKey: const ValueKey('account-credit-limit'),
+                      initialMinor: creditLimitMinor,
+                      currency: dataStore.preferences.currency,
+                      labelText: 'Credit limit',
+                      onChanged: (value) => creditLimitMinor = value.abs(),
                     ),
                   ],
                   if (type == AccountType.loan) ...[
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: originalLoanAmount,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Original loan amount',
-                      ),
+                    AmountEntryField(
+                      fieldKey: const ValueKey('account-original-loan-amount'),
+                      initialMinor: originalLoanAmountMinor,
+                      currency: dataStore.preferences.currency,
+                      labelText: 'Original loan amount',
+                      onChanged: (value) =>
+                          originalLoanAmountMinor = value.abs(),
                     ),
                   ],
                   const SizedBox(height: 12),
@@ -3409,10 +3519,10 @@ Future<void> showAccountDialog(BuildContext context) async {
                   type: type,
                   openingBalanceCents: openingBalanceCents,
                   creditLimitMinor: type == AccountType.creditCard
-                      ? parseOptionalCents(creditLimit.text)?.abs()
+                      ? optionalPositiveMinor(creditLimitMinor)
                       : null,
                   originalLoanAmountMinor: type == AccountType.loan
-                      ? parseOptionalCents(originalLoanAmount.text)?.abs()
+                      ? optionalPositiveMinor(originalLoanAmountMinor)
                       : null,
                 )),
                 child: const Text('Add'),
@@ -5125,6 +5235,8 @@ int? parseOptionalCents(String value) {
   return (parsed * 100).round();
 }
 
+int? optionalPositiveMinor(int value) => value > 0 ? value : null;
+
 String dateInput(DateTime date) {
   final year = date.year.toString().padLeft(4, '0');
   final month = date.month.toString().padLeft(2, '0');
@@ -5165,6 +5277,43 @@ String monthLabel(DateTime date) {
     'December',
   ];
   return '${months[date.month - 1]} ${date.year}';
+}
+
+String shortDate(DateTime date) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${months[date.month - 1]} ${date.day}, ${date.year}';
+}
+
+bool isSameDay(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+Map<DateTime, List<v2_scheduled.ScheduledTransactionRecord>> scheduledByDate(
+  Iterable<v2_scheduled.ScheduledTransactionRecord> scheduled,
+) {
+  final grouped = <DateTime, List<v2_scheduled.ScheduledTransactionRecord>>{};
+  for (final item in scheduled) {
+    final date = DateTime(
+      item.nextDate.year,
+      item.nextDate.month,
+      item.nextDate.day,
+    );
+    grouped.putIfAbsent(date, () => []).add(item);
+  }
+  return grouped;
 }
 
 int daysInMonth(DateTime month) {

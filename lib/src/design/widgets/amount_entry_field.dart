@@ -72,7 +72,10 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
             ? FilteringTextInputFormatter.allow(RegExp(r'[-0-9]'))
             : FilteringTextInputFormatter.digitsOnly,
       ],
-      decoration: InputDecoration(labelText: widget.labelText),
+      decoration: InputDecoration(
+        labelText: widget.labelText,
+        floatingLabelBehavior: FloatingLabelBehavior.always,
+      ),
       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
         fontFeatures: const [FontFeature.tabularFigures()],
         fontWeight: FontWeight.w800,

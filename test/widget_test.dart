@@ -1104,7 +1104,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Credit limit'), findsOneWidget);
-    await tester.enterText(find.byType(TextField).at(1), '2500.00');
+    await tester.enterText(
+      find.byKey(const ValueKey('account-credit-limit')),
+      '250000',
+    );
+    await tester.pump();
+    expect(find.text(r'$2,500.00'), findsOneWidget);
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -1258,16 +1263,61 @@ void main() {
   });
 
   testWidgets('scheduled screen renders v2 scheduled rows', (tester) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          scheduledTransactions: [
+            rentSchedule(nextDate: DateTime(2026, 8)),
+            scheduledExpense(
+              id: 'sched-electric',
+              payee: 'Electric',
+              amountMinor: 14000,
+              nextDate: DateTime(2026, 8),
+            ),
+            scheduledExpense(
+              id: 'sched-internet',
+              payee: 'Internet',
+              amountMinor: 7000,
+              nextDate: DateTime(2026, 8, 15),
+            ),
+          ],
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
 
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Insurance'), findsOneWidget);
+    expect(find.text('Rent'), findsOneWidget);
     expect(find.byTooltip('Collapse calendar'), findsOneWidget);
     await tester.tap(find.byTooltip('Collapse calendar'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Expand calendar'), findsOneWidget);
+    await tester.tap(find.byTooltip('Expand calendar'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Next month'));
+    await tester.pumpAndSettle();
+    expect(find.text('September 2026'), findsOneWidget);
+    await tester.tap(find.byTooltip('Previous month'));
+    await tester.pumpAndSettle();
+    expect(find.text('August 2026'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey('scheduled-calendar-day-2026-8-1')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Aug 1, 2026'), findsOneWidget);
+    expect(find.text('Rent'), findsOneWidget);
+    expect(find.text('Electric'), findsOneWidget);
+    expect(find.text('Internet'), findsNothing);
     expect(find.text('Local alerts'), findsOneWidget);
   });
 
@@ -2311,14 +2361,28 @@ class FakeRemoteFinanceRepository implements FinanceRemoteRepository {
 }
 
 v2_scheduled.ScheduledTransactionRecord rentSchedule({DateTime? nextDate}) {
-  return v2_scheduled.ScheduledTransactionRecord(
+  return scheduledExpense(
     id: 'sched-rent',
-    type: v2_transaction.TransactionType.expense,
-    accountId: 'checking',
-    categoryId: 'dining',
     payee: 'Rent',
     amountMinor: 90000,
     nextDate: nextDate ?? DateTime(2026, 8),
+  );
+}
+
+v2_scheduled.ScheduledTransactionRecord scheduledExpense({
+  required String id,
+  required String payee,
+  required int amountMinor,
+  required DateTime nextDate,
+}) {
+  return v2_scheduled.ScheduledTransactionRecord(
+    id: id,
+    type: v2_transaction.TransactionType.expense,
+    accountId: 'checking',
+    categoryId: 'dining',
+    payee: payee,
+    amountMinor: amountMinor,
+    nextDate: nextDate,
     frequency: v2_scheduled.RecurrenceFrequency.monthly,
     sync: v2_sync.SyncMetadata.fresh(),
   );
