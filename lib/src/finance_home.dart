@@ -1235,88 +1235,177 @@ Future<void> showTransactionDetails(
     TransactionType.transfer => transaction.amountMinor.abs(),
     TransactionType.adjustment => transaction.amountMinor,
   };
+  final amountColor = signedAmount < 0
+      ? AppColors.danger
+      : transaction.type == TransactionType.income
+      ? AppTheme.accent
+      : null;
+  final detailBackground = Theme.of(context).brightness == Brightness.dark
+      ? AppColors.panelDark
+      : AppTheme.panel;
 
   final action = await showDialog<String>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('Transaction details'),
-      content: SizedBox(
-        width: 420,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TransactionDetailRow(label: 'Payee', value: transaction.payee),
-              TransactionDetailRow(
-                label: 'Type',
-                value: transactionTypeLabel(transaction.type),
-              ),
-              TransactionDetailRow(
-                label: 'Date',
-                value: dateInput(transaction.date),
-              ),
-              TransactionDetailRow(
-                label: 'Amount',
-                value: money(signedAmount, dataStore.preferences.currency),
-              ),
-              TransactionDetailRow(
-                label: 'Account',
-                value: accountsById[transaction.accountId]?.name ?? 'Unknown',
-              ),
-              if (transaction.transferAccountId != null)
-                TransactionDetailRow(
-                  label: 'Transfer to',
-                  value:
-                      accountsById[transaction.transferAccountId]?.name ??
-                      'Unknown',
+    builder: (dialogContext) => Dialog(
+      insetPadding: const EdgeInsets.all(AppSpacing.lg),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.card),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Transaction details',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: AppTheme.muted,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-              if (transaction.categoryId != null)
-                TransactionDetailRow(
-                  label: 'Category',
-                  value:
-                      categoriesById[transaction.categoryId]?.name ?? 'Unknown',
-                ),
-              if (transaction.note.trim().isNotEmpty)
-                TransactionDetailRow(label: 'Note', value: transaction.note),
-              if (transaction.splitLines.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.sm),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppTheme.accent.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(AppRadii.control),
+                      ),
+                      child: Icon(
+                        transactionDetailIcon(transaction.type),
+                        color: AppTheme.accent,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            transaction.payee,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.w900),
+                          ),
+                          const SizedBox(height: AppSpacing.xxs),
+                          Text(
+                            '${transactionTypeLabel(transaction.type)} • ${dateInput(transaction.date)}',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: AppTheme.muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: detailBackground,
+                    borderRadius: BorderRadius.circular(AppRadii.card),
+                    border: Border.all(
+                      color: Theme.of(context).dividerColor.withValues(
+                        alpha: Theme.of(context).brightness == Brightness.dark
+                            ? 0.35
+                            : 0.55,
+                      ),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Amount',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: AppTheme.muted,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        money(signedAmount, dataStore.preferences.currency),
+                        style: AppTextStyles.money(
+                          context,
+                          fontSize: 34,
+                          color: amountColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TransactionDetailRow(
+                  label: 'Account',
+                  value: accountsById[transaction.accountId]?.name ?? 'Unknown',
+                ),
+                if (transaction.transferAccountId != null)
+                  TransactionDetailRow(
+                    label: 'Transfer to',
+                    value:
+                        accountsById[transaction.transferAccountId]?.name ??
+                        'Unknown',
+                  ),
+                if (transaction.categoryId != null)
+                  TransactionDetailRow(
+                    label: 'Category',
+                    value:
+                        categoriesById[transaction.categoryId]?.name ??
+                        'Unknown',
+                  ),
+                if (transaction.note.trim().isNotEmpty)
+                  TransactionDetailRow(label: 'Note', value: transaction.note),
+                if (transaction.splitLines.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
                     'Splits',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                       color: AppTheme.muted,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                for (final split in transaction.splitLines)
-                  TransactionDetailRow(
-                    label: categoriesById[split.categoryId]?.name ?? 'Category',
-                    value: money(
-                      split.amountMinor,
-                      dataStore.preferences.currency,
+                  const SizedBox(height: AppSpacing.xs),
+                  for (final split in transaction.splitLines)
+                    TransactionDetailRow(
+                      label:
+                          categoriesById[split.categoryId]?.name ?? 'Category',
+                      value: money(
+                        split.amountMinor,
+                        dataStore.preferences.currency,
+                      ),
                     ),
-                  ),
+                ],
+                const SizedBox(height: AppSpacing.lg),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('Close'),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    FilledButton.icon(
+                      onPressed: canEdit
+                          ? () => Navigator.pop(dialogContext, 'edit')
+                          : null,
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Edit'),
+                    ),
+                  ],
+                ),
               ],
-            ],
+            ),
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: const Text('Close'),
-        ),
-        FilledButton.icon(
-          onPressed: canEdit
-              ? () => Navigator.pop(dialogContext, 'edit')
-              : null,
-          icon: const Icon(Icons.edit_outlined),
-          label: const Text('Edit'),
-        ),
-      ],
     ),
   );
 
@@ -1326,6 +1415,15 @@ Future<void> showTransactionDetails(
   } else {
     await showTransactionDialog(context, transaction: transaction);
   }
+}
+
+IconData transactionDetailIcon(TransactionType type) {
+  return switch (type) {
+    TransactionType.expense => Icons.remove_circle_outline,
+    TransactionType.income => Icons.add_circle_outline,
+    TransactionType.transfer => Icons.swap_horiz,
+    TransactionType.adjustment => Icons.tune_outlined,
+  };
 }
 
 class TransactionDetailRow extends StatelessWidget {
@@ -1340,13 +1438,20 @@ class TransactionDetailRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).dividerColor.withValues(alpha: 0.45),
+          ),
+        ),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 96,
+            width: 104,
             child: Text(
               label,
               style: Theme.of(context).textTheme.labelLarge?.copyWith(

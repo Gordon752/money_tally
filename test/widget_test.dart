@@ -377,7 +377,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Transaction details'), findsOneWidget);
-    expect(find.text('Payee'), findsOneWidget);
+    expect(find.text('Walmart'), findsWidgets);
     expect(find.text('Amount'), findsOneWidget);
     expect(find.text(r'-$64.28'), findsWidgets);
 
