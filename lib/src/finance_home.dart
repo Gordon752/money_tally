@@ -459,7 +459,7 @@ class BudgetPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
+    final store = FinanceDataStoreScope.watch(context);
     final budgets = showAll ? store.budgets : store.budgets.take(3);
     return AppCard(
       title: 'Budgets',
@@ -730,14 +730,14 @@ class ScheduledTile extends StatelessWidget {
 class BudgetProgressRow extends StatelessWidget {
   const BudgetProgressRow({required this.budget, super.key});
 
-  final Budget budget;
+  final BudgetRecord budget;
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
-    final category = store.categoryById(budget.categoryId);
-    final spent = store.spentThisMonth(budget.categoryId);
-    final progress = (spent / budget.monthlyLimitCents).clamp(0.0, 1.0);
+    final store = FinanceDataStoreScope.watch(context);
+    final spent = store.spentThisMonthForBudget(budget);
+    final remaining = budget.remainingMinor(spent);
+    final isOver = budget.isOverBudget(spent);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -748,23 +748,28 @@ class BudgetProgressRow extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  category.name,
+                  budget.name,
                   style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
               ),
-              Text('${money(spent)} / ${money(budget.monthlyLimitCents)}'),
+              Text(
+                isOver
+                    ? 'Over by ${money(remaining.abs())}'
+                    : '${money(remaining)} left',
+                style: TextStyle(
+                  color: isOver ? AppTheme.rose : AppTheme.muted,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 9,
-              color: category.color,
-              backgroundColor: AppTheme.line,
-            ),
+          const SizedBox(height: 4),
+          Text(
+            'Spent ${money(spent)} of ${money(budget.amountMinor)}',
+            style: const TextStyle(color: AppTheme.muted),
           ),
+          const SizedBox(height: 8),
+          BudgetProgressBar(spentMinor: spent, budgetMinor: budget.amountMinor),
         ],
       ),
     );

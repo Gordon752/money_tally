@@ -128,6 +128,16 @@ void main() {
     expect(find.text('Alerts are required'), findsOneWidget);
   });
 
+  testWidgets('budgets screen renders v2 budget progress text', (tester) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Budgets').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Dining'), findsOneWidget);
+    expect(find.textContaining('Spent'), findsWidgets);
+  });
+
   test('legacy v2 mirror refreshes in-memory v2 balances', () async {
     final legacyStore = FinanceStore.seeded();
     final dataStore = FinanceDataStore(

@@ -152,6 +152,66 @@ void main() {
     expect(remote.savedTransactions.length, 1);
     expect(remote.savedTransactions.single.type, TransactionType.income);
   });
+
+  test(
+    'budget spending includes matching transaction and split categories',
+    () {
+      final dataSet = _dataSet().copyWith(
+        budgets: [
+          BudgetRecord(
+            id: 'food-budget',
+            name: 'Food',
+            amountMinor: 10000,
+            categoryIds: const ['dining', 'snacks'],
+            sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+          ),
+        ],
+        transactions: [
+          TransactionRecord(
+            id: 'expense-1',
+            type: TransactionType.expense,
+            accountId: 'checking',
+            categoryId: 'dining',
+            date: DateTime(2026, 7, 6),
+            payee: 'Cafe',
+            amountMinor: 1250,
+            sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+          ),
+          TransactionRecord(
+            id: 'split-1',
+            type: TransactionType.expense,
+            accountId: 'checking',
+            categoryId: 'dining',
+            date: DateTime(2026, 7, 7),
+            payee: 'Store',
+            amountMinor: 3000,
+            splitLines: const [
+              TransactionSplitLine(
+                id: 'line-1',
+                categoryId: 'snacks',
+                amountMinor: 800,
+              ),
+              TransactionSplitLine(
+                id: 'line-2',
+                categoryId: 'other',
+                amountMinor: 2200,
+              ),
+            ],
+            sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+          ),
+        ],
+      );
+      final store = FinanceDataStore(dataSet: dataSet);
+
+      expect(
+        store.spentThisMonthForBudget(
+          dataSet.budgets.single,
+          now: DateTime(2026, 7, 10),
+        ),
+        2050,
+      );
+    },
+  );
 }
 
 FinanceDataSet _dataSet() {

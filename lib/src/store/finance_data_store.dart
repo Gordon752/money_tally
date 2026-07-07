@@ -132,6 +132,34 @@ class FinanceDataStore extends ChangeNotifier {
 
   int get netWorthMinor => totalAssetsMinor + totalLiabilitiesMinor;
 
+  int spentThisMonthForBudget(BudgetRecord budget, {DateTime? now}) {
+    final anchor = now ?? DateTime.now();
+    final periodStart = DateTime(anchor.year, anchor.month);
+    final periodEnd = DateTime(anchor.year, anchor.month + 1);
+    final categoryIds = budget.categoryIds.toSet();
+
+    return transactions
+        .where((transaction) {
+          return transaction.type == TransactionType.expense &&
+              !transaction.date.isBefore(periodStart) &&
+              transaction.date.isBefore(periodEnd);
+        })
+        .fold(0, (total, transaction) {
+          if (transaction.isSplit) {
+            final splitSpent = transaction.splitLines
+                .where((line) => categoryIds.contains(line.categoryId))
+                .fold(
+                  0,
+                  (splitTotal, line) => splitTotal + line.amountMinor.abs(),
+                );
+            return total + splitSpent;
+          }
+          return categoryIds.contains(transaction.categoryId)
+              ? total + transaction.amountMinor.abs()
+              : total;
+        });
+  }
+
   AccountRecord accountById(String id) {
     return accounts.firstWhere((account) => account.id == id);
   }
