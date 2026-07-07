@@ -24,6 +24,8 @@ class BudgetRecord {
 
   int remainingMinor(int spentMinor) => amountMinor - spentMinor;
   bool isOverBudget(int spentMinor) => spentMinor > amountMinor;
+  bool get isDeleted => sync.isDeleted;
+  bool get isVisible => !isArchived && !isDeleted;
 
   BudgetRecord copyWith({
     String? name,

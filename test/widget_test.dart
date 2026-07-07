@@ -1154,6 +1154,32 @@ void main() {
     expect(find.text('Dining'), findsNothing);
   });
 
+  testWidgets('budget long press can delete budget', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Budgets').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Dining'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    final budget = dataStore.budgets.singleWhere(
+      (item) => item.name == 'Dining',
+    );
+    expect(budget.isArchived, isTrue);
+    expect(budget.isDeleted, isTrue);
+    expect(find.text('Dining'), findsNothing);
+  });
+
   testWidgets('categories screen renders v2 categories on wide layout', (
     tester,
   ) async {
@@ -1230,6 +1256,35 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(dataStore.categoryById('dining').isArchived, isTrue);
+    expect(find.text('Dining'), findsNothing);
+  });
+
+  testWidgets('category long press can delete category', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Categories').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Dining'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    final category = dataStore.categoryById('dining');
+    expect(category.isArchived, isTrue);
+    expect(category.isDeleted, isTrue);
     expect(find.text('Dining'), findsNothing);
   });
 

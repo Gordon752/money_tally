@@ -373,6 +373,10 @@ class FinanceDataStore extends ChangeNotifier {
     return categories.firstWhere((category) => category.id == id);
   }
 
+  BudgetRecord budgetById(String id) {
+    return budgets.firstWhere((budget) => budget.id == id);
+  }
+
   Future<void> replaceDataSet(
     FinanceDataSet dataSet, {
     bool persistLocal = true,
@@ -501,10 +505,38 @@ class FinanceDataStore extends ChangeNotifier {
     await _commit(category: category);
   }
 
+  Future<void> archiveCategory(String categoryId) async {
+    final category = categoryById(categoryId).copyWith(isArchived: true);
+    await saveCategory(category);
+  }
+
+  Future<void> deleteCategory(String categoryId) async {
+    final existing = categoryById(categoryId);
+    final category = existing.copyWith(
+      isArchived: true,
+      sync: existing.sync.deleted(deviceId: deviceId),
+    );
+    await saveCategory(category);
+  }
+
   Future<void> saveBudget(BudgetRecord budget) async {
     final updated = _upsert(budgets, budget, (item) => item.id);
     _dataSet = _dataSet.copyWith(budgets: updated);
     await _commit(budget: budget);
+  }
+
+  Future<void> archiveBudget(String budgetId) async {
+    final budget = budgetById(budgetId).copyWith(isArchived: true);
+    await saveBudget(budget);
+  }
+
+  Future<void> deleteBudget(String budgetId) async {
+    final existing = budgetById(budgetId);
+    final budget = existing.copyWith(
+      isArchived: true,
+      sync: existing.sync.deleted(deviceId: deviceId),
+    );
+    await saveBudget(budget);
   }
 
   Future<void> saveScheduledTransaction(

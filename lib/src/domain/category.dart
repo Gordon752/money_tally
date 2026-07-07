@@ -64,6 +64,8 @@ class CategoryRecord {
   final SyncMetadata sync;
 
   bool get hasIcon => iconName != null && iconName!.trim().isNotEmpty;
+  bool get isDeleted => sync.isDeleted;
+  bool get isVisible => !isArchived && !isDeleted;
 
   CategoryRecord copyWith({
     String? name,

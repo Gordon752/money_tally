@@ -718,7 +718,7 @@ class _LedgerViewState extends State<LedgerView> {
     final store = FinanceDataStoreScope.watch(context);
     final activeAccounts = store.activeAccountsInDisplayOrder;
     final activeCategories = store.categories
-        .where((category) => !category.isArchived)
+        .where((category) => category.isVisible)
         .toList(growable: false);
     final accountsById = {
       for (final account in store.accounts) account.id: account,
@@ -1627,7 +1627,7 @@ class CategoriesView extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final categories = store.categories
-        .where((category) => !category.isArchived)
+        .where((category) => category.isVisible)
         .toList(growable: false);
     final categoriesById = {
       for (final category in categories) category.id: category,
@@ -1962,7 +1962,7 @@ class ReportsView extends StatelessWidget {
     final categoriesById = {
       for (final category in store.categories) category.id: category,
     };
-    final budgets = store.budgets.where((budget) => !budget.isArchived);
+    final budgets = store.budgets.where((budget) => budget.isVisible);
 
     return Column(
       children: [
@@ -2252,7 +2252,7 @@ class AccountBalancePanel extends StatelessWidget {
       child: Column(
         children: [
           for (final account in store.accounts.where(
-            (account) => !account.isArchived,
+            (account) => account.isVisible,
           ))
             MetricRow(
               label: account.name,
@@ -2308,7 +2308,7 @@ class BudgetPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final budgets = store.budgets
-        .where((budget) => !budget.isArchived)
+        .where((budget) => budget.isVisible)
         .toList(growable: false);
     final visibleBudgets = showAll ? budgets : budgets.take(3);
     return AppCard(
@@ -2673,7 +2673,7 @@ Future<void> showBudgetDialog(
   final categories = dataStore.categories
       .where(
         (category) =>
-            !category.isArchived &&
+            category.isVisible &&
             category.kind == v2_category.CategoryKind.expense,
       )
       .toList(growable: false);
@@ -2812,10 +2812,9 @@ Future<void> showBudgetActions(
     case 'edit':
       await showBudgetDialog(context, budget: budget);
     case 'archive':
+      await FinanceDataStoreScope.read(context).archiveBudget(budget.id);
     case 'delete':
-      await FinanceDataStoreScope.read(
-        context,
-      ).saveBudget(budget.copyWith(isArchived: true));
+      await FinanceDataStoreScope.read(context).deleteBudget(budget.id);
   }
 }
 
@@ -3368,7 +3367,7 @@ Future<void> showTransferDialog(
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final accounts = dataStore.accounts
-      .where((account) => !account.isArchived)
+      .where((account) => account.isVisible)
       .toList(growable: false);
   if (accounts.length < 2) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -3498,7 +3497,7 @@ Future<void> showScheduledTransactionDialog(
   final accounts = dataStore.accounts
       .where(
         (account) =>
-            !account.isArchived ||
+            account.isVisible ||
             account.id == existing?.accountId ||
             account.id == existing?.transferAccountId,
       )
@@ -4286,7 +4285,7 @@ Future<void> showCategoryDialog(
             final parentOptions = dataStore.categories
                 .where(
                   (item) =>
-                      !item.isArchived &&
+                      item.isVisible &&
                       item.kind == kind &&
                       item.id != existingCategory?.id,
                 )
@@ -4483,10 +4482,9 @@ Future<void> showCategoryActions(
     case 'edit':
       await showCategoryDialog(context, categoryId: category.id);
     case 'archive':
+      await FinanceDataStoreScope.read(context).archiveCategory(category.id);
     case 'delete':
-      await FinanceDataStoreScope.read(
-        context,
-      ).saveCategory(category.copyWith(isArchived: true));
+      await FinanceDataStoreScope.read(context).deleteCategory(category.id);
   }
 }
 
@@ -4772,7 +4770,7 @@ List<v2_category.CategoryRecord> categoriesForTransactionKind(
       ? v2_category.CategoryKind.expense
       : v2_category.CategoryKind.income;
   return store.categories
-      .where((category) => !category.isArchived && category.kind == kind)
+      .where((category) => category.isVisible && category.kind == kind)
       .toList(growable: false);
 }
 
@@ -4782,9 +4780,7 @@ List<v2_category.CategoryRecord> scheduledCategoriesForType(
 ) {
   final kindName = type == TransactionType.income ? 'income' : 'expense';
   return dataStore.categories
-      .where(
-        (category) => !category.isArchived && category.kind.name == kindName,
-      )
+      .where((category) => category.isVisible && category.kind.name == kindName)
       .toList(growable: false);
 }
 
