@@ -14,6 +14,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'firebase_options.dart';
 import 'src/design/design_tokens.dart';
 import 'src/design/money_format.dart';
+import 'src/design/widgets/amount_entry_field.dart';
 import 'src/design/widgets/budget_progress_bar.dart';
 import 'src/design/widgets/account_card.dart';
 import 'src/design/widgets/floating_action_button.dart';

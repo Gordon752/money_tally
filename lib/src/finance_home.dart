@@ -1124,15 +1124,15 @@ Future<void> showSplitTransactionDialog(
       ? [
           SplitLineDraft(
             categoryId: defaultCategoryId,
-            amountText: dollars(transaction.amountMinor.abs()),
+            amountMinor: transaction.amountMinor.abs(),
           ),
-          SplitLineDraft(categoryId: categories.first.id, amountText: '0.00'),
+          SplitLineDraft(categoryId: categories.first.id, amountMinor: 0),
         ]
       : [
           for (final line in transaction.splitLines)
             SplitLineDraft(
               categoryId: line.categoryId,
-              amountText: dollars(line.amountMinor),
+              amountMinor: line.amountMinor,
               noteText: line.note,
             ),
         ];
@@ -1178,15 +1178,13 @@ Future<void> showSplitTransactionDialog(
                         const SizedBox(width: 8),
                         Expanded(
                           flex: 2,
-                          child: TextField(
-                            key: ValueKey('split-amount-$index'),
-                            controller: drafts[index].amount,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            decoration: const InputDecoration(
-                              labelText: 'Amount',
-                            ),
+                          child: AmountEntryField(
+                            fieldKey: ValueKey('split-amount-$index'),
+                            initialMinor: drafts[index].amountMinor,
+                            currency: dataStore.preferences.currency,
+                            labelText: 'Amount',
+                            onChanged: (value) =>
+                                drafts[index].amountMinor = value,
                           ),
                         ),
                         IconButton(
@@ -1207,7 +1205,7 @@ Future<void> showSplitTransactionDialog(
                       () => drafts.add(
                         SplitLineDraft(
                           categoryId: categories.first.id,
-                          amountText: '0.00',
+                          amountMinor: 0,
                         ),
                       ),
                     ),
@@ -1238,11 +1236,11 @@ Future<void> showSplitTransactionDialog(
             onPressed: () {
               final lines = [
                 for (var index = 0; index < drafts.length; index += 1)
-                  if (parseCents(drafts[index].amount.text).abs() > 0)
+                  if (drafts[index].amountMinor.abs() > 0)
                     TransactionSplitLine(
                       id: 'split_${DateTime.now().microsecondsSinceEpoch}_$index',
                       categoryId: drafts[index].categoryId,
-                      amountMinor: parseCents(drafts[index].amount.text).abs(),
+                      amountMinor: drafts[index].amountMinor.abs(),
                       note: drafts[index].note.text,
                     ),
               ];
@@ -1277,13 +1275,12 @@ Future<void> showSplitTransactionDialog(
 class SplitLineDraft {
   SplitLineDraft({
     required this.categoryId,
-    required String amountText,
+    required this.amountMinor,
     String noteText = '',
-  }) : amount = TextEditingController(text: amountText),
-       note = TextEditingController(text: noteText);
+  }) : note = TextEditingController(text: noteText);
 
   String categoryId;
-  final TextEditingController amount;
+  int amountMinor;
   final TextEditingController note;
 }
 
@@ -2570,9 +2567,7 @@ Future<void> showBudgetDialog(
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final name = TextEditingController(text: budget?.name ?? '');
-  final amount = TextEditingController(
-    text: budget == null ? '' : dollars(budget.amountMinor),
-  );
+  var amountMinor = budget?.amountMinor ?? 0;
   final selectedCategoryIds = {...?budget?.categoryIds};
   final categories = dataStore.categories
       .where(
@@ -2602,14 +2597,11 @@ Future<void> showBudgetDialog(
                       autofocus: true,
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: amount,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Budget amount',
-                      ),
+                    AmountEntryField(
+                      initialMinor: amountMinor,
+                      currency: dataStore.preferences.currency,
+                      labelText: 'Budget amount',
+                      onChanged: (value) => amountMinor = value,
                     ),
                     const SizedBox(height: 12),
                     Align(
@@ -2648,7 +2640,7 @@ Future<void> showBudgetDialog(
               FilledButton(
                 onPressed: () => Navigator.pop(context, (
                   name: name.text.trim(),
-                  amountMinor: parseCents(amount.text).abs(),
+                  amountMinor: amountMinor.abs(),
                   categoryIds: selectedCategoryIds.toList(),
                 )),
                 child: const Text('Save'),
@@ -3275,7 +3267,7 @@ Future<void> showTransferDialog(
   }
 
   final payee = TextEditingController(text: 'Transfer');
-  final amount = TextEditingController();
+  var amountMinor = 0;
   var fromAccountId =
       accounts.any((account) => account.id == initialFromAccountId)
       ? initialFromAccountId!
@@ -3307,13 +3299,12 @@ Future<void> showTransferDialog(
                     decoration: const InputDecoration(labelText: 'Payee'),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: amount,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(labelText: 'Amount'),
+                  AmountEntryField(
+                    initialMinor: amountMinor,
+                    currency: dataStore.preferences.currency,
+                    labelText: 'Amount',
                     autofocus: true,
+                    onChanged: (value) => amountMinor = value,
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
@@ -3368,7 +3359,7 @@ Future<void> showTransferDialog(
                   payee: payee.text.trim().isEmpty
                       ? 'Transfer'
                       : payee.text.trim(),
-                  amountMinor: parseCents(amount.text).abs(),
+                  amountMinor: amountMinor.abs(),
                 )),
                 child: const Text('Add'),
               ),
@@ -3409,9 +3400,7 @@ Future<void> showScheduledTransactionDialog(
   }
 
   final payee = TextEditingController(text: existing?.payee ?? '');
-  final amount = TextEditingController(
-    text: existing == null ? '' : dollars(existing.amountMinor),
-  );
+  var amountMinor = existing?.amountMinor ?? 0;
   final nextDate = TextEditingController(
     text: dateInput(existing?.nextDate ?? DateTime.now()),
   );
@@ -3518,12 +3507,11 @@ Future<void> showScheduledTransactionDialog(
                         autofocus: true,
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: amount,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: const InputDecoration(labelText: 'Amount'),
+                      AmountEntryField(
+                        initialMinor: amountMinor,
+                        currency: dataStore.preferences.currency,
+                        labelText: 'Amount',
+                        onChanged: (value) => amountMinor = value,
                       ),
                       const SizedBox(height: 12),
                       TextField(
@@ -3671,7 +3659,7 @@ Future<void> showScheduledTransactionDialog(
                     payee: payee.text.trim().isEmpty
                         ? scheduledPayeeFallback(type)
                         : payee.text.trim(),
-                    amountMinor: parseCents(amount.text).abs(),
+                    amountMinor: amountMinor.abs(),
                     nextDate: parseDateInput(nextDate.text, DateTime.now()),
                     frequency: frequency,
                     alertPreference: alertPreference,
@@ -3974,9 +3962,7 @@ Future<void> showTransactionDialog(
   final activeAccounts = dataStore.activeAccountsInDisplayOrder;
   if (activeAccounts.isEmpty) return;
   final payee = TextEditingController(text: transaction?.payee ?? '');
-  final amount = TextEditingController(
-    text: transaction == null ? '' : dollars(transaction.amountMinor.abs()),
-  );
+  var amountMinor = transaction?.amountMinor.abs() ?? 0;
   var accountId =
       activeAccounts.any(
         (account) => account.id == (transaction?.accountId ?? initialAccountId),
@@ -4051,12 +4037,11 @@ Future<void> showTransactionDialog(
                       decoration: const InputDecoration(labelText: 'Payee'),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: amount,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(labelText: 'Amount'),
+                    AmountEntryField(
+                      initialMinor: amountMinor,
+                      currency: dataStore.preferences.currency,
+                      labelText: 'Amount',
+                      onChanged: (value) => amountMinor = value,
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -4102,7 +4087,7 @@ Future<void> showTransactionDialog(
                             payee: payee.text.trim().isEmpty
                                 ? 'Transaction'
                                 : payee.text.trim(),
-                            amountMinor: parseCents(amount.text).abs(),
+                            amountMinor: amountMinor.abs(),
                             isExpense: isExpense,
                           ));
                         },

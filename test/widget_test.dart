@@ -387,7 +387,10 @@ void main() {
     await tester.tap(find.text('Split'));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byKey(const ValueKey('split-amount-0')), '30');
+    await tester.enterText(
+      find.byKey(const ValueKey('split-amount-0')),
+      '3000',
+    );
     await tester.enterText(
       find.byKey(const ValueKey('split-amount-1')),
       '34.28',

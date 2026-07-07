@@ -10,12 +10,16 @@ class AmountEntryField extends StatefulWidget {
     this.initialMinor = 0,
     this.currency = const CurrencyFormatSettings(),
     this.labelText = 'Amount',
+    this.autofocus = false,
+    this.fieldKey,
     super.key,
   });
 
   final int initialMinor;
   final CurrencyFormatSettings currency;
   final String labelText;
+  final bool autofocus;
+  final Key? fieldKey;
   final ValueChanged<int> onChanged;
 
   @override
@@ -54,9 +58,11 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
   @override
   Widget build(BuildContext context) {
     return TextField(
+      key: widget.fieldKey,
       controller: _controller,
       keyboardType: TextInputType.number,
       textAlign: TextAlign.right,
+      autofocus: widget.autofocus,
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       decoration: InputDecoration(labelText: widget.labelText),
       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
