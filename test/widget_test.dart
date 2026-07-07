@@ -541,7 +541,34 @@ void main() {
     expect(find.text('App Preferences'), findsOneWidget);
     expect(find.text('Launch screen'), findsOneWidget);
     expect(find.text('Money Format'), findsOneWidget);
+    expect(find.text('Notifications'), findsOneWidget);
     expect(find.text('Data Ownership'), findsOneWidget);
+  });
+
+  testWidgets('settings toggles notification preference', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+
+    expect(dataStore.preferences.notificationsEnabled, isTrue);
   });
 
   testWidgets('launch screen preference selects initial finance section', (

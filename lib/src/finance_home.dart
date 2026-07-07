@@ -936,6 +936,17 @@ class SettingsView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
+        AppCard(
+          title: 'Notifications',
+          child: SettingsSwitch(
+            label: 'Scheduled transaction alerts',
+            value: preferences.notificationsEnabled,
+            onChanged: (value) => store.savePreferences(
+              preferences.copyWith(notificationsEnabled: value),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
         const AppCard(
           title: 'Data Ownership',
           child: Column(
@@ -1037,6 +1048,30 @@ class SettingsDropdown<T> extends StatelessWidget {
           onChanged(value);
         }
       },
+    );
+  }
+}
+
+class SettingsSwitch extends StatelessWidget {
+  const SettingsSwitch({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    super.key,
+  });
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+      value: value,
+      activeThumbColor: AppTheme.accent,
+      onChanged: onChanged,
     );
   }
 }
