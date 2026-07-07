@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
@@ -1096,6 +1097,52 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(dataStore.preferences.notificationsEnabled, isTrue);
+  });
+
+  testWidgets('settings export rows copy data', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final clipboardWrites = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          final data = call.arguments as Map<Object?, Object?>;
+          clipboardWrites.add(data['text']! as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Export CSV'));
+    await tester.pump();
+    expect(find.text('CSV export copied'), findsOneWidget);
+    expect(clipboardWrites.single, contains('transaction_id,split_line_id'));
+
+    await tester.tap(find.widgetWithText(ListTile, 'Export JSON'));
+    await tester.pump();
+    expect(clipboardWrites.length, 2);
+    expect(clipboardWrites.last, contains('"accounts"'));
   });
 
   testWidgets('launch screen preference selects initial finance section', (

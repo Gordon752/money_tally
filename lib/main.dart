@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
@@ -29,6 +30,7 @@ import 'src/domain/sync_metadata.dart' as v2_sync;
 import 'src/domain/transaction.dart';
 import 'src/domain/user_preferences.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
+import 'src/persistence/backup_codec.dart';
 import 'src/persistence/local_finance_data_set_repository.dart';
 import 'src/store/finance_data_store.dart';
 import 'src/store/finance_data_store_scope.dart';

@@ -1664,21 +1664,36 @@ class SettingsView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        const AppCard(
+        AppCard(
           title: 'Data Ownership',
           child: Column(
             children: [
-              SettingsPlaceholderRow(
+              SettingsActionRow(
                 icon: Icons.file_download_outlined,
                 title: 'Export CSV',
+                trailingText: 'Copy',
+                onTap: () => copyExportToClipboard(
+                  context,
+                  title: 'CSV export copied',
+                  payload: const BackupCodec().encodeTransactionsCsv(
+                    store.dataSet,
+                  ),
+                ),
               ),
-              SettingsPlaceholderRow(
+              SettingsActionRow(
                 icon: Icons.data_object_outlined,
                 title: 'Export JSON',
+                trailingText: 'Copy',
+                onTap: () => copyExportToClipboard(
+                  context,
+                  title: 'JSON backup copied',
+                  payload: const BackupCodec().encodeJson(store.dataSet),
+                ),
               ),
-              SettingsPlaceholderRow(
+              const SettingsActionRow(
                 icon: Icons.restore_outlined,
                 title: 'Backup and restore',
+                trailingText: 'Later',
               ),
             ],
           ),
@@ -1920,15 +1935,19 @@ class SettingsSwitch extends StatelessWidget {
   }
 }
 
-class SettingsPlaceholderRow extends StatelessWidget {
-  const SettingsPlaceholderRow({
+class SettingsActionRow extends StatelessWidget {
+  const SettingsActionRow({
     required this.icon,
     required this.title,
+    required this.trailingText,
+    this.onTap,
     super.key,
   });
 
   final IconData icon;
   final String title;
+  final String trailingText;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1936,9 +1955,23 @@ class SettingsPlaceholderRow extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: AppTheme.accent),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
-      trailing: const Text('Later', style: TextStyle(color: AppTheme.muted)),
+      trailing: Text(
+        trailingText,
+        style: const TextStyle(color: AppTheme.muted),
+      ),
+      onTap: onTap,
     );
   }
+}
+
+Future<void> copyExportToClipboard(
+  BuildContext context, {
+  required String title,
+  required String payload,
+}) async {
+  await Clipboard.setData(ClipboardData(text: payload));
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(title)));
 }
 
 class AccountBalancePanel extends StatelessWidget {
