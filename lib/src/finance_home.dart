@@ -834,6 +834,18 @@ Future<void> showTransactionOptions(
             onTap: () => Navigator.pop(sheetContext, 'duplicate'),
           ),
           ListTile(
+            enabled:
+                transaction.type == TransactionType.expense ||
+                transaction.type == TransactionType.income,
+            leading: const Icon(Icons.call_split_outlined),
+            title: const Text('Split'),
+            onTap:
+                transaction.type == TransactionType.expense ||
+                    transaction.type == TransactionType.income
+                ? () => Navigator.pop(sheetContext, 'split')
+                : null,
+          ),
+          ListTile(
             enabled: transaction.type != TransactionType.adjustment,
             leading: const Icon(Icons.event_repeat_outlined),
             title: const Text('Make Scheduled'),
@@ -859,6 +871,8 @@ Future<void> showTransactionOptions(
       await showTransactionDialog(context, transaction: transaction);
     case 'duplicate':
       await duplicateTransaction(context, transaction);
+    case 'split':
+      await showSplitTransactionDialog(context, transaction);
     case 'schedule':
       await makeTransactionScheduled(context, transaction);
     case 'delete':
@@ -900,6 +914,190 @@ Future<void> deleteTransaction(
       sync: transaction.sync.deleted(deviceId: dataStore.deviceId),
     ),
   );
+}
+
+Future<void> showSplitTransactionDialog(
+  BuildContext context,
+  TransactionRecord transaction,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final categories = categoriesForTransactionKind(
+    dataStore,
+    transaction.type == TransactionType.expense,
+  );
+  if (categories.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Add a category before splitting')),
+    );
+    return;
+  }
+
+  final defaultCategoryId = transaction.categoryId ?? categories.first.id;
+  final drafts = transaction.splitLines.isEmpty
+      ? [
+          SplitLineDraft(
+            categoryId: defaultCategoryId,
+            amountText: dollars(transaction.amountMinor.abs()),
+          ),
+          SplitLineDraft(categoryId: categories.first.id, amountText: '0.00'),
+        ]
+      : [
+          for (final line in transaction.splitLines)
+            SplitLineDraft(
+              categoryId: line.categoryId,
+              amountText: dollars(line.amountMinor),
+              noteText: line.note,
+            ),
+        ];
+  var errorText = '';
+
+  final splitLines = await showDialog<List<TransactionSplitLine>>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Split transaction'),
+        content: SizedBox(
+          width: 480,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var index = 0; index < drafts.length; index += 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: drafts[index].categoryId,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Category',
+                            ),
+                            items: [
+                              for (final category in categories)
+                                DropdownMenuItem(
+                                  value: category.id,
+                                  child: Text(category.name),
+                                ),
+                            ],
+                            onChanged: (value) => setDialogState(
+                              () => drafts[index].categoryId =
+                                  value ?? drafts[index].categoryId,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            key: ValueKey('split-amount-$index'),
+                            controller: drafts[index].amount,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Amount',
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Remove split line',
+                          onPressed: drafts.length > 1
+                              ? () =>
+                                    setDialogState(() => drafts.removeAt(index))
+                              : null,
+                          icon: const Icon(Icons.remove_circle_outline),
+                        ),
+                      ],
+                    ),
+                  ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => setDialogState(
+                      () => drafts.add(
+                        SplitLineDraft(
+                          categoryId: categories.first.id,
+                          amountText: '0.00',
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add line'),
+                  ),
+                ),
+                if (errorText.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      errorText,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final lines = [
+                for (var index = 0; index < drafts.length; index += 1)
+                  if (parseCents(drafts[index].amount.text).abs() > 0)
+                    TransactionSplitLine(
+                      id: 'split_${DateTime.now().microsecondsSinceEpoch}_$index',
+                      categoryId: drafts[index].categoryId,
+                      amountMinor: parseCents(drafts[index].amount.text).abs(),
+                      note: drafts[index].note.text,
+                    ),
+              ];
+              final total = lines.fold(
+                0,
+                (runningTotal, line) => runningTotal + line.amountMinor,
+              );
+              if (lines.isEmpty) {
+                setDialogState(() => errorText = 'Add at least one split line');
+                return;
+              }
+              if (total != transaction.amountMinor.abs()) {
+                setDialogState(
+                  () => errorText =
+                      'Split total must equal ${money(transaction.amountMinor.abs(), dataStore.preferences.currency)}',
+                );
+                return;
+              }
+              Navigator.pop(context, lines);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (splitLines == null) return;
+  await dataStore.saveTransaction(transaction.copyWith(splitLines: splitLines));
+}
+
+class SplitLineDraft {
+  SplitLineDraft({
+    required this.categoryId,
+    required String amountText,
+    String noteText = '',
+  }) : amount = TextEditingController(text: amountText),
+       note = TextEditingController(text: noteText);
+
+  String categoryId;
+  final TextEditingController amount;
+  final TextEditingController note;
 }
 
 Future<void> makeTransactionScheduled(

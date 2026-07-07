@@ -310,6 +310,40 @@ void main() {
     expect(find.text('Walmart Grocery'), findsOneWidget);
   });
 
+  testWidgets('ledger long press can split transaction', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Walmart').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Split'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('split-amount-0')), '30');
+    await tester.enterText(
+      find.byKey(const ValueKey('split-amount-1')),
+      '34.28',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final transaction = dataStore.transactions.singleWhere(
+      (item) => item.payee == 'Walmart',
+    );
+    expect(transaction.isSplit, isTrue);
+    expect(transaction.splitLines.length, 2);
+    expect(transaction.splitTotalMinor, transaction.amountMinor);
+  });
+
   testWidgets('ledger long press can make transaction scheduled', (
     tester,
   ) async {
