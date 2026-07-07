@@ -276,7 +276,16 @@ class LedgerView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
+    final store = FinanceDataStoreScope.watch(context);
+    final transactions = [...store.transactions]
+      ..sort((a, b) => b.date.compareTo(a.date));
+    final accountsById = {
+      for (final account in store.accounts) account.id: account,
+    };
+    final categoriesById = {
+      for (final category in store.categories) category.id: category,
+    };
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -291,11 +300,20 @@ class LedgerView extends StatelessWidget {
         const SizedBox(height: 12),
         AppCard(
           padding: EdgeInsets.zero,
-          child: Column(
-            children: [
-              for (final transaction in store.recentTransactions)
-                TransactionTile(transaction: transaction),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                for (final transaction in transactions)
+                  TransactionRow(
+                    transaction: transaction,
+                    accountName: accountsById[transaction.accountId]?.name,
+                    categoryName: transaction.categoryId == null
+                        ? null
+                        : categoriesById[transaction.categoryId]?.name,
+                  ),
+              ],
+            ),
           ),
         ),
       ],

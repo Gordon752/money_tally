@@ -108,6 +108,16 @@ void main() {
     expect(find.text('Adjust balance'), findsNothing);
   });
 
+  testWidgets('ledger screen renders v2 transaction rows', (tester) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Walmart'), findsWidgets);
+    expect(find.textContaining('Checking'), findsWidgets);
+  });
+
   test('legacy v2 mirror refreshes in-memory v2 balances', () async {
     final legacyStore = FinanceStore.seeded();
     final dataStore = FinanceDataStore(
