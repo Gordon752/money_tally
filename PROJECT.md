@@ -441,6 +441,8 @@ Features:
 - Archive account
 - Delete account
 - Collapsible account groups
+- Reorder accounts within a group
+- Reorder account groups
 - Include in group balance
 - Include in net worth
 
@@ -450,8 +452,17 @@ Long press account actions:
 - Add Income
 - Transfer
 - Adjust Balance
+- Move Up / Move Down
+- Move to Group/type
 - Edit
 - Archive/Delete
+
+Long press account group actions:
+
+- Collapse/Expand
+- Move Group Up / Move Group Down
+
+Initial rule: use fixed account groups derived from account type. Do not add custom user-defined account groups until the fixed-group behavior is stable.
 
 Remove the standalone Adjust Balance button. Balance adjustments should live in account actions and should create auditable records if the ledger model supports it.
 
@@ -592,6 +603,7 @@ Exclude investment, debt payoff, credit score, and AI financial advice features.
 8. Settings should exist before the design system is fully used, because appearance, currency, decimal places, and FAB placement affect many components.
 9. Category hierarchy affects budgets and reports; implement categories before final budget/report logic.
 10. Simulator is useful for UI/layout testing, but real iPhone and Mac remain the source of truth for Apple sign-in and sync.
+11. Account and account-group ordering should be persisted before heavy account-screen polish. Start with `sortOrder` on accounts and a group-order preference; use long-press controls before drag-and-drop.
 
 ## Development Priority
 
