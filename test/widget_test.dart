@@ -418,7 +418,7 @@ void main() {
     expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
     expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
 
-    await tester.tap(find.text('Clear'));
+    await tester.tap(find.byTooltip('Clear filters'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-type-')));
     await tester.pumpAndSettle();
@@ -429,7 +429,7 @@ void main() {
     expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
     expect(find.widgetWithText(TransactionRow, 'Diner'), findsNothing);
 
-    await tester.tap(find.text('Clear'));
+    await tester.tap(find.byTooltip('Clear filters'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-category-')));
     await tester.pumpAndSettle();
@@ -440,7 +440,7 @@ void main() {
     expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
     expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
 
-    await tester.tap(find.text('Clear'));
+    await tester.tap(find.byTooltip('Clear filters'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-date-all')));
     await tester.pumpAndSettle();

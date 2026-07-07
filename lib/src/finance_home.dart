@@ -801,6 +801,23 @@ class _LedgerViewState extends State<LedgerView> {
         accountFilterId.isNotEmpty ||
         categoryFilterId.isNotEmpty ||
         dateFilter != LedgerDateFilter.all;
+    final selectedTypeLabel = typeFilterName.isEmpty
+        ? 'Type'
+        : transactionTypeLabel(
+            TransactionType.values.firstWhere(
+              (type) => type.name == typeFilterName,
+              orElse: () => TransactionType.expense,
+            ),
+          );
+    final selectedAccountLabel = accountFilterId.isEmpty
+        ? 'Account'
+        : accountsById[accountFilterId]?.name ?? 'Account';
+    final selectedCategoryLabel = categoryFilterId.isEmpty
+        ? 'Category'
+        : categoriesById[categoryFilterId]?.name ?? 'Category';
+    final selectedDateLabel = dateFilter == LedgerDateFilter.all
+        ? 'Date'
+        : ledgerDateFilterLabel(dateFilter);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -822,105 +839,84 @@ class _LedgerViewState extends State<LedgerView> {
           onChanged: (value) => setState(() => query = value),
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            SizedBox(
-              width: 160,
-              child: DropdownButtonFormField<String>(
-                key: ValueKey('ledger-type-$typeFilterName'),
-                initialValue: typeFilterName,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Type'),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              LedgerFilterButton<String>(
+                buttonKey: ValueKey('ledger-type-$typeFilterName'),
+                icon: Icons.tune_outlined,
+                label: selectedTypeLabel,
+                isActive: typeFilterName.isNotEmpty,
                 items: [
-                  const DropdownMenuItem(value: '', child: Text('All types')),
+                  const PopupMenuItem(value: '', child: Text('All types')),
                   for (final type in TransactionType.values)
-                    DropdownMenuItem(
+                    PopupMenuItem(
                       value: type.name,
                       child: Text(transactionTypeLabel(type)),
                     ),
                 ],
-                onChanged: (value) =>
-                    setState(() => typeFilterName = value ?? ''),
+                onSelected: (value) => setState(() => typeFilterName = value),
               ),
-            ),
-            SizedBox(
-              width: 180,
-              child: DropdownButtonFormField<String>(
-                key: ValueKey('ledger-account-$accountFilterId'),
-                initialValue: accountFilterId,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Account'),
+              const SizedBox(width: AppSpacing.xs),
+              LedgerFilterButton<String>(
+                buttonKey: ValueKey('ledger-account-$accountFilterId'),
+                icon: Icons.account_balance_wallet_outlined,
+                label: selectedAccountLabel,
+                isActive: accountFilterId.isNotEmpty,
                 items: [
-                  const DropdownMenuItem(
-                    value: '',
-                    child: Text('All accounts'),
-                  ),
+                  const PopupMenuItem(value: '', child: Text('All accounts')),
                   for (final account in activeAccounts)
-                    DropdownMenuItem(
-                      value: account.id,
-                      child: Text(account.name),
-                    ),
+                    PopupMenuItem(value: account.id, child: Text(account.name)),
                 ],
-                onChanged: (value) =>
-                    setState(() => accountFilterId = value ?? ''),
+                onSelected: (value) => setState(() => accountFilterId = value),
               ),
-            ),
-            SizedBox(
-              width: 180,
-              child: DropdownButtonFormField<String>(
-                key: ValueKey('ledger-category-$categoryFilterId'),
-                initialValue: categoryFilterId,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Category'),
+              const SizedBox(width: AppSpacing.xs),
+              LedgerFilterButton<String>(
+                buttonKey: ValueKey('ledger-category-$categoryFilterId'),
+                icon: Icons.sell_outlined,
+                label: selectedCategoryLabel,
+                isActive: categoryFilterId.isNotEmpty,
                 items: [
-                  const DropdownMenuItem(
-                    value: '',
-                    child: Text('All categories'),
-                  ),
+                  const PopupMenuItem(value: '', child: Text('All categories')),
                   for (final category in activeCategories)
-                    DropdownMenuItem(
+                    PopupMenuItem(
                       value: category.id,
                       child: Text(category.name),
                     ),
                 ],
-                onChanged: (value) =>
-                    setState(() => categoryFilterId = value ?? ''),
+                onSelected: (value) => setState(() => categoryFilterId = value),
               ),
-            ),
-            SizedBox(
-              width: 170,
-              child: DropdownButtonFormField<LedgerDateFilter>(
-                key: ValueKey('ledger-date-${dateFilter.name}'),
-                initialValue: dateFilter,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Date'),
+              const SizedBox(width: AppSpacing.xs),
+              LedgerFilterButton<LedgerDateFilter>(
+                buttonKey: ValueKey('ledger-date-${dateFilter.name}'),
+                icon: Icons.calendar_today_outlined,
+                label: selectedDateLabel,
+                isActive: dateFilter != LedgerDateFilter.all,
                 items: [
                   for (final filter in LedgerDateFilter.values)
-                    DropdownMenuItem(
+                    PopupMenuItem(
                       value: filter,
                       child: Text(ledgerDateFilterLabel(filter)),
                     ),
                 ],
-                onChanged: (value) =>
-                    setState(() => dateFilter = value ?? LedgerDateFilter.all),
+                onSelected: (value) => setState(() => dateFilter = value),
               ),
-            ),
-            TextButton.icon(
-              onPressed: hasFilters
-                  ? () => setState(() {
-                      typeFilterName = '';
-                      accountFilterId = '';
-                      categoryFilterId = '';
-                      dateFilter = LedgerDateFilter.all;
-                    })
-                  : null,
-              icon: const Icon(Icons.filter_alt_off_outlined),
-              label: const Text('Clear'),
-            ),
-          ],
+              const SizedBox(width: AppSpacing.xs),
+              IconButton.filledTonal(
+                tooltip: 'Clear filters',
+                onPressed: hasFilters
+                    ? () => setState(() {
+                        typeFilterName = '';
+                        accountFilterId = '';
+                        categoryFilterId = '';
+                        dateFilter = LedgerDateFilter.all;
+                      })
+                    : null,
+                icon: const Icon(Icons.filter_alt_off_outlined),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         AppCard(
@@ -957,6 +953,74 @@ class _LedgerViewState extends State<LedgerView> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class LedgerFilterButton<T> extends StatelessWidget {
+  const LedgerFilterButton({
+    required this.buttonKey,
+    required this.icon,
+    required this.label,
+    required this.items,
+    required this.onSelected,
+    this.isActive = false,
+    super.key,
+  });
+
+  final Key buttonKey;
+  final IconData icon;
+  final String label;
+  final List<PopupMenuEntry<T>> items;
+  final ValueChanged<T> onSelected;
+  final bool isActive;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final foreground = isActive ? Colors.white : AppTheme.accent;
+    final background = isActive
+        ? AppTheme.accent
+        : AppTheme.accent.withValues(alpha: 0.08);
+    final border = isActive
+        ? AppTheme.accent
+        : AppTheme.accent.withValues(alpha: 0.18);
+
+    return PopupMenuButton<T>(
+      key: buttonKey,
+      tooltip: label,
+      onSelected: onSelected,
+      itemBuilder: (context) => items,
+      child: Container(
+        height: 40,
+        constraints: const BoxConstraints(maxWidth: 190),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(AppRadii.pill),
+          border: Border.all(color: border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: foreground),
+            const SizedBox(width: AppSpacing.xs),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xxs),
+            Icon(Icons.keyboard_arrow_down, size: 18, color: foreground),
+          ],
+        ),
+      ),
     );
   }
 }
