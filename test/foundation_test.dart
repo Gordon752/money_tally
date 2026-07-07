@@ -552,6 +552,8 @@ void main() {
     final store = FinanceDataStore(dataSet: dataSet);
 
     expect(store.availableCashMinor, 157850);
+    expect(store.openingNetWorthMinor, 110000);
+    expect(store.netWorthLedgerChangeMinor, 47850);
     expect(store.incomeThisMonthMinor(now: DateTime(2026, 7, 10)), 50000);
     expect(store.expensesThisMonthMinor(now: DateTime(2026, 7, 10)), 1250);
   });

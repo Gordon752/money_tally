@@ -276,6 +276,14 @@ class FinanceDataStore extends ChangeNotifier {
 
   int get netWorthMinor => totalAssetsMinor + totalLiabilitiesMinor;
 
+  int get openingNetWorthMinor {
+    return accounts
+        .where((account) => account.isVisible && account.includeInNetWorth)
+        .fold(0, (total, account) => total + account.openingBalanceMinor);
+  }
+
+  int get netWorthLedgerChangeMinor => netWorthMinor - openingNetWorthMinor;
+
   int get availableCashMinor {
     return accounts
         .where(

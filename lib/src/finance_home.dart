@@ -2035,10 +2035,25 @@ class ReportsView extends StatelessWidget {
             ),
             AppCard(
               title: 'Net worth history',
-              child: ReportMetricRow(
-                icon: Icons.show_chart_outlined,
-                label: 'Current',
-                value: money(store.netWorthMinor, currency),
+              child: Column(
+                children: [
+                  ReportMetricRow(
+                    icon: Icons.flag_outlined,
+                    label: 'Opening',
+                    value: money(store.openingNetWorthMinor, currency),
+                  ),
+                  ReportMetricRow(
+                    icon: Icons.timeline_outlined,
+                    label: 'Ledger change',
+                    value: money(store.netWorthLedgerChangeMinor, currency),
+                    isWarning: store.netWorthLedgerChangeMinor < 0,
+                  ),
+                  ReportMetricRow(
+                    icon: Icons.show_chart_outlined,
+                    label: 'Current',
+                    value: money(store.netWorthMinor, currency),
+                  ),
+                ],
               ),
             ),
           ],

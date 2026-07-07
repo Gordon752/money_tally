@@ -1811,6 +1811,8 @@ void main() {
 
     expect(find.text('Monthly spending'), findsOneWidget);
     expect(find.text('Category breakdown'), findsOneWidget);
+    expect(find.text('Opening'), findsOneWidget);
+    expect(find.text('Ledger change'), findsOneWidget);
     expect(find.text('Budget history'), findsOneWidget);
     expect(find.text(r'$82.78'), findsWidgets);
     expect(find.text(r'$1,264.00'), findsWidgets);
