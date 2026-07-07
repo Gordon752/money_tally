@@ -1,0 +1,74 @@
+import 'package:flutter/material.dart';
+
+import '../../domain/transaction.dart';
+import '../design_tokens.dart';
+import 'money_text.dart';
+
+class TransactionRow extends StatelessWidget {
+  const TransactionRow({
+    required this.transaction,
+    this.categoryName,
+    this.accountName,
+    this.onTap,
+    this.onLongPress,
+    super.key,
+  });
+
+  final TransactionRecord transaction;
+  final String? categoryName;
+  final String? accountName;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final signedAmount = switch (transaction.type) {
+      TransactionType.expense => -transaction.amountMinor.abs(),
+      TransactionType.income => transaction.amountMinor.abs(),
+      TransactionType.transfer => transaction.amountMinor.abs(),
+      TransactionType.adjustment => transaction.amountMinor,
+    };
+
+    return InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    transaction.payee,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    [
+                      if (accountName != null) accountName,
+                      if (categoryName != null) categoryName,
+                      if (transaction.isSplit) 'Split',
+                      if (transaction.isTransfer) 'Transfer',
+                    ].join(' • '),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            MoneyText(
+              amountMinor: signedAmount,
+              showPositiveSign: transaction.type == TransactionType.income,
+              color: signedAmount < 0 ? AppColors.danger : AppColors.ink,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

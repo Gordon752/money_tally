@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "997915460525",
+    "project_id": "money-tally-gordonbowles",
+    "storage_bucket": "money-tally-gordonbowles.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:997915460525:android:59391767a4925bc86a1724",
+        "android_client_info": {
+          "package_name": "com.gordonbowles.moneytally"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCyGRpgiCzyzHbcNWgY2PcU4boEVA22gcM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
