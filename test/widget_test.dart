@@ -1,5 +1,9 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
+import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
+import 'package:money_tally/src/store/finance_data_store.dart';
+import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
 void main() {
   test('finance snapshot round trips through json', () {
@@ -67,6 +71,30 @@ void main() {
     expect(find.text('Dashboard'), findsWidgets);
     expect(find.text('NET WORTH'), findsOneWidget);
     expect(find.text('Accounts'), findsWidgets);
+  });
+
+  testWidgets('provides v2 finance data store beside legacy store', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    final context = tester.element(find.byType(MaterialApp));
+    final dataStore = FinanceDataStoreScope.read(context);
+
+    expect(
+      dataStore.balanceForAccount('checking'),
+      legacyStore.accountById('checking').balanceCents,
+    );
   });
 }
 

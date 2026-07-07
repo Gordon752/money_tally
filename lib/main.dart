@@ -13,6 +13,8 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'firebase_options.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
 import 'src/persistence/local_finance_data_set_repository.dart';
+import 'src/store/finance_data_store.dart';
+import 'src/store/finance_data_store_scope.dart';
 
 part 'src/app_theme.dart';
 part 'src/auth_service.dart';
@@ -39,13 +41,26 @@ class MoneyTallyBootstrap extends StatefulWidget {
 }
 
 class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
-  late final Future<FinanceStore> _startup = _load();
+  late final Future<AppStores> _startup = _load();
 
-  Future<FinanceStore> _load() async {
+  Future<AppStores> _load() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    return FinanceStore.load();
+    final legacyStore = await FinanceStore.load();
+    final dataStore = await _loadV2StoreFromLegacy(legacyStore);
+    return AppStores(legacyStore: legacyStore, dataStore: dataStore);
+  }
+
+  Future<FinanceDataStore> _loadV2StoreFromLegacy(
+    FinanceStore legacyStore,
+  ) async {
+    final localRepository = const LocalFinanceDataSetRepository();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    await localRepository.save(dataSet);
+    return FinanceDataStore(dataSet: dataSet, localRepository: localRepository);
   }
 
   @override
@@ -54,19 +69,20 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
       debugShowCheckedModeBanner: false,
       title: 'Money Tally',
       theme: AppTheme.light(),
-      home: FutureBuilder<FinanceStore>(
+      home: FutureBuilder<AppStores>(
         future: _startup,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             debugPrint('Money Tally startup failed: ${snapshot.error}');
             return StartupErrorView(error: snapshot.error.toString());
           }
-          final store = snapshot.data;
-          if (store == null) {
+          final stores = snapshot.data;
+          if (stores == null) {
             return const StartupLoadingView();
           }
           return MoneyTallyApp(
-            store: store,
+            store: stores.legacyStore,
+            dataStore: stores.dataStore,
             authService: FirebaseAuthService(),
             remoteRepository: FirestoreFinanceRepository(),
           );
@@ -74,6 +90,13 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
       ),
     );
   }
+}
+
+class AppStores {
+  const AppStores({required this.legacyStore, required this.dataStore});
+
+  final FinanceStore legacyStore;
+  final FinanceDataStore dataStore;
 }
 
 class StartupLoadingView extends StatelessWidget {
@@ -155,15 +178,40 @@ class StartupErrorView extends StatelessWidget {
 }
 
 class MoneyTallyApp extends StatelessWidget {
-  MoneyTallyApp({
+  factory MoneyTallyApp({
     FinanceStore? store,
+    FinanceDataStore? dataStore,
     AuthService? authService,
+    FinanceRemoteRepository? remoteRepository,
+    Key? key,
+  }) {
+    final legacyStore = store ?? FinanceStore.seeded();
+    final financeDataStore =
+        dataStore ??
+        FinanceDataStore(
+          dataSet: const V1SnapshotMigrator().migrate(
+            legacyStore.snapshot().toJson(),
+          ),
+        );
+    return MoneyTallyApp._(
+      store: legacyStore,
+      dataStore: financeDataStore,
+      authService: authService ?? LocalOnlyAuthService(),
+      remoteRepository: remoteRepository,
+      key: key,
+    );
+  }
+
+  const MoneyTallyApp._({
+    required this.store,
+    required this.dataStore,
+    required this.authService,
     this.remoteRepository,
     super.key,
-  }) : store = store ?? FinanceStore.seeded(),
-       authService = authService ?? LocalOnlyAuthService();
+  });
 
   final FinanceStore store;
+  final FinanceDataStore dataStore;
   final AuthService authService;
   final FinanceRemoteRepository? remoteRepository;
 
@@ -171,13 +219,16 @@ class MoneyTallyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return FinanceStoreScope(
       store: store,
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'Money Tally',
-        theme: AppTheme.light(),
-        home: AuthGate(
-          authService: authService,
-          remoteRepository: remoteRepository,
+      child: FinanceDataStoreScope(
+        store: dataStore,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'Money Tally',
+          theme: AppTheme.light(),
+          home: AuthGate(
+            authService: authService,
+            remoteRepository: remoteRepository,
+          ),
         ),
       ),
     );
