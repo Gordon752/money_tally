@@ -1319,6 +1319,7 @@ Future<void> showFloatingAddMenu(BuildContext context) async {
     case 'account':
       await showAccountDialog(context);
     case 'transfer':
+      await showTransferDialog(context);
     case 'scheduled':
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${floatingAddActionLabel(selected)} is next')),
@@ -1435,6 +1436,128 @@ Future<void> saveLegacyAccountToV2(
     );
   }
   await targetStore.saveAccount(record);
+}
+
+Future<void> showTransferDialog(BuildContext context) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final accounts = dataStore.accounts
+      .where((account) => !account.isArchived)
+      .toList(growable: false);
+  if (accounts.length < 2) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('At least two accounts are required')),
+    );
+    return;
+  }
+
+  final payee = TextEditingController(text: 'Transfer');
+  final amount = TextEditingController();
+  var fromAccountId = accounts.first.id;
+  var toAccountId = accounts
+      .firstWhere((account) => account.id != fromAccountId)
+      .id;
+
+  final result =
+      await showDialog<
+        ({
+          String fromAccountId,
+          String toAccountId,
+          String payee,
+          int amountMinor,
+        })
+      >(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Add transfer'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: payee,
+                    decoration: const InputDecoration(labelText: 'Payee'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: amount,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(labelText: 'Amount'),
+                    autofocus: true,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: fromAccountId,
+                    decoration: const InputDecoration(labelText: 'From'),
+                    items: [
+                      for (final account in accounts)
+                        DropdownMenuItem(
+                          value: account.id,
+                          child: Text(account.name),
+                        ),
+                    ],
+                    onChanged: (value) => setDialogState(() {
+                      fromAccountId = value ?? fromAccountId;
+                      if (toAccountId == fromAccountId) {
+                        toAccountId = accounts
+                            .firstWhere(
+                              (account) => account.id != fromAccountId,
+                            )
+                            .id;
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: toAccountId,
+                    decoration: const InputDecoration(labelText: 'To'),
+                    items: [
+                      for (final account in accounts)
+                        if (account.id != fromAccountId)
+                          DropdownMenuItem(
+                            value: account.id,
+                            child: Text(account.name),
+                          ),
+                    ],
+                    onChanged: (value) => setDialogState(
+                      () => toAccountId = value ?? toAccountId,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, (
+                  fromAccountId: fromAccountId,
+                  toAccountId: toAccountId,
+                  payee: payee.text.trim().isEmpty
+                      ? 'Transfer'
+                      : payee.text.trim(),
+                  amountMinor: parseCents(amount.text).abs(),
+                )),
+                child: const Text('Add'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  if (result == null) return;
+  await dataStore.addTransfer(
+    fromAccountId: result.fromAccountId,
+    toAccountId: result.toAccountId,
+    date: DateTime.now(),
+    payee: result.payee,
+    amountMinor: result.amountMinor,
+  );
 }
 
 Future<void> showTransactionDialog(

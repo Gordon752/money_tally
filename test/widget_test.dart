@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/domain/money.dart';
+import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
+import 'package:money_tally/src/domain/transaction.dart' as v2_transaction;
 import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
@@ -260,6 +262,40 @@ void main() {
     );
   });
 
+  testWidgets('floating add transfer creates first-class transfer', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Transfer'));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(1), '50.00');
+    await tester.tap(find.text('Add').last);
+    await tester.pumpAndSettle();
+
+    final transfer = dataStore.transactions.singleWhere(
+      (transaction) =>
+          transaction.type == v2_transaction.TransactionType.transfer,
+    );
+    expect(transfer.transferAccountId, 'cash');
+    await tester.tap(find.text('Accounts').last);
+    await tester.pumpAndSettle();
+    expect(find.text(r'$1,802.40'), findsOneWidget);
+    expect(find.text(r'$297.00'), findsOneWidget);
+  });
+
   testWidgets('account long press can edit account name', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(
@@ -456,6 +492,41 @@ void main() {
 
     expect(dataStore.balanceForAccount('checking'), 200000);
     expect(dataStore.preferences.appearanceMode, AppearanceMode.dark);
+  });
+
+  test('legacy v2 mirror preserves v2-only transactions', () async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator()
+          .migrate(legacyStore.snapshot().toJson())
+          .copyWith(
+            transactions: [
+              v2_transaction.TransactionRecord(
+                id: 'v2-transfer',
+                type: v2_transaction.TransactionType.transfer,
+                accountId: 'checking',
+                transferAccountId: 'cash',
+                date: DateTime(2026, 7, 7),
+                payee: 'Transfer',
+                amountMinor: 0,
+                sync: v2_sync.SyncMetadata.fresh(),
+              ),
+            ],
+          ),
+    );
+    final mirror = LegacyV2StoreMirror(
+      legacyStore: legacyStore,
+      dataStore: dataStore,
+    )..start();
+    addTearDown(mirror.dispose);
+
+    legacyStore.adjustAccountBalance('checking', 200000);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      dataStore.transactions.map((transaction) => transaction.id),
+      contains('v2-transfer'),
+    );
   });
 }
 

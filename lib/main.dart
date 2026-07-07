@@ -166,15 +166,34 @@ class LegacyV2StoreMirror {
     try {
       do {
         _queuedRefresh = false;
-        final dataSet = const V1SnapshotMigrator()
-            .migrate(legacyStore.snapshot().toJson())
-            .copyWith(preferences: dataStore.preferences);
+        final migrated = const V1SnapshotMigrator().migrate(
+          legacyStore.snapshot().toJson(),
+        );
+        final dataSet = migrated.copyWith(
+          transactions: mergeV2OnlyTransactions(
+            migrated: migrated.transactions,
+            current: dataStore.transactions,
+          ),
+          preferences: dataStore.preferences,
+        );
         await dataStore.replaceDataSet(dataSet, persistLocal: false);
       } while (_queuedRefresh);
     } finally {
       _isRefreshing = false;
     }
   }
+}
+
+List<TransactionRecord> mergeV2OnlyTransactions({
+  required List<TransactionRecord> migrated,
+  required List<TransactionRecord> current,
+}) {
+  final migratedIds = migrated.map((transaction) => transaction.id).toSet();
+  return [
+    ...migrated,
+    for (final transaction in current)
+      if (!migratedIds.contains(transaction.id)) transaction,
+  ];
 }
 
 class StartupLoadingView extends StatelessWidget {
