@@ -57,6 +57,8 @@ class AccountRecord {
   final SyncMetadata sync;
 
   AccountGroup get group => type.group;
+  bool get isDeleted => sync.isDeleted;
+  bool get isVisible => !isArchived && !isDeleted;
 
   AccountRecord copyWith({
     String? name,

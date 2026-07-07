@@ -81,6 +81,29 @@ void main() {
   });
 
   test(
+    'data store soft deletes accounts from active lists and totals',
+    () async {
+      final legacyStore = FinanceStore.seeded();
+      final dataSet = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final dataStore = FinanceDataStore(dataSet: dataSet);
+
+      await dataStore.deleteAccount('checking');
+
+      final deletedAccount = dataStore.accountById('checking');
+      expect(deletedAccount.isArchived, isTrue);
+      expect(deletedAccount.isDeleted, isTrue);
+      expect(
+        dataStore.activeAccountsInDisplayOrder.map((account) => account.id),
+        isNot(contains('checking')),
+      );
+      expect(dataStore.totalAssetsMinor, 24700);
+      expect(dataStore.availableCashMinor, 24700);
+    },
+  );
+
+  test(
     'store can push and pull snapshots through a remote repository',
     () async {
       final local = FinanceStore.seeded();
@@ -825,6 +848,29 @@ void main() {
 
     expect(find.text('Checking'), findsNothing);
     expect(legacyStore.accountById('checking').isArchived, isTrue);
+  });
+
+  testWidgets('account long press can delete account', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Accounts').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Checking'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Checking'), findsNothing);
+    expect(legacyStore.accountById('checking').isArchived, isTrue);
+    expect(dataStore.accountById('checking').isDeleted, isTrue);
   });
 
   testWidgets('scheduled screen renders v2 scheduled rows', (tester) async {

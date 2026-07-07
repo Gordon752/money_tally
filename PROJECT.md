@@ -224,6 +224,8 @@ Credit card rule: credit cards may optionally store a `creditLimitMinor`. Credit
 
 Loan payoff rule: loan accounts may optionally store an `originalLoanAmountMinor`. The remaining payoff amount should be derived from the current ledger balance. Loan account cards can show remaining balance, amount paid down, and a clean minimalist payoff progress bar. The Loans group card can show total remaining versus total original loan amount across included loans. If a loan has no original amount, hide payoff percentage for that loan or exclude it from group payoff calculations.
 
+Account delete rule: deleting an account creates a sync tombstone by setting `deletedAt` and hides the account from active account lists, account group balances, available cash, net worth, and reorder actions. The record should not be hard-deleted while transactions may still reference it. During the v1-to-v2 bridge phase, the legacy account is archived for compatibility.
+
 ### Category
 
 Target fields:

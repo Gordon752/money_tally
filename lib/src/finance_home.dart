@@ -2921,6 +2921,13 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
               title: const Text('Archive'),
               onTap: () => Navigator.pop(context, 'archive'),
             ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete'),
+              textColor: AppTheme.rose,
+              iconColor: AppTheme.rose,
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
           ],
         ),
       ),
@@ -2952,6 +2959,9 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
   } else if (action == 'archive' && context.mounted) {
     final archived = store.archiveAccount(account.id);
     await saveLegacyAccountToV2(context, archived);
+  } else if (action == 'delete' && context.mounted) {
+    store.archiveAccount(account.id);
+    await dataStore.deleteAccount(account.id);
   }
 }
 

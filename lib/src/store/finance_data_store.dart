@@ -125,7 +125,7 @@ class FinanceDataStore extends ChangeNotifier {
   List<AccountRecord> get activeAccountsInDisplayOrder {
     final groupOrder = accountGroupDisplayOrderIndexes;
     return accounts
-        .where((account) => !account.isArchived)
+        .where((account) => account.isVisible)
         .toList(growable: false)
       ..sort(
         (a, b) => compareAccountDisplayOrder(a, b, groupOrder: groupOrder),
@@ -187,7 +187,7 @@ class FinanceDataStore extends ChangeNotifier {
     return accounts
         .where(
           (account) =>
-              !account.isArchived &&
+              account.isVisible &&
               account.includeInGroupBalance &&
               account.type == AccountType.creditCard,
         )
@@ -199,7 +199,7 @@ class FinanceDataStore extends ChangeNotifier {
     return accounts
         .where(
           (account) =>
-              !account.isArchived &&
+              account.isVisible &&
               account.includeInGroupBalance &&
               account.type == AccountType.creditCard &&
               account.creditLimitMinor != null,
@@ -233,7 +233,7 @@ class FinanceDataStore extends ChangeNotifier {
     return accounts
         .where(
           (account) =>
-              !account.isArchived &&
+              account.isVisible &&
               account.includeInGroupBalance &&
               account.type == AccountType.loan,
         )
@@ -248,7 +248,7 @@ class FinanceDataStore extends ChangeNotifier {
     return accounts
         .where(
           (account) =>
-              !account.isArchived &&
+              account.isVisible &&
               account.includeInGroupBalance &&
               account.type == AccountType.loan &&
               account.originalLoanAmountMinor != null,
@@ -260,7 +260,7 @@ class FinanceDataStore extends ChangeNotifier {
 
   int get totalAssetsMinor {
     return accounts
-        .where((account) => account.includeInNetWorth)
+        .where((account) => account.isVisible && account.includeInNetWorth)
         .map((account) => balanceForAccount(account.id))
         .where((balance) => balance > 0)
         .fold(0, (total, balance) => total + balance);
@@ -268,7 +268,7 @@ class FinanceDataStore extends ChangeNotifier {
 
   int get totalLiabilitiesMinor {
     return accounts
-        .where((account) => account.includeInNetWorth)
+        .where((account) => account.isVisible && account.includeInNetWorth)
         .map((account) => balanceForAccount(account.id))
         .where((balance) => balance < 0)
         .fold(0, (total, balance) => total + balance);
@@ -280,6 +280,7 @@ class FinanceDataStore extends ChangeNotifier {
     return accounts
         .where(
           (account) =>
+              account.isVisible &&
               account.includeInGroupBalance &&
               (account.group == AccountGroup.banking ||
                   account.group == AccountGroup.cash),
@@ -448,6 +449,15 @@ class FinanceDataStore extends ChangeNotifier {
     await saveAccount(account);
   }
 
+  Future<void> deleteAccount(String accountId) async {
+    final existing = accountById(accountId);
+    final account = existing.copyWith(
+      isArchived: true,
+      sync: existing.sync.deleted(deviceId: deviceId),
+    );
+    await saveAccount(account);
+  }
+
   Future<void> moveAccountWithinGroup({
     required String accountId,
     required int direction,
@@ -456,7 +466,7 @@ class FinanceDataStore extends ChangeNotifier {
     final account = accountById(accountId);
     final groupAccounts =
         accounts
-            .where((item) => !item.isArchived && item.group == account.group)
+            .where((item) => item.isVisible && item.group == account.group)
             .toList(growable: false)
           ..sort(compareAccountDisplayOrder);
     final fromIndex = groupAccounts.indexWhere((item) => item.id == accountId);
