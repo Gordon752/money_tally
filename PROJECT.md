@@ -354,6 +354,7 @@ Before larger multi-device use, define merge rules:
 
 - Highest `updatedAt` wins for ordinary edits.
 - Deletes/archives must win over older edits.
+- Remote repositories must load tombstone records instead of filtering them out. UI selectors decide visibility. This prevents a deleted remote record from looking like an empty remote dataset and being resurrected by local seeding.
 - Transactions should be append-friendly.
 - Balance adjustment conflicts should be represented by explicit adjustment records.
 - Snapshot backup export/import must preserve ids and sync metadata.

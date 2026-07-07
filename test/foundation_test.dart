@@ -415,6 +415,25 @@ void main() {
     expect(remote.savedAccounts, isEmpty);
   });
 
+  test('store treats remote tombstones as existing sync data', () async {
+    final deletedChecking = _dataSet().accounts
+        .firstWhere((account) => account.id == 'checking')
+        .copyWith(
+          isArchived: true,
+          sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)).deleted(),
+        );
+    final remote = FakeRecordRepository(
+      dataSet: _emptyDataSet().copyWith(accounts: [deletedChecking]),
+    );
+    final store = FinanceDataStore(dataSet: _dataSet());
+
+    await store.attachRemoteSync(remoteRepository: remote, userId: 'user-1');
+
+    expect(store.accountById('checking').isDeleted, isTrue);
+    expect(store.activeAccountsInDisplayOrder, isEmpty);
+    expect(remote.savedAccounts, isEmpty);
+  });
+
   test(
     'budget spending includes matching transaction and split categories',
     () {

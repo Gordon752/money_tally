@@ -62,23 +62,18 @@ class FirestoreRecordRepository implements FinanceRecordRepository {
     return FinanceDataSet(
       accounts: accountsSnapshot.docs
           .map((doc) => AccountRecord.fromJson(doc.data()))
-          .where((item) => !item.sync.isDeleted)
           .toList(),
       categories: categoriesSnapshot.docs
           .map((doc) => CategoryRecord.fromJson(doc.data()))
-          .where((item) => !item.sync.isDeleted)
           .toList(),
       transactions: transactionsSnapshot.docs
           .map((doc) => TransactionRecord.fromJson(doc.data()))
-          .where((item) => !item.sync.isDeleted)
           .toList(),
       scheduledTransactions: scheduledSnapshot.docs
           .map((doc) => ScheduledTransactionRecord.fromJson(doc.data()))
-          .where((item) => !item.sync.isDeleted)
           .toList(),
       budgets: budgetsSnapshot.docs
           .map((doc) => BudgetRecord.fromJson(doc.data()))
-          .where((item) => !item.sync.isDeleted)
           .toList(),
       preferences: preferencesSnapshot.data() == null
           ? const UserPreferences()
