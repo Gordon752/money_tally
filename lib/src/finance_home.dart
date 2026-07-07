@@ -834,6 +834,14 @@ Future<void> showTransactionOptions(
             onTap: () => Navigator.pop(sheetContext, 'duplicate'),
           ),
           ListTile(
+            enabled: transaction.type != TransactionType.adjustment,
+            leading: const Icon(Icons.event_repeat_outlined),
+            title: const Text('Make Scheduled'),
+            onTap: transaction.type != TransactionType.adjustment
+                ? () => Navigator.pop(sheetContext, 'schedule')
+                : null,
+          ),
+          ListTile(
             leading: const Icon(Icons.delete_outline),
             title: const Text('Delete'),
             textColor: AppTheme.rose,
@@ -851,6 +859,8 @@ Future<void> showTransactionOptions(
       await showTransactionDialog(context, transaction: transaction);
     case 'duplicate':
       await duplicateTransaction(context, transaction);
+    case 'schedule':
+      await makeTransactionScheduled(context, transaction);
     case 'delete':
       await deleteTransaction(context, transaction);
   }
@@ -890,6 +900,50 @@ Future<void> deleteTransaction(
       sync: transaction.sync.deleted(deviceId: dataStore.deviceId),
     ),
   );
+}
+
+Future<void> makeTransactionScheduled(
+  BuildContext context,
+  TransactionRecord transaction,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final schedule = v2_scheduled.ScheduledTransactionRecord(
+    id: 'sched_${DateTime.now().microsecondsSinceEpoch}',
+    type: transaction.type,
+    accountId: transaction.accountId,
+    transferAccountId: transaction.type == TransactionType.transfer
+        ? transaction.transferAccountId
+        : null,
+    categoryId: transaction.type == TransactionType.transfer
+        ? null
+        : transaction.categoryId,
+    payee: transaction.payee,
+    amountMinor: transaction.amountMinor.abs(),
+    nextDate: firstMonthlyDateAfter(transaction.date, DateTime.now()),
+    frequency: v2_scheduled.RecurrenceFrequency.monthly,
+    sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+  );
+  await dataStore.saveScheduledTransaction(schedule);
+  await dataStore.saveTransaction(
+    transaction.copyWith(scheduledTransactionId: schedule.id),
+  );
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('Scheduled ${transaction.payee} monthly')),
+  );
+}
+
+DateTime firstMonthlyDateAfter(DateTime sourceDate, DateTime now) {
+  final today = DateTime(now.year, now.month, now.day);
+  var candidate = DateTime(
+    sourceDate.year,
+    sourceDate.month + 1,
+    sourceDate.day,
+  );
+  while (!candidate.isAfter(today)) {
+    candidate = DateTime(candidate.year, candidate.month + 1, candidate.day);
+  }
+  return candidate;
 }
 
 class BudgetsView extends StatelessWidget {

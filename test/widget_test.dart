@@ -310,6 +310,41 @@ void main() {
     expect(find.text('Walmart Grocery'), findsOneWidget);
   });
 
+  testWidgets('ledger long press can make transaction scheduled', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Walmart').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Make Scheduled'));
+    await tester.pumpAndSettle();
+
+    final schedule = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.payee == 'Walmart',
+    );
+    expect(schedule.type, v2_transaction.TransactionType.expense);
+    expect(schedule.accountId, 'checking');
+    expect(schedule.categoryId, 'walmart');
+    expect(schedule.frequency, v2_scheduled.RecurrenceFrequency.monthly);
+    expect(schedule.nextDate.isAfter(DateTime.now()), isTrue);
+
+    final transaction = dataStore.transactions.singleWhere(
+      (item) => item.payee == 'Walmart',
+    );
+    expect(transaction.scheduledTransactionId, schedule.id);
+  });
+
   testWidgets('add transaction dialog honors default income preference', (
     tester,
   ) async {
