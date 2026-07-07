@@ -3446,6 +3446,8 @@ Future<void> showTransferDialog(
   }
 
   final payee = TextEditingController(text: 'Transfer');
+  final date = TextEditingController(text: dateInput(DateTime.now()));
+  final note = TextEditingController();
   var amountMinor = 0;
   var fromAccountId =
       accounts.any((account) => account.id == initialFromAccountId)
@@ -3461,6 +3463,8 @@ Future<void> showTransferDialog(
           String fromAccountId,
           String toAccountId,
           String payee,
+          DateTime date,
+          String note,
           int amountMinor,
         })
       >(
@@ -3470,60 +3474,82 @@ Future<void> showTransferDialog(
             title: const Text('Add transfer'),
             content: SizedBox(
               width: 420,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: payee,
-                    decoration: const InputDecoration(labelText: 'Payee'),
-                  ),
-                  const SizedBox(height: 12),
-                  AmountEntryField(
-                    initialMinor: amountMinor,
-                    currency: dataStore.preferences.currency,
-                    labelText: 'Amount',
-                    autofocus: true,
-                    onChanged: (value) => amountMinor = value,
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: fromAccountId,
-                    decoration: const InputDecoration(labelText: 'From'),
-                    items: [
-                      for (final account in accounts)
-                        DropdownMenuItem(
-                          value: account.id,
-                          child: Text(account.name),
-                        ),
-                    ],
-                    onChanged: (value) => setDialogState(() {
-                      fromAccountId = value ?? fromAccountId;
-                      if (toAccountId == fromAccountId) {
-                        toAccountId = accounts
-                            .firstWhere(
-                              (account) => account.id != fromAccountId,
-                            )
-                            .id;
-                      }
-                    }),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: toAccountId,
-                    decoration: const InputDecoration(labelText: 'To'),
-                    items: [
-                      for (final account in accounts)
-                        if (account.id != fromAccountId)
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      key: const ValueKey('transfer-payee'),
+                      controller: payee,
+                      decoration: const InputDecoration(labelText: 'Payee'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      key: const ValueKey('transfer-date'),
+                      controller: date,
+                      keyboardType: TextInputType.datetime,
+                      decoration: const InputDecoration(
+                        labelText: 'Date',
+                        hintText: 'YYYY-MM-DD',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      key: const ValueKey('transfer-note'),
+                      controller: note,
+                      decoration: const InputDecoration(labelText: 'Note'),
+                      minLines: 1,
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 12),
+                    AmountEntryField(
+                      fieldKey: const ValueKey('transfer-amount'),
+                      initialMinor: amountMinor,
+                      currency: dataStore.preferences.currency,
+                      labelText: 'Amount',
+                      autofocus: true,
+                      onChanged: (value) => amountMinor = value,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: fromAccountId,
+                      decoration: const InputDecoration(labelText: 'From'),
+                      items: [
+                        for (final account in accounts)
                           DropdownMenuItem(
                             value: account.id,
                             child: Text(account.name),
                           ),
-                    ],
-                    onChanged: (value) => setDialogState(
-                      () => toAccountId = value ?? toAccountId,
+                      ],
+                      onChanged: (value) => setDialogState(() {
+                        fromAccountId = value ?? fromAccountId;
+                        if (toAccountId == fromAccountId) {
+                          toAccountId = accounts
+                              .firstWhere(
+                                (account) => account.id != fromAccountId,
+                              )
+                              .id;
+                        }
+                      }),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: toAccountId,
+                      decoration: const InputDecoration(labelText: 'To'),
+                      items: [
+                        for (final account in accounts)
+                          if (account.id != fromAccountId)
+                            DropdownMenuItem(
+                              value: account.id,
+                              child: Text(account.name),
+                            ),
+                      ],
+                      onChanged: (value) => setDialogState(
+                        () => toAccountId = value ?? toAccountId,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             actions: [
@@ -3538,6 +3564,8 @@ Future<void> showTransferDialog(
                   payee: payee.text.trim().isEmpty
                       ? 'Transfer'
                       : payee.text.trim(),
+                  date: parseDateInput(date.text, DateTime.now()),
+                  note: note.text.trim(),
                   amountMinor: amountMinor.abs(),
                 )),
                 child: const Text('Add'),
@@ -3551,9 +3579,10 @@ Future<void> showTransferDialog(
   await dataStore.addTransfer(
     fromAccountId: result.fromAccountId,
     toAccountId: result.toAccountId,
-    date: DateTime.now(),
+    date: result.date,
     payee: result.payee,
     amountMinor: result.amountMinor,
+    note: result.note,
   );
 }
 

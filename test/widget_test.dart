@@ -719,8 +719,18 @@ void main() {
     await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
-    final fields = find.byType(TextField);
-    await tester.enterText(fields.at(1), '50.00');
+    await tester.enterText(
+      find.byKey(const ValueKey('transfer-date')),
+      '2026-07-05',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transfer-note')),
+      'ATM cash',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transfer-amount')),
+      '5000',
+    );
     await tester.tap(find.text('Add').last);
     await tester.pumpAndSettle();
 
@@ -729,6 +739,8 @@ void main() {
           transaction.type == v2_transaction.TransactionType.transfer,
     );
     expect(transfer.transferAccountId, 'cash');
+    expect(transfer.date, DateTime(2026, 7, 5));
+    expect(transfer.note, 'ATM cash');
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
     expect(find.text(r'$1,802.40'), findsWidgets);
