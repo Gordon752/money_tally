@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../domain/account.dart';
 import '../../domain/money.dart';
 import '../design_tokens.dart';
+import '../money_format.dart';
 import 'money_text.dart';
 
 class AccountCard extends StatelessWidget {
@@ -25,6 +26,7 @@ class AccountCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final metric = _accountMetric();
     return Card(
       child: InkWell(
         onTap: onTap,
@@ -32,48 +34,95 @@ class AccountCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.card),
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
-          child: Row(
+          child: Column(
             children: [
-              if (leading != null) ...[
-                leading!,
-                const SizedBox(width: AppSpacing.sm),
-              ],
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      account.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      softWrap: false,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      _groupLabel(account.group.name),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      softWrap: false,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+              Row(
+                children: [
+                  if (leading != null) ...[
+                    leading!,
+                    const SizedBox(width: AppSpacing.sm),
                   ],
-                ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          account.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          _groupLabel(account.group.name),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  MoneyText(
+                    amountMinor: balanceMinor,
+                    currency: currency,
+                    color: balanceMinor < 0 ? AppColors.danger : null,
+                  ),
+                ],
               ),
-              MoneyText(
-                amountMinor: balanceMinor,
-                currency: currency,
-                color: balanceMinor < 0 ? AppColors.danger : null,
-              ),
+              if (metric != null) ...[
+                const SizedBox(height: AppSpacing.sm),
+                _AccountMetricBar(metric: metric),
+              ],
             ],
           ),
         ),
       ),
     );
+  }
+
+  _AccountMetric? _accountMetric() {
+    final formatter = MoneyFormatter(currency);
+    switch (account.type) {
+      case AccountType.creditCard:
+        final limit = account.creditLimitMinor;
+        if (limit == null || limit <= 0) return null;
+        final used = balanceMinor.isNegative ? balanceMinor.abs() : 0;
+        final progress = (used / limit).clamp(0.0, 1.0).toDouble();
+        return _AccountMetric(
+          label:
+              'Credit used ${formatter.formatMinor(used)} of ${formatter.formatMinor(limit)}',
+          progress: progress,
+          isOver: used > limit,
+        );
+      case AccountType.loan:
+        final original = account.originalLoanAmountMinor;
+        if (original == null || original <= 0) return null;
+        final remaining = balanceMinor.abs();
+        final rawPaidDown = original - remaining;
+        final paidDown = rawPaidDown < 0
+            ? 0
+            : rawPaidDown > original
+            ? original
+            : rawPaidDown;
+        return _AccountMetric(
+          label:
+              'Paid down ${formatter.formatMinor(paidDown)} of ${formatter.formatMinor(original)}',
+          progress: paidDown / original,
+        );
+      case AccountType.checking:
+      case AccountType.savings:
+      case AccountType.cash:
+      case AccountType.otherBanking:
+        return null;
+    }
   }
 
   String _groupLabel(String groupName) {
@@ -84,5 +133,57 @@ class AccountCard extends StatelessWidget {
       'loans' => 'Loans',
       _ => groupName,
     };
+  }
+}
+
+class _AccountMetric {
+  const _AccountMetric({
+    required this.label,
+    required this.progress,
+    this.isOver = false,
+  });
+
+  final String label;
+  final double progress;
+  final bool isOver;
+}
+
+class _AccountMetricBar extends StatelessWidget {
+  const _AccountMetricBar({required this.metric});
+
+  final _AccountMetric metric;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = metric.progress.clamp(0.0, 1.0).toDouble();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          metric.label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontFeatures: const [AppTextStyles.tabularFigures],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xxs),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadii.pill),
+          child: SizedBox(
+            height: 6,
+            child: LinearProgressIndicator(
+              value: progress,
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest,
+              color: metric.isOver ? AppColors.danger : AppColors.accent,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }

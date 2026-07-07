@@ -425,39 +425,47 @@ class AccountsView extends StatelessWidget {
               builder: (context) {
                 final isCollapsed = store.preferences.collapsedAccountGroupNames
                     .contains(group.name);
-                return SectionHeader(
-                  key: ValueKey('account-group-${group.name}'),
-                  title: accountGroupLabel(group),
-                  subtitle: money(
-                    accounts
-                        .where(
-                          (account) =>
-                              account.group == group &&
-                              account.includeInGroupBalance,
-                        )
-                        .fold(
-                          0,
-                          (total, account) =>
-                              total + store.balanceForAccount(account.id),
+                final progress = accountGroupProgress(context, store, group);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SectionHeader(
+                      key: ValueKey('account-group-${group.name}'),
+                      title: accountGroupLabel(group),
+                      subtitle: money(
+                        accounts
+                            .where(
+                              (account) =>
+                                  account.group == group &&
+                                  account.includeInGroupBalance,
+                            )
+                            .fold(
+                              0,
+                              (total, account) =>
+                                  total + store.balanceForAccount(account.id),
+                            ),
+                        store.preferences.currency,
+                      ),
+                      trailing: IconButton(
+                        tooltip: isCollapsed
+                            ? 'Expand ${accountGroupLabel(group)}'
+                            : 'Collapse ${accountGroupLabel(group)}',
+                        onPressed: () => toggleAccountGroupCollapsed(
+                          context,
+                          group,
+                          isCollapsed: isCollapsed,
                         ),
-                    store.preferences.currency,
-                  ),
-                  trailing: IconButton(
-                    tooltip: isCollapsed
-                        ? 'Expand ${accountGroupLabel(group)}'
-                        : 'Collapse ${accountGroupLabel(group)}',
-                    onPressed: () => toggleAccountGroupCollapsed(
-                      context,
-                      group,
-                      isCollapsed: isCollapsed,
+                        icon: Icon(
+                          isCollapsed
+                              ? Icons.keyboard_arrow_right
+                              : Icons.keyboard_arrow_down,
+                        ),
+                      ),
+                      onLongPress: () =>
+                          showAccountGroupActions(context, group),
                     ),
-                    icon: Icon(
-                      isCollapsed
-                          ? Icons.keyboard_arrow_right
-                          : Icons.keyboard_arrow_down,
-                    ),
-                  ),
-                  onLongPress: () => showAccountGroupActions(context, group),
+                    if (progress != null && !isCollapsed) progress,
+                  ],
                 );
               },
             ),
@@ -485,6 +493,93 @@ class AccountsView extends StatelessWidget {
               ),
           ],
       ],
+    );
+  }
+}
+
+Widget? accountGroupProgress(
+  BuildContext context,
+  FinanceDataStore store,
+  v2_account.AccountGroup group,
+) {
+  switch (group) {
+    case v2_account.AccountGroup.creditCards:
+      final limit = store.creditLimitMinorForGroup(group);
+      if (limit <= 0) return null;
+      final used = store.creditUsedMinorForGroup(group);
+      return AccountGroupProgressStrip(
+        label:
+            'Credit used ${money(used, store.preferences.currency)} of ${money(limit, store.preferences.currency)}',
+        progress: used / limit,
+        isOver: used > limit,
+      );
+    case v2_account.AccountGroup.loans:
+      final original = store.originalLoanAmountMinorForGroup(group);
+      if (original <= 0) return null;
+      final remaining = store.remainingLoanMinorForGroup(group);
+      final rawPaidDown = original - remaining;
+      final paidDown = rawPaidDown < 0
+          ? 0
+          : rawPaidDown > original
+          ? original
+          : rawPaidDown;
+      return AccountGroupProgressStrip(
+        label:
+            'Paid down ${money(paidDown, store.preferences.currency)} of ${money(original, store.preferences.currency)}',
+        progress: paidDown / original,
+      );
+    case v2_account.AccountGroup.banking:
+    case v2_account.AccountGroup.cash:
+      return null;
+  }
+}
+
+class AccountGroupProgressStrip extends StatelessWidget {
+  const AccountGroupProgressStrip({
+    required this.label,
+    required this.progress,
+    this.isOver = false,
+    super.key,
+  });
+
+  final String label;
+  final double progress;
+  final bool isOver;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = progress.clamp(0.0, 1.0).toDouble();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            softWrap: false,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontFeatures: const [AppTextStyles.tabularFigures],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxs),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadii.pill),
+            child: SizedBox(
+              height: 6,
+              child: LinearProgressIndicator(
+                value: value,
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest,
+                color: isOver ? AppColors.danger : AppColors.accent,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

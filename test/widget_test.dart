@@ -691,6 +691,7 @@ void main() {
     final account = dataStore.accountById('card');
     expect(account.creditLimitMinor, 250000);
     expect(dataStore.creditAvailableMinorForAccount('card'), 206178);
+    expect(find.text(r'Credit used $438.22 of $2,500.00'), findsWidgets);
   });
 
   testWidgets('account long press can add expense for selected account', (
