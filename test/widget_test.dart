@@ -950,6 +950,35 @@ void main() {
     expect(find.text('Fuel'), findsOneWidget);
   });
 
+  testWidgets('budget long press can rename budget', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Budgets').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Dining'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, 'Food');
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      dataStore.budgets.singleWhere((item) => item.id == 'b1').name,
+      'Food',
+    );
+    expect(find.text('Food'), findsOneWidget);
+  });
+
   testWidgets('budget long press archives budget', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(
