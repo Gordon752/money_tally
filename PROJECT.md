@@ -211,6 +211,7 @@ Target fields:
 - `type`: banking, cash, creditCard, loan
 - `openingBalanceMinor`
 - `creditLimitMinor` for credit card accounts only
+- `originalLoanAmountMinor` for loan accounts only
 - `currentBalanceMinor` or derived balance strategy
 - `isArchived`
 - `includeInGroupBalance`
@@ -220,6 +221,8 @@ Target fields:
 Settled balance rule: account balances are derived from opening balance plus ledger activity. Expenses, income, transfers, and balance adjustments are all ledger transactions. The app should not silently mutate account balances. `Adjust Balance` creates an explicit adjustment transaction so the balance change remains auditable, exportable, and syncable. The app can cache computed balances for performance later, but the ledger remains the source of truth.
 
 Credit card rule: credit cards may optionally store a `creditLimitMinor`. Credit used should be derived from the account balance, not stored separately. Account cards for credit cards can show used credit, available credit, and a clean minimalist utilization bar. The Credit Cards group card can show total used versus total limit across included cards. If a card has no limit, hide utilization for that card or exclude it from group utilization calculations rather than showing misleading percentages.
+
+Loan payoff rule: loan accounts may optionally store an `originalLoanAmountMinor`. The remaining payoff amount should be derived from the current ledger balance. Loan account cards can show remaining balance, amount paid down, and a clean minimalist payoff progress bar. The Loans group card can show total remaining versus total original loan amount across included loans. If a loan has no original amount, hide payoff percentage for that loan or exclude it from group payoff calculations.
 
 ### Category
 
@@ -287,10 +290,13 @@ Target fields:
 - `alertPreference`
 - `customAlertTime`
 - `repeatAlertUntilResolved`
+- `autoPostEnabled`
+- `autoPostAt`
+- `autoPostNotificationEnabled`
 - `lastAction`: paid, skipped, none
 - sync metadata
 
-Scheduled transactions should not silently post unless an explicit future preference is added. Initial behavior should remind, allow Mark Paid, Skip Once, Edit, Duplicate, and Delete.
+Scheduled transactions should not silently post by default. Auto-posting is an explicit per-scheduled-transaction option. When enabled, the app creates the real ledger transaction at the configured scheduled date/time if the item has not already been marked paid or skipped. If the user manually marks it paid before the due date, auto-posting should not create a duplicate transaction and no auto-post notification should fire. If the app auto-posts the transaction, the user should receive a clear notification that the transaction was posted, unless they disabled that notification for the item.
 
 ### Budget
 
@@ -375,7 +381,7 @@ Do not build all export features immediately, but keep models serializable, stab
 
 ## Notifications
 
-Use local notifications for scheduled transaction alerts through a dedicated `NotificationScheduler` service. UI screens should not schedule notifications directly.
+Use local notifications for scheduled transaction alerts and auto-post confirmations through a dedicated `NotificationScheduler` service. UI screens should not schedule notifications directly.
 
 Required alert options:
 
@@ -394,7 +400,7 @@ Notification scheduling should live outside UI screens in a notification service
 
 Platform note: iOS, iPadOS, macOS, and Android notification permissions and badge behavior differ. Hide platform-specific details behind `NotificationScheduler`.
 
-Settled notification rule: use `flutter_local_notifications`, ask permission only when the user enables alerts, keep initial behavior reminder-only with no auto-posting, and keep badge counts focused on due or overdue scheduled items.
+Settled notification rule: use `flutter_local_notifications`, ask permission only when the user enables alerts or auto-post confirmations, keep auto-posting opt-in per item, and keep badge counts focused on due or overdue scheduled items that still need attention.
 
 ## Coding Conventions
 
@@ -509,6 +515,8 @@ Features:
 - Scheduled expense
 - Scheduled income
 - Scheduled transfer
+- Optional auto-post at scheduled date/time
+- Notification when an auto-posted transaction is created
 - Collapsible calendar at top
 - Mark dates that have scheduled items
 - List scheduled items below calendar
