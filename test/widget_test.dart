@@ -747,6 +747,34 @@ void main() {
     expect(find.text('Add transfer'), findsOneWidget);
   });
 
+  testWidgets('add transaction honors last used transfer preference', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            defaultTransactionType: DefaultTransactionType.lastUsed,
+            lastUsedTransactionType: v2_transaction.TransactionType.transfer,
+          ),
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add transaction'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add transfer'), findsOneWidget);
+  });
+
   testWidgets('add transaction dialog saves entered date', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(
