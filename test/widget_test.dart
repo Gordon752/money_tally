@@ -1257,6 +1257,47 @@ void main() {
     expect(scheduled.lastAction, v2_scheduled.ScheduledAction.none);
   });
 
+  testWidgets('scheduled long press can mark transfer paid', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final scheduledTransfer = rentSchedule().copyWith(
+      type: v2_transaction.TransactionType.transfer,
+      transferAccountId: 'cash',
+      payee: 'Cash draw',
+      amountMinor: 5000,
+      clearCategory: true,
+    );
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(scheduledTransactions: [scheduledTransfer]);
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Cash draw'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark Paid'));
+    await tester.pumpAndSettle();
+
+    final paid = dataStore.transactions.singleWhere(
+      (transaction) => transaction.scheduledTransactionId == 'sched-rent',
+    );
+    expect(paid.type, v2_transaction.TransactionType.transfer);
+    expect(paid.accountId, 'checking');
+    expect(paid.transferAccountId, 'cash');
+    expect(paid.categoryId, isNull);
+    expect(paid.amountMinor, 5000);
+
+    final scheduled = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.id == 'sched-rent',
+    );
+    expect(scheduled.nextDate, DateTime(2026, 9));
+    expect(scheduled.lastAction, v2_scheduled.ScheduledAction.none);
+  });
+
   testWidgets('scheduled long press can duplicate and delete item', (
     tester,
   ) async {
