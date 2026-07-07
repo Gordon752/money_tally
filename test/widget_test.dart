@@ -313,6 +313,48 @@ void main() {
     expect(find.byTooltip('Collapse Everyday Money'), findsOneWidget);
   });
 
+  testWidgets('account long press can reorder account within group', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final savings = legacyStore.addAccount(
+      name: 'Savings',
+      type: AccountType.savings,
+      balanceCents: 10000,
+    );
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            launchScreen: LaunchScreen.accounts,
+          ),
+        );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    expect(
+      dataStore.activeAccountsInDisplayOrder
+          .where((account) => account.group == v2_account.AccountGroup.banking)
+          .map((account) => account.id),
+      ['checking', savings.id],
+    );
+
+    await tester.longPress(find.text('Savings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Move Up'));
+    await tester.pumpAndSettle();
+
+    expect(
+      dataStore.activeAccountsInDisplayOrder
+          .where((account) => account.group == v2_account.AccountGroup.banking)
+          .map((account) => account.id),
+      [savings.id, 'checking'],
+    );
+  });
+
   testWidgets('ledger screen renders v2 transaction rows', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 
