@@ -97,6 +97,17 @@ void main() {
     );
   });
 
+  testWidgets('accounts screen renders v2 account cards', (tester) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Accounts').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Checking'), findsOneWidget);
+    expect(find.text('Banking'), findsOneWidget);
+    expect(find.text('Adjust balance'), findsNothing);
+  });
+
   test('legacy v2 mirror refreshes in-memory v2 balances', () async {
     final legacyStore = FinanceStore.seeded();
     final dataStore = FinanceDataStore(

@@ -47,7 +47,7 @@ class AccountCard extends StatelessWidget {
                     ),
                     const SizedBox(height: AppSpacing.xxs),
                     Text(
-                      account.group.name,
+                      _groupLabel(account.group.name),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -64,5 +64,15 @@ class AccountCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _groupLabel(String groupName) {
+    return switch (groupName) {
+      'banking' => 'Banking',
+      'cash' => 'Cash',
+      'creditCards' => 'Credit Cards',
+      'loans' => 'Loans',
+      _ => groupName,
+    };
   }
 }

@@ -252,49 +252,19 @@ class AccountsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
+    final store = FinanceDataStoreScope.watch(context);
     return ResponsiveGrid(
       minTileWidth: 300,
       children: [
         for (final account in store.accounts)
-          AppCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(accountIcon(account.type), color: AppTheme.accent),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        account.name,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  money(account.balanceCents),
-                  style: TextStyle(
-                    color: account.balanceCents < 0
-                        ? AppTheme.rose
-                        : AppTheme.ink,
-                    fontSize: 32,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: () => showAdjustBalanceDialog(context, account),
-                  icon: const Icon(Icons.tune),
-                  label: const Text('Adjust balance'),
-                ),
-              ],
+          AccountCard(
+            account: account,
+            balanceMinor: store.balanceForAccount(account.id),
+            leading: Icon(
+              accountGroupIcon(account.group.name),
+              color: AppTheme.accent,
             ),
+            onLongPress: () => showAccountOptions(context, account.id),
           ),
       ],
     );
@@ -808,6 +778,31 @@ Future<void> showAdjustBalanceDialog(
   if (value != null) store.adjustAccountBalance(account.id, value);
 }
 
+Future<void> showAccountOptions(BuildContext context, String accountId) async {
+  final store = FinanceStoreScope.watch(context);
+  final account = store.accountById(accountId);
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (context) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.tune),
+            title: const Text('Adjust Balance'),
+            onTap: () => Navigator.pop(context, 'adjust'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (action == 'adjust' && context.mounted) {
+    await showAdjustBalanceDialog(context, account);
+  }
+}
+
 Future<void> showTransactionDialog(BuildContext context) async {
   final store = FinanceStoreScope.watch(context);
   final payee = TextEditingController();
@@ -969,6 +964,15 @@ IconData accountIcon(AccountType type) {
     AccountType.savings => Icons.savings_outlined,
     AccountType.creditCard => Icons.credit_card_outlined,
     AccountType.loan => Icons.request_quote_outlined,
+  };
+}
+
+IconData accountGroupIcon(String groupName) {
+  return switch (groupName) {
+    'cash' => Icons.payments_outlined,
+    'creditCards' => Icons.credit_card_outlined,
+    'loans' => Icons.request_quote_outlined,
+    _ => Icons.account_balance_outlined,
   };
 }
 

@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'firebase_options.dart';
+import 'src/design/widgets/account_card.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
 import 'src/persistence/local_finance_data_set_repository.dart';
 import 'src/store/finance_data_store.dart';
