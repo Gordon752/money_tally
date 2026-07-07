@@ -70,6 +70,9 @@ void main() {
     expect(find.text('Money Tally'), findsOneWidget);
     expect(find.text('Dashboard'), findsWidgets);
     expect(find.text('NET WORTH'), findsOneWidget);
+    expect(find.text('TOTAL ASSETS'), findsOneWidget);
+    expect(find.text('AVAILABLE CASH'), findsOneWidget);
+    expect(find.text('MONTH EXPENSES'), findsOneWidget);
     expect(find.text('Accounts'), findsWidgets);
   });
 

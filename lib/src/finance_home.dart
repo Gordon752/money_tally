@@ -207,28 +207,57 @@ class DashboardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
+    final store = FinanceDataStoreScope.watch(context);
+    final scheduled = [...store.scheduledTransactions]
+      ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
+    final incomeThisMonth = store.incomeThisMonthMinor();
+    final expensesThisMonth = store.expensesThisMonthMinor();
     return Column(
       children: [
         ResponsiveGrid(
           children: [
             SummaryCard(
               label: 'Net worth',
-              value: money(store.netWorthCents),
+              value: money(store.netWorthMinor),
               icon: Icons.account_balance_wallet_outlined,
               isPrimary: true,
             ),
             SummaryCard(
-              label: 'Upcoming',
-              value: store.upcomingScheduled.isEmpty
-                  ? 'None'
-                  : dateShort(store.upcomingScheduled.first.nextDate),
-              icon: Icons.notifications_active_outlined,
+              label: 'Total assets',
+              value: money(store.totalAssetsMinor),
+              icon: Icons.trending_up,
             ),
             SummaryCard(
-              label: 'Monthly budgets',
-              value: '${store.budgets.length}',
-              icon: Icons.pie_chart_outline,
+              label: 'Total liabilities',
+              value: money(store.totalLiabilitiesMinor.abs()),
+              icon: Icons.request_quote_outlined,
+            ),
+            SummaryCard(
+              label: 'Available cash',
+              value: money(store.availableCashMinor),
+              icon: Icons.payments_outlined,
+            ),
+            SummaryCard(
+              label: 'Month income',
+              value: money(incomeThisMonth),
+              icon: Icons.add_circle_outline,
+            ),
+            SummaryCard(
+              label: 'Month expenses',
+              value: money(expensesThisMonth),
+              icon: Icons.remove_circle_outline,
+            ),
+            SummaryCard(
+              label: 'Month remaining',
+              value: money(incomeThisMonth - expensesThisMonth),
+              icon: Icons.savings_outlined,
+            ),
+            SummaryCard(
+              label: 'Next scheduled',
+              value: scheduled.isEmpty
+                  ? 'None'
+                  : dateShort(scheduled.first.nextDate),
+              icon: Icons.notifications_active_outlined,
             ),
           ],
         ),
@@ -422,7 +451,7 @@ class AccountBalancePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
+    final store = FinanceDataStoreScope.watch(context);
     return AppCard(
       title: 'Accounts',
       child: Column(
@@ -430,8 +459,8 @@ class AccountBalancePanel extends StatelessWidget {
           for (final account in store.accounts)
             MetricRow(
               label: account.name,
-              value: money(account.balanceCents),
-              icon: accountIcon(account.type),
+              value: money(store.balanceForAccount(account.id)),
+              icon: accountGroupIcon(account.group.name),
             ),
         ],
       ),
@@ -444,15 +473,18 @@ class UpcomingPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
+    final store = FinanceDataStoreScope.watch(context);
+    final scheduled = [...store.scheduledTransactions]
+      ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
     return AppCard(
       title: 'Scheduled',
       child: Column(
         children: [
-          for (final item in store.upcomingScheduled.take(3))
+          for (final item in scheduled.take(3))
             MetricRow(
               label: item.payee,
-              value: '${money(item.amountCents)} · ${dateShort(item.nextDate)}',
+              value:
+                  '${money(item.type.name == 'expense' ? -item.amountMinor.abs() : item.amountMinor)} · ${dateShort(item.nextDate)}',
               icon: Icons.event_repeat_outlined,
             ),
         ],
@@ -486,15 +518,28 @@ class RecentTransactionsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
+    final store = FinanceDataStoreScope.watch(context);
+    final transactions = [...store.transactions]
+      ..sort((a, b) => b.date.compareTo(a.date));
+    final accountsById = {
+      for (final account in store.accounts) account.id: account,
+    };
+    final categoriesById = {
+      for (final category in store.categories) category.id: category,
+    };
     return AppCard(
       title: 'Recent ledger',
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Column(
         children: [
-          const SizedBox(height: 8),
-          for (final transaction in store.recentTransactions.take(3))
-            TransactionTile(transaction: transaction),
+          for (final transaction in transactions.take(3))
+            TransactionRow(
+              transaction: transaction,
+              accountName: accountsById[transaction.accountId]?.name,
+              categoryName: transaction.categoryId == null
+                  ? null
+                  : categoriesById[transaction.categoryId]?.name,
+            ),
         ],
       ),
     );

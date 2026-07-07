@@ -212,6 +212,48 @@ void main() {
       );
     },
   );
+
+  test('store reports available cash and this-month totals', () {
+    final dataSet = _dataSet().copyWith(
+      transactions: [
+        TransactionRecord(
+          id: 'income-1',
+          type: TransactionType.income,
+          accountId: 'checking',
+          categoryId: 'income',
+          date: DateTime(2026, 7, 6),
+          payee: 'Settlement',
+          amountMinor: 50000,
+          sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+        ),
+        TransactionRecord(
+          id: 'expense-1',
+          type: TransactionType.expense,
+          accountId: 'checking',
+          categoryId: 'dining',
+          date: DateTime(2026, 7, 6),
+          payee: 'Cafe',
+          amountMinor: 1250,
+          sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+        ),
+        TransactionRecord(
+          id: 'old-expense',
+          type: TransactionType.expense,
+          accountId: 'checking',
+          categoryId: 'dining',
+          date: DateTime(2026, 6, 30),
+          payee: 'Old Cafe',
+          amountMinor: 900,
+          sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+        ),
+      ],
+    );
+    final store = FinanceDataStore(dataSet: dataSet);
+
+    expect(store.availableCashMinor, 157850);
+    expect(store.incomeThisMonthMinor(now: DateTime(2026, 7, 10)), 50000);
+    expect(store.expensesThisMonthMinor(now: DateTime(2026, 7, 10)), 1250);
+  });
 }
 
 FinanceDataSet _dataSet() {
