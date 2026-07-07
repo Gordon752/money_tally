@@ -69,6 +69,21 @@ void main() {
     expect(find.text(r'-$5.00'), findsOneWidget);
   });
 
+  testWidgets('sync pill stays compact', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SyncPill(label: 'Synced', onSignOut: () {}),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Synced'), findsOneWidget);
+    expect(tester.getSize(find.byType(SyncPill)).height, lessThanOrEqualTo(36));
+  });
+
   test('finance snapshot round trips through json', () {
     final store = FinanceStore.seeded();
     store.addCategory('Fuel');

@@ -295,26 +295,34 @@ class SyncPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_queue, color: AppTheme.accent, size: 18),
-            const SizedBox(width: 8),
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+            const Icon(Icons.cloud_queue, color: AppTheme.accent, size: 15),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+            ),
             if (onSignOut != null) ...[
-              const SizedBox(width: 6),
+              const SizedBox(width: 4),
               Tooltip(
                 message: 'Sign out',
                 child: IconButton(
                   visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    minimumSize: const Size(24, 24),
+                    fixedSize: const Size(24, 24),
+                  ),
                   constraints: const BoxConstraints.tightFor(
-                    width: 32,
-                    height: 32,
+                    width: 24,
+                    height: 24,
                   ),
                   padding: EdgeInsets.zero,
                   onPressed: onSignOut,
-                  icon: const Icon(Icons.logout, size: 18),
+                  icon: const Icon(Icons.logout, size: 15),
                 ),
               ),
             ],
