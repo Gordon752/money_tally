@@ -396,6 +396,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Insurance'), findsOneWidget);
+    expect(find.byTooltip('Collapse calendar'), findsOneWidget);
+    await tester.tap(find.byTooltip('Collapse calendar'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Expand calendar'), findsOneWidget);
     expect(find.text('Alerts are required'), findsOneWidget);
   });
 
@@ -467,6 +471,7 @@ void main() {
       (item) => item.id == 'sched-rent',
     );
     expect(original.isDeleted, isTrue);
+    expect(find.text('Rent'), findsNothing);
     expect(find.text('Rent copy'), findsOneWidget);
   });
 

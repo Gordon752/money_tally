@@ -405,20 +405,63 @@ class BudgetsView extends StatelessWidget {
   }
 }
 
-class ScheduledView extends StatelessWidget {
+class ScheduledView extends StatefulWidget {
   const ScheduledView({super.key});
+
+  @override
+  State<ScheduledView> createState() => _ScheduledViewState();
+}
+
+class _ScheduledViewState extends State<ScheduledView> {
+  var _calendarCollapsed = false;
+  late DateTime _visibleMonth = DateTime(
+    DateTime.now().year,
+    DateTime.now().month,
+  );
 
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final scheduled = [...store.scheduledTransactions]
+      ..removeWhere((item) => item.isDeleted)
       ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
+    if (scheduled.isNotEmpty &&
+        scheduled.every(
+          (item) =>
+              item.nextDate.year != _visibleMonth.year ||
+              item.nextDate.month != _visibleMonth.month,
+        )) {
+      _visibleMonth = DateTime(
+        scheduled.first.nextDate.year,
+        scheduled.first.nextDate.month,
+      );
+    }
     return AppCard(
       padding: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Column(
           children: [
+            ScheduledCalendarPreview(
+              month: _visibleMonth,
+              scheduledTransactions: scheduled,
+              isCollapsed: _calendarCollapsed,
+              onToggleCollapsed: () =>
+                  setState(() => _calendarCollapsed = !_calendarCollapsed),
+              onPreviousMonth: () => setState(
+                () => _visibleMonth = DateTime(
+                  _visibleMonth.year,
+                  _visibleMonth.month - 1,
+                ),
+              ),
+              onNextMonth: () => setState(
+                () => _visibleMonth = DateTime(
+                  _visibleMonth.year,
+                  _visibleMonth.month + 1,
+                ),
+              ),
+            ),
+            const Divider(height: 1),
             for (final item in scheduled)
               ScheduledTransactionRow(
                 scheduledTransaction: item,
@@ -438,6 +481,203 @@ class ScheduledView extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class ScheduledCalendarPreview extends StatelessWidget {
+  const ScheduledCalendarPreview({
+    required this.month,
+    required this.scheduledTransactions,
+    required this.isCollapsed,
+    required this.onToggleCollapsed,
+    required this.onPreviousMonth,
+    required this.onNextMonth,
+    super.key,
+  });
+
+  final DateTime month;
+  final List<v2_scheduled.ScheduledTransactionRecord> scheduledTransactions;
+  final bool isCollapsed;
+  final VoidCallback onToggleCollapsed;
+  final VoidCallback onPreviousMonth;
+  final VoidCallback onNextMonth;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final markedDays = {
+      for (final item in scheduledTransactions)
+        if (item.nextDate.year == month.year &&
+            item.nextDate.month == month.month)
+          item.nextDate.day,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Previous month',
+                onPressed: onPreviousMonth,
+                icon: const Icon(Icons.chevron_left),
+              ),
+              Expanded(
+                child: Text(
+                  monthLabel(month),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Next month',
+                onPressed: onNextMonth,
+                icon: const Icon(Icons.chevron_right),
+              ),
+              IconButton(
+                tooltip: isCollapsed ? 'Expand calendar' : 'Collapse calendar',
+                onPressed: onToggleCollapsed,
+                icon: Icon(
+                  isCollapsed
+                      ? Icons.keyboard_arrow_down
+                      : Icons.keyboard_arrow_up,
+                ),
+              ),
+            ],
+          ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 180),
+            crossFadeState: isCollapsed
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            firstChild: ScheduledCalendarGrid(
+              month: month,
+              markedDays: markedDays,
+            ),
+            secondChild: const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ScheduledCalendarGrid extends StatelessWidget {
+  const ScheduledCalendarGrid({
+    required this.month,
+    required this.markedDays,
+    super.key,
+  });
+
+  final DateTime month;
+  final Set<int> markedDays;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final days = daysInMonth(month);
+    final firstWeekdayOffset = DateTime(month.year, month.month).weekday % 7;
+    final rows = ((firstWeekdayOffset + days) / 7).ceil();
+    return Column(
+      children: [
+        Row(
+          children: [
+            for (final label in const ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
+              Expanded(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: AppTheme.muted,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        for (var row = 0; row < rows; row++)
+          Row(
+            children: [
+              for (var column = 0; column < 7; column++)
+                Expanded(
+                  child: ScheduledCalendarDayCell(
+                    day: dayForCalendarCell(
+                      row: row,
+                      column: column,
+                      firstWeekdayOffset: firstWeekdayOffset,
+                      daysInMonth: days,
+                    ),
+                    markedDays: markedDays,
+                  ),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class ScheduledCalendarDayCell extends StatelessWidget {
+  const ScheduledCalendarDayCell({
+    required this.day,
+    required this.markedDays,
+    super.key,
+  });
+
+  final int? day;
+  final Set<int> markedDays;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (day == null) {
+      return const SizedBox(height: 36);
+    }
+    final isMarked = markedDays.contains(day);
+    return SizedBox(
+      height: 36,
+      child: Center(
+        child: Container(
+          width: 30,
+          height: 30,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isMarked ? AppTheme.accent.withValues(alpha: 0.12) : null,
+            borderRadius: BorderRadius.circular(15),
+            border: isMarked
+                ? Border.all(color: AppTheme.accent.withValues(alpha: 0.35))
+                : null,
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Text(
+                '$day',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: isMarked ? FontWeight.w900 : FontWeight.w600,
+                  color: isMarked ? AppTheme.accent : null,
+                ),
+              ),
+              if (isMarked)
+                Positioned(
+                  bottom: 3,
+                  child: Container(
+                    width: 4,
+                    height: 4,
+                    decoration: const BoxDecoration(
+                      color: AppTheme.accent,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -2447,6 +2687,38 @@ DateTime parseDateInput(String value, DateTime fallback) {
     return DateTime(fallback.year, fallback.month, fallback.day);
   }
   return DateTime(parsed.year, parsed.month, parsed.day);
+}
+
+String monthLabel(DateTime date) {
+  const months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+  return '${months[date.month - 1]} ${date.year}';
+}
+
+int daysInMonth(DateTime month) {
+  return DateTime(month.year, month.month + 1, 0).day;
+}
+
+int? dayForCalendarCell({
+  required int row,
+  required int column,
+  required int firstWeekdayOffset,
+  required int daysInMonth,
+}) {
+  final day = row * 7 + column - firstWeekdayOffset + 1;
+  return day < 1 || day > daysInMonth ? null : day;
 }
 
 String dateShort(DateTime date) {
