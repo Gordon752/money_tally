@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/account.dart';
+import '../../domain/money.dart';
 import '../design_tokens.dart';
 import 'money_text.dart';
 
@@ -8,6 +9,7 @@ class AccountCard extends StatelessWidget {
   const AccountCard({
     required this.account,
     required this.balanceMinor,
+    this.currency = const CurrencyFormatSettings(),
     this.leading,
     this.onTap,
     this.onLongPress,
@@ -16,6 +18,7 @@ class AccountCard extends StatelessWidget {
 
   final AccountRecord account;
   final int balanceMinor;
+  final CurrencyFormatSettings currency;
   final Widget? leading;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
@@ -57,6 +60,7 @@ class AccountCard extends StatelessWidget {
               ),
               MoneyText(
                 amountMinor: balanceMinor,
+                currency: currency,
                 color: balanceMinor < 0 ? AppColors.danger : null,
               ),
             ],

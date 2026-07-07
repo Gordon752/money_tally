@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/money.dart';
 import '../../domain/scheduled_transaction.dart';
 import '../../domain/transaction.dart';
 import '../design_tokens.dart';
@@ -8,12 +9,14 @@ import 'money_text.dart';
 class ScheduledTransactionRow extends StatelessWidget {
   const ScheduledTransactionRow({
     required this.scheduledTransaction,
+    this.currency = const CurrencyFormatSettings(),
     this.onTap,
     this.onLongPress,
     super.key,
   });
 
   final ScheduledTransactionRecord scheduledTransaction;
+  final CurrencyFormatSettings currency;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
@@ -56,6 +59,7 @@ class ScheduledTransactionRow extends StatelessWidget {
             ),
             MoneyText(
               amountMinor: signedAmount,
+              currency: currency,
               color: signedAmount < 0 ? AppColors.danger : null,
             ),
           ],

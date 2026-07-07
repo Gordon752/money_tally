@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/money.dart';
 import '../../domain/transaction.dart';
 import '../design_tokens.dart';
 import 'money_text.dart';
@@ -7,6 +8,7 @@ import 'money_text.dart';
 class TransactionRow extends StatelessWidget {
   const TransactionRow({
     required this.transaction,
+    this.currency = const CurrencyFormatSettings(),
     this.categoryName,
     this.accountName,
     this.onTap,
@@ -15,6 +17,7 @@ class TransactionRow extends StatelessWidget {
   });
 
   final TransactionRecord transaction;
+  final CurrencyFormatSettings currency;
   final String? categoryName;
   final String? accountName;
   final VoidCallback? onTap;
@@ -63,6 +66,7 @@ class TransactionRow extends StatelessWidget {
             ),
             MoneyText(
               amountMinor: signedAmount,
+              currency: currency,
               showPositiveSign: transaction.type == TransactionType.income,
               color: signedAmount < 0 ? AppColors.danger : AppColors.ink,
             ),

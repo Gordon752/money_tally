@@ -237,44 +237,45 @@ class DashboardView extends StatelessWidget {
       ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
     final incomeThisMonth = store.incomeThisMonthMinor();
     final expensesThisMonth = store.expensesThisMonthMinor();
+    final currency = store.preferences.currency;
     return Column(
       children: [
         ResponsiveGrid(
           children: [
             SummaryCard(
               label: 'Net worth',
-              value: money(store.netWorthMinor),
+              value: money(store.netWorthMinor, currency),
               icon: Icons.account_balance_wallet_outlined,
               isPrimary: true,
             ),
             SummaryCard(
               label: 'Total assets',
-              value: money(store.totalAssetsMinor),
+              value: money(store.totalAssetsMinor, currency),
               icon: Icons.trending_up,
             ),
             SummaryCard(
               label: 'Total liabilities',
-              value: money(store.totalLiabilitiesMinor.abs()),
+              value: money(store.totalLiabilitiesMinor.abs(), currency),
               icon: Icons.request_quote_outlined,
             ),
             SummaryCard(
               label: 'Available cash',
-              value: money(store.availableCashMinor),
+              value: money(store.availableCashMinor, currency),
               icon: Icons.payments_outlined,
             ),
             SummaryCard(
               label: 'Month income',
-              value: money(incomeThisMonth),
+              value: money(incomeThisMonth, currency),
               icon: Icons.add_circle_outline,
             ),
             SummaryCard(
               label: 'Month expenses',
-              value: money(expensesThisMonth),
+              value: money(expensesThisMonth, currency),
               icon: Icons.remove_circle_outline,
             ),
             SummaryCard(
               label: 'Month remaining',
-              value: money(incomeThisMonth - expensesThisMonth),
+              value: money(incomeThisMonth - expensesThisMonth, currency),
               icon: Icons.savings_outlined,
             ),
             SummaryCard(
@@ -314,6 +315,7 @@ class AccountsView extends StatelessWidget {
           AccountCard(
             account: account,
             balanceMinor: store.balanceForAccount(account.id),
+            currency: store.preferences.currency,
             leading: Icon(
               accountGroupIcon(account.group.name),
               color: AppTheme.accent,
@@ -361,6 +363,7 @@ class LedgerView extends StatelessWidget {
                 for (final transaction in transactions)
                   TransactionRow(
                     transaction: transaction,
+                    currency: store.preferences.currency,
                     accountName: accountsById[transaction.accountId]?.name,
                     categoryName: transaction.categoryId == null
                         ? null
@@ -399,7 +402,10 @@ class ScheduledView extends StatelessWidget {
         child: Column(
           children: [
             for (final item in scheduled)
-              ScheduledTransactionRow(scheduledTransaction: item),
+              ScheduledTransactionRow(
+                scheduledTransaction: item,
+                currency: store.preferences.currency,
+              ),
             const Divider(height: 1),
             const ListTile(
               leading: Icon(
@@ -716,6 +722,7 @@ class AccountBalancePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
+    final currency = store.preferences.currency;
     return AppCard(
       title: 'Accounts',
       child: Column(
@@ -723,7 +730,7 @@ class AccountBalancePanel extends StatelessWidget {
           for (final account in store.accounts)
             MetricRow(
               label: account.name,
-              value: money(store.balanceForAccount(account.id)),
+              value: money(store.balanceForAccount(account.id), currency),
               icon: accountGroupIcon(account.group.name),
             ),
         ],
@@ -738,6 +745,7 @@ class UpcomingPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
+    final currency = store.preferences.currency;
     final scheduled = [...store.scheduledTransactions]
       ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
     return AppCard(
@@ -748,7 +756,7 @@ class UpcomingPanel extends StatelessWidget {
             MetricRow(
               label: item.payee,
               value:
-                  '${money(item.type.name == 'expense' ? -item.amountMinor.abs() : item.amountMinor)} · ${dateShort(item.nextDate)}',
+                  '${money(item.type.name == 'expense' ? -item.amountMinor.abs() : item.amountMinor, currency)} · ${dateShort(item.nextDate)}',
               icon: Icons.event_repeat_outlined,
             ),
         ],
@@ -799,6 +807,7 @@ class RecentTransactionsPanel extends StatelessWidget {
           for (final transaction in transactions.take(3))
             TransactionRow(
               transaction: transaction,
+              currency: store.preferences.currency,
               accountName: accountsById[transaction.accountId]?.name,
               categoryName: transaction.categoryId == null
                   ? null
@@ -979,6 +988,7 @@ class TransactionTile extends StatelessWidget {
     final store = FinanceStoreScope.watch(context);
     final category = store.categoryById(transaction.categoryId);
     final account = store.accountById(transaction.accountId);
+    final currency = currencyForContext(context);
 
     return ListTile(
       leading: Container(
@@ -997,7 +1007,7 @@ class TransactionTile extends StatelessWidget {
         '${dateShort(transaction.date)} · ${category.name} · ${account.name}',
       ),
       trailing: Text(
-        money(transaction.amountCents),
+        money(transaction.amountCents, currency),
         style: TextStyle(
           color: transaction.amountCents < 0 ? AppTheme.rose : AppTheme.accent,
           fontWeight: FontWeight.w900,
@@ -1017,6 +1027,7 @@ class ScheduledTile extends StatelessWidget {
     final store = FinanceStoreScope.watch(context);
     final category = store.categoryById(item.categoryId);
     final account = store.accountById(item.accountId);
+    final currency = currencyForContext(context);
 
     return ListTile(
       leading: const Icon(Icons.event_repeat_outlined, color: AppTheme.accent),
@@ -1032,7 +1043,7 @@ class ScheduledTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Text(
-            money(item.amountCents),
+            money(item.amountCents, currency),
             style: const TextStyle(fontWeight: FontWeight.w900),
           ),
           Text(
@@ -1053,6 +1064,7 @@ class BudgetProgressRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
+    final currency = store.preferences.currency;
     final spent = store.spentThisMonthForBudget(budget);
     final remaining = budget.remainingMinor(spent);
     final isOver = budget.isOverBudget(spent);
@@ -1072,8 +1084,8 @@ class BudgetProgressRow extends StatelessWidget {
               ),
               Text(
                 isOver
-                    ? 'Over by ${money(remaining.abs())}'
-                    : '${money(remaining)} left',
+                    ? 'Over by ${money(remaining.abs(), currency)}'
+                    : '${money(remaining, currency)} left',
                 style: TextStyle(
                   color: isOver ? AppTheme.rose : AppTheme.muted,
                   fontWeight: FontWeight.w800,
@@ -1083,7 +1095,7 @@ class BudgetProgressRow extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Spent ${money(spent)} of ${money(budget.amountMinor)}',
+            'Spent ${money(spent, currency)} of ${money(budget.amountMinor, currency)}',
             style: const TextStyle(color: AppTheme.muted),
           ),
           const SizedBox(height: 8),
@@ -1403,12 +1415,15 @@ String thousandsSeparatorLabel(String value) {
   };
 }
 
-String money(int cents) {
-  final sign = cents < 0 ? '-' : '';
-  final abs = cents.abs();
-  final dollars = abs ~/ 100;
-  final decimal = (abs % 100).toString().padLeft(2, '0');
-  return '$sign\$$dollars.$decimal';
+CurrencyFormatSettings currencyForContext(BuildContext context) {
+  return FinanceDataStoreScope.read(context).preferences.currency;
+}
+
+String money(
+  int cents, [
+  CurrencyFormatSettings currency = const CurrencyFormatSettings(),
+]) {
+  return MoneyFormatter(currency).formatMinor(cents);
 }
 
 String dollars(int cents) => (cents / 100).toStringAsFixed(2);
