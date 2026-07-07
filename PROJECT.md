@@ -433,6 +433,7 @@ Account groups:
 - Cash
 - Credit Cards
 - Loans
+- Custom groups
 
 Features:
 
@@ -441,6 +442,9 @@ Features:
 - Archive account
 - Delete account
 - Collapsible account groups
+- Create custom account groups
+- Rename custom account groups
+- Archive/delete custom account groups
 - Reorder accounts within a group
 - Reorder account groups
 - Include in group balance
@@ -453,16 +457,19 @@ Long press account actions:
 - Transfer
 - Adjust Balance
 - Move Up / Move Down
-- Move to Group/type
+- Move to Group
+- Change account type
 - Edit
 - Archive/Delete
 
 Long press account group actions:
 
 - Collapse/Expand
+- Rename custom group
 - Move Group Up / Move Group Down
+- Archive/Delete custom group
 
-Initial rule: use fixed account groups derived from account type. Do not add custom user-defined account groups until the fixed-group behavior is stable.
+Initial rule: ship fixed account groups derived from account type first. Custom user-defined account groups are planned for a later phase after fixed-group collapse, ordering, and account movement are stable.
 
 Remove the standalone Adjust Balance button. Balance adjustments should live in account actions and should create auditable records if the ledger model supports it.
 
@@ -604,6 +611,7 @@ Exclude investment, debt payoff, credit score, and AI financial advice features.
 9. Category hierarchy affects budgets and reports; implement categories before final budget/report logic.
 10. Simulator is useful for UI/layout testing, but real iPhone and Mac remain the source of truth for Apple sign-in and sync.
 11. Account and account-group ordering should be persisted before heavy account-screen polish. Start with `sortOrder` on accounts and a group-order preference; use long-press controls before drag-and-drop.
+12. Custom account groups should be modeled separately from account type. Account type controls financial behavior; account group controls organization. Built-in groups should have stable ids and default sort orders, while custom groups should support rename, reorder, archive/delete, and moving accounts between groups.
 
 ## Development Priority
 
