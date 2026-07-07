@@ -8,6 +8,7 @@ import 'package:money_tally/src/domain/scheduled_transaction.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart';
 import 'package:money_tally/src/domain/transaction.dart';
 import 'package:money_tally/src/domain/user_preferences.dart';
+import 'package:money_tally/src/notifications/notification_scheduler.dart';
 import 'package:money_tally/src/persistence/backup_codec.dart';
 import 'package:money_tally/src/persistence/finance_record_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
@@ -275,6 +276,78 @@ void main() {
     expect(updated.appearanceMode, AppearanceMode.dark);
     expect(updated.currency.currencyCode, 'CAD');
     expect(updated.defaultTransactionType, DefaultTransactionType.lastUsed);
+  });
+
+  test('notification planner converts alert preferences into requests', () {
+    const planner = ScheduledNotificationPlanner();
+    final request = planner.planOne(
+      ScheduledTransactionRecord(
+        id: 'sched-rent',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        payee: 'Rent',
+        amountMinor: 90000,
+        nextDate: DateTime(2026, 8, 1),
+        frequency: RecurrenceFrequency.monthly,
+        alertPreference: AlertPreference.threeDaysBefore,
+        repeatAlertUntilResolved: true,
+        sync: SyncMetadata.fresh(now: DateTime(2026, 7, 1)),
+      ),
+      now: DateTime(2026, 7, 20),
+    );
+
+    expect(request, isNotNull);
+    expect(request!.scheduledTransactionId, 'sched-rent');
+    expect(request.title, 'Payment due');
+    expect(request.body, 'Rent is due.');
+    expect(request.scheduledFor, DateTime(2026, 7, 29, 9));
+    expect(request.repeatUntilResolved, isTrue);
+    expect(request.id, notificationIdFor('sched-rent'));
+  });
+
+  test('notification planner skips disabled and resolved schedules', () {
+    const planner = ScheduledNotificationPlanner();
+    final base = ScheduledTransactionRecord(
+      id: 'sched-rent',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      payee: 'Rent',
+      amountMinor: 90000,
+      nextDate: DateTime(2026, 8, 1),
+      frequency: RecurrenceFrequency.monthly,
+      sync: SyncMetadata.fresh(now: DateTime(2026, 7, 1)),
+    );
+
+    expect(planner.planOne(base, now: DateTime(2026, 7, 20)), isNull);
+    expect(
+      planner.planOne(
+        base.copyWith(alertPreference: AlertPreference.sameDay),
+        now: DateTime(2026, 8, 1, 10),
+      ),
+      isNull,
+    );
+    expect(
+      planner.planOne(
+        base.copyWith(
+          alertPreference: AlertPreference.sameDay,
+          lastAction: ScheduledAction.skipped,
+        ),
+        now: DateTime(2026, 7, 20),
+      ),
+      isNull,
+    );
+    expect(
+      planner.planOne(
+        base.copyWith(
+          alertPreference: AlertPreference.sameDay,
+          sync: base.sync.deleted(),
+        ),
+        now: DateTime(2026, 7, 20),
+      ),
+      isNull,
+    );
   });
 }
 
