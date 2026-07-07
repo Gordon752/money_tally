@@ -369,7 +369,7 @@ class CategoriesView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
+    final store = FinanceDataStoreScope.watch(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -388,16 +388,25 @@ class CategoriesView extends StatelessWidget {
             children: [
               for (final category in store.categories)
                 ListTile(
-                  leading: CircleAvatar(backgroundColor: category.color),
+                  leading: CircleAvatar(
+                    backgroundColor: category.colorValue == null
+                        ? AppTheme.line
+                        : Color(category.colorValue!),
+                    child: Icon(
+                      categoryKindIcon(category.kind.name),
+                      color: AppTheme.ink,
+                      size: 18,
+                    ),
+                  ),
                   title: Text(
                     category.name,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
-                  subtitle: Text(category.kind.name),
+                  subtitle: Text(categoryKindLabel(category.kind.name)),
                   trailing: IconButton(
                     icon: const Icon(Icons.edit_outlined),
                     onPressed: () =>
-                        showCategoryDialog(context, category: category),
+                        showCategoryDialog(context, categoryId: category.id),
                   ),
                 ),
             ],
@@ -957,9 +966,13 @@ Future<void> showTransactionDialog(BuildContext context) async {
 Future<void> showCategoryDialog(
   BuildContext context, {
   LedgerCategory? category,
+  String? categoryId,
 }) async {
   final store = FinanceStoreScope.watch(context);
-  final controller = TextEditingController(text: category?.name ?? '');
+  final legacyCategory = categoryId == null
+      ? category
+      : store.categoryById(categoryId);
+  final controller = TextEditingController(text: legacyCategory?.name ?? '');
   final value = await showDialog<String>(
     context: context,
     builder: (context) => AlertDialog(
@@ -982,10 +995,10 @@ Future<void> showCategoryDialog(
     ),
   );
   if (value == null || value.isEmpty) return;
-  if (category == null) {
+  if (legacyCategory == null) {
     store.addCategory(value);
   } else {
-    store.renameCategory(category.id, value);
+    store.renameCategory(legacyCategory.id, value);
   }
 }
 
@@ -1005,6 +1018,24 @@ IconData accountGroupIcon(String groupName) {
     'creditCards' => Icons.credit_card_outlined,
     'loans' => Icons.request_quote_outlined,
     _ => Icons.account_balance_outlined,
+  };
+}
+
+IconData categoryKindIcon(String kindName) {
+  return switch (kindName) {
+    'income' => Icons.trending_up,
+    'transfer' => Icons.swap_horiz,
+    'system' => Icons.settings_outlined,
+    _ => Icons.sell_outlined,
+  };
+}
+
+String categoryKindLabel(String kindName) {
+  return switch (kindName) {
+    'income' => 'Income',
+    'transfer' => 'Transfer',
+    'system' => 'System',
+    _ => 'Expense',
   };
 }
 

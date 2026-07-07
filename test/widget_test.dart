@@ -138,6 +138,23 @@ void main() {
     expect(find.textContaining('Spent'), findsWidgets);
   });
 
+  testWidgets('categories screen renders v2 categories on wide layout', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Categories').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Dining'), findsOneWidget);
+    expect(find.text('Expense'), findsWidgets);
+  });
+
   test('legacy v2 mirror refreshes in-memory v2 balances', () async {
     final legacyStore = FinanceStore.seeded();
     final dataStore = FinanceDataStore(
