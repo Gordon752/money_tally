@@ -96,11 +96,16 @@ class Account {
   final bool isArchived;
   final SyncMetadata sync;
 
-  Account copyWith({int? balanceCents, bool? isArchived}) {
+  Account copyWith({
+    String? name,
+    AccountType? type,
+    int? balanceCents,
+    bool? isArchived,
+  }) {
     return Account(
       id: id,
-      name: name,
-      type: type,
+      name: name ?? this.name,
+      type: type ?? this.type,
       balanceCents: balanceCents ?? this.balanceCents,
       isArchived: isArchived ?? this.isArchived,
       sync: sync.touched(),

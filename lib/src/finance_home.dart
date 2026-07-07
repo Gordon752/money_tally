@@ -326,7 +326,9 @@ class AccountsView extends StatelessWidget {
     return ResponsiveGrid(
       minTileWidth: 300,
       children: [
-        for (final account in store.accounts)
+        for (final account in store.accounts.where(
+          (account) => !account.isArchived,
+        ))
           AccountCard(
             account: account,
             balanceMinor: store.balanceForAccount(account.id),
@@ -742,7 +744,9 @@ class AccountBalancePanel extends StatelessWidget {
       title: 'Accounts',
       child: Column(
         children: [
-          for (final account in store.accounts)
+          for (final account in store.accounts.where(
+            (account) => !account.isArchived,
+          ))
             MetricRow(
               label: account.name,
               value: money(store.balanceForAccount(account.id), currency),
@@ -1170,6 +1174,16 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
             title: const Text('Adjust Balance'),
             onTap: () => Navigator.pop(context, 'adjust'),
           ),
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit'),
+            onTap: () => Navigator.pop(context, 'edit'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.archive_outlined),
+            title: const Text('Archive'),
+            onTap: () => Navigator.pop(context, 'archive'),
+          ),
         ],
       ),
     ),
@@ -1177,7 +1191,79 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
 
   if (action == 'adjust' && context.mounted) {
     await showAdjustBalanceDialog(context, account);
+  } else if (action == 'edit' && context.mounted) {
+    await showEditAccountDialog(context, account);
+  } else if (action == 'archive' && context.mounted) {
+    final archived = store.archiveAccount(account.id);
+    await saveLegacyAccountToV2(context, archived);
   }
+}
+
+Future<void> showEditAccountDialog(
+  BuildContext context,
+  Account account,
+) async {
+  final store = FinanceStoreScope.watch(context);
+  final name = TextEditingController(text: account.name);
+  var type = account.type;
+
+  final result = await showDialog<({String name, AccountType type})>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Edit account'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: 'Name'),
+                autofocus: true,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<AccountType>(
+                initialValue: type,
+                decoration: const InputDecoration(labelText: 'Type'),
+                items: [
+                  for (final item in AccountType.values)
+                    DropdownMenuItem(
+                      value: item,
+                      child: Text(accountTypeLabel(item)),
+                    ),
+                ],
+                onChanged: (value) =>
+                    setDialogState(() => type = value ?? type),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, (
+              name: name.text.trim().isEmpty ? account.name : name.text.trim(),
+              type: type,
+            )),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (result == null) return;
+  final updated = store.editAccount(
+    accountId: account.id,
+    name: result.name,
+    type: result.type,
+  );
+  if (!context.mounted) return;
+  await saveLegacyAccountToV2(context, updated);
 }
 
 Future<void> showFloatingAddMenu(BuildContext context) async {
@@ -1319,15 +1405,36 @@ Future<void> showAccountDialog(BuildContext context) async {
     type: result.type,
     balanceCents: result.openingBalanceCents,
   );
-  await dataStore.saveAccount(
-    v2_account.AccountRecord(
+  if (!context.mounted) return;
+  await saveLegacyAccountToV2(context, account, dataStore: dataStore);
+}
+
+Future<void> saveLegacyAccountToV2(
+  BuildContext context,
+  Account account, {
+  FinanceDataStore? dataStore,
+}) async {
+  final targetStore = dataStore ?? FinanceDataStoreScope.read(context);
+  v2_account.AccountRecord record;
+  try {
+    record = targetStore
+        .accountById(account.id)
+        .copyWith(
+          name: account.name,
+          type: v2AccountTypeFor(account.type),
+          isArchived: account.isArchived,
+        );
+  } on StateError {
+    record = v2_account.AccountRecord(
       id: account.id,
       name: account.name,
       type: v2AccountTypeFor(account.type),
       openingBalanceMinor: account.balanceCents,
+      isArchived: account.isArchived,
       sync: v2_sync.SyncMetadata.fresh(),
-    ),
-  );
+    );
+  }
+  await targetStore.saveAccount(record);
 }
 
 Future<void> showTransactionDialog(

@@ -238,6 +238,36 @@ class FinanceStore extends ChangeNotifier {
     return account;
   }
 
+  Account editAccount({
+    required String accountId,
+    required String name,
+    required AccountType type,
+  }) {
+    late Account updatedAccount;
+    accounts = [
+      for (final account in accounts)
+        if (account.id == accountId)
+          updatedAccount = account.copyWith(name: name.trim(), type: type)
+        else
+          account,
+    ];
+    _commit();
+    return updatedAccount;
+  }
+
+  Account archiveAccount(String accountId) {
+    late Account archivedAccount;
+    accounts = [
+      for (final account in accounts)
+        if (account.id == accountId)
+          archivedAccount = account.copyWith(isArchived: true)
+        else
+          account,
+    ];
+    _commit();
+    return archivedAccount;
+  }
+
   void addTransaction({
     required String accountId,
     required String categoryId,
