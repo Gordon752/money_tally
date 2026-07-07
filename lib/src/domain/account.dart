@@ -25,6 +25,8 @@ class AccountRecord {
     required this.type,
     required this.openingBalanceMinor,
     required this.sync,
+    this.creditLimitMinor,
+    this.originalLoanAmountMinor,
     this.isArchived = false,
     this.includeInGroupBalance = true,
     this.includeInNetWorth = true,
@@ -35,6 +37,8 @@ class AccountRecord {
   final String name;
   final AccountType type;
   final int openingBalanceMinor;
+  final int? creditLimitMinor;
+  final int? originalLoanAmountMinor;
   final bool isArchived;
   final bool includeInGroupBalance;
   final bool includeInNetWorth;
@@ -47,17 +51,27 @@ class AccountRecord {
     String? name,
     AccountType? type,
     int? openingBalanceMinor,
+    int? creditLimitMinor,
+    int? originalLoanAmountMinor,
     bool? isArchived,
     bool? includeInGroupBalance,
     bool? includeInNetWorth,
     int? sortOrder,
     SyncMetadata? sync,
+    bool clearCreditLimit = false,
+    bool clearOriginalLoanAmount = false,
   }) {
     return AccountRecord(
       id: id,
       name: name ?? this.name,
       type: type ?? this.type,
       openingBalanceMinor: openingBalanceMinor ?? this.openingBalanceMinor,
+      creditLimitMinor: clearCreditLimit
+          ? null
+          : creditLimitMinor ?? this.creditLimitMinor,
+      originalLoanAmountMinor: clearOriginalLoanAmount
+          ? null
+          : originalLoanAmountMinor ?? this.originalLoanAmountMinor,
       isArchived: isArchived ?? this.isArchived,
       includeInGroupBalance:
           includeInGroupBalance ?? this.includeInGroupBalance,
@@ -73,6 +87,8 @@ class AccountRecord {
       'name': name,
       'type': type.name,
       'openingBalanceMinor': openingBalanceMinor,
+      'creditLimitMinor': creditLimitMinor,
+      'originalLoanAmountMinor': originalLoanAmountMinor,
       'isArchived': isArchived,
       'includeInGroupBalance': includeInGroupBalance,
       'includeInNetWorth': includeInNetWorth,
@@ -87,6 +103,8 @@ class AccountRecord {
       name: json['name'] as String? ?? '',
       type: enumByName(AccountType.values, json['type'], AccountType.checking),
       openingBalanceMinor: json['openingBalanceMinor'] as int? ?? 0,
+      creditLimitMinor: json['creditLimitMinor'] as int?,
+      originalLoanAmountMinor: json['originalLoanAmountMinor'] as int?,
       isArchived: json['isArchived'] as bool? ?? false,
       includeInGroupBalance: json['includeInGroupBalance'] as bool? ?? true,
       includeInNetWorth: json['includeInNetWorth'] as bool? ?? true,

@@ -159,6 +159,99 @@ class FinanceDataStore extends ChangeNotifier {
     return _dataSet.balanceForAccount(accountId);
   }
 
+  int creditUsedMinorForAccount(String accountId) {
+    final account = accountById(accountId);
+    if (account.type != AccountType.creditCard) return 0;
+    return balanceForAccount(accountId).isNegative
+        ? balanceForAccount(accountId).abs()
+        : 0;
+  }
+
+  int? creditAvailableMinorForAccount(String accountId) {
+    final account = accountById(accountId);
+    final creditLimit = account.creditLimitMinor;
+    if (account.type != AccountType.creditCard || creditLimit == null) {
+      return null;
+    }
+    return creditLimit - creditUsedMinorForAccount(accountId);
+  }
+
+  int creditLimitMinorForGroup(AccountGroup group) {
+    if (group != AccountGroup.creditCards) return 0;
+    return accounts
+        .where(
+          (account) =>
+              !account.isArchived &&
+              account.includeInGroupBalance &&
+              account.type == AccountType.creditCard,
+        )
+        .fold(0, (total, account) => total + (account.creditLimitMinor ?? 0));
+  }
+
+  int creditUsedMinorForGroup(AccountGroup group) {
+    if (group != AccountGroup.creditCards) return 0;
+    return accounts
+        .where(
+          (account) =>
+              !account.isArchived &&
+              account.includeInGroupBalance &&
+              account.type == AccountType.creditCard &&
+              account.creditLimitMinor != null,
+        )
+        .fold(0, (total, account) {
+          return total + creditUsedMinorForAccount(account.id);
+        });
+  }
+
+  int remainingLoanMinorForAccount(String accountId) {
+    final account = accountById(accountId);
+    if (account.type != AccountType.loan) return 0;
+    return balanceForAccount(accountId).abs();
+  }
+
+  int? loanPaidDownMinorForAccount(String accountId) {
+    final account = accountById(accountId);
+    final originalAmount = account.originalLoanAmountMinor;
+    if (account.type != AccountType.loan || originalAmount == null) {
+      return null;
+    }
+    final remaining = remainingLoanMinorForAccount(accountId);
+    final paidDown = originalAmount - remaining;
+    if (paidDown < 0) return 0;
+    if (paidDown > originalAmount) return originalAmount;
+    return paidDown;
+  }
+
+  int originalLoanAmountMinorForGroup(AccountGroup group) {
+    if (group != AccountGroup.loans) return 0;
+    return accounts
+        .where(
+          (account) =>
+              !account.isArchived &&
+              account.includeInGroupBalance &&
+              account.type == AccountType.loan,
+        )
+        .fold(
+          0,
+          (total, account) => total + (account.originalLoanAmountMinor ?? 0),
+        );
+  }
+
+  int remainingLoanMinorForGroup(AccountGroup group) {
+    if (group != AccountGroup.loans) return 0;
+    return accounts
+        .where(
+          (account) =>
+              !account.isArchived &&
+              account.includeInGroupBalance &&
+              account.type == AccountType.loan &&
+              account.originalLoanAmountMinor != null,
+        )
+        .fold(0, (total, account) {
+          return total + remainingLoanMinorForAccount(account.id);
+        });
+  }
+
   int get totalAssetsMinor {
     return accounts
         .where((account) => account.includeInNetWorth)

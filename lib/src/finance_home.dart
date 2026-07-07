@@ -2727,6 +2727,16 @@ Future<void> showEditAccountDialog(
   final dataStore = FinanceDataStoreScope.read(context);
   final v2Account = dataStore.accountById(account.id);
   final name = TextEditingController(text: account.name);
+  final creditLimit = TextEditingController(
+    text: v2Account.creditLimitMinor == null
+        ? ''
+        : dollars(v2Account.creditLimitMinor!),
+  );
+  final originalLoanAmount = TextEditingController(
+    text: v2Account.originalLoanAmountMinor == null
+        ? ''
+        : dollars(v2Account.originalLoanAmountMinor!),
+  );
   var type = account.type;
   var includeInGroupBalance = v2Account.includeInGroupBalance;
   var includeInNetWorth = v2Account.includeInNetWorth;
@@ -2736,6 +2746,8 @@ Future<void> showEditAccountDialog(
         ({
           String name,
           AccountType type,
+          int? creditLimitMinor,
+          int? originalLoanAmountMinor,
           bool includeInGroupBalance,
           bool includeInNetWorth,
         })
@@ -2768,6 +2780,30 @@ Future<void> showEditAccountDialog(
                     onChanged: (value) =>
                         setDialogState(() => type = value ?? type),
                   ),
+                  if (type == AccountType.creditCard) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: creditLimit,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Credit limit',
+                      ),
+                    ),
+                  ],
+                  if (type == AccountType.loan) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: originalLoanAmount,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Original loan amount',
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -2797,6 +2833,12 @@ Future<void> showEditAccountDialog(
                       ? account.name
                       : name.text.trim(),
                   type: type,
+                  creditLimitMinor: type == AccountType.creditCard
+                      ? parseOptionalCents(creditLimit.text)?.abs()
+                      : null,
+                  originalLoanAmountMinor: type == AccountType.loan
+                      ? parseOptionalCents(originalLoanAmount.text)?.abs()
+                      : null,
                   includeInGroupBalance: includeInGroupBalance,
                   includeInNetWorth: includeInNetWorth,
                 )),
@@ -2818,6 +2860,10 @@ Future<void> showEditAccountDialog(
     context,
     updated,
     dataStore: dataStore,
+    creditLimitMinor: result.creditLimitMinor,
+    originalLoanAmountMinor: result.originalLoanAmountMinor,
+    updateCreditLimit: true,
+    updateOriginalLoanAmount: true,
     includeInGroupBalance: result.includeInGroupBalance,
     includeInNetWorth: result.includeInNetWorth,
   );
@@ -2887,11 +2933,19 @@ Future<void> showAccountDialog(BuildContext context) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final name = TextEditingController();
   final openingBalance = TextEditingController(text: '0.00');
+  final creditLimit = TextEditingController();
+  final originalLoanAmount = TextEditingController();
   var type = AccountType.checking;
 
   final result =
       await showDialog<
-        ({String name, AccountType type, int openingBalanceCents})
+        ({
+          String name,
+          AccountType type,
+          int openingBalanceCents,
+          int? creditLimitMinor,
+          int? originalLoanAmountMinor,
+        })
       >(
         context: context,
         builder: (context) => StatefulBuilder(
@@ -2921,6 +2975,30 @@ Future<void> showAccountDialog(BuildContext context) async {
                     onChanged: (value) =>
                         setDialogState(() => type = value ?? type),
                   ),
+                  if (type == AccountType.creditCard) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: creditLimit,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Credit limit',
+                      ),
+                    ),
+                  ],
+                  if (type == AccountType.loan) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: originalLoanAmount,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Original loan amount',
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   TextField(
                     controller: openingBalance,
@@ -2947,6 +3025,12 @@ Future<void> showAccountDialog(BuildContext context) async {
                       : name.text.trim(),
                   type: type,
                   openingBalanceCents: parseCents(openingBalance.text),
+                  creditLimitMinor: type == AccountType.creditCard
+                      ? parseOptionalCents(creditLimit.text)?.abs()
+                      : null,
+                  originalLoanAmountMinor: type == AccountType.loan
+                      ? parseOptionalCents(originalLoanAmount.text)?.abs()
+                      : null,
                 )),
                 child: const Text('Add'),
               ),
@@ -2962,13 +3046,25 @@ Future<void> showAccountDialog(BuildContext context) async {
     balanceCents: result.openingBalanceCents,
   );
   if (!context.mounted) return;
-  await saveLegacyAccountToV2(context, account, dataStore: dataStore);
+  await saveLegacyAccountToV2(
+    context,
+    account,
+    dataStore: dataStore,
+    creditLimitMinor: result.creditLimitMinor,
+    originalLoanAmountMinor: result.originalLoanAmountMinor,
+    updateCreditLimit: true,
+    updateOriginalLoanAmount: true,
+  );
 }
 
 Future<void> saveLegacyAccountToV2(
   BuildContext context,
   Account account, {
   FinanceDataStore? dataStore,
+  int? creditLimitMinor,
+  int? originalLoanAmountMinor,
+  bool updateCreditLimit = false,
+  bool updateOriginalLoanAmount = false,
   bool? includeInGroupBalance,
   bool? includeInNetWorth,
 }) async {
@@ -2980,6 +3076,16 @@ Future<void> saveLegacyAccountToV2(
         .copyWith(
           name: account.name,
           type: v2AccountTypeFor(account.type),
+          creditLimitMinor: updateCreditLimit ? creditLimitMinor : null,
+          originalLoanAmountMinor: updateOriginalLoanAmount
+              ? originalLoanAmountMinor
+              : null,
+          clearCreditLimit:
+              account.type != AccountType.creditCard ||
+              (updateCreditLimit && creditLimitMinor == null),
+          clearOriginalLoanAmount:
+              account.type != AccountType.loan ||
+              (updateOriginalLoanAmount && originalLoanAmountMinor == null),
           isArchived: account.isArchived,
           includeInGroupBalance: includeInGroupBalance,
           includeInNetWorth: includeInNetWorth,
@@ -2994,6 +3100,12 @@ Future<void> saveLegacyAccountToV2(
       name: account.name,
       type: v2Type,
       openingBalanceMinor: account.balanceCents,
+      creditLimitMinor: v2Type == v2_account.AccountType.creditCard
+          ? creditLimitMinor
+          : null,
+      originalLoanAmountMinor: v2Type == v2_account.AccountType.loan
+          ? originalLoanAmountMinor ?? account.balanceCents.abs()
+          : null,
       isArchived: account.isArchived,
       includeInGroupBalance: includeInGroupBalance ?? true,
       includeInNetWorth: includeInNetWorth ?? true,
@@ -4489,6 +4601,14 @@ String dollars(int cents) => (cents / 100).toStringAsFixed(2);
 int parseCents(String value) {
   final cleaned = value.replaceAll(RegExp(r'[$,\s]'), '');
   final parsed = double.tryParse(cleaned) ?? 0;
+  return (parsed * 100).round();
+}
+
+int? parseOptionalCents(String value) {
+  final cleaned = value.replaceAll(RegExp(r'[$,\s]'), '');
+  if (cleaned.isEmpty) return null;
+  final parsed = double.tryParse(cleaned);
+  if (parsed == null) return null;
   return (parsed * 100).round();
 }
 

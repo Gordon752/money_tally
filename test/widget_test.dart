@@ -653,6 +653,46 @@ void main() {
     expect(account.includeInNetWorth, isFalse);
   });
 
+  testWidgets('account edit can set credit card limit', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            launchScreen: LaunchScreen.accounts,
+          ),
+        );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    final card = find.byWidgetPredicate(
+      (widget) => widget is AccountCard && widget.account.name == 'Credit Card',
+    );
+    await tester.ensureVisible(card);
+    await tester.pumpAndSettle();
+    await tester.longPress(card);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Credit limit'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).at(1), '2500.00');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final account = dataStore.accountById('card');
+    expect(account.creditLimitMinor, 250000);
+    expect(dataStore.creditAvailableMinorForAccount('card'), 206178);
+  });
+
   testWidgets('account long press can add expense for selected account', (
     tester,
   ) async {

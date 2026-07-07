@@ -58,11 +58,15 @@ class V1SnapshotMigrator {
     Map<String, Object?> account, {
     required int openingBalanceMinor,
   }) {
+    final accountType = _accountTypeFromV1(account['type'] as String?);
     return v2_account.AccountRecord(
       id: account['id'] as String,
       name: account['name'] as String? ?? '',
-      type: _accountTypeFromV1(account['type'] as String?),
+      type: accountType,
       openingBalanceMinor: openingBalanceMinor,
+      originalLoanAmountMinor: accountType == v2_account.AccountType.loan
+          ? openingBalanceMinor.abs()
+          : null,
       isArchived: account['isArchived'] as bool? ?? false,
       sync: _syncFromV1(_jsonMap(account['sync'])),
     );

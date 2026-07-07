@@ -148,6 +148,43 @@ void main() {
     ]);
   });
 
+  test('store derives credit card and loan progress values', () {
+    final sync = SyncMetadata.fresh(now: DateTime(2026, 7, 6));
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        accounts: [
+          ..._dataSet().accounts,
+          AccountRecord(
+            id: 'card',
+            name: 'Credit Card',
+            type: AccountType.creditCard,
+            openingBalanceMinor: -50000,
+            creditLimitMinor: 200000,
+            sync: sync,
+          ),
+          AccountRecord(
+            id: 'loan',
+            name: 'Truck Loan',
+            type: AccountType.loan,
+            openingBalanceMinor: -1000000,
+            originalLoanAmountMinor: 1500000,
+            sync: sync,
+          ),
+        ],
+      ),
+    );
+
+    expect(store.creditUsedMinorForAccount('card'), 50000);
+    expect(store.creditAvailableMinorForAccount('card'), 150000);
+    expect(store.creditUsedMinorForGroup(AccountGroup.creditCards), 50000);
+    expect(store.creditLimitMinorForGroup(AccountGroup.creditCards), 200000);
+
+    expect(store.remainingLoanMinorForAccount('loan'), 1000000);
+    expect(store.loanPaidDownMinorForAccount('loan'), 500000);
+    expect(store.remainingLoanMinorForGroup(AccountGroup.loans), 1000000);
+    expect(store.originalLoanAmountMinorForGroup(AccountGroup.loans), 1500000);
+  });
+
   test('split transactions must match the parent amount', () async {
     final store = FinanceDataStore(dataSet: _dataSet());
 
@@ -195,6 +232,16 @@ void main() {
   test('backup codec preserves v2 data set records', () {
     const codec = BackupCodec();
     final dataSet = _dataSet().copyWith(
+      accounts: [
+        for (final account in _dataSet().accounts)
+          if (account.id == 'checking')
+            account.copyWith(
+              type: AccountType.creditCard,
+              creditLimitMinor: 250000,
+            )
+          else
+            account,
+      ],
       transactions: [
         TransactionRecord(
           id: 'transfer-1',
@@ -212,6 +259,7 @@ void main() {
     final restored = codec.decodeJson(codec.encodeJson(dataSet));
 
     expect(restored.accounts.length, dataSet.accounts.length);
+    expect(restored.accounts.first.creditLimitMinor, 250000);
     expect(restored.transactions.single.type, TransactionType.transfer);
     expect(restored.transactions.single.transferAccountId, 'cash');
   });

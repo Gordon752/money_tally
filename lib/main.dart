@@ -240,6 +240,8 @@ List<v2_account.AccountRecord> mergeAccountsPreferCurrent({
           name: account.name,
           type: account.type,
           openingBalanceMinor: account.openingBalanceMinor,
+          creditLimitMinor: current.creditLimitMinor,
+          originalLoanAmountMinor: current.originalLoanAmountMinor,
           isArchived: account.isArchived,
           includeInGroupBalance: current.includeInGroupBalance,
           includeInNetWorth: current.includeInNetWorth,
