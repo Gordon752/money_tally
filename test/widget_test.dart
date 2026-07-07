@@ -403,6 +403,29 @@ void main() {
     expect(find.text('Alerts are required'), findsOneWidget);
   });
 
+  testWidgets('dashboard shows scheduled due count', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          scheduledTransactions: [
+            rentSchedule(
+              nextDate: DateTime.now().subtract(const Duration(days: 1)),
+            ),
+          ],
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    expect(find.text('1 due'), findsOneWidget);
+    expect(find.text('Due today'), findsOneWidget);
+  });
+
   testWidgets('scheduled long press can mark paid and advance item', (
     tester,
   ) async {
@@ -701,7 +724,7 @@ class FakeRemoteFinanceRepository implements FinanceRemoteRepository {
   }
 }
 
-v2_scheduled.ScheduledTransactionRecord rentSchedule() {
+v2_scheduled.ScheduledTransactionRecord rentSchedule({DateTime? nextDate}) {
   return v2_scheduled.ScheduledTransactionRecord(
     id: 'sched-rent',
     type: v2_transaction.TransactionType.expense,
@@ -709,7 +732,7 @@ v2_scheduled.ScheduledTransactionRecord rentSchedule() {
     categoryId: 'dining',
     payee: 'Rent',
     amountMinor: 90000,
-    nextDate: DateTime(2026, 8),
+    nextDate: nextDate ?? DateTime(2026, 8),
     frequency: v2_scheduled.RecurrenceFrequency.monthly,
     sync: v2_sync.SyncMetadata.fresh(),
   );

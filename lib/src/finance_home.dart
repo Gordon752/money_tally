@@ -52,7 +52,12 @@ class _FinanceHomeState extends State<FinanceHome> {
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.sizeOf(context).width >= 880;
-    final preferences = FinanceDataStoreScope.watch(context).preferences;
+    final dataStore = FinanceDataStoreScope.watch(context);
+    final preferences = dataStore.preferences;
+    final dueScheduledCount = scheduledDueCount(
+      dataStore.scheduledTransactions,
+      DateTime.now(),
+    );
 
     return Scaffold(
       body: SafeArea(child: isWide ? _wideLayout() : _compactLayout()),
@@ -79,7 +84,10 @@ class _FinanceHomeState extends State<FinanceHome> {
               destinations: [
                 for (final section in compactSections)
                   NavigationDestination(
-                    icon: Icon(section.icon),
+                    icon: FinanceSectionIcon(
+                      section: section,
+                      dueScheduledCount: dueScheduledCount,
+                    ),
                     label: section.label,
                   ),
               ],
@@ -88,6 +96,10 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   Widget _wideLayout() {
+    final dueScheduledCount = scheduledDueCount(
+      FinanceDataStoreScope.watch(context).scheduledTransactions,
+      DateTime.now(),
+    );
     return Row(
       children: [
         NavigationRail(
@@ -102,7 +114,10 @@ class _FinanceHomeState extends State<FinanceHome> {
           destinations: [
             for (final section in FinanceSection.values)
               NavigationRailDestination(
-                icon: Icon(section.icon),
+                icon: FinanceSectionIcon(
+                  section: section,
+                  dueScheduledCount: dueScheduledCount,
+                ),
                 label: Text(section.label),
               ),
           ],
@@ -143,6 +158,74 @@ class _FinanceHomeState extends State<FinanceHome> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class FinanceSectionIcon extends StatelessWidget {
+  const FinanceSectionIcon({
+    required this.section,
+    required this.dueScheduledCount,
+    super.key,
+  });
+
+  final FinanceSection section;
+  final int dueScheduledCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = Icon(section.icon);
+    if (section != FinanceSection.scheduled || dueScheduledCount == 0) {
+      return icon;
+    }
+    return CountBadge(count: dueScheduledCount, child: icon);
+  }
+}
+
+class CountBadge extends StatelessWidget {
+  const CountBadge({required this.count, required this.child, super.key});
+
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count > 99 ? '99+' : '$count';
+    return SizedBox(
+      width: 32,
+      height: 32,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Center(child: child),
+          Positioned(
+            top: -1,
+            right: -1,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppTheme.rose,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.surface,
+                  width: 1.5,
+                ),
+              ),
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -254,6 +337,7 @@ class DashboardView extends StatelessWidget {
     final incomeThisMonth = store.incomeThisMonthMinor();
     final expensesThisMonth = store.expensesThisMonthMinor();
     final currency = store.preferences.currency;
+    final dueCount = scheduledDueCount(scheduled, DateTime.now());
     return Column(
       children: [
         ResponsiveGrid(
@@ -296,9 +380,11 @@ class DashboardView extends StatelessWidget {
             ),
             SummaryCard(
               label: 'Next scheduled',
-              value: scheduled.isEmpty
-                  ? 'None'
-                  : dateShort(scheduled.first.nextDate),
+              value: dueCount == 0
+                  ? scheduled.isEmpty
+                        ? 'None'
+                        : dateShort(scheduled.first.nextDate)
+                  : '$dueCount due',
               icon: Icons.notifications_active_outlined,
             ),
           ],
@@ -1011,10 +1097,17 @@ class UpcomingPanel extends StatelessWidget {
     final scheduled = [...store.scheduledTransactions]
       ..removeWhere((item) => item.isDeleted)
       ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
+    final dueCount = scheduledDueCount(scheduled, DateTime.now());
     return AppCard(
       title: 'Scheduled',
       child: Column(
         children: [
+          if (dueCount > 0)
+            MetricRow(
+              label: 'Due today',
+              value: '$dueCount',
+              icon: Icons.notification_important_outlined,
+            ),
           for (final item in scheduled.take(3))
             MetricRow(
               label: item.payee,
@@ -2687,6 +2780,22 @@ DateTime parseDateInput(String value, DateTime fallback) {
     return DateTime(fallback.year, fallback.month, fallback.day);
   }
   return DateTime(parsed.year, parsed.month, parsed.day);
+}
+
+int scheduledDueCount(
+  Iterable<v2_scheduled.ScheduledTransactionRecord> scheduledTransactions,
+  DateTime now,
+) {
+  final today = DateTime(now.year, now.month, now.day);
+  return scheduledTransactions.where((item) {
+    if (item.isDeleted) return false;
+    final dueDate = DateTime(
+      item.nextDate.year,
+      item.nextDate.month,
+      item.nextDate.day,
+    );
+    return !dueDate.isAfter(today);
+  }).length;
 }
 
 String monthLabel(DateTime date) {
