@@ -178,6 +178,47 @@ void main() {
     expect(find.text('Data Ownership'), findsOneWidget);
   });
 
+  testWidgets('launch screen preference selects initial finance section', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            launchScreen: LaunchScreen.reports,
+          ),
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    expect(find.text('Reports'), findsWidgets);
+    expect(find.text('Income vs expenses'), findsOneWidget);
+    expect(find.text('Net worth history'), findsOneWidget);
+  });
+
+  testWidgets('reports screen is reachable from wide navigation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Reports').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Monthly spending'), findsOneWidget);
+    expect(find.text('Budget history'), findsOneWidget);
+  });
+
   testWidgets('applies v2 appearance preference to app theme mode', (
     tester,
   ) async {

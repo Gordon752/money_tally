@@ -6,6 +6,7 @@ enum FinanceSection {
   ledger(Icons.receipt_long_outlined, 'Ledger'),
   budgets(Icons.pie_chart_outline, 'Budgets'),
   scheduled(Icons.event_repeat_outlined, 'Scheduled'),
+  reports(Icons.insights_outlined, 'Reports'),
   categories(Icons.sell_outlined, 'Categories'),
   settings(Icons.settings_outlined, 'Settings');
 
@@ -34,6 +35,17 @@ class _FinanceHomeState extends State<FinanceHome> {
   ];
 
   var selected = FinanceSection.dashboard;
+  var _appliedLaunchPreference = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_appliedLaunchPreference) return;
+    selected = financeSectionForLaunchScreen(
+      FinanceDataStoreScope.read(context).preferences.launchScreen,
+    );
+    _appliedLaunchPreference = true;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -109,6 +121,7 @@ class _FinanceHomeState extends State<FinanceHome> {
               FinanceSection.ledger => const LedgerView(),
               FinanceSection.budgets => const BudgetsView(),
               FinanceSection.scheduled => const ScheduledView(),
+              FinanceSection.reports => const ReportsView(),
               FinanceSection.categories => const CategoriesView(),
               FinanceSection.settings => const SettingsView(),
             },
@@ -598,6 +611,45 @@ class SettingsView extends StatelessWidget {
     return _currencyOptions.firstWhere(
       (option) => option.currencyCode == code,
       orElse: () => _currencyOptions.first,
+    );
+  }
+}
+
+class ReportsView extends StatelessWidget {
+  const ReportsView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const AppCard(
+      title: 'Reports',
+      child: Column(
+        children: [
+          SettingsPlaceholderRow(
+            icon: Icons.calendar_month_outlined,
+            title: 'Monthly spending',
+          ),
+          SettingsPlaceholderRow(
+            icon: Icons.compare_arrows_outlined,
+            title: 'Income vs expenses',
+          ),
+          SettingsPlaceholderRow(
+            icon: Icons.pie_chart_outline,
+            title: 'Category breakdown',
+          ),
+          SettingsPlaceholderRow(
+            icon: Icons.waterfall_chart_outlined,
+            title: 'Cash flow',
+          ),
+          SettingsPlaceholderRow(
+            icon: Icons.show_chart_outlined,
+            title: 'Net worth history',
+          ),
+          SettingsPlaceholderRow(
+            icon: Icons.ssid_chart_outlined,
+            title: 'Budget history',
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1304,6 +1356,17 @@ String launchScreenLabel(LaunchScreen screen) {
     LaunchScreen.budgets => 'Budgets',
     LaunchScreen.scheduled => 'Scheduled',
     LaunchScreen.reports => 'Reports',
+  };
+}
+
+FinanceSection financeSectionForLaunchScreen(LaunchScreen screen) {
+  return switch (screen) {
+    LaunchScreen.dashboard => FinanceSection.dashboard,
+    LaunchScreen.ledger => FinanceSection.ledger,
+    LaunchScreen.accounts => FinanceSection.accounts,
+    LaunchScreen.budgets => FinanceSection.budgets,
+    LaunchScreen.scheduled => FinanceSection.scheduled,
+    LaunchScreen.reports => FinanceSection.reports,
   };
 }
 
