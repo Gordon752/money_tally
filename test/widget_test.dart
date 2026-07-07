@@ -509,6 +509,60 @@ void main() {
     expect(find.textContaining('Spent'), findsWidgets);
   });
 
+  testWidgets('budget dialog creates budget with categories', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Budgets').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add budget'));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Fuel');
+    await tester.enterText(fields.at(1), '250.00');
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'Dining'));
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    final budget = dataStore.budgets.singleWhere((item) => item.name == 'Fuel');
+    expect(budget.amountMinor, 25000);
+    expect(budget.categoryIds, contains('dining'));
+    expect(find.text('Fuel'), findsOneWidget);
+  });
+
+  testWidgets('budget long press archives budget', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Budgets').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Dining'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Archive'));
+    await tester.pumpAndSettle();
+
+    expect(
+      dataStore.budgets.singleWhere((item) => item.name == 'Dining').isArchived,
+      isTrue,
+    );
+    expect(find.text('Dining'), findsNothing);
+  });
+
   testWidgets('categories screen renders v2 categories on wide layout', (
     tester,
   ) async {

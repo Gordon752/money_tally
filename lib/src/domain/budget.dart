@@ -25,6 +25,25 @@ class BudgetRecord {
   int remainingMinor(int spentMinor) => amountMinor - spentMinor;
   bool isOverBudget(int spentMinor) => spentMinor > amountMinor;
 
+  BudgetRecord copyWith({
+    String? name,
+    BudgetPeriod? period,
+    int? amountMinor,
+    List<String>? categoryIds,
+    bool? isArchived,
+    SyncMetadata? sync,
+  }) {
+    return BudgetRecord(
+      id: id,
+      name: name ?? this.name,
+      period: period ?? this.period,
+      amountMinor: amountMinor ?? this.amountMinor,
+      categoryIds: categoryIds ?? this.categoryIds,
+      isArchived: isArchived ?? this.isArchived,
+      sync: sync ?? this.sync.touched(),
+    );
+  }
+
   Map<String, Object?> toJson() {
     return {
       'id': id,

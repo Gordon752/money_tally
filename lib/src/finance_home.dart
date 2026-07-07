@@ -1171,12 +1171,27 @@ class BudgetPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
-    final budgets = showAll ? store.budgets : store.budgets.take(3);
+    final budgets = store.budgets
+        .where((budget) => !budget.isArchived)
+        .toList(growable: false);
+    final visibleBudgets = showAll ? budgets : budgets.take(3);
     return AppCard(
       title: 'Budgets',
       child: Column(
         children: [
-          for (final budget in budgets) BudgetProgressRow(budget: budget),
+          if (showAll) ...[
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: () => showBudgetDialog(context),
+                icon: const Icon(Icons.add),
+                label: const Text('Add budget'),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          for (final budget in visibleBudgets)
+            BudgetProgressRow(budget: budget),
         ],
       ),
     );
@@ -1467,40 +1482,208 @@ class BudgetProgressRow extends StatelessWidget {
     final remaining = budget.remainingMinor(spent);
     final isOver = budget.isOverBudget(spent);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  budget.name,
-                  style: const TextStyle(fontWeight: FontWeight.w900),
+    return InkWell(
+      onLongPress: () => showBudgetActions(context, budget),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    budget.name,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+                Text(
+                  isOver
+                      ? 'Over by ${money(remaining.abs(), currency)}'
+                      : '${money(remaining, currency)} left',
+                  style: TextStyle(
+                    color: isOver ? AppTheme.rose : AppTheme.muted,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Spent ${money(spent, currency)} of ${money(budget.amountMinor, currency)}',
+              style: const TextStyle(color: AppTheme.muted),
+            ),
+            const SizedBox(height: 8),
+            BudgetProgressBar(
+              spentMinor: spent,
+              budgetMinor: budget.amountMinor,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> showBudgetDialog(
+  BuildContext context, {
+  BudgetRecord? budget,
+}) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final name = TextEditingController(text: budget?.name ?? '');
+  final amount = TextEditingController(
+    text: budget == null ? '' : dollars(budget.amountMinor),
+  );
+  final selectedCategoryIds = {...?budget?.categoryIds};
+  final categories = dataStore.categories
+      .where(
+        (category) =>
+            !category.isArchived &&
+            category.kind == v2_category.CategoryKind.expense,
+      )
+      .toList(growable: false);
+
+  final result =
+      await showDialog<
+        ({String name, int amountMinor, List<String> categoryIds})
+      >(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: Text(budget == null ? 'Add budget' : 'Edit budget'),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: name,
+                      decoration: const InputDecoration(labelText: 'Name'),
+                      autofocus: true,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: amount,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Budget amount',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Categories',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    for (final category in categories)
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(category.name),
+                        value: selectedCategoryIds.contains(category.id),
+                        activeColor: AppTheme.accent,
+                        onChanged: (value) => setDialogState(() {
+                          if (value ?? false) {
+                            selectedCategoryIds.add(category.id);
+                          } else {
+                            selectedCategoryIds.remove(category.id);
+                          }
+                        }),
+                      ),
+                  ],
                 ),
               ),
-              Text(
-                isOver
-                    ? 'Over by ${money(remaining.abs(), currency)}'
-                    : '${money(remaining, currency)} left',
-                style: TextStyle(
-                  color: isOver ? AppTheme.rose : AppTheme.muted,
-                  fontWeight: FontWeight.w800,
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, (
+                  name: name.text.trim(),
+                  amountMinor: parseCents(amount.text).abs(),
+                  categoryIds: selectedCategoryIds.toList(),
+                )),
+                child: const Text('Save'),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Spent ${money(spent, currency)} of ${money(budget.amountMinor, currency)}',
-            style: const TextStyle(color: AppTheme.muted),
-          ),
-          const SizedBox(height: 8),
-          BudgetProgressBar(spentMinor: spent, budgetMinor: budget.amountMinor),
-        ],
+        ),
+      );
+
+  if (result == null || result.name.isEmpty) return;
+  if (budget == null) {
+    await dataStore.saveBudget(
+      BudgetRecord(
+        id: 'budget_${DateTime.now().microsecondsSinceEpoch}',
+        name: result.name,
+        amountMinor: result.amountMinor,
+        categoryIds: result.categoryIds,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
       ),
     );
+    return;
+  }
+
+  await dataStore.saveBudget(
+    budget.copyWith(
+      name: result.name,
+      amountMinor: result.amountMinor,
+      categoryIds: result.categoryIds,
+    ),
+  );
+}
+
+Future<void> showBudgetActions(
+  BuildContext context,
+  BudgetRecord budget,
+) async {
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit'),
+            onTap: () => Navigator.pop(sheetContext, 'edit'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.archive_outlined),
+            title: const Text('Archive'),
+            onTap: () => Navigator.pop(sheetContext, 'archive'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Delete'),
+            textColor: AppTheme.rose,
+            iconColor: AppTheme.rose,
+            onTap: () => Navigator.pop(sheetContext, 'delete'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (!context.mounted || action == null) return;
+  switch (action) {
+    case 'edit':
+      await showBudgetDialog(context, budget: budget);
+    case 'archive':
+    case 'delete':
+      await FinanceDataStoreScope.read(
+        context,
+      ).saveBudget(budget.copyWith(isArchived: true));
   }
 }
 
