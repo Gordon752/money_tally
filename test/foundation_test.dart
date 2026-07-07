@@ -304,6 +304,7 @@ void main() {
       appearanceMode: AppearanceMode.dark,
       currency: CurrencyFormatSettings(currencyCode: 'USD', symbol: r'$'),
       defaultTransactionType: DefaultTransactionType.lastUsed,
+      collapsedAccountGroupNames: {'cash'},
     );
 
     final updated = preferences.copyWith(
@@ -318,6 +319,10 @@ void main() {
     expect(updated.appearanceMode, AppearanceMode.dark);
     expect(updated.currency.currencyCode, 'CAD');
     expect(updated.defaultTransactionType, DefaultTransactionType.lastUsed);
+    expect(updated.collapsedAccountGroupNames, {'cash'});
+
+    final roundTripped = UserPreferences.fromJson(updated.toJson());
+    expect(roundTripped.collapsedAccountGroupNames, {'cash'});
   });
 
   test('notification planner converts alert preferences into requests', () {

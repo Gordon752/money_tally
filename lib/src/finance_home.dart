@@ -425,45 +425,87 @@ class AccountsView extends StatelessWidget {
       children: [
         for (final group in v2_account.AccountGroup.values)
           if (accounts.any((account) => account.group == group)) ...[
-            SectionHeader(
-              title: accountGroupLabel(group),
-              subtitle: money(
-                accounts
-                    .where(
-                      (account) =>
-                          account.group == group &&
-                          account.includeInGroupBalance,
-                    )
-                    .fold(
-                      0,
-                      (total, account) =>
-                          total + store.balanceForAccount(account.id),
-                    ),
-                store.preferences.currency,
-              ),
-            ),
-            ResponsiveGrid(
-              minTileWidth: 300,
-              children: [
-                for (final account in accounts.where(
-                  (account) => account.group == group,
-                ))
-                  AccountCard(
-                    account: account,
-                    balanceMinor: store.balanceForAccount(account.id),
-                    currency: store.preferences.currency,
-                    leading: Icon(
-                      accountGroupIcon(account.group.name),
-                      color: AppTheme.accent,
-                    ),
-                    onLongPress: () => showAccountOptions(context, account.id),
+            Builder(
+              builder: (context) {
+                final isCollapsed = store.preferences.collapsedAccountGroupNames
+                    .contains(group.name);
+                return SectionHeader(
+                  title: accountGroupLabel(group),
+                  subtitle: money(
+                    accounts
+                        .where(
+                          (account) =>
+                              account.group == group &&
+                              account.includeInGroupBalance,
+                        )
+                        .fold(
+                          0,
+                          (total, account) =>
+                              total + store.balanceForAccount(account.id),
+                        ),
+                    store.preferences.currency,
                   ),
-              ],
+                  trailing: IconButton(
+                    tooltip: isCollapsed
+                        ? 'Expand ${accountGroupLabel(group)}'
+                        : 'Collapse ${accountGroupLabel(group)}',
+                    onPressed: () => toggleAccountGroupCollapsed(
+                      context,
+                      group,
+                      isCollapsed: isCollapsed,
+                    ),
+                    icon: Icon(
+                      isCollapsed
+                          ? Icons.keyboard_arrow_right
+                          : Icons.keyboard_arrow_down,
+                    ),
+                  ),
+                );
+              },
             ),
+            if (!store.preferences.collapsedAccountGroupNames.contains(
+              group.name,
+            ))
+              ResponsiveGrid(
+                minTileWidth: 300,
+                children: [
+                  for (final account in accounts.where(
+                    (account) => account.group == group,
+                  ))
+                    AccountCard(
+                      account: account,
+                      balanceMinor: store.balanceForAccount(account.id),
+                      currency: store.preferences.currency,
+                      leading: Icon(
+                        accountGroupIcon(account.group.name),
+                        color: AppTheme.accent,
+                      ),
+                      onLongPress: () =>
+                          showAccountOptions(context, account.id),
+                    ),
+                ],
+              ),
           ],
       ],
     );
   }
+}
+
+Future<void> toggleAccountGroupCollapsed(
+  BuildContext context,
+  v2_account.AccountGroup group, {
+  required bool isCollapsed,
+}) async {
+  final store = FinanceDataStoreScope.read(context);
+  final collapsedNames = {...store.preferences.collapsedAccountGroupNames};
+  if (isCollapsed) {
+    collapsedNames.remove(group.name);
+  } else {
+    collapsedNames.add(group.name);
+  }
+  await store.savePreferences(
+    store.preferences.copyWith(collapsedAccountGroupNames: collapsedNames),
+  );
 }
 
 class LedgerView extends StatelessWidget {

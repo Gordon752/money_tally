@@ -19,6 +19,7 @@ class UserPreferences {
     this.defaultTransactionType = DefaultTransactionType.lastUsed,
     this.lastUsedTransactionType = TransactionType.expense,
     this.notificationsEnabled = false,
+    this.collapsedAccountGroupNames = const {},
   });
 
   final LaunchScreen launchScreen;
@@ -28,6 +29,7 @@ class UserPreferences {
   final DefaultTransactionType defaultTransactionType;
   final TransactionType lastUsedTransactionType;
   final bool notificationsEnabled;
+  final Set<String> collapsedAccountGroupNames;
 
   UserPreferences copyWith({
     LaunchScreen? launchScreen,
@@ -37,6 +39,7 @@ class UserPreferences {
     DefaultTransactionType? defaultTransactionType,
     TransactionType? lastUsedTransactionType,
     bool? notificationsEnabled,
+    Set<String>? collapsedAccountGroupNames,
   }) {
     return UserPreferences(
       launchScreen: launchScreen ?? this.launchScreen,
@@ -49,6 +52,8 @@ class UserPreferences {
       lastUsedTransactionType:
           lastUsedTransactionType ?? this.lastUsedTransactionType,
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+      collapsedAccountGroupNames:
+          collapsedAccountGroupNames ?? this.collapsedAccountGroupNames,
     );
   }
 
@@ -61,6 +66,7 @@ class UserPreferences {
       'defaultTransactionType': defaultTransactionType.name,
       'lastUsedTransactionType': lastUsedTransactionType.name,
       'notificationsEnabled': notificationsEnabled,
+      'collapsedAccountGroupNames': collapsedAccountGroupNames.toList()..sort(),
     };
   }
 
@@ -93,6 +99,11 @@ class UserPreferences {
         TransactionType.expense,
       ),
       notificationsEnabled: json['notificationsEnabled'] as bool? ?? false,
+      collapsedAccountGroupNames:
+          (json['collapsedAccountGroupNames'] as List<Object?>?)
+              ?.whereType<String>()
+              .toSet() ??
+          const {},
     );
   }
 }

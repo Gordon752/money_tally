@@ -144,6 +144,25 @@ void main() {
     expect(find.text('Adjust balance'), findsNothing);
   });
 
+  testWidgets('accounts screen can collapse account groups', (tester) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Accounts').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Collapse Banking'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Banking'), findsWidgets);
+    expect(find.text('Checking'), findsNothing);
+    expect(find.byTooltip('Expand Banking'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Expand Banking'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Checking'), findsOneWidget);
+  });
+
   testWidgets('ledger screen renders v2 transaction rows', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 
