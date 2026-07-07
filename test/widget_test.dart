@@ -840,6 +840,49 @@ void main() {
     expect(find.text('Rent'), findsNothing);
   });
 
+  testWidgets('scheduled edit persists custom alert options', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          scheduledTransactions: [
+            rentSchedule().copyWith(
+              alertPreference: v2_scheduled.AlertPreference.custom,
+              customAlertTimeMinutes: 11 * 60 + 15,
+              repeatAlertUntilResolved: true,
+            ),
+          ],
+        );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Rent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Custom alert time'), findsOneWidget);
+    expect(find.text('11:15'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).at(3), '14:30');
+    await tester.ensureVisible(find.byType(CheckboxListTile));
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final edited = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.id == 'sched-rent',
+    );
+    expect(edited.alertPreference, v2_scheduled.AlertPreference.custom);
+    expect(edited.customAlertTimeMinutes, 14 * 60 + 30);
+    expect(edited.repeatAlertUntilResolved, isFalse);
+  });
+
   testWidgets('budgets screen renders v2 budget progress text', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 

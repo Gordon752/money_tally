@@ -3054,6 +3054,9 @@ Future<void> showScheduledTransactionDialog(
   final nextDate = TextEditingController(
     text: dateInput(existing?.nextDate ?? DateTime.now()),
   );
+  final customAlertTime = TextEditingController(
+    text: alertTimeInput(existing?.customAlertTimeMinutes ?? 9 * 60),
+  );
   var type = existing?.type ?? TransactionType.expense;
   var accountId = accounts.any((account) => account.id == existing?.accountId)
       ? existing!.accountId
@@ -3068,6 +3071,7 @@ Future<void> showScheduledTransactionDialog(
       existing?.frequency ?? v2_scheduled.RecurrenceFrequency.monthly;
   var alertPreference =
       existing?.alertPreference ?? v2_scheduled.AlertPreference.none;
+  var repeatAlertUntilResolved = existing?.repeatAlertUntilResolved ?? false;
 
   final result =
       await showDialog<
@@ -3081,6 +3085,8 @@ Future<void> showScheduledTransactionDialog(
           DateTime nextDate,
           v2_scheduled.RecurrenceFrequency frequency,
           v2_scheduled.AlertPreference alertPreference,
+          int? customAlertTimeMinutes,
+          bool repeatAlertUntilResolved,
         })
       >(
         context: context,
@@ -3256,6 +3262,32 @@ Future<void> showScheduledTransactionDialog(
                           () => alertPreference = value ?? alertPreference,
                         ),
                       ),
+                      if (alertPreference ==
+                          v2_scheduled.AlertPreference.custom) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: customAlertTime,
+                          keyboardType: TextInputType.datetime,
+                          decoration: const InputDecoration(
+                            labelText: 'Custom alert time',
+                            helperText: 'HH:MM',
+                          ),
+                        ),
+                      ],
+                      if (alertPreference !=
+                          v2_scheduled.AlertPreference.none) ...[
+                        const SizedBox(height: 12),
+                        CheckboxListTile(
+                          value: repeatAlertUntilResolved,
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'Repeat alert until marked paid/skipped',
+                          ),
+                          onChanged: (value) => setDialogState(
+                            () => repeatAlertUntilResolved = value ?? false,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -3282,6 +3314,13 @@ Future<void> showScheduledTransactionDialog(
                     nextDate: parseDateInput(nextDate.text, DateTime.now()),
                     frequency: frequency,
                     alertPreference: alertPreference,
+                    customAlertTimeMinutes:
+                        alertPreference == v2_scheduled.AlertPreference.custom
+                        ? parseAlertTimeMinutes(customAlertTime.text, 9 * 60)
+                        : null,
+                    repeatAlertUntilResolved:
+                        alertPreference != v2_scheduled.AlertPreference.none &&
+                        repeatAlertUntilResolved,
                   )),
                   child: Text(isEditing ? 'Save' : 'Add'),
                 ),
@@ -3313,6 +3352,8 @@ Future<void> showScheduledTransactionDialog(
           nextDate: result.nextDate,
           frequency: result.frequency,
           alertPreference: result.alertPreference,
+          customAlertTimeMinutes: result.customAlertTimeMinutes,
+          repeatAlertUntilResolved: result.repeatAlertUntilResolved,
           sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
         )
       : existing.copyWith(
@@ -3325,11 +3366,14 @@ Future<void> showScheduledTransactionDialog(
           nextDate: result.nextDate,
           frequency: result.frequency,
           alertPreference: result.alertPreference,
+          customAlertTimeMinutes: result.customAlertTimeMinutes,
+          repeatAlertUntilResolved: result.repeatAlertUntilResolved,
           scheduledNotificationIds: const [],
           lastAction: v2_scheduled.ScheduledAction.none,
           sync: existing.sync.touched(deviceId: dataStore.deviceId),
           clearTransferAccount: result.transferAccountId == null,
           clearCategory: result.categoryId == null,
+          clearCustomAlertTime: result.customAlertTimeMinutes == null,
           clearLastReminderScheduledAt: true,
         );
   await dataStore.saveScheduledTransaction(scheduledTransaction);
@@ -4215,6 +4259,24 @@ String alertPreferenceLabel(v2_scheduled.AlertPreference preference) {
     v2_scheduled.AlertPreference.oneWeekBefore => '1 week before',
     v2_scheduled.AlertPreference.custom => 'Custom',
   };
+}
+
+String alertTimeInput(int minutesAfterMidnight) {
+  final normalized = minutesAfterMidnight.clamp(0, 23 * 60 + 59);
+  final hours = normalized ~/ 60;
+  final minutes = normalized % 60;
+  return '${hours.toString().padLeft(2, '0')}:'
+      '${minutes.toString().padLeft(2, '0')}';
+}
+
+int parseAlertTimeMinutes(String value, int fallback) {
+  final parts = value.trim().split(':');
+  if (parts.length != 2) return fallback;
+  final hours = int.tryParse(parts[0]);
+  final minutes = int.tryParse(parts[1]);
+  if (hours == null || minutes == null) return fallback;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return fallback;
+  return hours * 60 + minutes;
 }
 
 String scheduledPayeeFallback(TransactionType type) {
