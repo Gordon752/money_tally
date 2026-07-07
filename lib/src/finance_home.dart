@@ -3026,10 +3026,19 @@ Future<void> showTransferDialog(
   );
 }
 
-Future<void> showScheduledTransactionDialog(BuildContext context) async {
+Future<void> showScheduledTransactionDialog(
+  BuildContext context, {
+  v2_scheduled.ScheduledTransactionRecord? existing,
+}) async {
   final dataStore = FinanceDataStoreScope.read(context);
+  final isEditing = existing != null;
   final accounts = dataStore.accounts
-      .where((account) => !account.isArchived)
+      .where(
+        (account) =>
+            !account.isArchived ||
+            account.id == existing?.accountId ||
+            account.id == existing?.transferAccountId,
+      )
       .toList(growable: false);
   if (accounts.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -3038,15 +3047,27 @@ Future<void> showScheduledTransactionDialog(BuildContext context) async {
     return;
   }
 
-  final payee = TextEditingController();
-  final amount = TextEditingController();
-  final nextDate = TextEditingController(text: dateInput(DateTime.now()));
-  var type = TransactionType.expense;
-  var accountId = accounts.first.id;
-  var transferAccountId = accounts.length > 1 ? accounts[1].id : null;
-  var categoryId = defaultCategoryIdForScheduledTransaction(dataStore, type);
-  var frequency = v2_scheduled.RecurrenceFrequency.monthly;
-  var alertPreference = v2_scheduled.AlertPreference.none;
+  final payee = TextEditingController(text: existing?.payee ?? '');
+  final amount = TextEditingController(
+    text: existing == null ? '' : dollars(existing.amountMinor),
+  );
+  final nextDate = TextEditingController(
+    text: dateInput(existing?.nextDate ?? DateTime.now()),
+  );
+  var type = existing?.type ?? TransactionType.expense;
+  var accountId = accounts.any((account) => account.id == existing?.accountId)
+      ? existing!.accountId
+      : accounts.first.id;
+  var transferAccountId =
+      existing?.transferAccountId ??
+      (accounts.length > 1 ? accounts[1].id : null);
+  var categoryId =
+      existing?.categoryId ??
+      defaultCategoryIdForScheduledTransaction(dataStore, type);
+  var frequency =
+      existing?.frequency ?? v2_scheduled.RecurrenceFrequency.monthly;
+  var alertPreference =
+      existing?.alertPreference ?? v2_scheduled.AlertPreference.none;
 
   final result =
       await showDialog<
@@ -3078,7 +3099,11 @@ Future<void> showScheduledTransactionDialog(BuildContext context) async {
             }
 
             return AlertDialog(
-              title: const Text('Add scheduled transaction'),
+              title: Text(
+                isEditing
+                    ? 'Edit scheduled transaction'
+                    : 'Add scheduled transaction',
+              ),
               content: SizedBox(
                 width: 420,
                 child: SingleChildScrollView(
@@ -3258,7 +3283,7 @@ Future<void> showScheduledTransactionDialog(BuildContext context) async {
                     frequency: frequency,
                     alertPreference: alertPreference,
                   )),
-                  child: const Text('Add'),
+                  child: Text(isEditing ? 'Save' : 'Add'),
                 ),
               ],
             );
@@ -3276,21 +3301,38 @@ Future<void> showScheduledTransactionDialog(BuildContext context) async {
     return;
   }
 
-  await dataStore.saveScheduledTransaction(
-    v2_scheduled.ScheduledTransactionRecord(
-      id: 'sched_${DateTime.now().microsecondsSinceEpoch}',
-      type: result.type,
-      accountId: result.accountId,
-      transferAccountId: result.transferAccountId,
-      categoryId: result.categoryId,
-      payee: result.payee,
-      amountMinor: result.amountMinor,
-      nextDate: result.nextDate,
-      frequency: result.frequency,
-      alertPreference: result.alertPreference,
-      sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
-    ),
-  );
+  final scheduledTransaction = existing == null
+      ? v2_scheduled.ScheduledTransactionRecord(
+          id: 'sched_${DateTime.now().microsecondsSinceEpoch}',
+          type: result.type,
+          accountId: result.accountId,
+          transferAccountId: result.transferAccountId,
+          categoryId: result.categoryId,
+          payee: result.payee,
+          amountMinor: result.amountMinor,
+          nextDate: result.nextDate,
+          frequency: result.frequency,
+          alertPreference: result.alertPreference,
+          sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+        )
+      : existing.copyWith(
+          type: result.type,
+          accountId: result.accountId,
+          transferAccountId: result.transferAccountId,
+          categoryId: result.categoryId,
+          payee: result.payee,
+          amountMinor: result.amountMinor,
+          nextDate: result.nextDate,
+          frequency: result.frequency,
+          alertPreference: result.alertPreference,
+          scheduledNotificationIds: const [],
+          lastAction: v2_scheduled.ScheduledAction.none,
+          sync: existing.sync.touched(deviceId: dataStore.deviceId),
+          clearTransferAccount: result.transferAccountId == null,
+          clearCategory: result.categoryId == null,
+          clearLastReminderScheduledAt: true,
+        );
+  await dataStore.saveScheduledTransaction(scheduledTransaction);
 }
 
 Future<void> showScheduledTransactionActions(
@@ -3315,6 +3357,11 @@ Future<void> showScheduledTransactionActions(
             onTap: () => Navigator.pop(sheetContext, 'skip'),
           ),
           ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit'),
+            onTap: () => Navigator.pop(sheetContext, 'edit'),
+          ),
+          ListTile(
             leading: const Icon(Icons.copy_outlined),
             title: const Text('Duplicate'),
             onTap: () => Navigator.pop(sheetContext, 'duplicate'),
@@ -3337,6 +3384,8 @@ Future<void> showScheduledTransactionActions(
       await markScheduledTransactionPaid(context, item);
     case 'skip':
       await skipScheduledTransactionOnce(context, item);
+    case 'edit':
+      await showScheduledTransactionDialog(context, existing: item);
     case 'duplicate':
       await duplicateScheduledTransaction(context, item);
     case 'delete':

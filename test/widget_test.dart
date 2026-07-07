@@ -804,6 +804,42 @@ void main() {
     expect(find.text('Rent copy'), findsOneWidget);
   });
 
+  testWidgets('scheduled long press can edit item', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(scheduledTransactions: [rentSchedule()]);
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Rent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit scheduled transaction'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).at(0), 'Mortgage');
+    await tester.enterText(find.byType(TextField).at(1), '925.50');
+    await tester.enterText(find.byType(TextField).at(2), '2026-08-15');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final edited = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.id == 'sched-rent',
+    );
+    expect(edited.payee, 'Mortgage');
+    expect(edited.amountMinor, 92550);
+    expect(edited.nextDate, DateTime(2026, 8, 15));
+    expect(edited.lastAction, v2_scheduled.ScheduledAction.none);
+    expect(find.text('Mortgage'), findsOneWidget);
+    expect(find.text('Rent'), findsNothing);
+  });
+
   testWidgets('budgets screen renders v2 budget progress text', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 
