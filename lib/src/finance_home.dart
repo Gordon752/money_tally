@@ -2911,6 +2911,11 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
                   : null,
             ),
             ListTile(
+              leading: const Icon(Icons.category_outlined),
+              title: const Text('Change Type'),
+              onTap: () => Navigator.pop(context, 'changeType'),
+            ),
+            ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: const Text('Edit'),
               onTap: () => Navigator.pop(context, 'edit'),
@@ -2953,6 +2958,8 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
     await dataStore.moveAccountWithinGroup(accountId: accountId, direction: -1);
   } else if (action == 'moveDown') {
     await dataStore.moveAccountWithinGroup(accountId: accountId, direction: 1);
+  } else if (action == 'changeType' && context.mounted) {
+    await showChangeAccountTypeDialog(context, account);
   } else if (action == 'edit' && context.mounted) {
     await showEditAccountDialog(context, account);
   } else if (action == 'archive' && context.mounted) {
@@ -2962,6 +2969,43 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
     store.archiveAccount(account.id);
     await dataStore.deleteAccount(account.id);
   }
+}
+
+Future<void> showChangeAccountTypeDialog(
+  BuildContext context,
+  Account account,
+) async {
+  final store = FinanceStoreScope.watch(context);
+  final dataStore = FinanceDataStoreScope.read(context);
+  final selectedType = await showModalBottomSheet<AccountType>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final type in AccountType.values)
+            ListTile(
+              leading: Icon(accountIcon(type)),
+              title: Text(accountTypeLabel(type)),
+              trailing: type == account.type
+                  ? const Icon(Icons.check, color: AppTheme.accent)
+                  : null,
+              onTap: () => Navigator.pop(sheetContext, type),
+            ),
+        ],
+      ),
+    ),
+  );
+  if (selectedType == null || selectedType == account.type) return;
+
+  final updated = store.editAccount(
+    accountId: account.id,
+    name: account.name,
+    type: selectedType,
+  );
+  if (!context.mounted) return;
+  await saveLegacyAccountToV2(context, updated, dataStore: dataStore);
 }
 
 Future<void> showEditAccountDialog(

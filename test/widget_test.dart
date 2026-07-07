@@ -5,6 +5,7 @@ import 'package:money_tally/main.dart';
 import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/design/widgets/transaction_row.dart';
+import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/category.dart' as v2_category;
 import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart'
@@ -737,6 +738,30 @@ void main() {
     final account = dataStore.accountById('checking');
     expect(account.includeInGroupBalance, isFalse);
     expect(account.includeInNetWorth, isFalse);
+  });
+
+  testWidgets('account long press can change account type', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Accounts').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Checking'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Change Type'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Cash').last);
+    await tester.pumpAndSettle();
+
+    expect(legacyStore.accountById('checking').type, AccountType.cash);
+    expect(dataStore.accountById('checking').type, v2_account.AccountType.cash);
   });
 
   testWidgets('account edit can set credit card limit', (tester) async {
