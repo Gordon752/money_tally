@@ -249,6 +249,7 @@ class DashboardView extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final scheduled = [...store.scheduledTransactions]
+      ..removeWhere((item) => item.isDeleted)
       ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
     final incomeThisMonth = store.incomeThisMonthMinor();
     final expensesThisMonth = store.expensesThisMonthMinor();
@@ -422,6 +423,8 @@ class ScheduledView extends StatelessWidget {
               ScheduledTransactionRow(
                 scheduledTransaction: item,
                 currency: store.preferences.currency,
+                onLongPress: () =>
+                    showScheduledTransactionActions(context, item),
               ),
             const Divider(height: 1),
             const ListTile(
@@ -766,6 +769,7 @@ class UpcomingPanel extends StatelessWidget {
     final store = FinanceDataStoreScope.watch(context);
     final currency = store.preferences.currency;
     final scheduled = [...store.scheduledTransactions]
+      ..removeWhere((item) => item.isDeleted)
       ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
     return AppCard(
       title: 'Scheduled',
@@ -1822,6 +1826,223 @@ Future<void> showScheduledTransactionDialog(BuildContext context) async {
       alertPreference: result.alertPreference,
       sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
     ),
+  );
+}
+
+Future<void> showScheduledTransactionActions(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+) async {
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.check_circle_outline),
+            title: const Text('Mark Paid'),
+            onTap: () => Navigator.pop(sheetContext, 'paid'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.skip_next_outlined),
+            title: const Text('Skip Once'),
+            onTap: () => Navigator.pop(sheetContext, 'skip'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.copy_outlined),
+            title: const Text('Duplicate'),
+            onTap: () => Navigator.pop(sheetContext, 'duplicate'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Delete'),
+            textColor: AppTheme.rose,
+            iconColor: AppTheme.rose,
+            onTap: () => Navigator.pop(sheetContext, 'delete'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (!context.mounted || action == null) return;
+  switch (action) {
+    case 'paid':
+      await markScheduledTransactionPaid(context, item);
+    case 'skip':
+      await skipScheduledTransactionOnce(context, item);
+    case 'duplicate':
+      await duplicateScheduledTransaction(context, item);
+    case 'delete':
+      await deleteScheduledTransaction(context, item);
+  }
+}
+
+Future<void> markScheduledTransactionPaid(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  TransactionRecord paidTransaction;
+  switch (item.type) {
+    case TransactionType.expense:
+      if (item.categoryId == null) {
+        showMissingScheduledCategoryMessage(context);
+        return;
+      }
+      paidTransaction = await dataStore.addExpense(
+        accountId: item.accountId,
+        categoryId: item.categoryId!,
+        date: item.nextDate,
+        payee: item.payee,
+        amountMinor: item.amountMinor,
+      );
+    case TransactionType.income:
+      if (item.categoryId == null) {
+        showMissingScheduledCategoryMessage(context);
+        return;
+      }
+      paidTransaction = await dataStore.addIncome(
+        accountId: item.accountId,
+        categoryId: item.categoryId!,
+        date: item.nextDate,
+        payee: item.payee,
+        amountMinor: item.amountMinor,
+      );
+    case TransactionType.transfer:
+      if (item.transferAccountId == null) {
+        showMissingScheduledTransferMessage(context);
+        return;
+      }
+      paidTransaction = await dataStore.addTransfer(
+        fromAccountId: item.accountId,
+        toAccountId: item.transferAccountId!,
+        date: item.nextDate,
+        payee: item.payee,
+        amountMinor: item.amountMinor,
+      );
+    case TransactionType.adjustment:
+      showMissingScheduledCategoryMessage(context);
+      return;
+  }
+
+  await dataStore.saveTransaction(
+    paidTransaction.copyWith(scheduledTransactionId: item.id),
+  );
+  await advanceOrCloseScheduledTransaction(
+    dataStore,
+    item,
+    v2_scheduled.ScheduledAction.paid,
+  );
+}
+
+Future<void> skipScheduledTransactionOnce(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  await advanceOrCloseScheduledTransaction(
+    dataStore,
+    item,
+    v2_scheduled.ScheduledAction.skipped,
+  );
+}
+
+Future<void> duplicateScheduledTransaction(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  await dataStore.saveScheduledTransaction(
+    v2_scheduled.ScheduledTransactionRecord(
+      id: 'sched_${DateTime.now().microsecondsSinceEpoch}',
+      type: item.type,
+      accountId: item.accountId,
+      transferAccountId: item.transferAccountId,
+      categoryId: item.categoryId,
+      payee: '${item.payee} copy',
+      amountMinor: item.amountMinor,
+      nextDate: item.nextDate,
+      frequency: item.frequency,
+      endDate: item.endDate,
+      alertPreference: item.alertPreference,
+      customAlertTimeMinutes: item.customAlertTimeMinutes,
+      repeatAlertUntilResolved: item.repeatAlertUntilResolved,
+      scheduledNotificationIds: const [],
+      lastAction: v2_scheduled.ScheduledAction.none,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+    ),
+  );
+}
+
+Future<void> deleteScheduledTransaction(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  await dataStore.saveScheduledTransaction(
+    item.copyWith(sync: item.sync.deleted(deviceId: dataStore.deviceId)),
+  );
+}
+
+Future<void> advanceOrCloseScheduledTransaction(
+  FinanceDataStore dataStore,
+  v2_scheduled.ScheduledTransactionRecord item,
+  v2_scheduled.ScheduledAction action,
+) async {
+  final nextDate = nextScheduledDate(item);
+  if (nextDate == null || nextDate.isAfter(item.endDate ?? DateTime(9999))) {
+    await dataStore.saveScheduledTransaction(
+      item.copyWith(
+        lastAction: action,
+        sync: item.sync.deleted(deviceId: dataStore.deviceId),
+      ),
+    );
+    return;
+  }
+  await dataStore.saveScheduledTransaction(
+    item.copyWith(
+      nextDate: nextDate,
+      lastAction: action,
+      sync: item.sync.touched(deviceId: dataStore.deviceId),
+    ),
+  );
+}
+
+DateTime? nextScheduledDate(v2_scheduled.ScheduledTransactionRecord item) {
+  final date = item.nextDate;
+  return switch (item.frequency) {
+    v2_scheduled.RecurrenceFrequency.once => null,
+    v2_scheduled.RecurrenceFrequency.weekly => date.add(
+      const Duration(days: 7),
+    ),
+    v2_scheduled.RecurrenceFrequency.biweekly => date.add(
+      const Duration(days: 14),
+    ),
+    v2_scheduled.RecurrenceFrequency.monthly => DateTime(
+      date.year,
+      date.month + 1,
+      date.day,
+    ),
+    v2_scheduled.RecurrenceFrequency.yearly => DateTime(
+      date.year + 1,
+      date.month,
+      date.day,
+    ),
+  };
+}
+
+void showMissingScheduledCategoryMessage(BuildContext context) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Choose a category before marking paid')),
+  );
+}
+
+void showMissingScheduledTransferMessage(BuildContext context) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Choose a destination before marking paid')),
   );
 }
 

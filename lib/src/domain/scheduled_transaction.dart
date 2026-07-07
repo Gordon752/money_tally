@@ -55,6 +55,59 @@ class ScheduledTransactionRecord {
   final SyncMetadata sync;
 
   bool get hasAlert => alertPreference != AlertPreference.none;
+  bool get isDeleted => sync.isDeleted;
+
+  ScheduledTransactionRecord copyWith({
+    TransactionType? type,
+    String? accountId,
+    String? transferAccountId,
+    String? categoryId,
+    String? payee,
+    int? amountMinor,
+    DateTime? nextDate,
+    RecurrenceFrequency? frequency,
+    DateTime? endDate,
+    AlertPreference? alertPreference,
+    int? customAlertTimeMinutes,
+    bool? repeatAlertUntilResolved,
+    List<int>? scheduledNotificationIds,
+    DateTime? lastReminderScheduledAt,
+    ScheduledAction? lastAction,
+    SyncMetadata? sync,
+    bool clearTransferAccount = false,
+    bool clearCategory = false,
+    bool clearEndDate = false,
+    bool clearCustomAlertTime = false,
+    bool clearLastReminderScheduledAt = false,
+  }) {
+    return ScheduledTransactionRecord(
+      id: id,
+      type: type ?? this.type,
+      accountId: accountId ?? this.accountId,
+      transferAccountId: clearTransferAccount
+          ? null
+          : transferAccountId ?? this.transferAccountId,
+      categoryId: clearCategory ? null : categoryId ?? this.categoryId,
+      payee: payee ?? this.payee,
+      amountMinor: amountMinor ?? this.amountMinor,
+      nextDate: nextDate ?? this.nextDate,
+      frequency: frequency ?? this.frequency,
+      endDate: clearEndDate ? null : endDate ?? this.endDate,
+      alertPreference: alertPreference ?? this.alertPreference,
+      customAlertTimeMinutes: clearCustomAlertTime
+          ? null
+          : customAlertTimeMinutes ?? this.customAlertTimeMinutes,
+      repeatAlertUntilResolved:
+          repeatAlertUntilResolved ?? this.repeatAlertUntilResolved,
+      scheduledNotificationIds:
+          scheduledNotificationIds ?? this.scheduledNotificationIds,
+      lastReminderScheduledAt: clearLastReminderScheduledAt
+          ? null
+          : lastReminderScheduledAt ?? this.lastReminderScheduledAt,
+      lastAction: lastAction ?? this.lastAction,
+      sync: sync ?? this.sync.touched(),
+    );
+  }
 
   Map<String, Object?> toJson() {
     return {

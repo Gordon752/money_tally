@@ -399,6 +399,77 @@ void main() {
     expect(find.text('Alerts are required'), findsOneWidget);
   });
 
+  testWidgets('scheduled long press can mark paid and advance item', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(scheduledTransactions: [rentSchedule()]);
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Rent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark Paid'));
+    await tester.pumpAndSettle();
+
+    final paid = dataStore.transactions.singleWhere(
+      (transaction) => transaction.scheduledTransactionId == 'sched-rent',
+    );
+    expect(paid.type, v2_transaction.TransactionType.expense);
+    expect(paid.amountMinor, 90000);
+
+    final scheduled = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.id == 'sched-rent',
+    );
+    expect(scheduled.nextDate, DateTime(2026, 9));
+    expect(scheduled.lastAction, v2_scheduled.ScheduledAction.paid);
+  });
+
+  testWidgets('scheduled long press can duplicate and delete item', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(scheduledTransactions: [rentSchedule()]);
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Rent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Duplicate'));
+    await tester.pumpAndSettle();
+
+    expect(
+      dataStore.scheduledTransactions.map((item) => item.payee),
+      contains('Rent copy'),
+    );
+    expect(find.text('Rent copy'), findsOneWidget);
+
+    await tester.longPress(find.text('Rent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    final original = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.id == 'sched-rent',
+    );
+    expect(original.isDeleted, isTrue);
+    expect(find.text('Rent copy'), findsOneWidget);
+  });
+
   testWidgets('budgets screen renders v2 budget progress text', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 
@@ -623,4 +694,18 @@ class FakeRemoteFinanceRepository implements FinanceRemoteRepository {
   }) async {
     snapshots[userId] = FinanceSnapshot.fromJson(snapshot.toJson());
   }
+}
+
+v2_scheduled.ScheduledTransactionRecord rentSchedule() {
+  return v2_scheduled.ScheduledTransactionRecord(
+    id: 'sched-rent',
+    type: v2_transaction.TransactionType.expense,
+    accountId: 'checking',
+    categoryId: 'dining',
+    payee: 'Rent',
+    amountMinor: 90000,
+    nextDate: DateTime(2026, 8),
+    frequency: v2_scheduled.RecurrenceFrequency.monthly,
+    sync: v2_sync.SyncMetadata.fresh(),
+  );
 }
