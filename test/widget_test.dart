@@ -118,6 +118,16 @@ void main() {
     expect(find.textContaining('Checking'), findsWidgets);
   });
 
+  testWidgets('scheduled screen renders v2 scheduled rows', (tester) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Insurance'), findsOneWidget);
+    expect(find.text('Alerts are required'), findsOneWidget);
+  });
+
   test('legacy v2 mirror refreshes in-memory v2 balances', () async {
     final legacyStore = FinanceStore.seeded();
     final dataStore = FinanceDataStore(

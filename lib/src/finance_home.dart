@@ -335,21 +335,30 @@ class ScheduledView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final store = FinanceStoreScope.watch(context);
+    final store = FinanceDataStoreScope.watch(context);
+    final scheduled = [...store.scheduledTransactions]
+      ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
     return AppCard(
       padding: EdgeInsets.zero,
-      child: Column(
-        children: [
-          for (final item in store.upcomingScheduled) ScheduledTile(item: item),
-          const Divider(height: 1),
-          const ListTile(
-            leading: Icon(Icons.notifications_outlined, color: AppTheme.accent),
-            title: Text('Alerts are required'),
-            subtitle: Text(
-              'Local notification wiring will be added before device builds.',
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          children: [
+            for (final item in scheduled)
+              ScheduledTransactionRow(scheduledTransaction: item),
+            const Divider(height: 1),
+            const ListTile(
+              leading: Icon(
+                Icons.notifications_outlined,
+                color: AppTheme.accent,
+              ),
+              title: Text('Alerts are required'),
+              subtitle: Text(
+                'Local notification wiring will be added before device builds.',
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
