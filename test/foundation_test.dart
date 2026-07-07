@@ -128,6 +128,26 @@ void main() {
     ]);
   });
 
+  test('store can reorder fixed account groups', () async {
+    final store = FinanceDataStore(dataSet: _dataSet());
+
+    expect(store.activeAccountsInDisplayOrder.map((account) => account.id), [
+      'checking',
+      'cash',
+    ]);
+
+    await store.moveAccountGroup(group: AccountGroup.cash, direction: -1);
+
+    expect(store.preferences.accountGroupOrderNames.take(2), [
+      'cash',
+      'banking',
+    ]);
+    expect(store.activeAccountsInDisplayOrder.map((account) => account.id), [
+      'cash',
+      'checking',
+    ]);
+  });
+
   test('split transactions must match the parent amount', () async {
     final store = FinanceDataStore(dataSet: _dataSet());
 
@@ -344,6 +364,7 @@ void main() {
       currency: CurrencyFormatSettings(currencyCode: 'USD', symbol: r'$'),
       defaultTransactionType: DefaultTransactionType.lastUsed,
       collapsedAccountGroupNames: {'cash'},
+      accountGroupOrderNames: ['cash', 'banking', 'creditCards', 'loans'],
     );
 
     final updated = preferences.copyWith(
@@ -359,9 +380,11 @@ void main() {
     expect(updated.currency.currencyCode, 'CAD');
     expect(updated.defaultTransactionType, DefaultTransactionType.lastUsed);
     expect(updated.collapsedAccountGroupNames, {'cash'});
+    expect(updated.accountGroupOrderNames.take(2), ['cash', 'banking']);
 
     final roundTripped = UserPreferences.fromJson(updated.toJson());
     expect(roundTripped.collapsedAccountGroupNames, {'cash'});
+    expect(roundTripped.accountGroupOrderNames.take(2), ['cash', 'banking']);
   });
 
   test('notification planner converts alert preferences into requests', () {

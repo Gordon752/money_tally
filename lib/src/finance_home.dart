@@ -423,7 +423,7 @@ class AccountsView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final group in v2_account.AccountGroup.values)
+        for (final group in store.accountGroupsInDisplayOrder)
           if (accounts.any((account) => account.group == group)) ...[
             Builder(
               builder: (context) {

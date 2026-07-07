@@ -123,10 +123,36 @@ class FinanceDataStore extends ChangeNotifier {
   UserPreferences get preferences => _dataSet.preferences;
 
   List<AccountRecord> get activeAccountsInDisplayOrder {
+    final groupOrder = accountGroupDisplayOrderIndexes;
     return accounts
         .where((account) => !account.isArchived)
         .toList(growable: false)
-      ..sort(compareAccountDisplayOrder);
+      ..sort(
+        (a, b) => compareAccountDisplayOrder(a, b, groupOrder: groupOrder),
+      );
+  }
+
+  List<AccountGroup> get accountGroupsInDisplayOrder {
+    final remaining = {
+      for (final group in AccountGroup.values) group.name: group,
+    };
+    final ordered = <AccountGroup>[];
+    for (final groupName in preferences.accountGroupOrderNames) {
+      final group = remaining.remove(groupName);
+      if (group != null) ordered.add(group);
+    }
+    ordered.addAll(
+      remaining.values.toList()..sort((a, b) => a.index.compareTo(b.index)),
+    );
+    return ordered;
+  }
+
+  Map<AccountGroup, int> get accountGroupDisplayOrderIndexes {
+    final groups = accountGroupsInDisplayOrder;
+    return {
+      for (var index = 0; index < groups.length; index += 1)
+        groups[index]: index,
+    };
   }
 
   int balanceForAccount(String accountId) {
@@ -601,6 +627,27 @@ class FinanceDataStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> moveAccountGroup({
+    required AccountGroup group,
+    required int direction,
+  }) async {
+    final groups = accountGroupsInDisplayOrder;
+    final fromIndex = groups.indexOf(group);
+    final toIndex = fromIndex + direction;
+    if (fromIndex < 0 || toIndex < 0 || toIndex >= groups.length) return;
+
+    final reordered = [...groups];
+    final moving = reordered.removeAt(fromIndex);
+    reordered.insert(toIndex, moving);
+    await savePreferences(
+      preferences.copyWith(
+        accountGroupOrderNames: [
+          for (final reorderedGroup in reordered) reorderedGroup.name,
+        ],
+      ),
+    );
+  }
+
   List<T> _upsert<T>(List<T> items, T value, String Function(T) idOf) {
     final id = idOf(value);
     var found = false;
@@ -622,8 +669,14 @@ class FinanceDataStore extends ChangeNotifier {
   }
 }
 
-int compareAccountDisplayOrder(AccountRecord a, AccountRecord b) {
-  final groupComparison = a.group.index.compareTo(b.group.index);
+int compareAccountDisplayOrder(
+  AccountRecord a,
+  AccountRecord b, {
+  Map<AccountGroup, int> groupOrder = const {},
+}) {
+  final groupComparison = (groupOrder[a.group] ?? a.group.index).compareTo(
+    groupOrder[b.group] ?? b.group.index,
+  );
   if (groupComparison != 0) return groupComparison;
   final sortComparison = a.sortOrder.compareTo(b.sortOrder);
   if (sortComparison != 0) return sortComparison;

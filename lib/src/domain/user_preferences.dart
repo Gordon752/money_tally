@@ -10,6 +10,13 @@ enum FloatingAddButtonPosition { left, right }
 
 enum DefaultTransactionType { expense, income, transfer, lastUsed }
 
+const defaultAccountGroupOrderNames = [
+  'banking',
+  'cash',
+  'creditCards',
+  'loans',
+];
+
 class UserPreferences {
   const UserPreferences({
     this.launchScreen = LaunchScreen.dashboard,
@@ -20,6 +27,7 @@ class UserPreferences {
     this.lastUsedTransactionType = TransactionType.expense,
     this.notificationsEnabled = false,
     this.collapsedAccountGroupNames = const {},
+    this.accountGroupOrderNames = defaultAccountGroupOrderNames,
   });
 
   final LaunchScreen launchScreen;
@@ -30,6 +38,7 @@ class UserPreferences {
   final TransactionType lastUsedTransactionType;
   final bool notificationsEnabled;
   final Set<String> collapsedAccountGroupNames;
+  final List<String> accountGroupOrderNames;
 
   UserPreferences copyWith({
     LaunchScreen? launchScreen,
@@ -40,6 +49,7 @@ class UserPreferences {
     TransactionType? lastUsedTransactionType,
     bool? notificationsEnabled,
     Set<String>? collapsedAccountGroupNames,
+    List<String>? accountGroupOrderNames,
   }) {
     return UserPreferences(
       launchScreen: launchScreen ?? this.launchScreen,
@@ -54,6 +64,8 @@ class UserPreferences {
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       collapsedAccountGroupNames:
           collapsedAccountGroupNames ?? this.collapsedAccountGroupNames,
+      accountGroupOrderNames:
+          accountGroupOrderNames ?? this.accountGroupOrderNames,
     );
   }
 
@@ -67,6 +79,7 @@ class UserPreferences {
       'lastUsedTransactionType': lastUsedTransactionType.name,
       'notificationsEnabled': notificationsEnabled,
       'collapsedAccountGroupNames': collapsedAccountGroupNames.toList()..sort(),
+      'accountGroupOrderNames': accountGroupOrderNames,
     };
   }
 
@@ -104,6 +117,11 @@ class UserPreferences {
               ?.whereType<String>()
               .toSet() ??
           const {},
+      accountGroupOrderNames:
+          (json['accountGroupOrderNames'] as List<Object?>?)
+              ?.whereType<String>()
+              .toList() ??
+          defaultAccountGroupOrderNames,
     );
   }
 }
