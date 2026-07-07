@@ -365,6 +365,29 @@ void main() {
     expect(find.textContaining('Checking'), findsWidgets);
   });
 
+  testWidgets('ledger tap opens transaction details before editing', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(TransactionRow, 'Walmart').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Transaction details'), findsOneWidget);
+    expect(find.text('Payee'), findsOneWidget);
+    expect(find.text('Amount'), findsOneWidget);
+    expect(find.text(r'-$64.28'), findsWidgets);
+
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit transaction'), findsOneWidget);
+    expect(find.byKey(const ValueKey('transaction-payee')), findsOneWidget);
+  });
+
   testWidgets('ledger search filters visible transactions', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 

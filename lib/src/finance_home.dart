@@ -947,6 +947,8 @@ class _LedgerViewState extends State<LedgerView> {
                     categoryName: transaction.categoryId == null
                         ? null
                         : categoriesById[transaction.categoryId]?.name,
+                    onTap: () =>
+                        showTransactionDetails(context, transaction.id),
                     onLongPress: () =>
                         showTransactionOptions(context, transaction.id),
                   ),
@@ -1142,6 +1144,169 @@ Future<void> showTransactionOptions(
       await makeTransactionScheduled(context, transaction);
     case 'delete':
       await deleteTransaction(context, transaction);
+  }
+}
+
+Future<void> showTransactionDetails(
+  BuildContext context,
+  String transactionId,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final transaction = dataStore.transactions.firstWhere(
+    (item) => item.id == transactionId,
+  );
+  final accountsById = {
+    for (final account in dataStore.accounts) account.id: account,
+  };
+  final categoriesById = {
+    for (final category in dataStore.categories) category.id: category,
+  };
+  final canEdit =
+      transaction.type == TransactionType.expense ||
+      transaction.type == TransactionType.income ||
+      transaction.type == TransactionType.transfer;
+  final signedAmount = switch (transaction.type) {
+    TransactionType.expense => -transaction.amountMinor.abs(),
+    TransactionType.income => transaction.amountMinor.abs(),
+    TransactionType.transfer => transaction.amountMinor.abs(),
+    TransactionType.adjustment => transaction.amountMinor,
+  };
+
+  final action = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Transaction details'),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TransactionDetailRow(label: 'Payee', value: transaction.payee),
+              TransactionDetailRow(
+                label: 'Type',
+                value: transactionTypeLabel(transaction.type),
+              ),
+              TransactionDetailRow(
+                label: 'Date',
+                value: dateInput(transaction.date),
+              ),
+              TransactionDetailRow(
+                label: 'Amount',
+                value: money(signedAmount, dataStore.preferences.currency),
+              ),
+              TransactionDetailRow(
+                label: 'Account',
+                value: accountsById[transaction.accountId]?.name ?? 'Unknown',
+              ),
+              if (transaction.transferAccountId != null)
+                TransactionDetailRow(
+                  label: 'Transfer to',
+                  value:
+                      accountsById[transaction.transferAccountId]?.name ??
+                      'Unknown',
+                ),
+              if (transaction.categoryId != null)
+                TransactionDetailRow(
+                  label: 'Category',
+                  value:
+                      categoriesById[transaction.categoryId]?.name ?? 'Unknown',
+                ),
+              if (transaction.note.trim().isNotEmpty)
+                TransactionDetailRow(label: 'Note', value: transaction.note),
+              if (transaction.splitLines.isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Splits',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: AppTheme.muted,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                for (final split in transaction.splitLines)
+                  TransactionDetailRow(
+                    label: categoriesById[split.categoryId]?.name ?? 'Category',
+                    value: money(
+                      split.amountMinor,
+                      dataStore.preferences.currency,
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Close'),
+        ),
+        FilledButton.icon(
+          onPressed: canEdit
+              ? () => Navigator.pop(dialogContext, 'edit')
+              : null,
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('Edit'),
+        ),
+      ],
+    ),
+  );
+
+  if (!context.mounted || action != 'edit') return;
+  if (transaction.type == TransactionType.transfer) {
+    await showTransferDialog(context, transfer: transaction);
+  } else {
+    await showTransactionDialog(context, transaction: transaction);
+  }
+}
+
+class TransactionDetailRow extends StatelessWidget {
+  const TransactionDetailRow({
+    required this.label,
+    required this.value,
+    super.key,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 96,
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: AppTheme.muted,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                fontFeatures: label == 'Amount'
+                    ? const [AppTextStyles.tabularFigures]
+                    : null,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
