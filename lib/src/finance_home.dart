@@ -508,21 +508,41 @@ Future<void> toggleAccountGroupCollapsed(
   );
 }
 
-class LedgerView extends StatelessWidget {
+class LedgerView extends StatefulWidget {
   const LedgerView({super.key});
+
+  @override
+  State<LedgerView> createState() => _LedgerViewState();
+}
+
+class _LedgerViewState extends State<LedgerView> {
+  var query = '';
 
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
-    final transactions = [...store.transactions]
-      ..removeWhere((transaction) => transaction.isDeleted)
-      ..sort((a, b) => b.date.compareTo(a.date));
     final accountsById = {
       for (final account in store.accounts) account.id: account,
     };
     final categoriesById = {
       for (final category in store.categories) category.id: category,
     };
+    final normalizedQuery = query.trim().toLowerCase();
+    final transactions =
+        store.transactions
+            .where((transaction) => !transaction.isDeleted)
+            .where(
+              (transaction) => transactionMatchesSearch(
+                transaction,
+                normalizedQuery,
+                accountName: accountsById[transaction.accountId]?.name,
+                categoryName: transaction.categoryId == null
+                    ? null
+                    : categoriesById[transaction.categoryId]?.name,
+              ),
+            )
+            .toList()
+          ..sort((a, b) => b.date.compareTo(a.date));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -536,12 +556,30 @@ class LedgerView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
+        TextField(
+          decoration: const InputDecoration(
+            labelText: 'Search transactions',
+            prefixIcon: Icon(Icons.search),
+          ),
+          onChanged: (value) => setState(() => query = value),
+        ),
+        const SizedBox(height: 12),
         AppCard(
           padding: EdgeInsets.zero,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
               children: [
+                if (transactions.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    child: Text(
+                      'No transactions match',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
                 for (final transaction in transactions)
                   TransactionRow(
                     transaction: transaction,
@@ -560,6 +598,22 @@ class LedgerView extends StatelessWidget {
       ],
     );
   }
+}
+
+bool transactionMatchesSearch(
+  TransactionRecord transaction,
+  String query, {
+  String? accountName,
+  String? categoryName,
+}) {
+  if (query.isEmpty) return true;
+  return [
+    transaction.payee,
+    transaction.note,
+    accountName,
+    categoryName,
+    transaction.type.name,
+  ].whereType<String>().any((value) => value.toLowerCase().contains(query));
 }
 
 Future<void> showTransactionOptions(

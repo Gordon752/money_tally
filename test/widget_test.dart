@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
+import 'package:money_tally/src/design/widgets/transaction_row.dart';
 import 'package:money_tally/src/domain/category.dart' as v2_category;
 import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart'
@@ -173,6 +174,19 @@ void main() {
     expect(find.textContaining('Checking'), findsWidgets);
   });
 
+  testWidgets('ledger search filters visible transactions', (tester) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'Diner');
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(TransactionRow, 'Diner'), findsOneWidget);
+    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
+    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
+  });
+
   testWidgets('ledger long press can duplicate and delete transaction', (
     tester,
   ) async {
@@ -231,8 +245,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final fields = find.byType(TextField);
-    await tester.enterText(fields.at(0), 'Walmart Grocery');
-    await tester.enterText(fields.at(1), '12.34');
+    await tester.enterText(fields.at(1), 'Walmart Grocery');
+    await tester.enterText(fields.at(2), '12.34');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
