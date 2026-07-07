@@ -148,6 +148,37 @@ void main() {
     expect(find.textContaining('Checking'), findsWidgets);
   });
 
+  testWidgets('add transaction dialog honors default income preference', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            defaultTransactionType: DefaultTransactionType.income,
+          ),
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add transaction'));
+    await tester.pumpAndSettle();
+
+    final segmented = tester.widget<SegmentedButton<bool>>(
+      find.byType(SegmentedButton<bool>),
+    );
+
+    expect(segmented.selected, {false});
+  });
+
   testWidgets('scheduled screen renders v2 scheduled rows', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 
@@ -273,9 +304,13 @@ void main() {
   test('legacy v2 mirror refreshes in-memory v2 balances', () async {
     final legacyStore = FinanceStore.seeded();
     final dataStore = FinanceDataStore(
-      dataSet: const V1SnapshotMigrator().migrate(
-        legacyStore.snapshot().toJson(),
-      ),
+      dataSet: const V1SnapshotMigrator()
+          .migrate(legacyStore.snapshot().toJson())
+          .copyWith(
+            preferences: const UserPreferences(
+              appearanceMode: AppearanceMode.dark,
+            ),
+          ),
     );
     final mirror = LegacyV2StoreMirror(
       legacyStore: legacyStore,
@@ -287,6 +322,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(dataStore.balanceForAccount('checking'), 200000);
+    expect(dataStore.preferences.appearanceMode, AppearanceMode.dark);
   });
 }
 

@@ -1167,18 +1167,22 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
 
 Future<void> showTransactionDialog(BuildContext context) async {
   final store = FinanceStoreScope.watch(context);
+  final dataStore = FinanceDataStoreScope.read(context);
   final payee = TextEditingController();
   final amount = TextEditingController();
   var accountId = store.accounts.first.id;
-  var categoryId = store.categories
-      .where((category) => category.kind == CategoryKind.expense)
-      .first
-      .id;
-  var isExpense = true;
+  var isExpense = isExpenseDefault(dataStore.preferences);
+  var categoryId = defaultCategoryIdForTransactionKind(store, isExpense);
 
   final result =
       await showDialog<
-        ({String accountId, String categoryId, String payee, int amountCents})
+        ({
+          String accountId,
+          String categoryId,
+          String payee,
+          int amountCents,
+          bool isExpense,
+        })
       >(
         context: context,
         builder: (context) => StatefulBuilder(
@@ -1203,8 +1207,13 @@ Future<void> showTransactionDialog(BuildContext context) async {
                       ),
                     ],
                     selected: {isExpense},
-                    onSelectionChanged: (values) =>
-                        setDialogState(() => isExpense = values.first),
+                    onSelectionChanged: (values) => setDialogState(() {
+                      isExpense = values.first;
+                      categoryId = defaultCategoryIdForTransactionKind(
+                        store,
+                        isExpense,
+                      );
+                    }),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -1264,6 +1273,7 @@ Future<void> showTransactionDialog(BuildContext context) async {
                         ? 'Transaction'
                         : payee.text.trim(),
                     amountCents: cents,
+                    isExpense: isExpense,
                   ));
                 },
                 child: const Text('Add'),
@@ -1280,6 +1290,13 @@ Future<void> showTransactionDialog(BuildContext context) async {
       date: DateTime.now(),
       payee: result.payee,
       amountCents: result.amountCents,
+    );
+    await dataStore.savePreferences(
+      dataStore.preferences.copyWith(
+        lastUsedTransactionType: result.isExpense
+            ? TransactionType.expense
+            : TransactionType.income,
+      ),
     );
   }
 }
@@ -1404,6 +1421,26 @@ String defaultTransactionTypeLabel(DefaultTransactionType type) {
     DefaultTransactionType.transfer => 'Transfer',
     DefaultTransactionType.lastUsed => 'Last used',
   };
+}
+
+bool isExpenseDefault(UserPreferences preferences) {
+  return switch (preferences.defaultTransactionType) {
+    DefaultTransactionType.expense => true,
+    DefaultTransactionType.income => false,
+    DefaultTransactionType.transfer => true,
+    DefaultTransactionType.lastUsed =>
+      preferences.lastUsedTransactionType != TransactionType.income,
+  };
+}
+
+String defaultCategoryIdForTransactionKind(FinanceStore store, bool isExpense) {
+  final kind = isExpense ? CategoryKind.expense : CategoryKind.income;
+  return store.categories
+      .firstWhere(
+        (category) => category.kind == kind,
+        orElse: () => store.categories.first,
+      )
+      .id;
 }
 
 String thousandsSeparatorLabel(String value) {

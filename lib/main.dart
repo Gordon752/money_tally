@@ -19,6 +19,7 @@ import 'src/design/widgets/scheduled_transaction_row.dart';
 import 'src/design/widgets/transaction_row.dart';
 import 'src/domain/budget.dart';
 import 'src/domain/money.dart';
+import 'src/domain/transaction.dart';
 import 'src/domain/user_preferences.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
 import 'src/persistence/local_finance_data_set_repository.dart';
@@ -161,9 +162,9 @@ class LegacyV2StoreMirror {
     try {
       do {
         _queuedRefresh = false;
-        final dataSet = const V1SnapshotMigrator().migrate(
-          legacyStore.snapshot().toJson(),
-        );
+        final dataSet = const V1SnapshotMigrator()
+            .migrate(legacyStore.snapshot().toJson())
+            .copyWith(preferences: dataStore.preferences);
         await dataStore.replaceDataSet(dataSet, persistLocal: false);
       } while (_queuedRefresh);
     } finally {
