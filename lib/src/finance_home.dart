@@ -578,6 +578,18 @@ Future<void> showTransactionOptions(
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
+            enabled:
+                transaction.type == TransactionType.expense ||
+                transaction.type == TransactionType.income,
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit'),
+            onTap:
+                transaction.type == TransactionType.expense ||
+                    transaction.type == TransactionType.income
+                ? () => Navigator.pop(sheetContext, 'edit')
+                : null,
+          ),
+          ListTile(
             leading: const Icon(Icons.copy_outlined),
             title: const Text('Duplicate'),
             onTap: () => Navigator.pop(sheetContext, 'duplicate'),
@@ -596,6 +608,8 @@ Future<void> showTransactionOptions(
 
   if (!context.mounted || action == null) return;
   switch (action) {
+    case 'edit':
+      await showTransactionDialog(context, transaction: transaction);
     case 'duplicate':
       await duplicateTransaction(context, transaction);
     case 'delete':
@@ -3009,17 +3023,28 @@ Future<void> showTransactionDialog(
   BuildContext context, {
   bool? initialIsExpense,
   String? initialAccountId,
+  TransactionRecord? transaction,
 }) async {
-  final store = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
-  final payee = TextEditingController();
-  final amount = TextEditingController();
+  final activeAccounts = dataStore.activeAccountsInDisplayOrder;
+  if (activeAccounts.isEmpty) return;
+  final payee = TextEditingController(text: transaction?.payee ?? '');
+  final amount = TextEditingController(
+    text: transaction == null ? '' : dollars(transaction.amountMinor.abs()),
+  );
   var accountId =
-      store.accounts.any((account) => account.id == initialAccountId)
-      ? initialAccountId!
-      : store.accounts.first.id;
-  var isExpense = initialIsExpense ?? isExpenseDefault(dataStore.preferences);
-  var categoryId = defaultCategoryIdForTransactionKind(store, isExpense);
+      activeAccounts.any(
+        (account) => account.id == (transaction?.accountId ?? initialAccountId),
+      )
+      ? (transaction?.accountId ?? initialAccountId)!
+      : activeAccounts.first.id;
+  var isExpense =
+      transaction?.type == TransactionType.expense ||
+      (transaction == null &&
+          (initialIsExpense ?? isExpenseDefault(dataStore.preferences)));
+  var categoryId =
+      transaction?.categoryId ??
+      defaultV2CategoryIdForTransactionKind(dataStore, isExpense);
 
   final result =
       await showDialog<
@@ -3027,125 +3052,163 @@ Future<void> showTransactionDialog(
           String accountId,
           String categoryId,
           String payee,
-          int amountCents,
+          int amountMinor,
           bool isExpense,
         })
       >(
         context: context,
         builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            title: const Text('Add transaction'),
-            content: SizedBox(
-              width: 420,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(
-                        value: true,
-                        label: Text('Expense'),
-                        icon: Icon(Icons.remove),
-                      ),
-                      ButtonSegment(
-                        value: false,
-                        label: Text('Income'),
-                        icon: Icon(Icons.add),
-                      ),
-                    ],
-                    selected: {isExpense},
-                    onSelectionChanged: (values) => setDialogState(() {
-                      isExpense = values.first;
-                      categoryId = defaultCategoryIdForTransactionKind(
-                        store,
-                        isExpense,
-                      );
-                    }),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: payee,
-                    decoration: const InputDecoration(labelText: 'Payee'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: amount,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+          builder: (context, setDialogState) {
+            final categoryOptions = categoriesForTransactionKind(
+              dataStore,
+              isExpense,
+            );
+            if (!categoryOptions.any((category) => category.id == categoryId)) {
+              categoryId = categoryOptions.isEmpty
+                  ? ''
+                  : categoryOptions.first.id;
+            }
+
+            return AlertDialog(
+              title: Text(
+                transaction == null ? 'Add transaction' : 'Edit transaction',
+              ),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: true,
+                          label: Text('Expense'),
+                          icon: Icon(Icons.remove),
+                        ),
+                        ButtonSegment(
+                          value: false,
+                          label: Text('Income'),
+                          icon: Icon(Icons.add),
+                        ),
+                      ],
+                      selected: {isExpense},
+                      onSelectionChanged: (values) => setDialogState(() {
+                        isExpense = values.first;
+                        categoryId = defaultV2CategoryIdForTransactionKind(
+                          dataStore,
+                          isExpense,
+                        );
+                      }),
                     ),
-                    decoration: const InputDecoration(labelText: 'Amount'),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: accountId,
-                    decoration: const InputDecoration(labelText: 'Account'),
-                    items: [
-                      for (final account in store.accounts)
-                        DropdownMenuItem(
-                          value: account.id,
-                          child: Text(account.name),
-                        ),
-                    ],
-                    onChanged: (value) => accountId = value ?? accountId,
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: categoryId,
-                    decoration: const InputDecoration(labelText: 'Category'),
-                    items: [
-                      for (final category in store.categories)
-                        DropdownMenuItem(
-                          value: category.id,
-                          child: Text(category.name),
-                        ),
-                    ],
-                    onChanged: (value) => categoryId = value ?? categoryId,
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: payee,
+                      decoration: const InputDecoration(labelText: 'Payee'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: amount,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(labelText: 'Amount'),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: accountId,
+                      decoration: const InputDecoration(labelText: 'Account'),
+                      items: [
+                        for (final account in activeAccounts)
+                          DropdownMenuItem(
+                            value: account.id,
+                            child: Text(account.name),
+                          ),
+                      ],
+                      onChanged: (value) => accountId = value ?? accountId,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: categoryId.isEmpty ? null : categoryId,
+                      decoration: const InputDecoration(labelText: 'Category'),
+                      items: [
+                        for (final category in categoryOptions)
+                          DropdownMenuItem(
+                            value: category.id,
+                            child: Text(category.name),
+                          ),
+                      ],
+                      onChanged: (value) => categoryId = value ?? categoryId,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  final cents =
-                      parseCents(amount.text).abs() * (isExpense ? -1 : 1);
-                  Navigator.pop(context, (
-                    accountId: accountId,
-                    categoryId: categoryId,
-                    payee: payee.text.trim().isEmpty
-                        ? 'Transaction'
-                        : payee.text.trim(),
-                    amountCents: cents,
-                    isExpense: isExpense,
-                  ));
-                },
-                child: const Text('Add'),
-              ),
-            ],
-          ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: categoryId.isEmpty
+                      ? null
+                      : () {
+                          Navigator.pop(context, (
+                            accountId: accountId,
+                            categoryId: categoryId,
+                            payee: payee.text.trim().isEmpty
+                                ? 'Transaction'
+                                : payee.text.trim(),
+                            amountMinor: parseCents(amount.text).abs(),
+                            isExpense: isExpense,
+                          ));
+                        },
+                  child: Text(transaction == null ? 'Add' : 'Save'),
+                ),
+              ],
+            );
+          },
         ),
       );
 
-  if (result != null) {
-    store.addTransaction(
-      accountId: result.accountId,
-      categoryId: result.categoryId,
-      date: DateTime.now(),
-      payee: result.payee,
-      amountCents: result.amountCents,
-    );
-    await dataStore.savePreferences(
-      dataStore.preferences.copyWith(
-        lastUsedTransactionType: result.isExpense
+  if (result == null) return;
+  if (transaction == null) {
+    if (result.isExpense) {
+      await dataStore.addExpense(
+        accountId: result.accountId,
+        categoryId: result.categoryId,
+        date: DateTime.now(),
+        payee: result.payee,
+        amountMinor: result.amountMinor,
+      );
+    } else {
+      await dataStore.addIncome(
+        accountId: result.accountId,
+        categoryId: result.categoryId,
+        date: DateTime.now(),
+        payee: result.payee,
+        amountMinor: result.amountMinor,
+      );
+    }
+  } else {
+    await dataStore.saveTransaction(
+      transaction.copyWith(
+        type: result.isExpense
             ? TransactionType.expense
             : TransactionType.income,
+        accountId: result.accountId,
+        categoryId: result.categoryId,
+        payee: result.payee,
+        amountMinor: result.amountMinor,
+        clearTransferAccount: true,
       ),
     );
   }
+  await dataStore.savePreferences(
+    dataStore.preferences.copyWith(
+      lastUsedTransactionType: result.isExpense
+          ? TransactionType.expense
+          : TransactionType.income,
+    ),
+  );
 }
 
 Future<void> showCategoryDialog(
@@ -3640,6 +3703,27 @@ String defaultCategoryIdForTransactionKind(FinanceStore store, bool isExpense) {
         orElse: () => store.categories.first,
       )
       .id;
+}
+
+String defaultV2CategoryIdForTransactionKind(
+  FinanceDataStore store,
+  bool isExpense,
+) {
+  final categories = categoriesForTransactionKind(store, isExpense);
+  if (categories.isNotEmpty) return categories.first.id;
+  return store.categories.isEmpty ? '' : store.categories.first.id;
+}
+
+List<v2_category.CategoryRecord> categoriesForTransactionKind(
+  FinanceDataStore store,
+  bool isExpense,
+) {
+  final kind = isExpense
+      ? v2_category.CategoryKind.expense
+      : v2_category.CategoryKind.income;
+  return store.categories
+      .where((category) => !category.isArchived && category.kind == kind)
+      .toList(growable: false);
 }
 
 List<v2_category.CategoryRecord> scheduledCategoriesForType(

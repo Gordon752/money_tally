@@ -212,6 +212,38 @@ void main() {
     expect(find.text('Walmart copy'), findsOneWidget);
   });
 
+  testWidgets('ledger long press can edit transaction', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Walmart').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Walmart Grocery');
+    await tester.enterText(fields.at(1), '12.34');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final edited = dataStore.transactions.singleWhere(
+      (transaction) => transaction.payee == 'Walmart Grocery',
+    );
+    expect(edited.amountMinor, 1234);
+    expect(edited.type, v2_transaction.TransactionType.expense);
+    expect(find.text('Walmart Grocery'), findsOneWidget);
+  });
+
   testWidgets('add transaction dialog honors default income preference', (
     tester,
   ) async {
@@ -474,12 +506,10 @@ void main() {
             launchScreen: LaunchScreen.accounts,
           ),
         );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(
-        store: legacyStore,
-        dataStore: FinanceDataStore(dataSet: dataSet),
-      ),
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
     );
 
     final cashCard = find.byWidgetPredicate(
@@ -498,11 +528,12 @@ void main() {
     await tester.tap(find.text('Add').last);
     await tester.pumpAndSettle();
 
-    final transaction = legacyStore.transactions.singleWhere(
+    final transaction = dataStore.transactions.singleWhere(
       (item) => item.payee == 'Coffee',
     );
     expect(transaction.accountId, 'cash');
-    expect(transaction.amountCents, -450);
+    expect(transaction.amountMinor, 450);
+    expect(transaction.type, v2_transaction.TransactionType.expense);
   });
 
   testWidgets('account long press can archive account', (tester) async {
