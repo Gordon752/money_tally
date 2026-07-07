@@ -3227,10 +3227,10 @@ Future<void> showAccountDialog(BuildContext context) async {
   final store = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
   final name = TextEditingController();
-  final openingBalance = TextEditingController(text: '0.00');
   final creditLimit = TextEditingController();
   final originalLoanAmount = TextEditingController();
   var type = AccountType.checking;
+  var openingBalanceCents = 0;
 
   final result =
       await showDialog<
@@ -3295,15 +3295,12 @@ Future<void> showAccountDialog(BuildContext context) async {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: openingBalance,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                      signed: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Opening balance',
-                    ),
+                  AmountEntryField(
+                    initialMinor: openingBalanceCents,
+                    currency: dataStore.preferences.currency,
+                    labelText: 'Opening balance',
+                    allowNegative: true,
+                    onChanged: (value) => openingBalanceCents = value,
                   ),
                 ],
               ),
@@ -3319,7 +3316,7 @@ Future<void> showAccountDialog(BuildContext context) async {
                       ? accountTypeLabel(type)
                       : name.text.trim(),
                   type: type,
-                  openingBalanceCents: parseCents(openingBalance.text),
+                  openingBalanceCents: openingBalanceCents,
                   creditLimitMinor: type == AccountType.creditCard
                       ? parseOptionalCents(creditLimit.text)?.abs()
                       : null,

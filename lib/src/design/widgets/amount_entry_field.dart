@@ -11,6 +11,7 @@ class AmountEntryField extends StatefulWidget {
     this.currency = const CurrencyFormatSettings(),
     this.labelText = 'Amount',
     this.autofocus = false,
+    this.allowNegative = false,
     this.fieldKey,
     super.key,
   });
@@ -19,6 +20,7 @@ class AmountEntryField extends StatefulWidget {
   final CurrencyFormatSettings currency;
   final String labelText;
   final bool autofocus;
+  final bool allowNegative;
   final Key? fieldKey;
   final ValueChanged<int> onChanged;
 
@@ -60,10 +62,16 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
     return TextField(
       key: widget.fieldKey,
       controller: _controller,
-      keyboardType: TextInputType.number,
+      keyboardType: TextInputType.numberWithOptions(
+        signed: widget.allowNegative,
+      ),
       textAlign: TextAlign.right,
       autofocus: widget.autofocus,
-      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      inputFormatters: [
+        widget.allowNegative
+            ? FilteringTextInputFormatter.allow(RegExp(r'[-0-9]'))
+            : FilteringTextInputFormatter.digitsOnly,
+      ],
       decoration: InputDecoration(labelText: widget.labelText),
       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
         fontFeatures: const [FontFeature.tabularFigures()],
@@ -75,8 +83,10 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
 
   void _handleChanged(String rawValue) {
     if (_isUpdating) return;
+    final isNegative = widget.allowNegative && rawValue.trim().startsWith('-');
     final digits = rawValue.replaceAll(RegExp(r'[^0-9]'), '');
-    final minor = _formatter.parseDigitsToMinor(digits);
+    final unsignedMinor = _formatter.parseDigitsToMinor(digits);
+    final minor = isNegative ? -unsignedMinor : unsignedMinor;
     widget.onChanged(minor);
     _setText(_formatter.formatMinor(minor));
   }

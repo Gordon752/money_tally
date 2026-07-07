@@ -47,6 +47,28 @@ void main() {
     expect(find.text(r'$10,000.00'), findsOneWidget);
   });
 
+  testWidgets('amount entry field supports signed calculator input', (
+    tester,
+  ) async {
+    var amountMinor = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AmountEntryField(
+            allowNegative: true,
+            onChanged: (value) => amountMinor = value,
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), '-500');
+    await tester.pump();
+
+    expect(amountMinor, -500);
+    expect(find.text(r'-$5.00'), findsOneWidget);
+  });
+
   test('finance snapshot round trips through json', () {
     final store = FinanceStore.seeded();
     store.addCategory('Fuel');
