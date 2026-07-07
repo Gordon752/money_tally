@@ -733,7 +733,9 @@ void main() {
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add transaction'));
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Income'));
     await tester.pumpAndSettle();
 
     final segmented = tester.widget<SegmentedButton<bool>>(
@@ -764,7 +766,9 @@ void main() {
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add transaction'));
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
     expect(find.text('Add transfer'), findsOneWidget);
@@ -792,7 +796,9 @@ void main() {
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add transaction'));
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
     expect(find.text('Add transfer'), findsOneWidget);
@@ -811,7 +817,9 @@ void main() {
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add transaction'));
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
     await tester.pumpAndSettle();
 
     await tester.enterText(
@@ -887,6 +895,33 @@ void main() {
     expect(
       scaffold.floatingActionButtonLocation,
       FloatingActionButtonLocation.startFloat,
+    );
+  });
+
+  testWidgets('floating add button honors center placement preference', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            floatingAddButtonPosition: FloatingAddButtonPosition.center,
+          ),
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+
+    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+
+    expect(
+      scaffold.floatingActionButtonLocation,
+      FloatingActionButtonLocation.centerFloat,
     );
   });
 

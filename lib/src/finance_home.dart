@@ -66,10 +66,14 @@ class _FinanceHomeState extends State<FinanceHome> {
             )
           : null,
       floatingActionButtonLocation:
-          preferences.floatingAddButtonPosition ==
-              FloatingAddButtonPosition.left
-          ? FloatingActionButtonLocation.startFloat
-          : FloatingActionButtonLocation.endFloat,
+          switch (preferences.floatingAddButtonPosition) {
+            FloatingAddButtonPosition.left =>
+              FloatingActionButtonLocation.startFloat,
+            FloatingAddButtonPosition.center =>
+              FloatingActionButtonLocation.centerFloat,
+            FloatingAddButtonPosition.right =>
+              FloatingActionButtonLocation.endFloat,
+          },
       bottomNavigationBar: isWide
           ? null
           : NavigationBar(
@@ -136,6 +140,8 @@ class _FinanceHomeState extends State<FinanceHome> {
             section: selected,
             syncLabel: widget.syncLabel,
             onSignOut: widget.onSignOut,
+            onOpenSettings: () =>
+                setState(() => selected = FinanceSection.settings),
           ),
         ),
         SliverPadding(
@@ -239,12 +245,14 @@ class PageHeader extends StatelessWidget {
   const PageHeader({
     required this.section,
     required this.syncLabel,
+    required this.onOpenSettings,
     this.onSignOut,
     super.key,
   });
 
   final FinanceSection section;
   final String syncLabel;
+  final VoidCallback onOpenSettings;
   final VoidCallback? onSignOut;
 
   @override
@@ -278,6 +286,12 @@ class PageHeader extends StatelessWidget {
               ],
             ),
           ),
+          IconButton(
+            tooltip: 'Settings',
+            onPressed: onOpenSettings,
+            icon: const Icon(Icons.settings_outlined),
+          ),
+          const SizedBox(width: 6),
           SyncPill(label: syncLabel, onSignOut: onSignOut),
         ],
       ),
@@ -336,6 +350,54 @@ class SyncPill extends StatelessWidget {
       ),
     );
   }
+}
+
+class DialogFieldGroup extends StatelessWidget {
+  const DialogFieldGroup({
+    required this.label,
+    required this.child,
+    this.helperText,
+    super.key,
+  });
+
+  final String label;
+  final Widget child;
+  final String? helperText;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        child,
+        if (helperText != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            helperText!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+InputDecoration dialogFieldDecoration({String? hintText}) {
+  return InputDecoration(
+    hintText: hintText,
+    floatingLabelBehavior: FloatingLabelBehavior.never,
+  );
 }
 
 class DashboardView extends StatelessWidget {
@@ -822,15 +884,6 @@ class _LedgerViewState extends State<LedgerView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.icon(
-            onPressed: () => showDefaultTransactionDialog(context),
-            icon: const Icon(Icons.add),
-            label: const Text('Add transaction'),
-          ),
-        ),
-        const SizedBox(height: 12),
         TextField(
           decoration: const InputDecoration(
             labelText: 'Search transactions',
@@ -839,84 +892,76 @@ class _LedgerViewState extends State<LedgerView> {
           onChanged: (value) => setState(() => query = value),
         ),
         const SizedBox(height: 12),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              LedgerFilterButton<String>(
-                buttonKey: ValueKey('ledger-type-$typeFilterName'),
-                icon: Icons.tune_outlined,
-                label: selectedTypeLabel,
-                isActive: typeFilterName.isNotEmpty,
-                items: [
-                  const PopupMenuItem(value: '', child: Text('All types')),
-                  for (final type in TransactionType.values)
-                    PopupMenuItem(
-                      value: type.name,
-                      child: Text(transactionTypeLabel(type)),
-                    ),
-                ],
-                onSelected: (value) => setState(() => typeFilterName = value),
-              ),
-              const SizedBox(width: AppSpacing.xs),
-              LedgerFilterButton<String>(
-                buttonKey: ValueKey('ledger-account-$accountFilterId'),
-                icon: Icons.account_balance_wallet_outlined,
-                label: selectedAccountLabel,
-                isActive: accountFilterId.isNotEmpty,
-                items: [
-                  const PopupMenuItem(value: '', child: Text('All accounts')),
-                  for (final account in activeAccounts)
-                    PopupMenuItem(value: account.id, child: Text(account.name)),
-                ],
-                onSelected: (value) => setState(() => accountFilterId = value),
-              ),
-              const SizedBox(width: AppSpacing.xs),
-              LedgerFilterButton<String>(
-                buttonKey: ValueKey('ledger-category-$categoryFilterId'),
-                icon: Icons.sell_outlined,
-                label: selectedCategoryLabel,
-                isActive: categoryFilterId.isNotEmpty,
-                items: [
-                  const PopupMenuItem(value: '', child: Text('All categories')),
-                  for (final category in activeCategories)
-                    PopupMenuItem(
-                      value: category.id,
-                      child: Text(category.name),
-                    ),
-                ],
-                onSelected: (value) => setState(() => categoryFilterId = value),
-              ),
-              const SizedBox(width: AppSpacing.xs),
-              LedgerFilterButton<LedgerDateFilter>(
-                buttonKey: ValueKey('ledger-date-${dateFilter.name}'),
-                icon: Icons.calendar_today_outlined,
-                label: selectedDateLabel,
-                isActive: dateFilter != LedgerDateFilter.all,
-                items: [
-                  for (final filter in LedgerDateFilter.values)
-                    PopupMenuItem(
-                      value: filter,
-                      child: Text(ledgerDateFilterLabel(filter)),
-                    ),
-                ],
-                onSelected: (value) => setState(() => dateFilter = value),
-              ),
-              const SizedBox(width: AppSpacing.xs),
-              IconButton.filledTonal(
-                tooltip: 'Clear filters',
-                onPressed: hasFilters
-                    ? () => setState(() {
-                        typeFilterName = '';
-                        accountFilterId = '';
-                        categoryFilterId = '';
-                        dateFilter = LedgerDateFilter.all;
-                      })
-                    : null,
-                icon: const Icon(Icons.filter_alt_off_outlined),
-              ),
-            ],
-          ),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: [
+            LedgerFilterButton<String>(
+              buttonKey: ValueKey('ledger-type-$typeFilterName'),
+              icon: Icons.tune_outlined,
+              label: selectedTypeLabel,
+              isActive: typeFilterName.isNotEmpty,
+              items: [
+                const PopupMenuItem(value: '', child: Text('All types')),
+                for (final type in TransactionType.values)
+                  PopupMenuItem(
+                    value: type.name,
+                    child: Text(transactionTypeLabel(type)),
+                  ),
+              ],
+              onSelected: (value) => setState(() => typeFilterName = value),
+            ),
+            LedgerFilterButton<String>(
+              buttonKey: ValueKey('ledger-account-$accountFilterId'),
+              icon: Icons.account_balance_wallet_outlined,
+              label: selectedAccountLabel,
+              isActive: accountFilterId.isNotEmpty,
+              items: [
+                const PopupMenuItem(value: '', child: Text('All accounts')),
+                for (final account in activeAccounts)
+                  PopupMenuItem(value: account.id, child: Text(account.name)),
+              ],
+              onSelected: (value) => setState(() => accountFilterId = value),
+            ),
+            LedgerFilterButton<String>(
+              buttonKey: ValueKey('ledger-category-$categoryFilterId'),
+              icon: Icons.sell_outlined,
+              label: selectedCategoryLabel,
+              isActive: categoryFilterId.isNotEmpty,
+              items: [
+                const PopupMenuItem(value: '', child: Text('All categories')),
+                for (final category in activeCategories)
+                  PopupMenuItem(value: category.id, child: Text(category.name)),
+              ],
+              onSelected: (value) => setState(() => categoryFilterId = value),
+            ),
+            LedgerFilterButton<LedgerDateFilter>(
+              buttonKey: ValueKey('ledger-date-${dateFilter.name}'),
+              icon: Icons.calendar_today_outlined,
+              label: selectedDateLabel,
+              isActive: dateFilter != LedgerDateFilter.all,
+              items: [
+                for (final filter in LedgerDateFilter.values)
+                  PopupMenuItem(
+                    value: filter,
+                    child: Text(ledgerDateFilterLabel(filter)),
+                  ),
+              ],
+              onSelected: (value) => setState(() => dateFilter = value),
+            ),
+            IconButton.filledTonal(
+              tooltip: 'Clear filters',
+              onPressed: hasFilters
+                  ? () => setState(() {
+                      typeFilterName = '';
+                      accountFilterId = '';
+                      categoryFilterId = '';
+                      dateFilter = LedgerDateFilter.all;
+                    })
+                  : null,
+              icon: const Icon(Icons.filter_alt_off_outlined),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         AppCard(
@@ -4222,18 +4267,15 @@ Future<void> showScheduledTransactionDialog(
                           const ButtonSegment(
                             value: TransactionType.expense,
                             label: Text('Expense'),
-                            icon: Icon(Icons.remove),
                           ),
                           const ButtonSegment(
                             value: TransactionType.income,
                             label: Text('Income'),
-                            icon: Icon(Icons.add),
                           ),
                           if (accounts.length > 1)
                             const ButtonSegment(
                               value: TransactionType.transfer,
                               label: Text('Transfer'),
-                              icon: Icon(Icons.swap_horiz),
                             ),
                         ],
                         selected: {type},
@@ -4252,125 +4294,151 @@ Future<void> showScheduledTransactionDialog(
                         }),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: payee,
-                        decoration: const InputDecoration(labelText: 'Payee'),
-                        autofocus: true,
-                      ),
-                      const SizedBox(height: 12),
-                      AmountEntryField(
-                        initialMinor: amountMinor,
-                        currency: dataStore.preferences.currency,
-                        labelText: 'Amount',
-                        onChanged: (value) => amountMinor = value,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: nextDate,
-                        keyboardType: TextInputType.datetime,
-                        decoration: const InputDecoration(
-                          labelText: 'Next date',
-                          helperText: 'YYYY-MM-DD',
+                      DialogFieldGroup(
+                        label: 'Payee',
+                        child: TextField(
+                          controller: payee,
+                          decoration: dialogFieldDecoration(),
+                          autofocus: true,
                         ),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: accountId,
-                        decoration: InputDecoration(
-                          labelText: type == TransactionType.transfer
-                              ? 'From'
-                              : 'Account',
+                      DialogFieldGroup(
+                        label: 'Amount',
+                        child: AmountEntryField(
+                          initialMinor: amountMinor,
+                          currency: dataStore.preferences.currency,
+                          labelText: null,
+                          onChanged: (value) => amountMinor = value,
                         ),
-                        items: [
-                          for (final account in accounts)
-                            DropdownMenuItem(
-                              value: account.id,
-                              child: Text(account.name),
-                            ),
-                        ],
-                        onChanged: (value) => setDialogState(() {
-                          accountId = value ?? accountId;
-                          if (transferAccountId == accountId) {
-                            transferAccountId = firstDestinationAccountId(
-                              accounts,
-                              accountId,
-                            );
-                          }
-                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: 'Next date',
+                        helperText: 'YYYY-MM-DD',
+                        child: TextField(
+                          controller: nextDate,
+                          keyboardType: TextInputType.datetime,
+                          decoration: dialogFieldDecoration(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: type == TransactionType.transfer
+                            ? 'From'
+                            : 'Account',
+                        child: DropdownButtonFormField<String>(
+                          initialValue: accountId,
+                          decoration: dialogFieldDecoration(),
+                          items: [
+                            for (final account in accounts)
+                              DropdownMenuItem(
+                                value: account.id,
+                                child: Text(account.name),
+                              ),
+                          ],
+                          onChanged: (value) => setDialogState(() {
+                            accountId = value ?? accountId;
+                            if (transferAccountId == accountId) {
+                              transferAccountId = firstDestinationAccountId(
+                                accounts,
+                                accountId,
+                              );
+                            }
+                          }),
+                        ),
                       ),
                       const SizedBox(height: 12),
                       if (type == TransactionType.transfer)
-                        DropdownButtonFormField<String>(
-                          initialValue: transferAccountId,
-                          decoration: const InputDecoration(labelText: 'To'),
-                          items: [
-                            for (final account in accounts)
-                              if (account.id != accountId)
-                                DropdownMenuItem(
-                                  value: account.id,
-                                  child: Text(account.name),
-                                ),
-                          ],
-                          onChanged: (value) =>
-                              setDialogState(() => transferAccountId = value),
+                        DialogFieldGroup(
+                          label: 'To',
+                          child: DropdownButtonFormField<String>(
+                            initialValue: transferAccountId,
+                            decoration: dialogFieldDecoration(),
+                            items: [
+                              for (final account in accounts)
+                                if (account.id != accountId)
+                                  DropdownMenuItem(
+                                    value: account.id,
+                                    child: Text(account.name),
+                                  ),
+                            ],
+                            onChanged: (value) =>
+                                setDialogState(() => transferAccountId = value),
+                          ),
                         )
                       else
-                        DropdownButtonFormField<String>(
-                          initialValue: categoryId,
-                          decoration: const InputDecoration(
-                            labelText: 'Category',
+                        DialogFieldGroup(
+                          label: 'Category',
+                          child: DropdownButtonFormField<String>(
+                            initialValue: categoryId,
+                            decoration: dialogFieldDecoration(),
+                            items: [
+                              for (final category in categories)
+                                DropdownMenuItem(
+                                  value: category.id,
+                                  child: Text(category.name),
+                                ),
+                            ],
+                            onChanged: (value) =>
+                                setDialogState(() => categoryId = value),
                           ),
-                          items: [
-                            for (final category in categories)
-                              DropdownMenuItem(
-                                value: category.id,
-                                child: Text(category.name),
-                              ),
-                          ],
-                          onChanged: (value) =>
-                              setDialogState(() => categoryId = value),
                         ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<v2_scheduled.RecurrenceFrequency>(
-                        initialValue: frequency,
-                        decoration: const InputDecoration(labelText: 'Repeat'),
-                        items: [
-                          for (final item
-                              in v2_scheduled.RecurrenceFrequency.values)
-                            DropdownMenuItem(
-                              value: item,
-                              child: Text(recurrenceFrequencyLabel(item)),
+                      DialogFieldGroup(
+                        label: 'Repeat',
+                        child:
+                            DropdownButtonFormField<
+                              v2_scheduled.RecurrenceFrequency
+                            >(
+                              initialValue: frequency,
+                              decoration: dialogFieldDecoration(),
+                              items: [
+                                for (final item
+                                    in v2_scheduled.RecurrenceFrequency.values)
+                                  DropdownMenuItem(
+                                    value: item,
+                                    child: Text(recurrenceFrequencyLabel(item)),
+                                  ),
+                              ],
+                              onChanged: (value) => setDialogState(
+                                () => frequency = value ?? frequency,
+                              ),
                             ),
-                        ],
-                        onChanged: (value) => setDialogState(
-                          () => frequency = value ?? frequency,
-                        ),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<v2_scheduled.AlertPreference>(
-                        initialValue: alertPreference,
-                        decoration: const InputDecoration(labelText: 'Alert'),
-                        items: [
-                          for (final item
-                              in v2_scheduled.AlertPreference.values)
-                            DropdownMenuItem(
-                              value: item,
-                              child: Text(alertPreferenceLabel(item)),
+                      DialogFieldGroup(
+                        label: 'Alert',
+                        child:
+                            DropdownButtonFormField<
+                              v2_scheduled.AlertPreference
+                            >(
+                              initialValue: alertPreference,
+                              decoration: dialogFieldDecoration(),
+                              items: [
+                                for (final item
+                                    in v2_scheduled.AlertPreference.values)
+                                  DropdownMenuItem(
+                                    value: item,
+                                    child: Text(alertPreferenceLabel(item)),
+                                  ),
+                              ],
+                              onChanged: (value) => setDialogState(
+                                () =>
+                                    alertPreference = value ?? alertPreference,
+                              ),
                             ),
-                        ],
-                        onChanged: (value) => setDialogState(
-                          () => alertPreference = value ?? alertPreference,
-                        ),
                       ),
                       if (alertPreference ==
                           v2_scheduled.AlertPreference.custom) ...[
                         const SizedBox(height: 12),
-                        TextField(
-                          controller: customAlertTime,
-                          keyboardType: TextInputType.datetime,
-                          decoration: const InputDecoration(
-                            labelText: 'Custom alert time',
-                            helperText: 'HH:MM',
+                        DialogFieldGroup(
+                          label: 'Custom alert time',
+                          helperText: 'HH:MM',
+                          child: TextField(
+                            controller: customAlertTime,
+                            keyboardType: TextInputType.datetime,
+                            decoration: dialogFieldDecoration(),
                           ),
                         ),
                       ],
@@ -4769,16 +4837,8 @@ Future<void> showTransactionDialog(
                     children: [
                       SegmentedButton<bool>(
                         segments: const [
-                          ButtonSegment(
-                            value: true,
-                            label: Text('Expense'),
-                            icon: Icon(Icons.remove),
-                          ),
-                          ButtonSegment(
-                            value: false,
-                            label: Text('Income'),
-                            icon: Icon(Icons.add),
-                          ),
+                          ButtonSegment(value: true, label: Text('Expense')),
+                          ButtonSegment(value: false, label: Text('Income')),
                         ],
                         selected: {isExpense},
                         onSelectionChanged: (values) => setDialogState(() {
@@ -4790,64 +4850,80 @@ Future<void> showTransactionDialog(
                         }),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        key: const ValueKey('transaction-payee'),
-                        controller: payee,
-                        decoration: const InputDecoration(labelText: 'Payee'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const ValueKey('transaction-date'),
-                        controller: date,
-                        keyboardType: TextInputType.datetime,
-                        decoration: const InputDecoration(
-                          labelText: 'Date',
-                          hintText: 'YYYY-MM-DD',
+                      DialogFieldGroup(
+                        label: 'Payee',
+                        child: TextField(
+                          key: const ValueKey('transaction-payee'),
+                          controller: payee,
+                          decoration: dialogFieldDecoration(),
                         ),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        key: const ValueKey('transaction-note'),
-                        controller: note,
-                        decoration: const InputDecoration(labelText: 'Note'),
-                        minLines: 1,
-                        maxLines: 3,
-                      ),
-                      const SizedBox(height: 12),
-                      AmountEntryField(
-                        fieldKey: const ValueKey('transaction-amount'),
-                        initialMinor: amountMinor,
-                        currency: dataStore.preferences.currency,
-                        labelText: 'Amount',
-                        onChanged: (value) => amountMinor = value,
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: accountId,
-                        decoration: const InputDecoration(labelText: 'Account'),
-                        items: [
-                          for (final account in activeAccounts)
-                            DropdownMenuItem(
-                              value: account.id,
-                              child: Text(account.name),
-                            ),
-                        ],
-                        onChanged: (value) => accountId = value ?? accountId,
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: categoryId.isEmpty ? null : categoryId,
-                        decoration: const InputDecoration(
-                          labelText: 'Category',
+                      DialogFieldGroup(
+                        label: 'Date',
+                        child: TextField(
+                          key: const ValueKey('transaction-date'),
+                          controller: date,
+                          keyboardType: TextInputType.datetime,
+                          decoration: dialogFieldDecoration(
+                            hintText: 'YYYY-MM-DD',
+                          ),
                         ),
-                        items: [
-                          for (final category in categoryOptions)
-                            DropdownMenuItem(
-                              value: category.id,
-                              child: Text(category.name),
-                            ),
-                        ],
-                        onChanged: (value) => categoryId = value ?? categoryId,
+                      ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: 'Note',
+                        child: TextField(
+                          key: const ValueKey('transaction-note'),
+                          controller: note,
+                          decoration: dialogFieldDecoration(),
+                          minLines: 1,
+                          maxLines: 3,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: 'Amount',
+                        child: AmountEntryField(
+                          fieldKey: const ValueKey('transaction-amount'),
+                          initialMinor: amountMinor,
+                          currency: dataStore.preferences.currency,
+                          labelText: null,
+                          onChanged: (value) => amountMinor = value,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: 'Account',
+                        child: DropdownButtonFormField<String>(
+                          initialValue: accountId,
+                          decoration: dialogFieldDecoration(),
+                          items: [
+                            for (final account in activeAccounts)
+                              DropdownMenuItem(
+                                value: account.id,
+                                child: Text(account.name),
+                              ),
+                          ],
+                          onChanged: (value) => accountId = value ?? accountId,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: 'Category',
+                        child: DropdownButtonFormField<String>(
+                          initialValue: categoryId.isEmpty ? null : categoryId,
+                          decoration: dialogFieldDecoration(),
+                          items: [
+                            for (final category in categoryOptions)
+                              DropdownMenuItem(
+                                value: category.id,
+                                child: Text(category.name),
+                              ),
+                          ],
+                          onChanged: (value) =>
+                              categoryId = value ?? categoryId,
+                        ),
                       ),
                     ],
                   ),
@@ -5406,6 +5482,7 @@ String appearanceModeLabel(AppearanceMode mode) {
 String floatingAddButtonPositionLabel(FloatingAddButtonPosition position) {
   return switch (position) {
     FloatingAddButtonPosition.left => 'Left',
+    FloatingAddButtonPosition.center => 'Center',
     FloatingAddButtonPosition.right => 'Right',
   };
 }

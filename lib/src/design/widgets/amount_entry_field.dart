@@ -19,7 +19,7 @@ class AmountEntryField extends StatefulWidget {
 
   final int initialMinor;
   final CurrencyFormatSettings currency;
-  final String labelText;
+  final String? labelText;
   final bool autofocus;
   final bool allowNegative;
   final Key? fieldKey;
@@ -76,7 +76,9 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
       ],
       decoration: InputDecoration(
         labelText: widget.labelText,
-        floatingLabelBehavior: FloatingLabelBehavior.always,
+        floatingLabelBehavior: widget.labelText == null
+            ? FloatingLabelBehavior.never
+            : FloatingLabelBehavior.always,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.md,
           vertical: AppSpacing.sm,

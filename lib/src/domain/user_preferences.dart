@@ -6,7 +6,7 @@ enum LaunchScreen { dashboard, ledger, accounts, budgets, scheduled, reports }
 
 enum AppearanceMode { system, light, dark }
 
-enum FloatingAddButtonPosition { left, right }
+enum FloatingAddButtonPosition { left, center, right }
 
 enum DefaultTransactionType { expense, income, transfer, lastUsed }
 
