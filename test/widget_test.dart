@@ -474,6 +474,67 @@ void main() {
     expect(find.text('Walmart Grocery'), findsOneWidget);
   });
 
+  testWidgets('ledger long press can edit transfer transaction', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+    await dataStore.addTransfer(
+      fromAccountId: 'checking',
+      toAccountId: 'cash',
+      date: DateTime(2026, 7, 5),
+      payee: 'ATM cash',
+      amountMinor: 5000,
+      note: 'Original note',
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('ATM cash').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit transfer'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('transfer-payee')),
+      'Cash refill',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transfer-date')),
+      '2026-07-06',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transfer-note')),
+      'Updated note',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transfer-amount')),
+      '7500',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final edited = dataStore.transactions.singleWhere(
+      (transaction) => transaction.payee == 'Cash refill',
+    );
+    expect(edited.type, v2_transaction.TransactionType.transfer);
+    expect(edited.accountId, 'checking');
+    expect(edited.transferAccountId, 'cash');
+    expect(edited.categoryId, isNull);
+    expect(edited.amountMinor, 7500);
+    expect(edited.date, DateTime(2026, 7, 6));
+    expect(edited.note, 'Updated note');
+    expect(find.text('Cash refill'), findsOneWidget);
+  });
+
   testWidgets('ledger long press can split transaction', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(

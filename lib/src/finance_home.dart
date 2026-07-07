@@ -1042,12 +1042,14 @@ Future<void> showTransactionOptions(
           ListTile(
             enabled:
                 transaction.type == TransactionType.expense ||
-                transaction.type == TransactionType.income,
+                transaction.type == TransactionType.income ||
+                transaction.type == TransactionType.transfer,
             leading: const Icon(Icons.edit_outlined),
             title: const Text('Edit'),
             onTap:
                 transaction.type == TransactionType.expense ||
-                    transaction.type == TransactionType.income
+                    transaction.type == TransactionType.income ||
+                    transaction.type == TransactionType.transfer
                 ? () => Navigator.pop(sheetContext, 'edit')
                 : null,
           ),
@@ -1091,7 +1093,11 @@ Future<void> showTransactionOptions(
   if (!context.mounted || action == null) return;
   switch (action) {
     case 'edit':
-      await showTransactionDialog(context, transaction: transaction);
+      if (transaction.type == TransactionType.transfer) {
+        await showTransferDialog(context, transfer: transaction);
+      } else {
+        await showTransactionDialog(context, transaction: transaction);
+      }
     case 'duplicate':
       await duplicateTransaction(context, transaction);
     case 'split':
@@ -3472,6 +3478,7 @@ Future<void> saveLegacyAccountToV2(
 Future<void> showTransferDialog(
   BuildContext context, {
   String? initialFromAccountId,
+  TransactionRecord? transfer,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final accounts = dataStore.accounts
@@ -3484,17 +3491,24 @@ Future<void> showTransferDialog(
     return;
   }
 
-  final payee = TextEditingController(text: 'Transfer');
-  final date = TextEditingController(text: dateInput(DateTime.now()));
-  final note = TextEditingController();
-  var amountMinor = 0;
+  final payee = TextEditingController(text: transfer?.payee ?? 'Transfer');
+  final date = TextEditingController(
+    text: dateInput(transfer?.date ?? DateTime.now()),
+  );
+  final note = TextEditingController(text: transfer?.note ?? '');
+  var amountMinor = transfer?.amountMinor.abs() ?? 0;
   var fromAccountId =
-      accounts.any((account) => account.id == initialFromAccountId)
-      ? initialFromAccountId!
+      accounts.any(
+        (account) =>
+            account.id == (transfer?.accountId ?? initialFromAccountId),
+      )
+      ? (transfer?.accountId ?? initialFromAccountId)!
       : accounts.first.id;
-  var toAccountId = accounts
-      .firstWhere((account) => account.id != fromAccountId)
-      .id;
+  var toAccountId =
+      accounts.any((account) => account.id == transfer?.transferAccountId) &&
+          transfer?.transferAccountId != fromAccountId
+      ? transfer!.transferAccountId!
+      : accounts.firstWhere((account) => account.id != fromAccountId).id;
 
   final result =
       await showDialog<
@@ -3510,7 +3524,7 @@ Future<void> showTransferDialog(
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
-            title: const Text('Add transfer'),
+            title: Text(transfer == null ? 'Add transfer' : 'Edit transfer'),
             content: SizedBox(
               width: 420,
               child: SingleChildScrollView(
@@ -3607,7 +3621,7 @@ Future<void> showTransferDialog(
                   note: note.text.trim(),
                   amountMinor: amountMinor.abs(),
                 )),
-                child: const Text('Add'),
+                child: Text(transfer == null ? 'Add' : 'Save'),
               ),
             ],
           ),
@@ -3615,14 +3629,29 @@ Future<void> showTransferDialog(
       );
 
   if (result == null) return;
-  await dataStore.addTransfer(
-    fromAccountId: result.fromAccountId,
-    toAccountId: result.toAccountId,
-    date: result.date,
-    payee: result.payee,
-    amountMinor: result.amountMinor,
-    note: result.note,
-  );
+  if (transfer == null) {
+    await dataStore.addTransfer(
+      fromAccountId: result.fromAccountId,
+      toAccountId: result.toAccountId,
+      date: result.date,
+      payee: result.payee,
+      amountMinor: result.amountMinor,
+      note: result.note,
+    );
+  } else {
+    await dataStore.saveTransaction(
+      transfer.copyWith(
+        type: TransactionType.transfer,
+        accountId: result.fromAccountId,
+        transferAccountId: result.toAccountId,
+        date: result.date,
+        payee: result.payee,
+        amountMinor: result.amountMinor,
+        note: result.note,
+        clearCategory: true,
+      ),
+    );
+  }
   await dataStore.savePreferences(
     dataStore.preferences.copyWith(
       lastUsedTransactionType: TransactionType.transfer,
