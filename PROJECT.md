@@ -583,6 +583,7 @@ Settings should include:
 - Default transaction type
 - Manage accounts
 - Manage categories
+- Manage budgets
 - Notification preferences
 - Export/import placeholders
 

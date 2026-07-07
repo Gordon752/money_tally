@@ -1836,6 +1836,12 @@ class SettingsView extends StatelessWidget {
                 trailingText: 'Open',
                 onTap: () => onSelectSection?.call(FinanceSection.categories),
               ),
+              SettingsActionRow(
+                icon: Icons.pie_chart_outline,
+                title: 'Manage budgets',
+                trailingText: 'Open',
+                onTap: () => onSelectSection?.call(FinanceSection.budgets),
+              ),
             ],
           ),
         ),
