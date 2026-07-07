@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
+import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/design/widgets/transaction_row.dart';
 import 'package:money_tally/src/domain/category.dart' as v2_category;
@@ -17,6 +18,34 @@ import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
 void main() {
+  testWidgets('amount entry field formats typed digits as money', (
+    tester,
+  ) async {
+    var amountMinor = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AmountEntryField(onChanged: (value) => amountMinor = value),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), '500');
+    await tester.pump();
+    expect(amountMinor, 500);
+    expect(find.text(r'$5.00'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), '12345');
+    await tester.pump();
+    expect(amountMinor, 12345);
+    expect(find.text(r'$123.45'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), '1000000');
+    await tester.pump();
+    expect(amountMinor, 1000000);
+    expect(find.text(r'$10,000.00'), findsOneWidget);
+  });
+
   test('finance snapshot round trips through json', () {
     final store = FinanceStore.seeded();
     store.addCategory('Fuel');
