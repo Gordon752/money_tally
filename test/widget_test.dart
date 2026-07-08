@@ -1817,6 +1817,46 @@ void main() {
     );
   });
 
+  testWidgets('category dialog opens with unknown legacy icon and color', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        categories: [
+          for (final category in migrated.categories)
+            if (category.id == 'dining')
+              category.copyWith(
+                iconName: 'old-unknown-icon',
+                colorValue: 0xFFABCDEF,
+              )
+            else
+              category,
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Categories').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.edit_outlined).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit category'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('category long press archives category', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;

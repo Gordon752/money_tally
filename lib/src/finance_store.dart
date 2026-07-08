@@ -396,4 +396,12 @@ class FinanceStoreScope extends InheritedNotifier<FinanceStore> {
     assert(scope != null, 'No FinanceStoreScope found');
     return scope!.notifier!;
   }
+
+  static FinanceStore read(BuildContext context) {
+    final element = context
+        .getElementForInheritedWidgetOfExactType<FinanceStoreScope>();
+    final scope = element?.widget as FinanceStoreScope?;
+    assert(scope != null, 'No FinanceStoreScope found');
+    return scope!.notifier!;
+  }
 }

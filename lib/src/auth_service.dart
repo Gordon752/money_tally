@@ -321,13 +321,14 @@ class _AuthGateState extends State<AuthGate> {
     final userId = _listeningUserId;
     if (store == null || remoteRepository == null || userId == null) return;
 
-    if (mounted) setState(() => _syncLabel = 'Syncing');
     try {
       await store.pushSnapshot(
         remoteRepository: remoteRepository,
         userId: userId,
       );
-      if (mounted) setState(() => _syncLabel = 'Synced');
+      if (mounted && _syncLabel != 'Synced') {
+        setState(() => _syncLabel = 'Synced');
+      }
     } on Exception {
       if (mounted) setState(() => _syncLabel = 'Sync issue');
     }

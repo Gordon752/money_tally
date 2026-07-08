@@ -5275,7 +5275,7 @@ Future<String?> showCategoryDialog(
   String? categoryId,
   v2_category.CategoryKind? initialKind,
 }) async {
-  final legacyStore = FinanceStoreScope.watch(context);
+  final legacyStore = FinanceStoreScope.read(context);
   final dataStore = FinanceDataStoreScope.read(context);
   final existingCategory = categoryId == null
       ? null
@@ -5286,8 +5286,8 @@ Future<String?> showCategoryDialog(
   var kind =
       existingCategory?.kind ?? initialKind ?? v2_category.CategoryKind.expense;
   var parentCategoryId = existingCategory?.parentCategoryId;
-  var iconName = existingCategory?.iconName;
-  var colorValue = existingCategory?.colorValue;
+  var iconName = sanitizedCategoryIconName(existingCategory?.iconName);
+  var colorValue = sanitizedCategoryColorValue(existingCategory?.colorValue);
 
   final result =
       await showDialog<
@@ -5316,10 +5316,12 @@ Future<String?> showCategoryDialog(
                           )),
                 )
                 .toList(growable: false);
-            if (parentCategoryId != null &&
-                !parentOptions.any((item) => item.id == parentCategoryId)) {
-              parentCategoryId = null;
-            }
+            final parentDropdownValue =
+                parentCategoryId != null &&
+                    parentOptions.any((item) => item.id == parentCategoryId)
+                ? parentCategoryId
+                : null;
+            parentCategoryId = parentDropdownValue;
 
             return AlertDialog(
               title: Text(
@@ -5357,7 +5359,7 @@ Future<String?> showCategoryDialog(
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String?>(
-                        initialValue: parentCategoryId,
+                        initialValue: parentDropdownValue,
                         decoration: const InputDecoration(
                           labelText: 'Parent category',
                         ),
@@ -5774,6 +5776,24 @@ List<String> savedPayees(FinanceDataStore store) {
   }
   payees.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   return payees;
+}
+
+String? sanitizedCategoryIconName(String? iconName) {
+  if (iconName == null) return null;
+  final trimmed = iconName.trim();
+  if (trimmed.isEmpty) return null;
+  final isCuratedIcon = v2_category.curatedCategoryIcons.any(
+    (option) => option.sfSymbolName == trimmed,
+  );
+  return isCuratedIcon ? trimmed : null;
+}
+
+int? sanitizedCategoryColorValue(int? colorValue) {
+  if (colorValue == null) return null;
+  final isCuratedColor = categoryColorOptions.any(
+    (option) => option.value == colorValue,
+  );
+  return isCuratedColor ? colorValue : null;
 }
 
 String recurrenceFrequencyLabel(v2_scheduled.RecurrenceFrequency frequency) {
