@@ -1934,7 +1934,30 @@ void main() {
     expect(find.text('Manage accounts'), findsOneWidget);
     expect(find.text('Manage categories'), findsOneWidget);
     expect(find.text('Manage budgets'), findsOneWidget);
+    expect(find.text('More'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'Reports'), findsOneWidget);
     expect(find.text('Data Ownership'), findsOneWidget);
+  });
+
+  testWidgets('mobile settings more card opens reports', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    final reports = find.widgetWithText(ListTile, 'Reports');
+    await tester.ensureVisible(reports);
+    await tester.pumpAndSettle();
+    await tester.tap(reports);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Monthly spending'), findsOneWidget);
+    expect(find.text('Category breakdown'), findsOneWidget);
+    expect(find.byTooltip('Add'), findsNothing);
   });
 
   testWidgets(
@@ -2082,7 +2105,10 @@ void main() {
 
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListTile, 'Export CSV'));
+    final exportCsv = find.widgetWithText(ListTile, 'Export CSV');
+    await tester.ensureVisible(exportCsv);
+    await tester.pumpAndSettle();
+    await tester.tap(exportCsv);
     await tester.pump();
     expect(find.text('CSV export copied'), findsOneWidget);
     expect(clipboardWrites.single, contains('transaction_id,split_line_id'));

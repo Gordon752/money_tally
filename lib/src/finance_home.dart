@@ -2575,6 +2575,20 @@ class SettingsView extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         AppCard(
+          title: 'More',
+          child: Column(
+            children: [
+              SettingsActionRow(
+                icon: Icons.insights_outlined,
+                title: 'Reports',
+                trailingText: 'Open',
+                onTap: () => onSelectSection?.call(FinanceSection.reports),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        AppCard(
           title: 'Data Ownership',
           child: Column(
             children: [
