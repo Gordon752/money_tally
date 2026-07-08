@@ -152,6 +152,13 @@ class _AuthGateState extends State<AuthGate> {
   FinanceRemoteRepository? _listeningRemoteRepository;
   String? _listeningUserId;
   Timer? _pushDebounce;
+  late final Stream<MoneyTallyUser?> _authStateStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _authStateStream = widget.authService.authStateChanges();
+  }
 
   @override
   void dispose() {
@@ -170,7 +177,7 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     return StreamBuilder<MoneyTallyUser?>(
-      stream: widget.authService.authStateChanges(),
+      stream: _authStateStream,
       initialData: widget.authService.currentUser,
       builder: (context, snapshot) {
         final user = snapshot.data;
@@ -191,8 +198,8 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        final store = FinanceStoreScope.watch(context);
-        final dataStore = FinanceDataStoreScope.watch(context);
+        final store = FinanceStoreScope.read(context);
+        final dataStore = FinanceDataStoreScope.read(context);
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _syncIfNeeded(user, store, dataStore);
         });

@@ -285,6 +285,14 @@ class PageHeader extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     SyncPill(label: syncLabel, onSignOut: onSignOut),
+                    SizedBox(
+                      height: 26,
+                      child: VerticalDivider(
+                        width: 1,
+                        thickness: 1,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                    ),
                     IconButton(
                       tooltip: 'Settings',
                       visualDensity: VisualDensity.compact,
@@ -321,29 +329,30 @@ class SyncPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppTheme.accent.withValues(alpha: 0.08),
-        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.18)),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-      ),
+    return SizedBox(
+      height: 36,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.only(left: 12, right: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.cloud_queue, color: AppTheme.accent, size: 15),
             const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: theme.colorScheme.onSurface,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
+            SizedBox(
+              width: 62,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.clip,
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
             if (onSignOut != null) ...[
-              const SizedBox(width: 4),
+              const SizedBox(width: 2),
               Tooltip(
                 message: 'Sign out',
                 child: IconButton(
