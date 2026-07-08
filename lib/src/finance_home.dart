@@ -18,7 +18,7 @@ enum FinanceSection {
 }
 
 class FinanceHome extends StatefulWidget {
-  const FinanceHome({this.syncLabel = 'Sync ready', this.onSignOut, super.key});
+  const FinanceHome({this.syncLabel = 'Synced', this.onSignOut, super.key});
 
   final String syncLabel;
   final VoidCallback? onSignOut;
@@ -329,6 +329,11 @@ class SyncPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final displayLabel = switch (label) {
+      'Local only' => 'Local only',
+      'Sync issue' => 'Sync issue',
+      _ => 'Synced',
+    };
     return SizedBox(
       height: 36,
       child: Padding(
@@ -341,7 +346,7 @@ class SyncPill extends StatelessWidget {
             SizedBox(
               width: 62,
               child: Text(
-                label,
+                displayLabel,
                 maxLines: 1,
                 overflow: TextOverflow.clip,
                 style: TextStyle(

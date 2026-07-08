@@ -144,7 +144,7 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   var _localOnly = false;
   var _isSigningIn = false;
-  var _syncLabel = 'Sync ready';
+  var _syncLabel = 'Synced';
   String? _authError;
   String? _syncingUid;
   String? _syncedUid;
@@ -245,7 +245,6 @@ class _AuthGateState extends State<AuthGate> {
     if (_syncedUid == user.uid || _syncingUid == user.uid) return;
 
     _syncingUid = user.uid;
-    setState(() => _syncLabel = 'Syncing');
     unawaited(
       _syncUser(user.uid, remoteRepository, recordRepository, store, dataStore),
     );
