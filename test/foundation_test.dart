@@ -251,6 +251,13 @@ void main() {
             sync: sync,
           ),
           AccountRecord(
+            id: 'card_without_limit',
+            name: 'Card Without Limit',
+            type: AccountType.creditCard,
+            openingBalanceMinor: -25000,
+            sync: sync,
+          ),
+          AccountRecord(
             id: 'loan',
             name: 'Truck Loan',
             type: AccountType.loan,
@@ -264,7 +271,7 @@ void main() {
 
     expect(store.creditUsedMinorForAccount('card'), 50000);
     expect(store.creditAvailableMinorForAccount('card'), 150000);
-    expect(store.creditUsedMinorForGroup(AccountGroup.creditCards), 50000);
+    expect(store.creditUsedMinorForGroup(AccountGroup.creditCards), 75000);
     expect(store.creditLimitMinorForGroup(AccountGroup.creditCards), 200000);
 
     expect(store.remainingLoanMinorForAccount('loan'), 1000000);

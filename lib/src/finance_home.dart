@@ -284,13 +284,13 @@ class PageHeader extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    SyncPill(label: syncLabel, onSignOut: onSignOut),
                     IconButton(
                       tooltip: 'Settings',
                       visualDensity: VisualDensity.compact,
                       onPressed: onOpenSettings,
                       icon: const Icon(Icons.settings_outlined, size: 21),
                     ),
-                    SyncPill(label: syncLabel, onSignOut: onSignOut),
                   ],
                 ),
               ),
@@ -323,7 +323,8 @@ class SyncPill extends StatelessWidget {
     final theme = Theme.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: AppTheme.accent.withValues(alpha: 0.08),
+        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.18)),
         borderRadius: BorderRadius.circular(AppRadii.pill),
       ),
       child: Padding(
@@ -575,11 +576,21 @@ class AccountGroupCard extends StatelessWidget {
                 behavior: HitTestBehavior.opaque,
                 onLongPress: () => showAccountGroupActions(context, group),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(
-                      accountGroupIcon(group.name),
-                      color: AppTheme.accent,
-                      size: 24,
+                    Container(
+                      width: 36,
+                      height: 36,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppTheme.accent.withValues(alpha: 0.09),
+                        borderRadius: BorderRadius.circular(AppRadii.card),
+                      ),
+                      child: Icon(
+                        accountGroupIcon(group.name),
+                        color: AppTheme.accent,
+                        size: 22,
+                      ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
@@ -588,10 +599,12 @@ class AccountGroupCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: AppTheme.accentStrong,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
                     ),
+                    const SizedBox(width: AppSpacing.sm),
                     MoneyText(
                       amountMinor: balanceMinor,
                       currency: store.preferences.currency,
@@ -726,12 +739,12 @@ class AccountGroupProgressStrip extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(AppRadii.pill),
             child: SizedBox(
-              height: 6,
+              height: 8,
               child: LinearProgressIndicator(
                 value: value,
                 backgroundColor: Theme.of(
                   context,
-                ).colorScheme.surfaceContainerHighest,
+                ).colorScheme.outlineVariant.withValues(alpha: 0.75),
                 color: isOver ? AppColors.danger : AppColors.accent,
               ),
             ),
@@ -2532,6 +2545,12 @@ class SettingsView extends StatelessWidget {
                 onTap: () => onSelectSection?.call(FinanceSection.categories),
               ),
               SettingsActionRow(
+                icon: Icons.person_outline,
+                title: 'Manage payees',
+                trailingText: 'Open',
+                onTap: () => showPayeesSheet(context),
+              ),
+              SettingsActionRow(
                 icon: Icons.pie_chart_outline,
                 title: 'Manage budgets',
                 trailingText: 'Open',
@@ -2586,6 +2605,57 @@ class SettingsView extends StatelessWidget {
       orElse: () => _currencyOptions.first,
     );
   }
+}
+
+Future<void> showPayeesSheet(BuildContext context) async {
+  final payees = savedPayees(FinanceDataStoreScope.read(context));
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          0,
+          AppSpacing.md,
+          AppSpacing.md,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Saved payees',
+              style: Theme.of(
+                sheetContext,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            if (payees.isEmpty)
+              Text(
+                'Payees appear here after transactions are saved.',
+                style: Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                ),
+              )
+            else
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: payees.length,
+                  separatorBuilder: (context, index) =>
+                      const Divider(height: 1),
+                  itemBuilder: (context, index) => ListTile(
+                    leading: const Icon(Icons.person_outline),
+                    title: Text(payees[index]),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 Future<void> showCustomCurrencyDialog(BuildContext context) async {
@@ -4062,10 +4132,15 @@ Future<void> showAccountDialog(BuildContext context) async {
       );
 
   if (result == null) return;
+  final normalizedOpeningBalanceCents = switch (result.type) {
+    AccountType.creditCard ||
+    AccountType.loan => -result.openingBalanceCents.abs(),
+    _ => result.openingBalanceCents,
+  };
   final account = store.addAccount(
     name: result.name,
     type: result.type,
-    balanceCents: result.openingBalanceCents,
+    balanceCents: normalizedOpeningBalanceCents,
   );
   if (!context.mounted) return;
   await saveLegacyAccountToV2(
@@ -4928,6 +5003,7 @@ Future<void> showTransactionDialog(
   final dataStore = FinanceDataStoreScope.read(context);
   final activeAccounts = dataStore.activeAccountsInDisplayOrder;
   if (activeAccounts.isEmpty) return;
+  final payeeOptions = savedPayees(dataStore);
   final payee = TextEditingController(text: transaction?.payee ?? '');
   final note = TextEditingController(text: transaction?.note ?? '');
   final date = TextEditingController(
@@ -5003,7 +5079,27 @@ Future<void> showTransactionDialog(
                         child: TextField(
                           key: const ValueKey('transaction-payee'),
                           controller: payee,
-                          decoration: dialogFieldDecoration(),
+                          decoration: dialogFieldDecoration().copyWith(
+                            suffixIcon: payeeOptions.isEmpty
+                                ? null
+                                : PopupMenuButton<String>(
+                                    tooltip: 'Saved payees',
+                                    icon: const Icon(
+                                      Icons.history_outlined,
+                                      size: 20,
+                                    ),
+                                    onSelected: (value) => payee.text = value,
+                                    itemBuilder: (context) => [
+                                      for (final option in payeeOptions.take(
+                                        12,
+                                      ))
+                                        PopupMenuItem(
+                                          value: option,
+                                          child: Text(option),
+                                        ),
+                                    ],
+                                  ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -5068,9 +5164,27 @@ Future<void> showTransactionDialog(
                                 value: category.id,
                                 child: Text(category.name),
                               ),
+                            const DropdownMenuItem(
+                              value: newCategoryDropdownValue,
+                              child: Text('New category...'),
+                            ),
                           ],
-                          onChanged: (value) =>
-                              categoryId = value ?? categoryId,
+                          onChanged: (value) async {
+                            if (value == null) return;
+                            if (value == newCategoryDropdownValue) {
+                              final newId = await showCategoryDialog(
+                                context,
+                                initialKind: isExpense
+                                    ? v2_category.CategoryKind.expense
+                                    : v2_category.CategoryKind.income,
+                              );
+                              if (newId != null) {
+                                setDialogState(() => categoryId = newId);
+                              }
+                              return;
+                            }
+                            setDialogState(() => categoryId = value);
+                          },
                         ),
                       ),
                     ],
@@ -5155,10 +5269,11 @@ Future<void> showTransactionDialog(
   );
 }
 
-Future<void> showCategoryDialog(
+Future<String?> showCategoryDialog(
   BuildContext context, {
   LedgerCategory? category,
   String? categoryId,
+  v2_category.CategoryKind? initialKind,
 }) async {
   final legacyStore = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
@@ -5168,7 +5283,8 @@ Future<void> showCategoryDialog(
   final name = TextEditingController(
     text: existingCategory?.name ?? category?.name ?? '',
   );
-  var kind = existingCategory?.kind ?? v2_category.CategoryKind.expense;
+  var kind =
+      existingCategory?.kind ?? initialKind ?? v2_category.CategoryKind.expense;
   var parentCategoryId = existingCategory?.parentCategoryId;
   var iconName = existingCategory?.iconName;
   var colorValue = existingCategory?.colorValue;
@@ -5313,7 +5429,7 @@ Future<void> showCategoryDialog(
         ),
       );
 
-  if (result == null || result.name.isEmpty) return;
+  if (result == null || result.name.isEmpty) return null;
   final sanitizedParentCategoryId =
       existingCategory != null &&
           v2_category.wouldCreateCategoryParentCycle(
@@ -5328,11 +5444,11 @@ Future<void> showCategoryDialog(
       result.name,
       kind: legacyCategoryKindFor(result.kind),
     );
+    final categoryId =
+        legacyCategory?.id ?? 'cat_${DateTime.now().microsecondsSinceEpoch}';
     await dataStore.saveCategory(
       v2_category.CategoryRecord(
-        id:
-            legacyCategory?.id ??
-            'cat_${DateTime.now().microsecondsSinceEpoch}',
+        id: categoryId,
         name: result.name,
         kind: result.kind,
         parentCategoryId: sanitizedParentCategoryId,
@@ -5341,7 +5457,7 @@ Future<void> showCategoryDialog(
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
       ),
     );
-    return;
+    return categoryId;
   }
 
   try {
@@ -5361,6 +5477,7 @@ Future<void> showCategoryDialog(
       clearColor: result.colorValue == null,
     ),
   );
+  return existingCategory.id;
 }
 
 Future<void> showCategoryActions(
@@ -5642,6 +5759,21 @@ String defaultTransactionTypeLabel(DefaultTransactionType type) {
     DefaultTransactionType.transfer => 'Transfer',
     DefaultTransactionType.lastUsed => 'Last used',
   };
+}
+
+const newCategoryDropdownValue = '__new_category__';
+
+List<String> savedPayees(FinanceDataStore store) {
+  final seen = <String>{};
+  final payees = <String>[];
+  final transactions = store.transactions.where((item) => !item.isDeleted);
+  for (final transaction in transactions) {
+    final payee = transaction.payee.trim();
+    if (payee.isEmpty || !seen.add(payee.toLowerCase())) continue;
+    payees.add(payee);
+  }
+  payees.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  return payees;
 }
 
 String recurrenceFrequencyLabel(v2_scheduled.RecurrenceFrequency frequency) {

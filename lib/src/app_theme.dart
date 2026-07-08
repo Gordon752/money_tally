@@ -3,7 +3,7 @@ part of '../main.dart';
 class AppTheme {
   static const ink = Color(0xFF17211F);
   static const muted = Color(0xFF61706C);
-  static const page = Color(0xFFF5F7F3);
+  static const page = Color(0xFFF0F4EF);
   static const panel = Color(0xFFFFFFFF);
   static const line = Color(0xFFD8E1DD);
   static const accent = Color(0xFF1F6F68);

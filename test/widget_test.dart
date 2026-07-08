@@ -2047,7 +2047,10 @@ void main() {
     expect(find.text('CSV export copied'), findsOneWidget);
     expect(clipboardWrites.single, contains('transaction_id,split_line_id'));
 
-    await tester.tap(find.widgetWithText(ListTile, 'Export JSON'));
+    final exportJson = find.widgetWithText(ListTile, 'Export JSON');
+    await tester.ensureVisible(exportJson);
+    await tester.pumpAndSettle();
+    await tester.tap(exportJson);
     await tester.pump();
     expect(clipboardWrites.length, 2);
     expect(clipboardWrites.last, contains('"accounts"'));

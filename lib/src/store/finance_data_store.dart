@@ -201,8 +201,7 @@ class FinanceDataStore extends ChangeNotifier {
           (account) =>
               account.isVisible &&
               account.includeInGroupBalance &&
-              account.type == AccountType.creditCard &&
-              account.creditLimitMinor != null,
+              account.type == AccountType.creditCard,
         )
         .fold(0, (total, account) {
           return total + creditUsedMinorForAccount(account.id);
