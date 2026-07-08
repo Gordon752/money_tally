@@ -257,15 +257,16 @@ class PageHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
                   'Money Tally',
                   style: TextStyle(
                     color: AppTheme.accent,
@@ -273,26 +274,38 @@ class PageHeader extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  section.label,
-                  style: const TextStyle(
-                    color: AppTheme.ink,
-                    fontSize: 34,
-                    fontWeight: FontWeight.w900,
-                    height: 1,
-                  ),
+              ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
                 ),
-              ],
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Settings',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onOpenSettings,
+                      icon: const Icon(Icons.settings_outlined, size: 21),
+                    ),
+                    SyncPill(label: syncLabel, onSignOut: onSignOut),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            section.label,
+            style: TextStyle(
+              color: theme.colorScheme.onSurface,
+              fontSize: 34,
+              fontWeight: FontWeight.w900,
+              height: 1,
             ),
           ),
-          IconButton(
-            tooltip: 'Settings',
-            onPressed: onOpenSettings,
-            icon: const Icon(Icons.settings_outlined),
-          ),
-          const SizedBox(width: 6),
-          SyncPill(label: syncLabel, onSignOut: onSignOut),
         ],
       ),
     );
@@ -307,11 +320,11 @@ class SyncPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: AppTheme.line),
-        borderRadius: BorderRadius.circular(999),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(AppRadii.pill),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -322,7 +335,11 @@ class SyncPill extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               label,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                color: theme.colorScheme.onSurface,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             if (onSignOut != null) ...[
               const SizedBox(width: 4),
@@ -499,112 +516,141 @@ class AccountsView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final group in store.accountGroupsInDisplayOrder)
-          if (accounts.any((account) => account.group == group)) ...[
-            Builder(
-              builder: (context) {
-                final isCollapsed = store.preferences.collapsedAccountGroupNames
-                    .contains(group.name);
-                final progress = accountGroupProgress(context, store, group);
-                final label = store.accountGroupLabel(group);
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SectionHeader(
-                      key: ValueKey('account-group-${group.name}'),
-                      title: label,
-                      subtitle: money(
-                        accounts
-                            .where(
-                              (account) =>
-                                  account.group == group &&
-                                  account.includeInGroupBalance,
-                            )
-                            .fold(
-                              0,
-                              (total, account) =>
-                                  total + store.balanceForAccount(account.id),
-                            ),
-                        store.preferences.currency,
-                      ),
-                      trailing: IconButton(
-                        tooltip: isCollapsed
-                            ? 'Expand $label'
-                            : 'Collapse $label',
-                        onPressed: () => toggleAccountGroupCollapsed(
-                          context,
-                          group,
-                          isCollapsed: isCollapsed,
-                        ),
-                        icon: Icon(
-                          isCollapsed
-                              ? Icons.keyboard_arrow_right
-                              : Icons.keyboard_arrow_down,
-                        ),
-                      ),
-                      onLongPress: () =>
-                          showAccountGroupActions(context, group),
-                    ),
-                    if (progress != null && !isCollapsed) progress,
-                  ],
-                );
-              },
+          if (accounts.any((account) => account.group == group))
+            AccountGroupCard(
+              group: group,
+              accounts: accounts
+                  .where((account) => account.group == group)
+                  .toList(growable: false),
+              store: store,
             ),
-            if (!store.preferences.collapsedAccountGroupNames.contains(
-              group.name,
-            ))
-              AccountCardList(
-                accounts: accounts
-                    .where((account) => account.group == group)
-                    .toList(growable: false),
-                store: store,
-              ),
-          ],
       ],
     );
   }
 }
 
-class AccountCardList extends StatelessWidget {
-  const AccountCardList({
+class AccountGroupCard extends StatelessWidget {
+  const AccountGroupCard({
+    required this.group,
     required this.accounts,
     required this.store,
     super.key,
   });
 
+  final v2_account.AccountGroup group;
   final List<v2_account.AccountRecord> accounts;
   final FinanceDataStore store;
 
   @override
   Widget build(BuildContext context) {
-    final cards = [
-      for (final account in accounts)
-        AccountCard(
-          account: account,
-          balanceMinor: store.balanceForAccount(account.id),
-          currency: store.preferences.currency,
-          groupLabel: store.accountGroupLabel(account.group),
-          leading: Icon(
-            accountGroupIcon(account.group.name),
-            color: AppTheme.accent,
+    final isCollapsed = store.preferences.collapsedAccountGroupNames.contains(
+      group.name,
+    );
+    final label = store.accountGroupLabel(group);
+    final balanceMinor = accounts
+        .where((account) => account.includeInGroupBalance)
+        .fold(
+          0,
+          (total, account) => total + store.balanceForAccount(account.id),
+        );
+    final progress = accountGroupProgress(context, store, group);
+
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: InkWell(
+        onLongPress: () => showAccountGroupActions(context, group),
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.sm,
           ),
-          onLongPress: () => showAccountOptions(context, account.id),
-        ),
-    ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 700) {
-          return Column(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (var index = 0; index < cards.length; index++) ...[
-                cards[index],
-                if (index != cards.length - 1)
-                  const SizedBox(height: AppSpacing.sm),
+              GestureDetector(
+                key: ValueKey('account-group-${group.name}'),
+                behavior: HitTestBehavior.opaque,
+                onLongPress: () => showAccountGroupActions(context, group),
+                child: Row(
+                  children: [
+                    Icon(
+                      accountGroupIcon(group.name),
+                      color: AppTheme.accent,
+                      size: 24,
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    MoneyText(
+                      amountMinor: balanceMinor,
+                      currency: store.preferences.currency,
+                      color: balanceMinor < 0 ? AppColors.danger : null,
+                    ),
+                    IconButton(
+                      tooltip: isCollapsed
+                          ? 'Expand $label'
+                          : 'Collapse $label',
+                      onPressed: () => toggleAccountGroupCollapsed(
+                        context,
+                        group,
+                        isCollapsed: isCollapsed,
+                      ),
+                      icon: Icon(
+                        isCollapsed
+                            ? Icons.keyboard_arrow_right
+                            : Icons.keyboard_arrow_down,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (progress != null && !isCollapsed) ...[
+                const SizedBox(height: AppSpacing.xs),
+                progress,
+              ],
+              if (!isCollapsed) ...[
+                const SizedBox(height: AppSpacing.xs),
+                for (var index = 0; index < accounts.length; index++) ...[
+                  if (index > 0)
+                    Divider(
+                      height: 1,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.outlineVariant.withValues(alpha: 0.55),
+                    ),
+                  AccountCard(
+                    account: accounts[index],
+                    balanceMinor: store.balanceForAccount(accounts[index].id),
+                    currency: store.preferences.currency,
+                    groupLabel: label,
+                    framed: false,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.sm,
+                    ),
+                    leading: Icon(
+                      accountGroupIcon(group.name),
+                      color: AppTheme.accent,
+                    ),
+                    onLongPress: () =>
+                        showAccountOptions(context, accounts[index].id),
+                  ),
+                ],
               ],
             ],
-          );
-        }
-        return ResponsiveGrid(minTileWidth: 300, children: cards);
-      },
+          ),
+        ),
+      ),
     );
   }
 }
@@ -880,6 +926,12 @@ class _LedgerViewState extends State<LedgerView> {
     final selectedDateLabel = dateFilter == LedgerDateFilter.all
         ? 'Date'
         : ledgerDateFilterLabel(dateFilter);
+    final activeFilterCount = [
+      typeFilterName.isNotEmpty,
+      accountFilterId.isNotEmpty,
+      categoryFilterId.isNotEmpty,
+      dateFilter != LedgerDateFilter.all,
+    ].where((isActive) => isActive).length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -892,74 +944,36 @@ class _LedgerViewState extends State<LedgerView> {
           onChanged: (value) => setState(() => query = value),
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: AppSpacing.xs,
-          runSpacing: AppSpacing.xs,
+        Row(
           children: [
-            LedgerFilterButton<String>(
-              buttonKey: ValueKey('ledger-type-$typeFilterName'),
-              icon: Icons.tune_outlined,
-              label: selectedTypeLabel,
-              isActive: typeFilterName.isNotEmpty,
-              items: [
-                const PopupMenuItem(value: '', child: Text('All types')),
-                for (final type in TransactionType.values)
-                  PopupMenuItem(
-                    value: type.name,
-                    child: Text(transactionTypeLabel(type)),
-                  ),
-              ],
-              onSelected: (value) => setState(() => typeFilterName = value),
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const ValueKey('ledger-filter-button'),
+                onPressed: () => showLedgerFilters(
+                  context: context,
+                  activeAccounts: activeAccounts,
+                  activeCategories: activeCategories,
+                  selectedTypeLabel: selectedTypeLabel,
+                  selectedAccountLabel: selectedAccountLabel,
+                  selectedCategoryLabel: selectedCategoryLabel,
+                  selectedDateLabel: selectedDateLabel,
+                ),
+                icon: const Icon(Icons.tune_outlined),
+                label: Text(
+                  activeFilterCount == 0
+                      ? 'Filters'
+                      : 'Filters ($activeFilterCount)',
+                ),
+              ),
             ),
-            LedgerFilterButton<String>(
-              buttonKey: ValueKey('ledger-account-$accountFilterId'),
-              icon: Icons.account_balance_wallet_outlined,
-              label: selectedAccountLabel,
-              isActive: accountFilterId.isNotEmpty,
-              items: [
-                const PopupMenuItem(value: '', child: Text('All accounts')),
-                for (final account in activeAccounts)
-                  PopupMenuItem(value: account.id, child: Text(account.name)),
-              ],
-              onSelected: (value) => setState(() => accountFilterId = value),
-            ),
-            LedgerFilterButton<String>(
-              buttonKey: ValueKey('ledger-category-$categoryFilterId'),
-              icon: Icons.sell_outlined,
-              label: selectedCategoryLabel,
-              isActive: categoryFilterId.isNotEmpty,
-              items: [
-                const PopupMenuItem(value: '', child: Text('All categories')),
-                for (final category in activeCategories)
-                  PopupMenuItem(value: category.id, child: Text(category.name)),
-              ],
-              onSelected: (value) => setState(() => categoryFilterId = value),
-            ),
-            LedgerFilterButton<LedgerDateFilter>(
-              buttonKey: ValueKey('ledger-date-${dateFilter.name}'),
-              icon: Icons.calendar_today_outlined,
-              label: selectedDateLabel,
-              isActive: dateFilter != LedgerDateFilter.all,
-              items: [
-                for (final filter in LedgerDateFilter.values)
-                  PopupMenuItem(
-                    value: filter,
-                    child: Text(ledgerDateFilterLabel(filter)),
-                  ),
-              ],
-              onSelected: (value) => setState(() => dateFilter = value),
-            ),
-            IconButton.filledTonal(
-              tooltip: 'Clear filters',
-              onPressed: hasFilters
-                  ? () => setState(() {
-                      typeFilterName = '';
-                      accountFilterId = '';
-                      categoryFilterId = '';
-                      dateFilter = LedgerDateFilter.all;
-                    })
-                  : null,
-              icon: const Icon(Icons.filter_alt_off_outlined),
+            const SizedBox(width: AppSpacing.sm),
+            Tooltip(
+              message: 'Clear filters',
+              child: TextButton.icon(
+                onPressed: hasFilters ? clearFilters : null,
+                icon: const Icon(Icons.filter_alt_off_outlined),
+                label: const Text('Clear'),
+              ),
             ),
           ],
         ),
@@ -998,6 +1012,140 @@ class _LedgerViewState extends State<LedgerView> {
           ),
         ),
       ],
+    );
+  }
+
+  void clearFilters() {
+    setState(() {
+      typeFilterName = '';
+      accountFilterId = '';
+      categoryFilterId = '';
+      dateFilter = LedgerDateFilter.all;
+    });
+  }
+
+  Future<void> showLedgerFilters({
+    required BuildContext context,
+    required List<v2_account.AccountRecord> activeAccounts,
+    required List<v2_category.CategoryRecord> activeCategories,
+    required String selectedTypeLabel,
+    required String selectedAccountLabel,
+    required String selectedCategoryLabel,
+    required String selectedDateLabel,
+  }) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Filters',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: [
+                  LedgerFilterButton<String>(
+                    buttonKey: ValueKey('ledger-type-$typeFilterName'),
+                    icon: Icons.tune_outlined,
+                    label: selectedTypeLabel,
+                    isActive: typeFilterName.isNotEmpty,
+                    items: [
+                      const PopupMenuItem(value: '', child: Text('All types')),
+                      for (final type in TransactionType.values)
+                        PopupMenuItem(
+                          value: type.name,
+                          child: Text(transactionTypeLabel(type)),
+                        ),
+                    ],
+                    onSelected: (value) {
+                      setState(() => typeFilterName = value);
+                      Navigator.pop(sheetContext);
+                    },
+                  ),
+                  LedgerFilterButton<String>(
+                    buttonKey: ValueKey('ledger-account-$accountFilterId'),
+                    icon: Icons.account_balance_wallet_outlined,
+                    label: selectedAccountLabel,
+                    isActive: accountFilterId.isNotEmpty,
+                    items: [
+                      const PopupMenuItem(
+                        value: '',
+                        child: Text('All accounts'),
+                      ),
+                      for (final account in activeAccounts)
+                        PopupMenuItem(
+                          value: account.id,
+                          child: Text(account.name),
+                        ),
+                    ],
+                    onSelected: (value) {
+                      setState(() => accountFilterId = value);
+                      Navigator.pop(sheetContext);
+                    },
+                  ),
+                  LedgerFilterButton<String>(
+                    buttonKey: ValueKey('ledger-category-$categoryFilterId'),
+                    icon: Icons.sell_outlined,
+                    label: selectedCategoryLabel,
+                    isActive: categoryFilterId.isNotEmpty,
+                    items: [
+                      const PopupMenuItem(
+                        value: '',
+                        child: Text('All categories'),
+                      ),
+                      for (final category in activeCategories)
+                        PopupMenuItem(
+                          value: category.id,
+                          child: Text(category.name),
+                        ),
+                    ],
+                    onSelected: (value) {
+                      setState(() => categoryFilterId = value);
+                      Navigator.pop(sheetContext);
+                    },
+                  ),
+                  LedgerFilterButton<LedgerDateFilter>(
+                    buttonKey: ValueKey('ledger-date-${dateFilter.name}'),
+                    icon: Icons.calendar_today_outlined,
+                    label: selectedDateLabel,
+                    isActive: dateFilter != LedgerDateFilter.all,
+                    items: [
+                      for (final filter in LedgerDateFilter.values)
+                        PopupMenuItem(
+                          value: filter,
+                          child: Text(ledgerDateFilterLabel(filter)),
+                        ),
+                    ],
+                    onSelected: (value) {
+                      setState(() => dateFilter = value);
+                      Navigator.pop(sheetContext);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextButton.icon(
+                onPressed: () {
+                  clearFilters();
+                  Navigator.pop(sheetContext);
+                },
+                icon: const Icon(Icons.filter_alt_off_outlined),
+                label: const Text('Clear filters'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

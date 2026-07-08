@@ -271,7 +271,10 @@ void main() {
 
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
-    await tester.longPress(find.byKey(const ValueKey('account-group-cash')));
+    final cashGroup = find.byKey(const ValueKey('account-group-cash'));
+    await tester.ensureVisible(cashGroup);
+    await tester.pumpAndSettle();
+    await tester.longPress(cashGroup);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Move Up'));
     await tester.pumpAndSettle();
@@ -297,7 +300,10 @@ void main() {
 
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
-    await tester.longPress(find.byKey(const ValueKey('account-group-banking')));
+    final bankingGroup = find.byKey(const ValueKey('account-group-banking'));
+    await tester.ensureVisible(bankingGroup);
+    await tester.pumpAndSettle();
+    await tester.longPress(bankingGroup);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Rename'));
     await tester.pumpAndSettle();
@@ -409,6 +415,8 @@ void main() {
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-account-')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Credit Card').last);
@@ -419,6 +427,8 @@ void main() {
     expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
 
     await tester.tap(find.byTooltip('Clear filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-type-')));
     await tester.pumpAndSettle();
@@ -431,6 +441,8 @@ void main() {
 
     await tester.tap(find.byTooltip('Clear filters'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-category-')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dining').last);
@@ -441,6 +453,8 @@ void main() {
     expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
 
     await tester.tap(find.byTooltip('Clear filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-date-all')));
     await tester.pumpAndSettle();
@@ -2083,7 +2097,10 @@ void main() {
 
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListTile, 'Backup and restore'));
+    final restoreRow = find.widgetWithText(ListTile, 'Backup and restore');
+    await tester.ensureVisible(restoreRow);
+    await tester.pumpAndSettle();
+    await tester.tap(restoreRow);
     await tester.pump();
 
     expect(dataStore.accountById('checking').name, 'Restored Checking');
@@ -2118,7 +2135,10 @@ void main() {
 
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListTile, 'Backup and restore'));
+    final restoreRow = find.widgetWithText(ListTile, 'Backup and restore');
+    await tester.ensureVisible(restoreRow);
+    await tester.pumpAndSettle();
+    await tester.tap(restoreRow);
     await tester.pump();
 
     expect(find.text('Could not restore JSON backup'), findsOneWidget);

@@ -15,6 +15,8 @@ class AccountCard extends StatelessWidget {
     this.leading,
     this.onTap,
     this.onLongPress,
+    this.framed = true,
+    this.padding = const EdgeInsets.all(AppSpacing.md),
     super.key,
   });
 
@@ -25,69 +27,68 @@ class AccountCard extends StatelessWidget {
   final Widget? leading;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+  final bool framed;
+  final EdgeInsetsGeometry padding;
 
   @override
   Widget build(BuildContext context) {
     final metric = _accountMetric();
-    return Card(
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  if (leading != null) ...[
-                    leading!,
-                    const SizedBox(width: AppSpacing.sm),
-                  ],
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          account.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          softWrap: false,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                        const SizedBox(height: AppSpacing.xxs),
-                        Text(
-                          groupLabel ?? _groupLabel(account.group.name),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          softWrap: false,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  MoneyText(
-                    amountMinor: balanceMinor,
-                    currency: currency,
-                    color: balanceMinor < 0 ? AppColors.danger : null,
-                  ),
+    final content = InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      borderRadius: BorderRadius.circular(AppRadii.card),
+      child: Padding(
+        padding: padding,
+        child: Column(
+          children: [
+            Row(
+              children: [
+                if (leading != null) ...[
+                  leading!,
+                  const SizedBox(width: AppSpacing.sm),
                 ],
-              ),
-              if (metric != null) ...[
-                const SizedBox(height: AppSpacing.sm),
-                _AccountMetricBar(metric: metric),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        account.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        groupLabel ?? _groupLabel(account.group.name),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                MoneyText(
+                  amountMinor: balanceMinor,
+                  currency: currency,
+                  color: balanceMinor < 0 ? AppColors.danger : null,
+                ),
               ],
+            ),
+            if (metric != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              _AccountMetricBar(metric: metric),
             ],
-          ),
+          ],
         ),
       ),
     );
+    if (!framed) return content;
+    return Card(child: content);
   }
 
   _AccountMetric? _accountMetric() {
