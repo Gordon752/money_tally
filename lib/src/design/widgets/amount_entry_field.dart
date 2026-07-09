@@ -31,13 +31,16 @@ class AmountEntryField extends StatefulWidget {
 
 class _AmountEntryFieldState extends State<AmountEntryField> {
   late final TextEditingController _controller;
+  late final FocusNode _focusNode;
   var _isUpdating = false;
+  var _hasUserEdited = false;
 
   MoneyFormatter get _formatter => MoneyFormatter(widget.currency);
 
   @override
   void initState() {
     super.initState();
+    _focusNode = FocusNode()..addListener(_handleFocusChanged);
     _controller = TextEditingController(
       text: _formatter.formatMinor(widget.initialMinor),
     );
@@ -54,6 +57,9 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
 
   @override
   void dispose() {
+    _focusNode
+      ..removeListener(_handleFocusChanged)
+      ..dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -63,6 +69,7 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
     return TextField(
       key: widget.fieldKey,
       controller: _controller,
+      focusNode: _focusNode,
       keyboardType: TextInputType.numberWithOptions(
         signed: widget.allowNegative,
       ),
@@ -88,18 +95,34 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
         fontFeatures: const [FontFeature.tabularFigures()],
         fontWeight: FontWeight.w900,
       ),
+      onTap: _selectExistingAmount,
       onChanged: _handleChanged,
     );
   }
 
   void _handleChanged(String rawValue) {
     if (_isUpdating) return;
+    _hasUserEdited = true;
     final isNegative = widget.allowNegative && rawValue.trim().startsWith('-');
     final digits = rawValue.replaceAll(RegExp(r'[^0-9]'), '');
     final unsignedMinor = _formatter.parseDigitsToMinor(digits);
     final minor = isNegative ? -unsignedMinor : unsignedMinor;
     widget.onChanged(minor);
     _setText(_formatter.formatMinor(minor));
+  }
+
+  void _handleFocusChanged() {
+    if (_focusNode.hasFocus) {
+      _selectExistingAmount();
+    }
+  }
+
+  void _selectExistingAmount() {
+    if (_hasUserEdited || widget.initialMinor == 0) return;
+    _controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _controller.text.length,
+    );
   }
 
   void _setText(String value) {

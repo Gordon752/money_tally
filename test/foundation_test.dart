@@ -486,7 +486,10 @@ void main() {
     await store.attachRemoteSync(remoteRepository: remote, userId: 'user-1');
 
     expect(store.accountById('checking').name, 'Cloud Checking');
-    expect(remote.savedAccounts, isEmpty);
+    expect(remote.savedAccounts.map((account) => account.id), [
+      'checking',
+      'cash',
+    ]);
   });
 
   test('store treats remote tombstones as existing sync data', () async {
@@ -504,8 +507,15 @@ void main() {
     await store.attachRemoteSync(remoteRepository: remote, userId: 'user-1');
 
     expect(store.accountById('checking').isDeleted, isTrue);
-    expect(store.activeAccountsInDisplayOrder, isEmpty);
-    expect(remote.savedAccounts, isEmpty);
+    expect(store.activeAccountsInDisplayOrder.map((account) => account.id), [
+      'cash',
+    ]);
+    expect(
+      remote.savedAccounts
+          .singleWhere((account) => account.id == 'checking')
+          .isDeleted,
+      isTrue,
+    );
   });
 
   test(

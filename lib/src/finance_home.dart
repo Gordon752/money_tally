@@ -37,6 +37,7 @@ class _FinanceHomeState extends State<FinanceHome> {
   ];
 
   var selected = FinanceSection.dashboard;
+  String? ledgerAccountFilterId;
   var _appliedLaunchPreference = false;
 
   @override
@@ -154,8 +155,15 @@ class _FinanceHomeState extends State<FinanceHome> {
           sliver: SliverToBoxAdapter(
             child: switch (selected) {
               FinanceSection.dashboard => const DashboardView(),
-              FinanceSection.accounts => const AccountsView(),
-              FinanceSection.ledger => const LedgerView(),
+              FinanceSection.accounts => AccountsView(
+                onOpenLedgerForAccount: (accountId) => setState(() {
+                  ledgerAccountFilterId = accountId;
+                  selected = FinanceSection.ledger;
+                }),
+              ),
+              FinanceSection.ledger => LedgerView(
+                initialAccountFilterId: ledgerAccountFilterId,
+              ),
               FinanceSection.budgets => const BudgetsView(),
               FinanceSection.scheduled => const ScheduledView(),
               FinanceSection.reports => const ReportsView(),
@@ -444,66 +452,43 @@ class DashboardView extends StatelessWidget {
     final incomeThisMonth = store.incomeThisMonthMinor();
     final expensesThisMonth = store.expensesThisMonthMinor();
     final currency = store.preferences.currency;
-    final dueCount = store.scheduledDueOrOverdueCount();
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ResponsiveGrid(
-          children: [
-            SummaryCard(
-              label: 'Net worth',
-              value: money(store.netWorthMinor, currency),
-              icon: Icons.account_balance_wallet_outlined,
-              isPrimary: true,
-            ),
-            SummaryCard(
-              label: 'Total assets',
-              value: money(store.totalAssetsMinor, currency),
-              icon: Icons.trending_up,
-            ),
-            SummaryCard(
-              label: 'Total liabilities',
-              value: money(store.totalLiabilitiesMinor.abs(), currency),
-              icon: Icons.request_quote_outlined,
-            ),
-            SummaryCard(
-              label: 'Available cash',
-              value: money(store.availableCashMinor, currency),
-              icon: Icons.payments_outlined,
-            ),
-            SummaryCard(
-              label: 'Month income',
-              value: money(incomeThisMonth, currency),
-              icon: Icons.add_circle_outline,
-            ),
-            SummaryCard(
-              label: 'Month expenses',
-              value: money(expensesThisMonth, currency),
-              icon: Icons.remove_circle_outline,
-            ),
-            SummaryCard(
-              label: 'Month remaining',
-              value: money(incomeThisMonth - expensesThisMonth, currency),
-              icon: Icons.savings_outlined,
-            ),
-            SummaryCard(
-              label: 'Next scheduled',
-              value: dueCount == 0
-                  ? scheduled.isEmpty
-                        ? 'None'
-                        : dateShort(scheduled.first.nextDate)
-                  : '$dueCount due',
-              icon: Icons.notifications_active_outlined,
-            ),
-          ],
+        NetWorthHeroCard(
+          netWorthMinor: store.netWorthMinor,
+          assetsMinor: store.totalAssetsMinor,
+          liabilitiesMinor: store.totalLiabilitiesMinor,
+          currency: currency,
         ),
-        const SizedBox(height: 16),
-        ResponsiveGrid(
-          minTileWidth: 360,
-          children: const [
-            AccountBalancePanel(),
-            UpcomingPanel(),
-            BudgetPanel(),
-            RecentTransactionsPanel(),
+        const SizedBox(height: AppSpacing.sm),
+        DashboardCardFlow(
+          children: [
+            CashSummaryCard(
+              availableCashMinor: store.availableCashMinor,
+              currency: currency,
+            ),
+            ThisMonthSummaryCard(
+              incomeMinor: incomeThisMonth,
+              expensesMinor: expensesThisMonth,
+              currency: currency,
+            ),
+            NextScheduledCard(scheduled: scheduled, currency: currency),
+            const AccountBalancePanel(
+              title: 'Accounts Preview',
+              maxRows: 4,
+              compact: true,
+            ),
+            const BudgetPanel(
+              title: 'Budgets Preview',
+              maxRows: 3,
+              compact: true,
+            ),
+            const RecentTransactionsPanel(
+              title: 'Recent Transactions',
+              maxRows: 3,
+              compact: true,
+            ),
           ],
         ),
       ],
@@ -511,8 +496,339 @@ class DashboardView extends StatelessWidget {
   }
 }
 
+class NetWorthHeroCard extends StatelessWidget {
+  const NetWorthHeroCard({
+    required this.netWorthMinor,
+    required this.assetsMinor,
+    required this.liabilitiesMinor,
+    required this.currency,
+    super.key,
+  });
+
+  final int netWorthMinor;
+  final int assetsMinor;
+  final int liabilitiesMinor;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      color: AppTheme.accent,
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.account_balance_wallet_outlined,
+              color: Colors.white,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'NET WORTH',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.82),
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            MoneyText(
+              amountMinor: netWorthMinor,
+              currency: currency,
+              fontSize: 34,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              children: [
+                Expanded(
+                  child: HeroMetric(
+                    label: 'Assets',
+                    amountMinor: assetsMinor,
+                    currency: currency,
+                    color: Colors.white,
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 34,
+                  color: colors.onPrimary.withValues(alpha: 0.18),
+                ),
+                Expanded(
+                  child: HeroMetric(
+                    label: 'Liabilities',
+                    amountMinor: liabilitiesMinor,
+                    currency: currency,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class HeroMetric extends StatelessWidget {
+  const HeroMetric({
+    required this.label,
+    required this.amountMinor,
+    required this.currency,
+    required this.color,
+    super.key,
+  });
+
+  final String label;
+  final int amountMinor;
+  final CurrencyFormatSettings currency;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: color.withValues(alpha: 0.74),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxs),
+          MoneyText(
+            amountMinor: amountMinor,
+            currency: currency,
+            fontSize: 17,
+            fontWeight: FontWeight.w900,
+            color: color,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class CashSummaryCard extends StatelessWidget {
+  const CashSummaryCard({
+    required this.availableCashMinor,
+    required this.currency,
+    super.key,
+  });
+
+  final int availableCashMinor;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      title: 'Cash Summary',
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      child: CompactMetricRow(
+        label: 'Available Cash',
+        amountMinor: availableCashMinor,
+        currency: currency,
+        icon: Icons.payments_outlined,
+      ),
+    );
+  }
+}
+
+class ThisMonthSummaryCard extends StatelessWidget {
+  const ThisMonthSummaryCard({
+    required this.incomeMinor,
+    required this.expensesMinor,
+    required this.currency,
+    super.key,
+  });
+
+  final int incomeMinor;
+  final int expensesMinor;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      title: 'This Month',
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      child: Column(
+        children: [
+          CompactMetricRow(
+            label: 'Income',
+            amountMinor: incomeMinor,
+            currency: currency,
+            icon: Icons.add_circle_outline,
+            showPositiveSign: true,
+          ),
+          CompactMetricRow(
+            label: 'Expenses',
+            amountMinor: -expensesMinor.abs(),
+            currency: currency,
+            icon: Icons.remove_circle_outline,
+          ),
+          CompactMetricRow(
+            label: 'Remaining',
+            amountMinor: incomeMinor - expensesMinor,
+            currency: currency,
+            icon: Icons.savings_outlined,
+            showPositiveSign: incomeMinor - expensesMinor > 0,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class NextScheduledCard extends StatelessWidget {
+  const NextScheduledCard({
+    required this.scheduled,
+    required this.currency,
+    super.key,
+  });
+
+  final List<v2_scheduled.ScheduledTransactionRecord> scheduled;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final next = scheduled.isEmpty ? null : scheduled.first;
+    return AppCard(
+      title: 'Next Scheduled',
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      child: next == null
+          ? const CompactEmptyRow(
+              icon: Icons.event_repeat_outlined,
+              label: 'No scheduled transactions',
+            )
+          : Row(
+              children: [
+                const Icon(Icons.event_repeat_outlined, color: AppTheme.accent),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        next.payee,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        shortDate(next.nextDate),
+                        style: TextStyle(
+                          color: AppTheme.ink.withValues(alpha: 0.7),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                MoneyText(
+                  amountMinor: next.type.name == 'expense'
+                      ? -next.amountMinor.abs()
+                      : next.amountMinor,
+                  currency: currency,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  color: next.type.name == 'expense'
+                      ? AppTheme.rose
+                      : AppTheme.ink,
+                  showPositiveSign: next.type.name == 'income',
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class CompactMetricRow extends StatelessWidget {
+  const CompactMetricRow({
+    required this.label,
+    required this.amountMinor,
+    required this.currency,
+    required this.icon,
+    this.showPositiveSign = false,
+    super.key,
+  });
+
+  final String label;
+  final int amountMinor;
+  final CurrencyFormatSettings currency;
+  final IconData icon;
+  final bool showPositiveSign;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      child: Row(
+        children: [
+          Icon(icon, color: AppTheme.accent, size: 22),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+            ),
+          ),
+          MoneyText(
+            amountMinor: amountMinor,
+            currency: currency,
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+            color: amountMinor < 0 ? AppTheme.rose : AppTheme.ink,
+            showPositiveSign: showPositiveSign,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class CompactEmptyRow extends StatelessWidget {
+  const CompactEmptyRow({required this.icon, required this.label, super.key});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: AppTheme.accent),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.ink.withValues(alpha: 0.68),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class AccountsView extends StatelessWidget {
-  const AccountsView({super.key});
+  const AccountsView({this.onOpenLedgerForAccount, super.key});
+
+  final ValueChanged<String>? onOpenLedgerForAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -538,6 +854,7 @@ class AccountsView extends StatelessWidget {
                   .where((account) => account.group == group)
                   .toList(growable: false),
               store: store,
+              onOpenLedgerForAccount: onOpenLedgerForAccount,
             ),
       ],
     );
@@ -549,12 +866,14 @@ class AccountGroupCard extends StatelessWidget {
     required this.group,
     required this.accounts,
     required this.store,
+    this.onOpenLedgerForAccount,
     super.key,
   });
 
   final v2_account.AccountGroup group;
   final List<v2_account.AccountRecord> accounts;
   final FinanceDataStore store;
+  final ValueChanged<String>? onOpenLedgerForAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -603,7 +922,7 @@ class AccountGroupCard extends StatelessWidget {
                       child: Icon(
                         accountGroupIcon(group.name),
                         color: AppTheme.accent,
-                        size: 22,
+                        size: 20,
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
@@ -612,10 +931,11 @@ class AccountGroupCard extends StatelessWidget {
                         label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: AppTheme.accentStrong,
-                          fontWeight: FontWeight.w900,
-                        ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: AppTheme.accentStrong,
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
@@ -623,6 +943,8 @@ class AccountGroupCard extends StatelessWidget {
                       amountMinor: balanceMinor,
                       currency: store.preferences.currency,
                       color: balanceMinor < 0 ? AppColors.danger : null,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
                     ),
                     IconButton(
                       tooltip: isCollapsed
@@ -647,15 +969,14 @@ class AccountGroupCard extends StatelessWidget {
                 progress,
               ],
               if (!isCollapsed) ...[
-                const SizedBox(height: AppSpacing.xs),
+                const SizedBox(height: AppSpacing.sm),
+                Divider(
+                  height: 1,
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.outlineVariant.withValues(alpha: 0.55),
+                ),
                 for (var index = 0; index < accounts.length; index++) ...[
-                  if (index > 0)
-                    Divider(
-                      height: 1,
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.outlineVariant.withValues(alpha: 0.55),
-                    ),
                   AccountCard(
                     account: accounts[index],
                     balanceMinor: store.balanceForAccount(accounts[index].id),
@@ -663,12 +984,16 @@ class AccountGroupCard extends StatelessWidget {
                     groupLabel: label,
                     framed: false,
                     padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.sm,
+                      vertical: AppSpacing.xs,
                     ),
                     leading: Icon(
                       accountGroupIcon(group.name),
                       color: AppTheme.accent,
+                      size: 22,
                     ),
+                    onTap: onOpenLedgerForAccount == null
+                        ? null
+                        : () => onOpenLedgerForAccount!(accounts[index].id),
                     onLongPress: () =>
                         showAccountOptions(context, accounts[index].id),
                   ),
@@ -753,7 +1078,7 @@ class AccountGroupProgressStrip extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(AppRadii.pill),
             child: SizedBox(
-              height: 8,
+              height: 5,
               child: LinearProgressIndicator(
                 value: value,
                 backgroundColor: Theme.of(
@@ -879,7 +1204,9 @@ Future<void> showRenameAccountGroupDialog(
 }
 
 class LedgerView extends StatefulWidget {
-  const LedgerView({super.key});
+  const LedgerView({this.initialAccountFilterId, super.key});
+
+  final String? initialAccountFilterId;
 
   @override
   State<LedgerView> createState() => _LedgerViewState();
@@ -891,6 +1218,21 @@ class _LedgerViewState extends State<LedgerView> {
   var accountFilterId = '';
   var categoryFilterId = '';
   var dateFilter = LedgerDateFilter.all;
+
+  @override
+  void initState() {
+    super.initState();
+    accountFilterId = widget.initialAccountFilterId ?? '';
+  }
+
+  @override
+  void didUpdateWidget(covariant LedgerView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialAccountFilterId != oldWidget.initialAccountFilterId &&
+        widget.initialAccountFilterId != null) {
+      accountFilterId = widget.initialAccountFilterId!;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1005,39 +1347,36 @@ class _LedgerViewState extends State<LedgerView> {
           ],
         ),
         const SizedBox(height: 12),
-        AppCard(
-          padding: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              children: [
-                if (transactions.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    child: Text(
-                      'No transactions match',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                for (final transaction in transactions)
-                  TransactionRow(
-                    transaction: transaction,
-                    currency: store.preferences.currency,
-                    accountName: accountsById[transaction.accountId]?.name,
-                    categoryName: transaction.categoryId == null
-                        ? null
-                        : categoriesById[transaction.categoryId]?.name,
-                    onTap: () =>
-                        showTransactionDetails(context, transaction.id),
-                    onLongPress: () =>
-                        showTransactionOptions(context, transaction.id),
-                  ),
-              ],
+        if (transactions.isEmpty)
+          AppCard(
+            child: Center(
+              child: Text(
+                'No transactions match',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
             ),
-          ),
-        ),
+          )
+        else
+          for (final transaction in transactions) ...[
+            AppCard(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TransactionRow(
+                transaction: transaction,
+                currency: store.preferences.currency,
+                accountName: accountsById[transaction.accountId]?.name,
+                categoryName: transaction.categoryId == null
+                    ? null
+                    : categoriesById[transaction.categoryId]?.name,
+                dateLabel: compactDate(transaction.date),
+                onTap: () => showTransactionDetails(context, transaction.id),
+                onLongPress: () =>
+                    showTransactionOptions(context, transaction.id),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+          ],
       ],
     );
   }
@@ -2276,7 +2615,7 @@ class ScheduledCalendarDayCell extends StatelessWidget {
     }
     final isMarked = markedDays.contains(day);
     return SizedBox(
-      height: 36,
+      height: 40,
       child: Center(
         child: InkWell(
           key: ValueKey(
@@ -2286,7 +2625,7 @@ class ScheduledCalendarDayCell extends StatelessWidget {
           onTap: () => onSelectDate(DateTime(month.year, month.month, day!)),
           child: Container(
             width: 30,
-            height: 30,
+            height: 34,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: isSelected
@@ -2299,8 +2638,8 @@ class ScheduledCalendarDayCell extends StatelessWidget {
                   ? Border.all(color: AppTheme.accent.withValues(alpha: 0.35))
                   : null,
             ),
-            child: Stack(
-              alignment: Alignment.center,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
                   '$day',
@@ -2315,18 +2654,19 @@ class ScheduledCalendarDayCell extends StatelessWidget {
                         : null,
                   ),
                 ),
-                if (isMarked)
-                  Positioned(
-                    bottom: 3,
-                    child: Container(
-                      width: 4,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: isSelected ? Colors.white : AppTheme.accent,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
+                const SizedBox(height: 1),
+                SizedBox(
+                  width: 4,
+                  height: 4,
+                  child: isMarked
+                      ? DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: isSelected ? Colors.white : AppTheme.accent,
+                            shape: BoxShape.circle,
+                          ),
+                        )
+                      : null,
+                ),
               ],
             ),
           ),
@@ -3055,23 +3395,40 @@ Future<void> restoreJsonBackupFromClipboard(BuildContext context) async {
 }
 
 class AccountBalancePanel extends StatelessWidget {
-  const AccountBalancePanel({super.key});
+  const AccountBalancePanel({
+    this.title = 'Accounts',
+    this.maxRows,
+    this.compact = false,
+    super.key,
+  });
+
+  final String title;
+  final int? maxRows;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final currency = store.preferences.currency;
+    final accounts = store.accounts
+        .where((account) => account.isVisible)
+        .take(maxRows ?? store.accounts.length);
     return AppCard(
-      title: 'Accounts',
+      title: title,
+      padding: EdgeInsets.all(compact ? AppSpacing.sm : AppSpacing.md),
       child: Column(
         children: [
-          for (final account in store.accounts.where(
-            (account) => account.isVisible,
-          ))
+          if (accounts.isEmpty)
+            const CompactEmptyRow(
+              icon: Icons.account_balance_wallet_outlined,
+              label: 'No accounts yet',
+            ),
+          for (final account in accounts)
             MetricRow(
               label: account.name,
               value: money(store.balanceForAccount(account.id), currency),
               icon: accountGroupIcon(account.group.name),
+              compact: compact,
             ),
         ],
       ),
@@ -3114,9 +3471,18 @@ class UpcomingPanel extends StatelessWidget {
 }
 
 class BudgetPanel extends StatelessWidget {
-  const BudgetPanel({this.showAll = false, super.key});
+  const BudgetPanel({
+    this.showAll = false,
+    this.title = 'Budgets',
+    this.maxRows,
+    this.compact = false,
+    super.key,
+  });
 
   final bool showAll;
+  final String title;
+  final int? maxRows;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -3124,9 +3490,10 @@ class BudgetPanel extends StatelessWidget {
     final budgets = store.budgets
         .where((budget) => budget.isVisible)
         .toList(growable: false);
-    final visibleBudgets = showAll ? budgets : budgets.take(3);
+    final visibleBudgets = showAll ? budgets : budgets.take(maxRows ?? 3);
     return AppCard(
-      title: 'Budgets',
+      title: title,
+      padding: EdgeInsets.all(compact ? AppSpacing.sm : AppSpacing.md),
       child: Column(
         children: [
           if (showAll) ...[
@@ -3140,6 +3507,11 @@ class BudgetPanel extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
+          if (visibleBudgets.isEmpty)
+            const CompactEmptyRow(
+              icon: Icons.pie_chart_outline,
+              label: 'No budgets yet',
+            ),
           for (final budget in visibleBudgets)
             BudgetProgressRow(budget: budget),
         ],
@@ -3149,7 +3521,16 @@ class BudgetPanel extends StatelessWidget {
 }
 
 class RecentTransactionsPanel extends StatelessWidget {
-  const RecentTransactionsPanel({super.key});
+  const RecentTransactionsPanel({
+    this.title = 'Recent ledger',
+    this.maxRows = 3,
+    this.compact = false,
+    super.key,
+  });
+
+  final String title;
+  final int maxRows;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -3164,11 +3545,21 @@ class RecentTransactionsPanel extends StatelessWidget {
       for (final category in store.categories) category.id: category,
     };
     return AppCard(
-      title: 'Recent ledger',
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      title: title,
+      padding: EdgeInsets.fromLTRB(
+        compact ? AppSpacing.sm : AppSpacing.md,
+        compact ? AppSpacing.sm : AppSpacing.md,
+        compact ? AppSpacing.sm : AppSpacing.md,
+        compact ? AppSpacing.xs : AppSpacing.sm,
+      ),
       child: Column(
         children: [
-          for (final transaction in transactions.take(3))
+          if (transactions.isEmpty)
+            const CompactEmptyRow(
+              icon: Icons.receipt_long_outlined,
+              label: 'No recent transactions',
+            ),
+          for (final transaction in transactions.take(maxRows))
             TransactionRow(
               transaction: transaction,
               currency: store.preferences.currency,
@@ -3309,33 +3700,81 @@ class ResponsiveGrid extends StatelessWidget {
   }
 }
 
+class DashboardCardFlow extends StatelessWidget {
+  const DashboardCardFlow({
+    required this.children,
+    this.minTileWidth = 320,
+    super.key,
+  });
+
+  final List<Widget> children;
+  final double minTileWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = (constraints.maxWidth / minTileWidth).floor().clamp(
+          1,
+          3,
+        );
+        final itemWidth =
+            (constraints.maxWidth - ((columns - 1) * AppSpacing.sm)) / columns;
+        return Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            for (final child in children)
+              SizedBox(width: itemWidth, child: child),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class MetricRow extends StatelessWidget {
   const MetricRow({
     required this.label,
     required this.value,
     required this.icon,
+    this.compact = false,
     super.key,
   });
 
   final String label;
   final String value;
   final IconData icon;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(
+        vertical: compact ? AppSpacing.xs : AppSpacing.sm,
+      ),
       child: Row(
         children: [
-          Icon(icon, color: AppTheme.accent, size: 20),
-          const SizedBox(width: 10),
+          Icon(icon, color: AppTheme.accent, size: compact ? 18 : 20),
+          SizedBox(width: compact ? AppSpacing.xs : AppSpacing.sm),
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(fontWeight: FontWeight.w800),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: compact ? 14 : null,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: compact ? 14 : null,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
         ],
       ),
     );
@@ -3533,6 +3972,7 @@ Future<void> showBudgetDialog(
                     TextField(
                       controller: name,
                       decoration: const InputDecoration(labelText: 'Name'),
+                      textCapitalization: TextCapitalization.words,
                       autofocus: true,
                     ),
                     const SizedBox(height: 12),
@@ -3893,6 +4333,7 @@ Future<void> showEditAccountDialog(
                   TextField(
                     controller: name,
                     decoration: const InputDecoration(labelText: 'Name'),
+                    textCapitalization: TextCapitalization.words,
                     autofocus: true,
                   ),
                   const SizedBox(height: 12),
@@ -4085,6 +4526,7 @@ Future<void> showAccountDialog(BuildContext context) async {
                   TextField(
                     controller: name,
                     decoration: const InputDecoration(labelText: 'Name'),
+                    textCapitalization: TextCapitalization.words,
                     autofocus: true,
                   ),
                   const SizedBox(height: 12),
@@ -4300,6 +4742,7 @@ Future<void> showTransferDialog(
                     TextField(
                       key: const ValueKey('transfer-payee'),
                       controller: payee,
+                      textCapitalization: TextCapitalization.words,
                       decoration: const InputDecoration(labelText: 'Payee'),
                     ),
                     const SizedBox(height: 12),
@@ -4309,13 +4752,23 @@ Future<void> showTransferDialog(
                       keyboardType: TextInputType.datetime,
                       decoration: const InputDecoration(
                         labelText: 'Date',
-                        hintText: 'YYYY-MM-DD',
+                        hintText: 'M/D/YY',
                       ),
+                      onTap: () async {
+                        final picked = await pickDateForField(
+                          context,
+                          parseDateInput(date.text, DateTime.now()),
+                        );
+                        if (picked != null) {
+                          date.text = dateInput(picked);
+                        }
+                      },
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       key: const ValueKey('transfer-note'),
                       controller: note,
+                      textCapitalization: TextCapitalization.sentences,
                       decoration: const InputDecoration(labelText: 'Note'),
                       minLines: 1,
                       maxLines: 3,
@@ -4549,6 +5002,7 @@ Future<void> showScheduledTransactionDialog(
                         label: 'Payee',
                         child: TextField(
                           controller: payee,
+                          textCapitalization: TextCapitalization.words,
                           decoration: dialogFieldDecoration(),
                           autofocus: true,
                         ),
@@ -4566,11 +5020,19 @@ Future<void> showScheduledTransactionDialog(
                       const SizedBox(height: 12),
                       DialogFieldGroup(
                         label: 'Next date',
-                        helperText: 'YYYY-MM-DD',
                         child: TextField(
                           controller: nextDate,
                           keyboardType: TextInputType.datetime,
                           decoration: dialogFieldDecoration(),
+                          onTap: () async {
+                            final picked = await pickDateForField(
+                              context,
+                              parseDateInput(nextDate.text, DateTime.now()),
+                            );
+                            if (picked != null) {
+                              nextDate.text = dateInput(picked);
+                            }
+                          },
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -4685,11 +5147,13 @@ Future<void> showScheduledTransactionDialog(
                         const SizedBox(height: 12),
                         DialogFieldGroup(
                           label: 'Custom alert time',
-                          helperText: 'HH:MM',
+                          helperText: 'Use AM or PM, for example 9:00 AM',
                           child: TextField(
                             controller: customAlertTime,
                             keyboardType: TextInputType.datetime,
-                            decoration: dialogFieldDecoration(),
+                            decoration: dialogFieldDecoration(
+                              hintText: '9:00 AM',
+                            ),
                           ),
                         ),
                       ],
@@ -5107,6 +5571,7 @@ Future<void> showTransactionDialog(
                         child: TextField(
                           key: const ValueKey('transaction-payee'),
                           controller: payee,
+                          textCapitalization: TextCapitalization.words,
                           decoration: dialogFieldDecoration().copyWith(
                             suffixIcon: payeeOptions.isEmpty
                                 ? null
@@ -5137,9 +5602,16 @@ Future<void> showTransactionDialog(
                           key: const ValueKey('transaction-date'),
                           controller: date,
                           keyboardType: TextInputType.datetime,
-                          decoration: dialogFieldDecoration(
-                            hintText: 'YYYY-MM-DD',
-                          ),
+                          decoration: dialogFieldDecoration(),
+                          onTap: () async {
+                            final picked = await pickDateForField(
+                              context,
+                              parseDateInput(date.text, DateTime.now()),
+                            );
+                            if (picked != null) {
+                              date.text = dateInput(picked);
+                            }
+                          },
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -5148,6 +5620,7 @@ Future<void> showTransactionDialog(
                         child: TextField(
                           key: const ValueKey('transaction-note'),
                           controller: note,
+                          textCapitalization: TextCapitalization.sentences,
                           decoration: dialogFieldDecoration(),
                           minLines: 1,
                           maxLines: 3,
@@ -5363,6 +5836,7 @@ Future<String?> showCategoryDialog(
                     children: [
                       TextField(
                         controller: name,
+                        textCapitalization: TextCapitalization.words,
                         decoration: const InputDecoration(
                           labelText: 'Category name',
                         ),
@@ -5847,14 +6321,37 @@ String alertPreferenceLabel(v2_scheduled.AlertPreference preference) {
 
 String alertTimeInput(int minutesAfterMidnight) {
   final normalized = minutesAfterMidnight.clamp(0, 23 * 60 + 59);
-  final hours = normalized ~/ 60;
+  final hours24 = normalized ~/ 60;
   final minutes = normalized % 60;
-  return '${hours.toString().padLeft(2, '0')}:'
-      '${minutes.toString().padLeft(2, '0')}';
+  final period = hours24 >= 12 ? 'PM' : 'AM';
+  final hours12 = hours24 % 12 == 0 ? 12 : hours24 % 12;
+  return '$hours12:${minutes.toString().padLeft(2, '0')} $period';
 }
 
 int parseAlertTimeMinutes(String value, int fallback) {
-  final parts = value.trim().split(':');
+  final trimmed = value.trim();
+  final amPmMatch = RegExp(
+    r'^(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])$',
+  ).firstMatch(trimmed);
+  if (amPmMatch != null) {
+    final rawHours = int.tryParse(amPmMatch.group(1) ?? '');
+    final minutes = int.tryParse(amPmMatch.group(2) ?? '0');
+    if (rawHours == null ||
+        minutes == null ||
+        rawHours < 1 ||
+        rawHours > 12 ||
+        minutes < 0 ||
+        minutes > 59) {
+      return fallback;
+    }
+    final isPm = amPmMatch.group(3)!.toUpperCase() == 'PM';
+    final hours24 = rawHours == 12
+        ? (isPm ? 12 : 0)
+        : rawHours + (isPm ? 12 : 0);
+    return hours24 * 60 + minutes;
+  }
+
+  final parts = trimmed.split(':');
   if (parts.length != 2) return fallback;
   final hours = int.tryParse(parts[0]);
   final minutes = int.tryParse(parts[1]);
@@ -5979,18 +6476,40 @@ int? parseOptionalCents(String value) {
 int? optionalPositiveMinor(int value) => value > 0 ? value : null;
 
 String dateInput(DateTime date) {
-  final year = date.year.toString().padLeft(4, '0');
-  final month = date.month.toString().padLeft(2, '0');
-  final day = date.day.toString().padLeft(2, '0');
-  return '$year-$month-$day';
+  return compactDate(date);
 }
 
 DateTime parseDateInput(String value, DateTime fallback) {
-  final parsed = DateTime.tryParse(value.trim());
+  final trimmed = value.trim();
+  final compactMatch = RegExp(
+    r'^(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})$',
+  ).firstMatch(trimmed);
+  if (compactMatch != null) {
+    final month = int.tryParse(compactMatch.group(1)!);
+    final day = int.tryParse(compactMatch.group(2)!);
+    final rawYear = int.tryParse(compactMatch.group(3)!);
+    if (month != null && day != null && rawYear != null) {
+      final year = rawYear < 100 ? 2000 + rawYear : rawYear;
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        return DateTime(year, month, day);
+      }
+    }
+  }
+
+  final parsed = DateTime.tryParse(trimmed);
   if (parsed == null) {
     return DateTime(fallback.year, fallback.month, fallback.day);
   }
   return DateTime(parsed.year, parsed.month, parsed.day);
+}
+
+Future<DateTime?> pickDateForField(BuildContext context, DateTime initialDate) {
+  return showDatePicker(
+    context: context,
+    initialDate: initialDate,
+    firstDate: DateTime(1970),
+    lastDate: DateTime(2100),
+  );
 }
 
 int scheduledDueCount(
@@ -6036,6 +6555,11 @@ String shortDate(DateTime date) {
     'Dec',
   ];
   return '${months[date.month - 1]} ${date.day}, ${date.year}';
+}
+
+String compactDate(DateTime date) {
+  final year = (date.year % 100).toString().padLeft(2, '0');
+  return '${date.month}/${date.day}/$year';
 }
 
 bool isSameDay(DateTime a, DateTime b) {

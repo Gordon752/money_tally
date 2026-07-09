@@ -171,10 +171,11 @@ void main() {
     expect(find.text('Money Tally'), findsOneWidget);
     expect(find.text('Dashboard'), findsWidgets);
     expect(find.text('NET WORTH'), findsOneWidget);
-    expect(find.text('TOTAL ASSETS'), findsOneWidget);
-    expect(find.text('AVAILABLE CASH'), findsOneWidget);
-    expect(find.text('MONTH EXPENSES'), findsOneWidget);
-    expect(find.text('Accounts'), findsWidgets);
+    expect(find.text('Assets'), findsOneWidget);
+    expect(find.text('Cash Summary'), findsOneWidget);
+    expect(find.text('This Month'), findsOneWidget);
+    expect(find.text('Next Scheduled'), findsOneWidget);
+    expect(find.text('Accounts Preview'), findsOneWidget);
   });
 
   testWidgets('uses v2 currency preference for visible money values', (
@@ -872,10 +873,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Expense'), findsOneWidget);
-    expect(find.text('Income'), findsOneWidget);
+    expect(find.text('Income'), findsWidgets);
     expect(find.text('Transfer'), findsOneWidget);
 
-    await tester.tap(find.text('Income'));
+    await tester.tap(find.text('Income').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Add transaction'), findsOneWidget);
@@ -1412,8 +1413,8 @@ void main() {
       ),
     );
 
-    expect(find.text('1 due'), findsOneWidget);
-    expect(find.text('Due today'), findsOneWidget);
+    expect(find.text('Next Scheduled'), findsOneWidget);
+    expect(find.text('Rent'), findsOneWidget);
   });
 
   testWidgets('scheduled long press can mark paid and advance item', (
@@ -1592,7 +1593,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Custom alert time'), findsOneWidget);
-    expect(find.text('11:15'), findsOneWidget);
+    expect(find.text('11:15 AM'), findsOneWidget);
     await tester.enterText(find.byType(TextField).at(3), '14:30');
     await tester.ensureVisible(find.byType(CheckboxListTile));
     await tester.tap(find.byType(CheckboxListTile));

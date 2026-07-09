@@ -56,8 +56,9 @@ class AccountCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         softWrap: false,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w800),
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       const SizedBox(height: AppSpacing.xxs),
                       Text(
@@ -76,6 +77,8 @@ class AccountCard extends StatelessWidget {
                   amountMinor: balanceMinor,
                   currency: currency,
                   color: balanceMinor < 0 ? AppColors.danger : null,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w700,
                 ),
               ],
             ),
@@ -176,7 +179,7 @@ class _AccountMetricBar extends StatelessWidget {
         ClipRRect(
           borderRadius: BorderRadius.circular(AppRadii.pill),
           child: SizedBox(
-            height: 6,
+            height: 5,
             child: LinearProgressIndicator(
               value: progress,
               backgroundColor: Theme.of(

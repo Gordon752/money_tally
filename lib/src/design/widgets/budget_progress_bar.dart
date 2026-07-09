@@ -22,7 +22,7 @@ class BudgetProgressBar extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppRadii.pill),
       child: SizedBox(
-        height: 8,
+        height: 5,
         child: LinearProgressIndicator(
           value: progress,
           backgroundColor: Theme.of(

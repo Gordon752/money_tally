@@ -25,6 +25,7 @@ import 'src/design/widgets/transaction_row.dart';
 import 'src/domain/budget.dart';
 import 'src/domain/account.dart' as v2_account;
 import 'src/domain/category.dart' as v2_category;
+import 'src/domain/finance_data_set.dart';
 import 'src/domain/money.dart';
 import 'src/domain/scheduled_transaction.dart' as v2_scheduled;
 import 'src/domain/sync_metadata.dart' as v2_sync;
@@ -95,9 +96,13 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
     FinanceStore legacyStore,
   ) async {
     final localRepository = const LocalFinanceDataSetRepository();
-    final dataSet = const V1SnapshotMigrator().migrate(
+    final localDataSet = await localRepository.load();
+    final migrated = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
     );
+    final dataSet = localDataSet == null
+        ? migrated
+        : mergeDataSetsPreferCurrent(incoming: migrated, current: localDataSet);
     await localRepository.save(dataSet);
     return FinanceDataStore(dataSet: dataSet, localRepository: localRepository);
   }
@@ -179,24 +184,9 @@ class LegacyV2StoreMirror {
         final migrated = const V1SnapshotMigrator().migrate(
           legacyStore.snapshot().toJson(),
         );
-        final dataSet = migrated.copyWith(
-          accounts: mergeAccountsPreferCurrent(
-            migrated: migrated.accounts,
-            current: dataStore.accounts,
-          ),
-          categories: mergeCategoriesPreferCurrent(
-            migrated: migrated.categories,
-            current: dataStore.categories,
-          ),
-          transactions: mergeV2OnlyTransactions(
-            migrated: migrated.transactions,
-            current: dataStore.transactions,
-          ),
-          scheduledTransactions: mergeV2OnlyScheduledTransactions(
-            migrated: migrated.scheduledTransactions,
-            current: dataStore.scheduledTransactions,
-          ),
-          preferences: dataStore.preferences,
+        final dataSet = mergeDataSetsPreferCurrent(
+          incoming: migrated,
+          current: dataStore.dataSet,
         );
         await dataStore.replaceDataSet(dataSet, persistLocal: false);
       } while (_queuedRefresh);
@@ -206,66 +196,119 @@ class LegacyV2StoreMirror {
   }
 }
 
+FinanceDataSet mergeDataSetsPreferCurrent({
+  required FinanceDataSet incoming,
+  required FinanceDataSet current,
+}) {
+  return incoming.copyWith(
+    accounts: mergeAccountsPreferCurrent(
+      incoming: incoming.accounts,
+      current: current.accounts,
+    ),
+    categories: mergeCategoriesPreferCurrent(
+      incoming: incoming.categories,
+      current: current.categories,
+    ),
+    transactions: mergeTransactionsPreferCurrent(
+      incoming: incoming.transactions,
+      current: current.transactions,
+    ),
+    scheduledTransactions: mergeScheduledTransactionsPreferCurrent(
+      incoming: incoming.scheduledTransactions,
+      current: current.scheduledTransactions,
+    ),
+    budgets: mergeBudgetsPreferCurrent(
+      incoming: incoming.budgets,
+      current: current.budgets,
+    ),
+    preferences: current.preferences,
+  );
+}
+
+T _preferCurrentRecord<T>({
+  required T incoming,
+  required T current,
+  required v2_sync.SyncMetadata Function(T item) syncOf,
+}) {
+  final currentSync = syncOf(current);
+  final incomingSync = syncOf(incoming);
+  if (currentSync.isDeleted) return current;
+  if (incomingSync.isDeleted) return incoming;
+  return currentSync.updatedAt.isAfter(incomingSync.updatedAt) ||
+          currentSync.updatedAt.isAtSameMomentAs(incomingSync.updatedAt)
+      ? current
+      : incoming;
+}
+
 List<TransactionRecord> mergeV2OnlyTransactions({
   required List<TransactionRecord> migrated,
+  required List<TransactionRecord> current,
+}) {
+  return mergeTransactionsPreferCurrent(incoming: migrated, current: current);
+}
+
+List<TransactionRecord> mergeTransactionsPreferCurrent({
+  required List<TransactionRecord> incoming,
   required List<TransactionRecord> current,
 }) {
   final currentById = {
     for (final transaction in current) transaction.id: transaction,
   };
-  final migratedIds = migrated.map((transaction) => transaction.id).toSet();
+  final incomingIds = incoming.map((transaction) => transaction.id).toSet();
   return [
-    for (final transaction in migrated)
-      if (currentById[transaction.id] case final current?)
-        current.sync.updatedAt.isAfter(transaction.sync.updatedAt)
-            ? current
-            : transaction
+    for (final transaction in incoming)
+      if (currentById[transaction.id] case final currentTransaction?)
+        _preferCurrentRecord(
+          incoming: transaction,
+          current: currentTransaction,
+          syncOf: (item) => item.sync,
+        )
       else
         transaction,
     for (final transaction in current)
-      if (!migratedIds.contains(transaction.id)) transaction,
+      if (!incomingIds.contains(transaction.id)) transaction,
   ];
 }
 
 List<v2_account.AccountRecord> mergeAccountsPreferCurrent({
-  required List<v2_account.AccountRecord> migrated,
+  required List<v2_account.AccountRecord> incoming,
   required List<v2_account.AccountRecord> current,
 }) {
   final currentById = {for (final account in current) account.id: account};
-  final migratedIds = migrated.map((account) => account.id).toSet();
+  final incomingIds = incoming.map((account) => account.id).toSet();
   return [
-    for (final account in migrated)
-      if (currentById[account.id] case final current?)
-        v2_account.AccountRecord(
-          id: account.id,
-          name: account.name,
-          type: account.type,
-          openingBalanceMinor: account.openingBalanceMinor,
-          creditLimitMinor: current.creditLimitMinor,
-          originalLoanAmountMinor: current.originalLoanAmountMinor,
-          isArchived: account.isArchived,
-          includeInGroupBalance: current.includeInGroupBalance,
-          includeInNetWorth: current.includeInNetWorth,
-          sortOrder: current.sortOrder,
-          sync: account.sync,
+    for (final account in incoming)
+      if (currentById[account.id] case final currentAccount?)
+        _preferCurrentRecord(
+          incoming: account,
+          current: currentAccount,
+          syncOf: (item) => item.sync,
         )
       else
         account,
     for (final account in current)
-      if (!migratedIds.contains(account.id)) account,
+      if (!incomingIds.contains(account.id)) account,
   ];
 }
 
 List<v2_category.CategoryRecord> mergeCategoriesPreferCurrent({
-  required List<v2_category.CategoryRecord> migrated,
+  required List<v2_category.CategoryRecord> incoming,
   required List<v2_category.CategoryRecord> current,
 }) {
   final currentById = {for (final category in current) category.id: category};
-  final migratedIds = migrated.map((category) => category.id).toSet();
+  final incomingIds = incoming.map((category) => category.id).toSet();
   return [
-    for (final category in migrated) currentById[category.id] ?? category,
+    for (final category in incoming)
+      if (currentById[category.id] case final currentCategory?)
+        _preferCurrentRecord(
+          incoming: category,
+          current: currentCategory,
+          syncOf: (item) => item.sync,
+        )
+      else
+        category,
     for (final category in current)
-      if (!migratedIds.contains(category.id)) category,
+      if (!incomingIds.contains(category.id)) category,
   ];
 }
 
@@ -273,11 +316,52 @@ List<v2_scheduled.ScheduledTransactionRecord> mergeV2OnlyScheduledTransactions({
   required List<v2_scheduled.ScheduledTransactionRecord> migrated,
   required List<v2_scheduled.ScheduledTransactionRecord> current,
 }) {
-  final migratedIds = migrated.map((scheduled) => scheduled.id).toSet();
+  return mergeScheduledTransactionsPreferCurrent(
+    incoming: migrated,
+    current: current,
+  );
+}
+
+List<v2_scheduled.ScheduledTransactionRecord>
+mergeScheduledTransactionsPreferCurrent({
+  required List<v2_scheduled.ScheduledTransactionRecord> incoming,
+  required List<v2_scheduled.ScheduledTransactionRecord> current,
+}) {
+  final currentById = {for (final item in current) item.id: item};
+  final incomingIds = incoming.map((scheduled) => scheduled.id).toSet();
   return [
-    ...migrated,
+    for (final scheduled in incoming)
+      if (currentById[scheduled.id] case final currentScheduled?)
+        _preferCurrentRecord(
+          incoming: scheduled,
+          current: currentScheduled,
+          syncOf: (item) => item.sync,
+        )
+      else
+        scheduled,
     for (final scheduled in current)
-      if (!migratedIds.contains(scheduled.id)) scheduled,
+      if (!incomingIds.contains(scheduled.id)) scheduled,
+  ];
+}
+
+List<BudgetRecord> mergeBudgetsPreferCurrent({
+  required List<BudgetRecord> incoming,
+  required List<BudgetRecord> current,
+}) {
+  final currentById = {for (final budget in current) budget.id: budget};
+  final incomingIds = incoming.map((budget) => budget.id).toSet();
+  return [
+    for (final budget in incoming)
+      if (currentById[budget.id] case final currentBudget?)
+        _preferCurrentRecord(
+          incoming: budget,
+          current: currentBudget,
+          syncOf: (item) => item.sync,
+        )
+      else
+        budget,
+    for (final budget in current)
+      if (!incomingIds.contains(budget.id)) budget,
   ];
 }
 

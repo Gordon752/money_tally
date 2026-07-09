@@ -405,7 +405,12 @@ class FinanceDataStore extends ChangeNotifier {
 
     final remoteDataSet = await remoteRepository.loadDataSet(userId);
     if (financeDataSetHasRecords(remoteDataSet)) {
-      await replaceDataSet(remoteDataSet);
+      final merged = mergeFinanceDataSetsPreferCurrent(
+        incoming: remoteDataSet,
+        current: _dataSet,
+      );
+      await replaceDataSet(merged);
+      await pushAllRecordsToRemote();
       return;
     }
 
@@ -814,6 +819,7 @@ class FinanceDataStore extends ChangeNotifier {
     BudgetRecord? budget,
     UserPreferences? preferences,
   }) async {
+    notifyListeners();
     await localRepository?.save(_dataSet);
     final remote = remoteRepository;
     final currentUserId = userId;
@@ -846,7 +852,6 @@ class FinanceDataStore extends ChangeNotifier {
         );
       }
     }
-    notifyListeners();
   }
 
   Future<void> moveAccountGroup({
@@ -936,6 +941,83 @@ bool isScheduledDueOrOverdue(
     scheduledTransaction.nextDate.day,
   );
   return !dueDate.isAfter(today);
+}
+
+FinanceDataSet mergeFinanceDataSetsPreferCurrent({
+  required FinanceDataSet incoming,
+  required FinanceDataSet current,
+}) {
+  return incoming.copyWith(
+    accounts: mergeFinanceRecordsPreferCurrent(
+      incoming: incoming.accounts,
+      current: current.accounts,
+      idOf: (item) => item.id,
+      syncOf: (item) => item.sync,
+    ),
+    categories: mergeFinanceRecordsPreferCurrent(
+      incoming: incoming.categories,
+      current: current.categories,
+      idOf: (item) => item.id,
+      syncOf: (item) => item.sync,
+    ),
+    transactions: mergeFinanceRecordsPreferCurrent(
+      incoming: incoming.transactions,
+      current: current.transactions,
+      idOf: (item) => item.id,
+      syncOf: (item) => item.sync,
+    ),
+    scheduledTransactions: mergeFinanceRecordsPreferCurrent(
+      incoming: incoming.scheduledTransactions,
+      current: current.scheduledTransactions,
+      idOf: (item) => item.id,
+      syncOf: (item) => item.sync,
+    ),
+    budgets: mergeFinanceRecordsPreferCurrent(
+      incoming: incoming.budgets,
+      current: current.budgets,
+      idOf: (item) => item.id,
+      syncOf: (item) => item.sync,
+    ),
+    preferences: current.preferences,
+  );
+}
+
+List<T> mergeFinanceRecordsPreferCurrent<T>({
+  required List<T> incoming,
+  required List<T> current,
+  required String Function(T item) idOf,
+  required SyncMetadata Function(T item) syncOf,
+}) {
+  final currentById = {for (final item in current) idOf(item): item};
+  final incomingIds = incoming.map(idOf).toSet();
+  return [
+    for (final item in incoming)
+      if (currentById[idOf(item)] case final currentItem?)
+        preferCurrentFinanceRecord(
+          incoming: item,
+          current: currentItem,
+          syncOf: syncOf,
+        )
+      else
+        item,
+    for (final item in current)
+      if (!incomingIds.contains(idOf(item))) item,
+  ];
+}
+
+T preferCurrentFinanceRecord<T>({
+  required T incoming,
+  required T current,
+  required SyncMetadata Function(T item) syncOf,
+}) {
+  final currentSync = syncOf(current);
+  final incomingSync = syncOf(incoming);
+  if (currentSync.isDeleted) return current;
+  if (incomingSync.isDeleted) return incoming;
+  return currentSync.updatedAt.isAfter(incomingSync.updatedAt) ||
+          currentSync.updatedAt.isAtSameMomentAs(incomingSync.updatedAt)
+      ? current
+      : incoming;
 }
 
 bool financeDataSetHasRecords(FinanceDataSet dataSet) {

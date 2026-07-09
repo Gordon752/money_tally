@@ -671,3 +671,26 @@ Later:
 - Add iCloud backup support.
 - Add Android build and Play Store setup.
 - Add App Store/TestFlight archive workflow.
+
+## Testing Notes
+
+- Shared mutation/delete bug: fixed in the store layer by notifying immediately after in-memory commits and by preserving current tombstones/edits during local migration and per-record sync merges. Continue watching this during normal phone/Mac testing, especially after sign-out/sign-in.
+- Accounts screen polish: current grouped-card direction is better than separate account cards, but the screen still feels visually unresolved. Problems observed on phone: group cards are too tall for sparse account lists, group balances compete too strongly with group names, red negative balances dominate the whole page, account rows need clearer hierarchy, and the header/action pill still takes attention from the content. Next pass should explore a denser grouped list style with softer group totals, clearer section headers, lighter row separators, better balance alignment, and less repeated icon weight.
+- Accounts navigation: tapping an account row should open Ledger filtered to that account. Long-press should remain reserved for account actions such as add expense, add income, transfer, adjust balance, edit, archive, and delete.
+- Typography polish: Ledger and Accounts row typography appears too large/bold on phone. Transaction/account names and money values are competing with screen headings and each other, making dense lists feel less clean. Next pass should reduce list-row font sizes/weights, use tabular money values with controlled emphasis, reserve heavy weight for page titles and key summary figures, and verify text still supports Dynamic Type without crowding.
+- Date formatting: user-facing date fields should not display raw ISO strings like `2026-07-07`. Prefer readable dates such as `July 7, 2026` or compact dates such as `7/7/26`, depending on available space and context. Date entry should use a date picker where practical instead of requiring manual `YYYY-MM-DD` typing.
+
+## Pre-Release Polish Checklist
+
+Before each build handed to the user for testing, review:
+
+- Every page title aligns exactly.
+- Every card uses the same corner radius.
+- Every button height is consistent.
+- Every icon size is consistent.
+- Every amount uses tabular numbers.
+- Every list row uses consistent padding.
+- Every animation duration is consistent.
+- Every shadow is consistent.
+- Every modal uses the same spacing rhythm.
+- Nothing clips in reasonable Dynamic Type sizes.

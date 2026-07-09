@@ -45,11 +45,7 @@ class ScheduledTransactionRow extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.xxs),
                   Text(
-                    scheduledTransaction.nextDate
-                        .toLocal()
-                        .toString()
-                        .split(' ')
-                        .first,
+                    _compactDate(scheduledTransaction.nextDate),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -60,6 +56,8 @@ class ScheduledTransactionRow extends StatelessWidget {
             MoneyText(
               amountMinor: signedAmount,
               currency: currency,
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
               color: signedAmount < 0 ? AppColors.danger : null,
             ),
           ],
@@ -67,4 +65,9 @@ class ScheduledTransactionRow extends StatelessWidget {
       ),
     );
   }
+}
+
+String _compactDate(DateTime date) {
+  final year = (date.year % 100).toString().padLeft(2, '0');
+  return '${date.month}/${date.day}/$year';
 }

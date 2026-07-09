@@ -11,6 +11,7 @@ class TransactionRow extends StatelessWidget {
     this.currency = const CurrencyFormatSettings(),
     this.categoryName,
     this.accountName,
+    this.dateLabel,
     this.onTap,
     this.onLongPress,
     super.key,
@@ -20,6 +21,7 @@ class TransactionRow extends StatelessWidget {
   final CurrencyFormatSettings currency;
   final String? categoryName;
   final String? accountName;
+  final String? dateLabel;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
@@ -38,6 +40,7 @@ class TransactionRow extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Column(
@@ -54,6 +57,7 @@ class TransactionRow extends StatelessWidget {
                     [
                       if (accountName != null) accountName,
                       if (categoryName != null) categoryName,
+                      if (dateLabel != null) dateLabel,
                       if (transaction.isSplit) 'Split',
                       if (transaction.isTransfer) 'Transfer',
                     ].join(' • '),
@@ -67,8 +71,12 @@ class TransactionRow extends StatelessWidget {
             MoneyText(
               amountMinor: signedAmount,
               currency: currency,
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
               showPositiveSign: transaction.type == TransactionType.income,
-              color: signedAmount < 0 ? AppColors.danger : AppColors.ink,
+              color: signedAmount < 0
+                  ? AppColors.danger
+                  : Theme.of(context).colorScheme.onSurface,
             ),
           ],
         ),
