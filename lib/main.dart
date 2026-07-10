@@ -188,7 +188,9 @@ class LegacyV2StoreMirror {
           incoming: migrated,
           current: dataStore.dataSet,
         );
-        await dataStore.replaceDataSet(dataSet, persistLocal: false);
+        // Persist the tombstone-preserving merge. Legacy code must never write
+        // a raw migrated snapshot directly over the v2 data set.
+        await dataStore.replaceDataSet(dataSet);
       } while (_queuedRefresh);
     } finally {
       _isRefreshing = false;
