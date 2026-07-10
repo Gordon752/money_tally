@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:money_tally/src/domain/account.dart';
 import 'package:money_tally/src/domain/budget.dart';
 import 'package:money_tally/src/domain/category.dart';
@@ -11,6 +12,7 @@ import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/notifications/notification_scheduler.dart';
 import 'package:money_tally/src/persistence/backup_codec.dart';
 import 'package:money_tally/src/persistence/finance_record_repository.dart';
+import 'package:money_tally/src/persistence/local_finance_data_set_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 
 void main() {
@@ -84,6 +86,79 @@ void main() {
 
     expect(store.balanceForAccount('checking'), 100000);
     expect(store.expensesThisMonthMinor(now: DateTime(2026, 7, 10)), 0);
+  });
+
+  test('deletion tombstones survive a complete local-store reload', () async {
+    SharedPreferences.setMockInitialValues({});
+    const repository = LocalFinanceDataSetRepository(
+      storageKey: 'persistence_restart_regression',
+    );
+    final sync = SyncMetadata.fresh(now: DateTime(2026, 7, 6));
+    final transaction = TransactionRecord(
+      id: 'transaction',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      date: DateTime(2026, 7, 6),
+      payee: 'Dinner',
+      amountMinor: 2500,
+      sync: sync,
+    );
+    final scheduled = _scheduledTransaction(
+      id: 'scheduled',
+      nextDate: DateTime(2026, 8, 1),
+      sync: sync,
+    );
+    final budget = BudgetRecord(
+      id: 'budget',
+      name: 'Dining',
+      amountMinor: 30000,
+      categoryIds: const ['dining'],
+      sync: sync,
+    );
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        transactions: [transaction],
+        scheduledTransactions: [scheduled],
+        budgets: [budget],
+      ),
+      localRepository: repository,
+    );
+    await repository.save(store.dataSet);
+
+    await store.deleteAccount('checking');
+    await store.saveTransaction(
+      transaction.copyWith(
+        sync: transaction.sync.deleted(deviceId: store.deviceId),
+      ),
+    );
+    await store.saveScheduledTransaction(
+      scheduled.copyWith(
+        sync: scheduled.sync.deleted(deviceId: store.deviceId),
+      ),
+    );
+    await store.deleteBudget('budget');
+
+    final reloaded = await FinanceDataStore.load(
+      localRepository: repository,
+    );
+
+    expect(reloaded.accountById('checking').isDeleted, isTrue);
+    expect(
+      reloaded.transactions.singleWhere((item) => item.id == 'transaction').isDeleted,
+      isTrue,
+    );
+    expect(
+      reloaded.scheduledTransactions
+          .singleWhere((item) => item.id == 'scheduled')
+          .isDeleted,
+      isTrue,
+    );
+    expect(reloaded.budgetById('budget').isDeleted, isTrue);
+    expect(
+      reloaded.activeAccountsInDisplayOrder.map((item) => item.id),
+      ['cash'],
+    );
   });
 
   test('store can reorder accounts within a fixed group', () async {

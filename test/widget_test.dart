@@ -15,8 +15,10 @@ import 'package:money_tally/src/domain/transaction.dart' as v2_transaction;
 import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
 import 'package:money_tally/src/persistence/backup_codec.dart';
+import 'package:money_tally/src/persistence/local_finance_data_set_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   testWidgets('amount entry field formats typed digits as money', (
@@ -2309,6 +2311,47 @@ void main() {
 
     expect(dataStore.balanceForAccount('checking'), 200000);
     expect(dataStore.preferences.appearanceMode, AppearanceMode.dark);
+  });
+
+  test('legacy v2 mirror persists tombstones without resurrection', () async {
+    SharedPreferences.setMockInitialValues({});
+    const repository = LocalFinanceDataSetRepository(
+      storageKey: 'legacy_mirror_tombstone_regression',
+    );
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final deletedTransaction = migrated.transactions.first.copyWith(
+      sync: migrated.transactions.first.sync.deleted(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        transactions: [
+          deletedTransaction,
+          ...migrated.transactions.skip(1),
+        ],
+      ),
+      localRepository: repository,
+    );
+    await repository.save(dataStore.dataSet);
+    final mirror = LegacyV2StoreMirror(
+      legacyStore: legacyStore,
+      dataStore: dataStore,
+    )..start();
+    addTearDown(mirror.dispose);
+
+    legacyStore.adjustAccountBalance('checking', 200000);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    final persisted = await repository.load();
+    expect(persisted, isNotNull);
+    expect(
+      persisted!.transactions
+          .singleWhere((transaction) => transaction.id == deletedTransaction.id)
+          .isDeleted,
+      isTrue,
+    );
   });
 
   test('legacy v2 mirror preserves v2-only transactions', () async {

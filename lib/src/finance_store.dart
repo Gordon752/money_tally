@@ -368,19 +368,10 @@ class FinanceStore extends ChangeNotifier {
     if (localRepository != null) {
       final currentSnapshot = snapshot();
       unawaited(localRepository.save(currentSnapshot));
-      unawaited(_saveV2Mirror(currentSnapshot));
     }
     notifyListeners();
   }
 
-  Future<void> _saveV2Mirror(FinanceSnapshot snapshot) async {
-    try {
-      final dataSet = const V1SnapshotMigrator().migrate(snapshot.toJson());
-      await const LocalFinanceDataSetRepository().save(dataSet);
-    } on Exception catch (error) {
-      debugPrint('V2 mirror save failed: $error');
-    }
-  }
 }
 
 class FinanceStoreScope extends InheritedNotifier<FinanceStore> {

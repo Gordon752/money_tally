@@ -4254,8 +4254,10 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
     final archived = store.archiveAccount(account.id);
     await saveLegacyAccountToV2(context, archived);
   } else if (action == 'delete' && context.mounted) {
-    store.archiveAccount(account.id);
+    // Persist the v2 tombstone before the legacy store emits its mirror refresh.
+    // The refresh merge will then preserve the deletion instead of racing it.
     await dataStore.deleteAccount(account.id);
+    store.archiveAccount(account.id);
   }
 }
 
