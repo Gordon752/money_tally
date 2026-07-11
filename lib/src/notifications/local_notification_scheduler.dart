@@ -11,6 +11,7 @@ import 'notification_scheduler.dart';
 class LocalNotificationScheduler implements NotificationScheduler {
   LocalNotificationScheduler({
     FlutterLocalNotificationsPlugin? plugin,
+    this.onNotificationSelected,
     ScheduledNotificationPlanner planner =
         const ScheduledNotificationPlanner(),
   }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
@@ -18,6 +19,7 @@ class LocalNotificationScheduler implements NotificationScheduler {
 
   final FlutterLocalNotificationsPlugin _plugin;
   final ScheduledNotificationPlanner _planner;
+  final void Function(String? payload)? onNotificationSelected;
   var _initialized = false;
 
   Future<void> initialize() async {
@@ -41,11 +43,15 @@ class LocalNotificationScheduler implements NotificationScheduler {
     );
     await _plugin.initialize(
       settings: settings,
-      onDidReceiveNotificationResponse: (_) {
-        // Opening a reminder currently returns to Money Tally's normal launch
-        // screen. Navigation to a specific schedule can be added later.
-      },
+      onDidReceiveNotificationResponse: (response) =>
+          onNotificationSelected?.call(response.payload),
     );
+    final launchDetails = await _plugin.getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp ?? false) {
+      onNotificationSelected?.call(
+        launchDetails?.notificationResponse?.payload,
+      );
+    }
     _initialized = true;
   }
 
