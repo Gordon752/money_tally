@@ -995,8 +995,6 @@ class AccountGroupCard extends StatelessWidget {
                         : () => onOpenLedgerForAccount!(accounts[index].id),
                     onLongPress: () =>
                         showAccountOptions(context, accounts[index].id),
-                    onMorePressed: () =>
-                        showAccountOptions(context, accounts[index].id),
                   ),
                 ],
               ],
