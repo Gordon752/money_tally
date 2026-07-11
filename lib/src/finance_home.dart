@@ -5544,6 +5544,7 @@ Future<void> showTransactionDialog(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SegmentedButton<TransactionType>(
+                        showSelectedIcon: false,
                         segments: const [
                           ButtonSegment(
                             value: TransactionType.expense,
