@@ -123,7 +123,10 @@ class _FinanceHomeState extends State<FinanceHome> {
                       curve: Curves.easeOutCubic,
                       child: MoneyTallyFloatingActionButton(
                         tooltip: 'Add',
-                        onPressed: () => showFloatingAddMenu(context),
+                        onPressed: () => showFloatingAddMenu(
+                          context,
+                          section: selected,
+                        ),
                         child: const Icon(Icons.add),
                       ),
                     ),
@@ -147,8 +150,10 @@ class _FinanceHomeState extends State<FinanceHome> {
               selectedIndex: compactSections.contains(selected)
                   ? compactSections.indexOf(selected)
                   : 0,
-              onDestinationSelected: (index) =>
-                  setState(() => selected = compactSections[index]),
+              onDestinationSelected: (index) {
+                HapticFeedback.selectionClick();
+                setState(() => selected = compactSections[index]);
+              },
               destinations: [
                 for (final section in compactSections)
                   NavigationDestination(
@@ -172,8 +177,10 @@ class _FinanceHomeState extends State<FinanceHome> {
         NavigationRail(
           extended: MediaQuery.sizeOf(context).width >= 1100,
           selectedIndex: FinanceSection.values.indexOf(selected),
-          onDestinationSelected: (index) =>
-              setState(() => selected = FinanceSection.values[index]),
+          onDestinationSelected: (index) {
+            HapticFeedback.selectionClick();
+            setState(() => selected = FinanceSection.values[index]);
+          },
           leading: const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Icon(Icons.account_balance, color: AppTheme.accent),
@@ -993,12 +1000,18 @@ class AccountGroupCard extends StatelessWidget {
               child: InkWell(
                 key: ValueKey('account-group-${group.name}'),
                 borderRadius: BorderRadius.circular(AppRadii.card),
-                onTap: () => toggleAccountGroupCollapsed(
-                  context,
-                  group,
-                  isCollapsed: isCollapsed,
-                ),
-                onLongPress: () => showAccountGroupActions(context, group),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  toggleAccountGroupCollapsed(
+                    context,
+                    group,
+                    isCollapsed: isCollapsed,
+                  );
+                },
+                onLongPress: () {
+                  HapticFeedback.mediumImpact();
+                  showAccountGroupActions(context, group);
+                },
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     vertical: AppSpacing.xs,
@@ -1497,24 +1510,35 @@ class _LedgerViewState extends State<LedgerView> {
             ),
           )
         else
-          for (final transaction in transactions) ...[
-            AppCard(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TransactionRow(
-                transaction: transaction,
-                currency: store.preferences.currency,
-                accountName: accountsById[transaction.accountId]?.name,
-                categoryName: transaction.categoryId == null
-                    ? null
-                    : categoriesById[transaction.categoryId]?.name,
-                dateLabel: compactDate(transaction.date),
-                onTap: () => showTransactionDetails(context, transaction.id),
-                onLongPress: () =>
-                    showTransactionOptions(context, transaction.id),
-              ),
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Column(
+              children: [
+                for (var index = 0; index < transactions.length; index++) ...[
+                  TransactionRow(
+                    transaction: transactions[index],
+                    currency: store.preferences.currency,
+                    accountName:
+                        accountsById[transactions[index].accountId]?.name,
+                    categoryName: transactions[index].categoryId == null
+                        ? null
+                        : categoriesById[transactions[index].categoryId]?.name,
+                    dateLabel: compactDate(transactions[index].date),
+                    onTap: () => showTransactionDetails(
+                      context,
+                      transactions[index].id,
+                    ),
+                    onLongPress: () {
+                      HapticFeedback.mediumImpact();
+                      showTransactionOptions(context, transactions[index].id);
+                    },
+                  ),
+                  if (index != transactions.length - 1)
+                    const Divider(height: 1, indent: 12, endIndent: 12),
+                ],
+              ],
             ),
-            const SizedBox(height: AppSpacing.xs),
-          ],
+          ),
       ],
     );
   }
@@ -2661,7 +2685,10 @@ class ScheduledCalendarPreview extends StatelessWidget {
               ),
               IconButton(
                 tooltip: isCollapsed ? 'Expand calendar' : 'Collapse calendar',
-                onPressed: onToggleCollapsed,
+                onPressed: () {
+                  HapticFeedback.selectionClick();
+                  onToggleCollapsed();
+                },
                 icon: AnimatedRotation(
                   turns: isCollapsed ? 0 : 0.5,
                   duration: MediaQuery.of(context).disableAnimations
@@ -4077,7 +4104,10 @@ class BudgetProgressRow extends StatelessWidget {
     final categorySummary = budgetCategorySummary(store, budget);
 
     return InkWell(
-      onLongPress: () => showBudgetActions(context, budget),
+      onLongPress: () {
+        HapticFeedback.mediumImpact();
+        showBudgetActions(context, budget);
+      },
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Column(
@@ -4165,6 +4195,9 @@ Future<void> showBudgetDialog(
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
+            alignment: Alignment.topCenter,
+            insetPadding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
+            actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
             title: Text(budget == null ? 'Add budget' : 'Edit budget'),
             content: SizedBox(
               width: 420,
@@ -4172,18 +4205,25 @@ Future<void> showBudgetDialog(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
-                      controller: name,
-                      decoration: const InputDecoration(labelText: 'Name'),
-                      textCapitalization: TextCapitalization.words,
-                      autofocus: true,
+                    DialogFieldGroup(
+                      label: 'Name',
+                      child: TextField(
+                        controller: name,
+                        decoration: dialogFieldDecoration(),
+                        textCapitalization: TextCapitalization.words,
+                        textInputAction: TextInputAction.next,
+                        autofocus: true,
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    AmountEntryField(
-                      initialMinor: amountMinor,
-                      currency: dataStore.preferences.currency,
-                      labelText: 'Budget amount',
-                      onChanged: (value) => amountMinor = value,
+                    DialogFieldGroup(
+                      label: 'Budget amount',
+                      child: AmountEntryField(
+                        initialMinor: amountMinor,
+                        currency: dataStore.preferences.currency,
+                        labelText: null,
+                        onChanged: (value) => amountMinor = value,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     Align(
@@ -4235,6 +4275,7 @@ Future<void> showBudgetDialog(
       );
 
   if (result == null || result.name.isEmpty) return;
+  HapticFeedback.mediumImpact();
   if (budget == null) {
     await dataStore.saveBudget(
       BudgetRecord(
@@ -4633,60 +4674,127 @@ Future<void> showEditAccountDialog(
   );
 }
 
-Future<void> showFloatingAddMenu(BuildContext context) async {
+Future<void> showFloatingAddMenu(
+  BuildContext context, {
+  FinanceSection? section,
+}) async {
+  final isScheduled = section == FinanceSection.scheduled;
+  final orderedActions = isScheduled
+      ? const ['expense', 'income', 'transfer']
+      : switch (section) {
+          FinanceSection.accounts => const [
+            'account',
+            'expense',
+            'income',
+            'transfer',
+            'category',
+            'scheduled',
+          ],
+          FinanceSection.budgets => const [
+            'budget',
+            'expense',
+            'income',
+            'transfer',
+            'account',
+            'category',
+            'scheduled',
+          ],
+          _ => const [
+            'expense',
+            'income',
+            'transfer',
+            'account',
+            'category',
+            'scheduled',
+          ],
+        };
+
+  FloatingActionMenuItem itemFor(String action) {
+    return switch (action) {
+      'expense' => FloatingActionMenuItem(
+        label: 'Expense',
+        leading: const Icon(Icons.remove_circle_outline),
+        onSelected: () => Navigator.pop(context, 'expense'),
+      ),
+      'income' => FloatingActionMenuItem(
+        label: 'Income',
+        leading: const Icon(Icons.add_circle_outline),
+        onSelected: () => Navigator.pop(context, 'income'),
+      ),
+      'transfer' => FloatingActionMenuItem(
+        label: 'Transfer',
+        leading: const Icon(Icons.swap_horiz),
+        onSelected: () => Navigator.pop(context, 'transfer'),
+      ),
+      'account' => FloatingActionMenuItem(
+        label: 'Account',
+        leading: const Icon(Icons.account_balance_wallet_outlined),
+        onSelected: () => Navigator.pop(context, 'account'),
+      ),
+      'budget' => FloatingActionMenuItem(
+        label: 'Budget',
+        leading: const Icon(Icons.pie_chart_outline),
+        onSelected: () => Navigator.pop(context, 'budget'),
+      ),
+      'category' => FloatingActionMenuItem(
+        label: 'Category',
+        leading: const Icon(Icons.sell_outlined),
+        onSelected: () => Navigator.pop(context, 'category'),
+      ),
+      _ => FloatingActionMenuItem(
+        label: 'Scheduled Transaction',
+        leading: const Icon(Icons.event_repeat_outlined),
+        onSelected: () => Navigator.pop(context, 'scheduled'),
+      ),
+    };
+  }
+
   final selected = await showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
     builder: (sheetContext) => SafeArea(
       child: MoneyTallyFloatingActionMenu(
-        items: [
-          FloatingActionMenuItem(
-            label: 'Expense',
-            leading: const Icon(Icons.remove_circle_outline),
-            onSelected: () => Navigator.pop(sheetContext, 'expense'),
-          ),
-          FloatingActionMenuItem(
-            label: 'Income',
-            leading: const Icon(Icons.add_circle_outline),
-            onSelected: () => Navigator.pop(sheetContext, 'income'),
-          ),
-          FloatingActionMenuItem(
-            label: 'Transfer',
-            leading: const Icon(Icons.swap_horiz),
-            onSelected: () => Navigator.pop(sheetContext, 'transfer'),
-          ),
-          FloatingActionMenuItem(
-            label: 'Account',
-            leading: const Icon(Icons.account_balance_wallet_outlined),
-            onSelected: () => Navigator.pop(sheetContext, 'account'),
-          ),
-          FloatingActionMenuItem(
-            label: 'Category',
-            leading: const Icon(Icons.sell_outlined),
-            onSelected: () => Navigator.pop(sheetContext, 'category'),
-          ),
-          FloatingActionMenuItem(
-            label: 'Scheduled Transaction',
-            leading: const Icon(Icons.event_repeat_outlined),
-            onSelected: () => Navigator.pop(sheetContext, 'scheduled'),
-          ),
-        ],
+        items: [for (final action in orderedActions) itemFor(action)],
       ),
     ),
   );
 
   if (!context.mounted || selected == null) return;
+  HapticFeedback.selectionClick();
   switch (selected) {
     case 'expense':
-      await showTransactionDialog(context, initialIsExpense: true);
+      if (isScheduled) {
+        await showScheduledTransactionDialog(
+          context,
+          initialType: TransactionType.expense,
+        );
+      } else {
+        await showTransactionDialog(context, initialIsExpense: true);
+      }
     case 'income':
-      await showTransactionDialog(context, initialIsExpense: false);
+      if (isScheduled) {
+        await showScheduledTransactionDialog(
+          context,
+          initialType: TransactionType.income,
+        );
+      } else {
+        await showTransactionDialog(context, initialIsExpense: false);
+      }
     case 'category':
       await showCategoryDialog(context);
     case 'account':
       await showAccountDialog(context);
     case 'transfer':
-      await showTransferDialog(context);
+      if (isScheduled) {
+        await showScheduledTransactionDialog(
+          context,
+          initialType: TransactionType.transfer,
+        );
+      } else {
+        await showTransferDialog(context);
+      }
+    case 'budget':
+      await showBudgetDialog(context);
     case 'scheduled':
       await showScheduledTransactionDialog(context);
   }
@@ -4858,6 +4966,7 @@ Future<void> showAccountDialog(BuildContext context) async {
       );
 
   if (result == null) return;
+  HapticFeedback.mediumImpact();
   final normalizedOpeningBalanceCents = switch (result.type) {
     AccountType.creditCard ||
     AccountType.loan => -result.openingBalanceCents.abs(),
@@ -4990,6 +5099,9 @@ Future<void> showTransferDialog(
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
+            alignment: Alignment.topCenter,
+            insetPadding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
+            actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
             title: Text(
               transfer == null ? 'Add transaction' : 'Edit transaction',
             ),
@@ -5026,29 +5138,10 @@ Future<void> showTransferDialog(
                     const SizedBox(height: 12),
                     DialogFieldGroup(
                       label: 'Payee',
-                      child: TextField(
-                        key: const ValueKey('transfer-payee'),
+                      child: PayeeAutocompleteField(
+                        fieldKey: const ValueKey('transfer-payee'),
                         controller: payee,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: dialogFieldDecoration().copyWith(
-                          suffixIcon: payeeOptions.isEmpty
-                              ? null
-                              : PopupMenuButton<String>(
-                                  tooltip: 'Saved payees',
-                                  icon: const Icon(
-                                    Icons.history_outlined,
-                                    size: 20,
-                                  ),
-                                  onSelected: (value) => payee.text = value,
-                                  itemBuilder: (context) => [
-                                    for (final option in payeeOptions.take(12))
-                                      PopupMenuItem(
-                                        value: option,
-                                        child: Text(option),
-                                      ),
-                                  ],
-                                ),
-                        ),
+                        options: payeeOptions,
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -5178,6 +5271,7 @@ Future<void> showTransferDialog(
     return;
   }
   if (result == null) return;
+  HapticFeedback.mediumImpact();
   if (transfer == null) {
     await dataStore.addTransfer(
       fromAccountId: result.fromAccountId,
@@ -5211,6 +5305,7 @@ Future<void> showTransferDialog(
 Future<void> showScheduledTransactionDialog(
   BuildContext context, {
   v2_scheduled.ScheduledTransactionRecord? existing,
+  TransactionType? initialType,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final isEditing = existing != null;
@@ -5229,6 +5324,7 @@ Future<void> showScheduledTransactionDialog(
     return;
   }
 
+  final payeeOptions = savedPayees(dataStore);
   final payee = TextEditingController(text: existing?.payee ?? '');
   final note = TextEditingController(text: existing?.note ?? '');
   var amountMinor = existing?.amountMinor ?? 0;
@@ -5238,7 +5334,7 @@ Future<void> showScheduledTransactionDialog(
   final customAlertTime = TextEditingController(
     text: alertTimeInput(existing?.customAlertTimeMinutes ?? 9 * 60),
   );
-  var type = existing?.type ?? TransactionType.expense;
+  var type = existing?.type ?? initialType ?? TransactionType.expense;
   var accountId = accounts.any((account) => account.id == existing?.accountId)
       ? existing!.accountId
       : accounts.first.id;
@@ -5287,6 +5383,9 @@ Future<void> showScheduledTransactionDialog(
             }
 
             return AlertDialog(
+              alignment: Alignment.topCenter,
+              insetPadding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
+              actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
               title: Text(
                 isEditing
                     ? 'Edit scheduled transaction'
@@ -5333,10 +5432,10 @@ Future<void> showScheduledTransactionDialog(
                       const SizedBox(height: 12),
                       DialogFieldGroup(
                         label: 'Payee',
-                        child: TextField(
+                        child: PayeeAutocompleteField(
+                          fieldKey: const ValueKey('scheduled-payee'),
                           controller: payee,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: dialogFieldDecoration(),
+                          options: payeeOptions,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -5640,6 +5739,7 @@ Future<void> showScheduledTransactionDialog(
       );
 
   if (result == null) return;
+  HapticFeedback.mediumImpact();
   if (result.type == TransactionType.transfer &&
       result.transferAccountId == null) {
     if (!context.mounted) return;
@@ -6080,6 +6180,9 @@ Future<void> showTransactionDialog(
             }
 
             return AlertDialog(
+              alignment: Alignment.topCenter,
+              insetPadding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
+              actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
               title: Text(
                 transaction == null ? 'Add transaction' : 'Edit transaction',
               ),
@@ -6129,31 +6232,10 @@ Future<void> showTransactionDialog(
                       const SizedBox(height: 12),
                       DialogFieldGroup(
                         label: 'Payee',
-                        child: TextField(
-                          key: const ValueKey('transaction-payee'),
+                        child: PayeeAutocompleteField(
+                          fieldKey: const ValueKey('transaction-payee'),
                           controller: payee,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: dialogFieldDecoration().copyWith(
-                            suffixIcon: payeeOptions.isEmpty
-                                ? null
-                                : PopupMenuButton<String>(
-                                    tooltip: 'Saved payees',
-                                    icon: const Icon(
-                                      Icons.history_outlined,
-                                      size: 20,
-                                    ),
-                                    onSelected: (value) => payee.text = value,
-                                    itemBuilder: (context) => [
-                                      for (final option in payeeOptions.take(
-                                        12,
-                                      ))
-                                        PopupMenuItem(
-                                          value: option,
-                                          child: Text(option),
-                                        ),
-                                    ],
-                                  ),
-                          ),
+                          options: payeeOptions,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -6488,6 +6570,7 @@ Future<void> showTransactionDialog(
     return;
   }
   if (result == null) return;
+  HapticFeedback.mediumImpact();
   if (transaction == null) {
     if (result.isExpense) {
       await dataStore.addExpense(
@@ -6588,6 +6671,9 @@ Future<String?> showCategoryDialog(
             parentCategoryId = parentDropdownValue;
 
             return AlertDialog(
+              alignment: Alignment.topCenter,
+              insetPadding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
+              actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
               title: Text(
                 existingCategory == null ? 'Add category' : 'Edit category',
               ),
@@ -6597,79 +6683,90 @@ Future<String?> showCategoryDialog(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      TextField(
-                        controller: name,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(
-                          labelText: 'Category name',
+                      DialogFieldGroup(
+                        label: 'Category name',
+                        child: TextField(
+                          controller: name,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: dialogFieldDecoration(),
+                          autofocus: true,
                         ),
-                        autofocus: true,
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<v2_category.CategoryKind>(
-                        initialValue: kind,
-                        decoration: const InputDecoration(labelText: 'Type'),
-                        items: [
-                          for (final item in v2_category.CategoryKind.values)
-                            if (item != v2_category.CategoryKind.system)
-                              DropdownMenuItem(
-                                value: item,
-                                child: Text(categoryKindLabel(item.name)),
+                      DialogFieldGroup(
+                        label: 'Type',
+                        child: DropdownButtonFormField<v2_category.CategoryKind>(
+                          initialValue: kind,
+                          decoration: dialogFieldDecoration(),
+                          items: [
+                            for (final item in v2_category.CategoryKind.values)
+                              if (item != v2_category.CategoryKind.system)
+                                DropdownMenuItem(
+                                  value: item,
+                                  child: Text(categoryKindLabel(item.name)),
+                                ),
+                          ],
+                          onChanged: (value) => setDialogState(() {
+                            kind = value ?? kind;
+                            parentCategoryId = null;
+                          }),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: 'Parent category',
+                        child: DropdownButtonFormField<String?>(
+                          initialValue: parentDropdownValue,
+                          decoration: dialogFieldDecoration(),
+                          items: [
+                            const DropdownMenuItem<String?>(child: Text('None')),
+                            for (final item in parentOptions)
+                              DropdownMenuItem<String?>(
+                                value: item.id,
+                                child: Text(item.name),
                               ),
-                        ],
-                        onChanged: (value) => setDialogState(() {
-                          kind = value ?? kind;
-                          parentCategoryId = null;
-                        }),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String?>(
-                        initialValue: parentDropdownValue,
-                        decoration: const InputDecoration(
-                          labelText: 'Parent category',
+                          ],
+                          onChanged: (value) =>
+                              setDialogState(() => parentCategoryId = value),
                         ),
-                        items: [
-                          const DropdownMenuItem<String?>(child: Text('None')),
-                          for (final item in parentOptions)
-                            DropdownMenuItem<String?>(
-                              value: item.id,
-                              child: Text(item.name),
-                            ),
-                        ],
-                        onChanged: (value) =>
-                            setDialogState(() => parentCategoryId = value),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<String?>(
-                        initialValue: iconName,
-                        decoration: const InputDecoration(labelText: 'Icon'),
-                        items: [
-                          const DropdownMenuItem<String?>(
-                            child: Text('No icon'),
-                          ),
-                          for (final item in v2_category.curatedCategoryIcons)
-                            DropdownMenuItem<String?>(
-                              value: item.sfSymbolName,
-                              child: Text(item.label),
+                      DialogFieldGroup(
+                        label: 'Icon',
+                        child: DropdownButtonFormField<String?>(
+                          initialValue: iconName,
+                          decoration: dialogFieldDecoration(),
+                          items: [
+                            const DropdownMenuItem<String?>(
+                              child: Text('No icon'),
                             ),
-                        ],
-                        onChanged: (value) =>
-                            setDialogState(() => iconName = value),
+                            for (final item in v2_category.curatedCategoryIcons)
+                              DropdownMenuItem<String?>(
+                                value: item.sfSymbolName,
+                                child: Text(item.label),
+                              ),
+                          ],
+                          onChanged: (value) =>
+                              setDialogState(() => iconName = value),
+                        ),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<int?>(
-                        initialValue: colorValue,
-                        decoration: const InputDecoration(labelText: 'Color'),
-                        items: [
-                          const DropdownMenuItem<int?>(child: Text('Default')),
-                          for (final item in categoryColorOptions)
-                            DropdownMenuItem<int?>(
-                              value: item.value,
-                              child: Text(item.label),
-                            ),
-                        ],
-                        onChanged: (value) =>
-                            setDialogState(() => colorValue = value),
+                      DialogFieldGroup(
+                        label: 'Color',
+                        child: DropdownButtonFormField<int?>(
+                          initialValue: colorValue,
+                          decoration: dialogFieldDecoration(),
+                          items: [
+                            const DropdownMenuItem<int?>(child: Text('Default')),
+                            for (final item in categoryColorOptions)
+                              DropdownMenuItem<int?>(
+                                value: item.value,
+                                child: Text(item.label),
+                              ),
+                          ],
+                          onChanged: (value) =>
+                              setDialogState(() => colorValue = value),
+                        ),
                       ),
                     ],
                   ),
@@ -6697,6 +6794,7 @@ Future<String?> showCategoryDialog(
       );
 
   if (result == null || result.name.isEmpty) return null;
+  HapticFeedback.mediumImpact();
   final sanitizedParentCategoryId =
       existingCategory != null &&
           v2_category.wouldCreateCategoryParentCycle(
@@ -7052,16 +7150,152 @@ String defaultTransactionTypeLabel(DefaultTransactionType type) {
 
 const newCategoryDropdownValue = '__new_category__';
 
+class PayeeAutocompleteField extends StatefulWidget {
+  const PayeeAutocompleteField({
+    required this.controller,
+    required this.options,
+    required this.fieldKey,
+    super.key,
+  });
+
+  final TextEditingController controller;
+  final List<String> options;
+  final Key fieldKey;
+
+  @override
+  State<PayeeAutocompleteField> createState() =>
+      _PayeeAutocompleteFieldState();
+}
+
+class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
+  final _focusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RawAutocomplete<String>(
+      textEditingController: widget.controller,
+      focusNode: _focusNode,
+      displayStringForOption: (option) => option,
+      optionsBuilder: (value) => rankedPayeeSuggestions(
+        widget.options,
+        value.text,
+      ),
+      onSelected: (_) {
+        HapticFeedback.selectionClick();
+        _focusNode.unfocus();
+      },
+      fieldViewBuilder: (context, controller, focusNode, onSubmitted) {
+        return TextField(
+          key: widget.fieldKey,
+          controller: controller,
+          focusNode: focusNode,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => onSubmitted(),
+          decoration: dialogFieldDecoration().copyWith(
+            suffixIcon: widget.options.isEmpty
+                ? null
+                : PopupMenuButton<String>(
+                    tooltip: 'Recent payees',
+                    icon: const Icon(Icons.history_outlined, size: 20),
+                    onSelected: (value) {
+                      controller.text = value;
+                      controller.selection = TextSelection.collapsed(
+                        offset: value.length,
+                      );
+                      HapticFeedback.selectionClick();
+                    },
+                    itemBuilder: (context) => [
+                      for (final option in widget.options.take(12))
+                        PopupMenuItem(value: option, child: Text(option)),
+                    ],
+                  ),
+          ),
+        );
+      },
+      optionsViewBuilder: (context, onSelected, options) {
+        final visible = options.take(6).toList(growable: false);
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 8,
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(14),
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 264),
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                shrinkWrap: true,
+                itemCount: visible.length,
+                itemBuilder: (context, index) {
+                  final option = visible[index];
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.history_outlined, size: 18),
+                    title: Text(option),
+                    onTap: () => onSelected(option),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+Iterable<String> rankedPayeeSuggestions(
+  List<String> recentPayees,
+  String query,
+) {
+  final normalized = query.trim().toLowerCase();
+  final matching = recentPayees
+      .where(
+        (payee) =>
+            normalized.isEmpty || payee.toLowerCase().contains(normalized),
+      )
+      .toList(growable: false);
+  matching.sort((a, b) {
+    final lowerA = a.toLowerCase();
+    final lowerB = b.toLowerCase();
+    final rankA = lowerA == normalized
+        ? 0
+        : lowerA.startsWith(normalized)
+        ? 1
+        : 2;
+    final rankB = lowerB == normalized
+        ? 0
+        : lowerB.startsWith(normalized)
+        ? 1
+        : 2;
+    if (rankA != rankB) return rankA.compareTo(rankB);
+    if (normalized.isEmpty) {
+      return recentPayees.indexOf(a).compareTo(recentPayees.indexOf(b));
+    }
+    return lowerA.compareTo(lowerB);
+  });
+  return matching;
+}
+
 List<String> savedPayees(FinanceDataStore store) {
   final seen = <String>{};
   final payees = <String>[];
-  final transactions = store.transactions.where((item) => !item.isDeleted);
+  final transactions = store.transactions.where((item) => !item.isDeleted)
+      .toList(growable: false)
+    ..sort((a, b) => b.date.compareTo(a.date));
   for (final transaction in transactions) {
     final payee = transaction.payee.trim();
     if (payee.isEmpty || !seen.add(payee.toLowerCase())) continue;
     payees.add(payee);
   }
-  payees.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   return payees;
 }
 
