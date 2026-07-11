@@ -5822,6 +5822,7 @@ Future<void> showTransactionDialog(
   TransactionRecord? transaction,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
+  final legacyStore = FinanceStoreScope.read(context);
   final activeAccounts = dataStore.activeAccountsInDisplayOrder;
   if (activeAccounts.isEmpty) return;
   final payeeOptions = savedPayees(dataStore);
@@ -5847,6 +5848,8 @@ Future<void> showTransactionDialog(
       transaction?.categoryId ??
       defaultV2CategoryIdForTransactionKind(dataStore, isExpense);
   var switchToTransfer = false;
+  var isCreatingCategory = false;
+  final newCategoryName = TextEditingController();
 
   final result =
       await showDialog<
@@ -6013,88 +6016,217 @@ Future<void> showTransactionDialog(
                         ),
                       ),
                       const SizedBox(height: 12),
-                      DialogFieldGroup(
-                        label: 'Category',
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final selectedCategoryName =
-                                categoryOptions.any(
-                                  (category) => category.id == categoryId,
-                                )
-                                ? categoryOptions
-                                      .firstWhere(
-                                        (category) =>
-                                            category.id == categoryId,
-                                      )
-                                      .name
-                                : 'Choose category';
-                            return PopupMenuButton<String>(
-                              key: const ValueKey(
-                                'transaction-category-picker',
-                              ),
-                              constraints: BoxConstraints.tightFor(
-                                width: constraints.maxWidth,
-                              ),
-                              position: PopupMenuPosition.under,
-                              offset: const Offset(0, 4),
-                              borderRadius: BorderRadius.circular(
-                                AppRadii.card,
-                              ),
-                              itemBuilder: (context) => [
-                                for (final category in categoryOptions)
-                                  PopupMenuItem(
-                                    value: category.id,
-                                    child: Text(category.name),
-                                  ),
-                                const PopupMenuDivider(),
-                                const PopupMenuItem(
-                                  value: newCategoryDropdownValue,
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.add, size: 20),
-                                      SizedBox(width: AppSpacing.sm),
-                                      Text('New category...'),
-                                    ],
-                                  ),
+                      AnimatedSwitcher(
+                        duration: MediaQuery.of(context).disableAnimations
+                            ? Duration.zero
+                            : const Duration(milliseconds: 165),
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: SizeTransition(
+                            sizeFactor: animation,
+                            axisAlignment: -1,
+                            child: child,
+                          ),
+                        ),
+                        child: isCreatingCategory
+                            ? DialogFieldGroup(
+                                key: const ValueKey(
+                                  'inline-category-creator',
                                 ),
-                              ],
-                              onSelected: (value) async {
-                                if (value == newCategoryDropdownValue) {
-                                  await Future<void>.delayed(
-                                    const Duration(milliseconds: 120),
-                                  );
-                                  if (!context.mounted) return;
-                                  final newId = await showCategoryDialog(
-                                    context,
-                                    initialKind: isExpense
-                                        ? v2_category.CategoryKind.expense
-                                        : v2_category.CategoryKind.income,
-                                  );
-                                  if (newId != null && context.mounted) {
-                                    setDialogState(() => categoryId = newId);
-                                  }
-                                  return;
-                                }
-                                setDialogState(() => categoryId = value);
-                              },
-                              child: InputDecorator(
-                                decoration: dialogFieldDecoration(),
-                                child: Row(
+                                label: 'New category',
+                                child: Column(
                                   children: [
-                                    Expanded(
-                                      child: Text(
-                                        selectedCategoryName,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                    TextField(
+                                      key: const ValueKey(
+                                        'new-transaction-category-name',
                                       ),
+                                      controller: newCategoryName,
+                                      autofocus: true,
+                                      textCapitalization:
+                                          TextCapitalization.words,
+                                      decoration: dialogFieldDecoration(
+                                        hintText: 'Category name',
+                                      ),
+                                      onSubmitted: (_) async {
+                                        final name =
+                                            newCategoryName.text.trim();
+                                        if (name.isEmpty) return;
+                                        final kind = isExpense
+                                            ? v2_category.CategoryKind.expense
+                                            : v2_category.CategoryKind.income;
+                                        final legacyCategory = legacyStore
+                                            .addCategory(
+                                              name,
+                                              kind: legacyCategoryKindFor(kind),
+                                            );
+                                        final newId =
+                                            legacyCategory?.id ??
+                                            'cat_${DateTime.now().microsecondsSinceEpoch}';
+                                        await dataStore.saveCategory(
+                                          v2_category.CategoryRecord(
+                                            id: newId,
+                                            name: name,
+                                            kind: kind,
+                                            sync: v2_sync.SyncMetadata.fresh(
+                                              deviceId: dataStore.deviceId,
+                                            ),
+                                          ),
+                                        );
+                                        if (!context.mounted) return;
+                                        setDialogState(() {
+                                          categoryId = newId;
+                                          isCreatingCategory = false;
+                                          newCategoryName.clear();
+                                        });
+                                      },
                                     ),
-                                    const Icon(Icons.arrow_drop_down),
+                                    const SizedBox(height: AppSpacing.xs),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.end,
+                                      children: [
+                                        TextButton(
+                                          onPressed: () => setDialogState(() {
+                                            isCreatingCategory = false;
+                                            newCategoryName.clear();
+                                          }),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        const SizedBox(width: AppSpacing.xs),
+                                        FilledButton.icon(
+                                          onPressed: () async {
+                                            final name =
+                                                newCategoryName.text.trim();
+                                            if (name.isEmpty) return;
+                                            final kind = isExpense
+                                                ? v2_category
+                                                      .CategoryKind
+                                                      .expense
+                                                : v2_category
+                                                      .CategoryKind
+                                                      .income;
+                                            final legacyCategory = legacyStore
+                                                .addCategory(
+                                                  name,
+                                                  kind:
+                                                      legacyCategoryKindFor(
+                                                        kind,
+                                                      ),
+                                                );
+                                            final newId =
+                                                legacyCategory?.id ??
+                                                'cat_${DateTime.now().microsecondsSinceEpoch}';
+                                            await dataStore.saveCategory(
+                                              v2_category.CategoryRecord(
+                                                id: newId,
+                                                name: name,
+                                                kind: kind,
+                                                sync:
+                                                    v2_sync.SyncMetadata.fresh(
+                                                      deviceId:
+                                                          dataStore.deviceId,
+                                                    ),
+                                              ),
+                                            );
+                                            if (!context.mounted) return;
+                                            setDialogState(() {
+                                              categoryId = newId;
+                                              isCreatingCategory = false;
+                                              newCategoryName.clear();
+                                            });
+                                          },
+                                          icon: const Icon(Icons.add, size: 18),
+                                          label: const Text('Add category'),
+                                        ),
+                                      ],
+                                    ),
                                   ],
                                 ),
+                              )
+                            : DialogFieldGroup(
+                                key: const ValueKey(
+                                  'transaction-category-field',
+                                ),
+                                label: 'Category',
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final selectedCategoryName =
+                                        categoryOptions.any(
+                                          (category) =>
+                                              category.id == categoryId,
+                                        )
+                                        ? categoryOptions
+                                              .firstWhere(
+                                                (category) =>
+                                                    category.id == categoryId,
+                                              )
+                                              .name
+                                        : 'Choose category';
+                                    return PopupMenuButton<String>(
+                                      key: const ValueKey(
+                                        'transaction-category-picker',
+                                      ),
+                                      constraints: BoxConstraints.tightFor(
+                                        width: constraints.maxWidth,
+                                      ),
+                                      position: PopupMenuPosition.under,
+                                      offset: const Offset(0, 4),
+                                      borderRadius: BorderRadius.circular(
+                                        AppRadii.card,
+                                      ),
+                                      itemBuilder: (context) => [
+                                        for (final category in categoryOptions)
+                                          PopupMenuItem(
+                                            value: category.id,
+                                            child: Text(category.name),
+                                          ),
+                                        const PopupMenuDivider(),
+                                        const PopupMenuItem(
+                                          value: newCategoryDropdownValue,
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.add, size: 20),
+                                              SizedBox(width: AppSpacing.sm),
+                                              Text('New category...'),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                      onSelected: (value) {
+                                        if (value ==
+                                            newCategoryDropdownValue) {
+                                          setDialogState(() {
+                                            isCreatingCategory = true;
+                                            newCategoryName.clear();
+                                          });
+                                          return;
+                                        }
+                                        setDialogState(
+                                          () => categoryId = value,
+                                        );
+                                      },
+                                      child: InputDecorator(
+                                        decoration: dialogFieldDecoration(),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                selectedCategoryName,
+                                                maxLines: 1,
+                                                overflow:
+                                                    TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const Icon(
+                                              Icons.arrow_drop_down,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
                               ),
-                            );
-                          },
-                        ),
                       ),
                     ],
                   ),
