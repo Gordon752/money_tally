@@ -6022,6 +6022,9 @@ Future<void> showTransactionDialog(
                                       .name
                                 : 'Choose category';
                             return PopupMenuButton<String>(
+                              key: const ValueKey(
+                                'transaction-category-picker',
+                              ),
                               constraints: BoxConstraints.tightFor(
                                 width: constraints.maxWidth,
                               ),
