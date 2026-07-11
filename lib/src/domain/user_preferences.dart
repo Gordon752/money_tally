@@ -29,6 +29,8 @@ class UserPreferences {
     this.collapsedAccountGroupNames = const {},
     this.accountGroupOrderNames = defaultAccountGroupOrderNames,
     this.accountGroupLabelOverrides = const {},
+    this.savedPayeeNames = const [],
+    this.archivedPayeeNames = const {},
   });
 
   final LaunchScreen launchScreen;
@@ -41,6 +43,8 @@ class UserPreferences {
   final Set<String> collapsedAccountGroupNames;
   final List<String> accountGroupOrderNames;
   final Map<String, String> accountGroupLabelOverrides;
+  final List<String> savedPayeeNames;
+  final Set<String> archivedPayeeNames;
 
   UserPreferences copyWith({
     LaunchScreen? launchScreen,
@@ -53,6 +57,8 @@ class UserPreferences {
     Set<String>? collapsedAccountGroupNames,
     List<String>? accountGroupOrderNames,
     Map<String, String>? accountGroupLabelOverrides,
+    List<String>? savedPayeeNames,
+    Set<String>? archivedPayeeNames,
   }) {
     return UserPreferences(
       launchScreen: launchScreen ?? this.launchScreen,
@@ -71,6 +77,8 @@ class UserPreferences {
           accountGroupOrderNames ?? this.accountGroupOrderNames,
       accountGroupLabelOverrides:
           accountGroupLabelOverrides ?? this.accountGroupLabelOverrides,
+      savedPayeeNames: savedPayeeNames ?? this.savedPayeeNames,
+      archivedPayeeNames: archivedPayeeNames ?? this.archivedPayeeNames,
     );
   }
 
@@ -86,6 +94,8 @@ class UserPreferences {
       'collapsedAccountGroupNames': collapsedAccountGroupNames.toList()..sort(),
       'accountGroupOrderNames': accountGroupOrderNames,
       'accountGroupLabelOverrides': accountGroupLabelOverrides,
+      'savedPayeeNames': savedPayeeNames,
+      'archivedPayeeNames': archivedPayeeNames.toList()..sort(),
     };
   }
 
@@ -132,6 +142,17 @@ class UserPreferences {
           stringMap(json['accountGroupLabelOverrides']).map(
             (key, value) => MapEntry(key, value is String ? value : ''),
           )..removeWhere((key, value) => value.trim().isEmpty),
+      savedPayeeNames:
+          (json['savedPayeeNames'] as List<Object?>?)
+              ?.whereType<String>()
+              .toList() ??
+          const [],
+      archivedPayeeNames:
+          (json['archivedPayeeNames'] as List<Object?>?)
+              ?.whereType<String>()
+              .map((value) => value.toLowerCase())
+              .toSet() ??
+          const {},
     );
   }
 }
