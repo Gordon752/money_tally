@@ -49,6 +49,8 @@ part 'src/finance_store.dart';
 part 'src/firestore_finance_repository.dart';
 part 'src/local_finance_repository.dart';
 
+final scheduledNotificationLaunchPayload = ValueNotifier<String?>(null);
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterError.onError = (details) {
@@ -76,7 +78,11 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
     NotificationScheduler notificationScheduler =
         const NoopNotificationScheduler();
     try {
-      final localNotificationScheduler = LocalNotificationScheduler();
+      final localNotificationScheduler = LocalNotificationScheduler(
+        onNotificationSelected: (payload) {
+          scheduledNotificationLaunchPayload.value = payload ?? 'scheduled';
+        },
+      );
       await localNotificationScheduler.initialize();
       notificationScheduler = localNotificationScheduler;
     } catch (error, stackTrace) {
