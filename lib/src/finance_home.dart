@@ -2409,6 +2409,7 @@ Future<void> makeTransactionScheduled(
         ? null
         : transaction.categoryId,
     payee: transaction.payee,
+    note: transaction.note,
     amountMinor: transaction.amountMinor.abs(),
     nextDate: firstMonthlyDateAfter(transaction.date, DateTime.now()),
     frequency: v2_scheduled.RecurrenceFrequency.monthly,
@@ -2572,6 +2573,8 @@ class _ScheduledViewState extends State<ScheduledView> {
                           key: ValueKey('scheduled-row-${item.id}'),
                           scheduledTransaction: item,
                           currency: store.preferences.currency,
+                          onTap: () =>
+                              showScheduledTransactionDetails(context, item),
                           onLongPress: () =>
                               showScheduledTransactionActions(context, item),
                         ),
@@ -5177,6 +5180,7 @@ Future<void> showScheduledTransactionDialog(
   }
 
   final payee = TextEditingController(text: existing?.payee ?? '');
+  final note = TextEditingController(text: existing?.note ?? '');
   var amountMinor = existing?.amountMinor ?? 0;
   final nextDate = TextEditingController(
     text: dateInput(existing?.nextDate ?? DateTime.now()),
@@ -5208,6 +5212,7 @@ Future<void> showScheduledTransactionDialog(
           String? transferAccountId,
           String? categoryId,
           String payee,
+          String note,
           int amountMinor,
           DateTime nextDate,
           v2_scheduled.RecurrenceFrequency frequency,
@@ -5282,6 +5287,18 @@ Future<void> showScheduledTransactionDialog(
                           controller: payee,
                           textCapitalization: TextCapitalization.words,
                           decoration: dialogFieldDecoration(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: 'Note',
+                        child: TextField(
+                          key: const ValueKey('scheduled-note'),
+                          controller: note,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: dialogFieldDecoration(),
+                          minLines: 1,
+                          maxLines: 3,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -5551,6 +5568,7 @@ Future<void> showScheduledTransactionDialog(
                     payee: payee.text.trim().isEmpty
                         ? scheduledPayeeFallback(type)
                         : payee.text.trim(),
+                    note: note.text.trim(),
                     amountMinor: amountMinor.abs(),
                     nextDate: parseDateInput(nextDate.text, DateTime.now()),
                     frequency: frequency,
@@ -5596,6 +5614,7 @@ Future<void> showScheduledTransactionDialog(
           transferAccountId: result.transferAccountId,
           categoryId: result.categoryId,
           payee: result.payee,
+          note: result.note,
           amountMinor: result.amountMinor,
           nextDate: result.nextDate,
           frequency: result.frequency,
@@ -5610,6 +5629,7 @@ Future<void> showScheduledTransactionDialog(
           transferAccountId: result.transferAccountId,
           categoryId: result.categoryId,
           payee: result.payee,
+          note: result.note,
           amountMinor: result.amountMinor,
           nextDate: result.nextDate,
           frequency: result.frequency,
@@ -5625,6 +5645,99 @@ Future<void> showScheduledTransactionDialog(
           clearLastReminderScheduledAt: true,
         );
   await dataStore.saveScheduledTransaction(scheduledTransaction);
+}
+
+Future<void> showScheduledTransactionDetails(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  String accountName(String? id) {
+    for (final account in dataStore.accounts) {
+      if (account.id == id) return account.name;
+    }
+    return 'Unavailable';
+  }
+
+  String categoryName(String? id) {
+    for (final category in dataStore.categories) {
+      if (category.id == id) return category.name;
+    }
+    return 'Uncategorized';
+  }
+
+  final action = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Scheduled transaction'),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TransactionDetailRow(label: 'Payee', value: item.payee),
+              TransactionDetailRow(
+                label: 'Type',
+                value: transactionTypeLabel(item.type),
+              ),
+              TransactionDetailRow(
+                label: 'Amount',
+                value: money(
+                  item.amountMinor,
+                  dataStore.preferences.currency,
+                ),
+              ),
+              TransactionDetailRow(
+                label: 'Next date',
+                value: dateInput(item.nextDate),
+              ),
+              TransactionDetailRow(
+                label: 'Repeat',
+                value: recurrenceFrequencyLabel(item.frequency),
+              ),
+              TransactionDetailRow(
+                label: item.type == TransactionType.transfer
+                    ? 'From'
+                    : 'Account',
+                value: accountName(item.accountId),
+              ),
+              if (item.type == TransactionType.transfer)
+                TransactionDetailRow(
+                  label: 'To',
+                  value: accountName(item.transferAccountId),
+                )
+              else
+                TransactionDetailRow(
+                  label: 'Category',
+                  value: categoryName(item.categoryId),
+                ),
+              TransactionDetailRow(
+                label: 'Alert',
+                value: alertPreferenceLabel(item.alertPreference),
+              ),
+              if (item.note.trim().isNotEmpty)
+                TransactionDetailRow(label: 'Note', value: item.note),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Close'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.pop(dialogContext, 'edit'),
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('Edit'),
+        ),
+      ],
+    ),
+  );
+  if (action == 'edit' && context.mounted) {
+    await showScheduledTransactionDialog(context, existing: item);
+  }
 }
 
 Future<void> showScheduledTransactionActions(
@@ -5702,6 +5815,7 @@ Future<void> markScheduledTransactionPaid(
         date: item.nextDate,
         payee: item.payee,
         amountMinor: item.amountMinor,
+        note: item.note,
         scheduledTransactionId: item.id,
       );
     case TransactionType.income:
@@ -5715,6 +5829,7 @@ Future<void> markScheduledTransactionPaid(
         date: item.nextDate,
         payee: item.payee,
         amountMinor: item.amountMinor,
+        note: item.note,
         scheduledTransactionId: item.id,
       );
     case TransactionType.transfer:
@@ -5728,6 +5843,7 @@ Future<void> markScheduledTransactionPaid(
         date: item.nextDate,
         payee: item.payee,
         amountMinor: item.amountMinor,
+        note: item.note,
         scheduledTransactionId: item.id,
       );
     case TransactionType.adjustment:
@@ -5767,6 +5883,7 @@ Future<void> duplicateScheduledTransaction(
       transferAccountId: item.transferAccountId,
       categoryId: item.categoryId,
       payee: '${item.payee} copy',
+      note: item.note,
       amountMinor: item.amountMinor,
       nextDate: item.nextDate,
       frequency: item.frequency,
