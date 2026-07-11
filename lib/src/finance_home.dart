@@ -6008,35 +6008,81 @@ Future<void> showTransactionDialog(
                       const SizedBox(height: 12),
                       DialogFieldGroup(
                         label: 'Category',
-                        child: DropdownButtonFormField<String>(
-                          initialValue: categoryId.isEmpty ? null : categoryId,
-                          decoration: dialogFieldDecoration(),
-                          items: [
-                            for (final category in categoryOptions)
-                              DropdownMenuItem(
-                                value: category.id,
-                                child: Text(category.name),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final selectedCategoryName =
+                                categoryOptions.any(
+                                  (category) => category.id == categoryId,
+                                )
+                                ? categoryOptions
+                                      .firstWhere(
+                                        (category) =>
+                                            category.id == categoryId,
+                                      )
+                                      .name
+                                : 'Choose category';
+                            return PopupMenuButton<String>(
+                              constraints: BoxConstraints.tightFor(
+                                width: constraints.maxWidth,
                               ),
-                            const DropdownMenuItem(
-                              value: newCategoryDropdownValue,
-                              child: Text('New category...'),
-                            ),
-                          ],
-                          onChanged: (value) async {
-                            if (value == null) return;
-                            if (value == newCategoryDropdownValue) {
-                              final newId = await showCategoryDialog(
-                                context,
-                                initialKind: isExpense
-                                    ? v2_category.CategoryKind.expense
-                                    : v2_category.CategoryKind.income,
-                              );
-                              if (newId != null) {
-                                setDialogState(() => categoryId = newId);
-                              }
-                              return;
-                            }
-                            setDialogState(() => categoryId = value);
+                              position: PopupMenuPosition.under,
+                              offset: const Offset(0, 4),
+                              borderRadius: BorderRadius.circular(
+                                AppRadii.card,
+                              ),
+                              itemBuilder: (context) => [
+                                for (final category in categoryOptions)
+                                  PopupMenuItem(
+                                    value: category.id,
+                                    child: Text(category.name),
+                                  ),
+                                const PopupMenuDivider(),
+                                const PopupMenuItem(
+                                  value: newCategoryDropdownValue,
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.add, size: 20),
+                                      SizedBox(width: AppSpacing.sm),
+                                      Text('New category...'),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              onSelected: (value) async {
+                                if (value == newCategoryDropdownValue) {
+                                  await Future<void>.delayed(
+                                    const Duration(milliseconds: 120),
+                                  );
+                                  if (!context.mounted) return;
+                                  final newId = await showCategoryDialog(
+                                    context,
+                                    initialKind: isExpense
+                                        ? v2_category.CategoryKind.expense
+                                        : v2_category.CategoryKind.income,
+                                  );
+                                  if (newId != null && context.mounted) {
+                                    setDialogState(() => categoryId = newId);
+                                  }
+                                  return;
+                                }
+                                setDialogState(() => categoryId = value);
+                              },
+                              child: InputDecorator(
+                                decoration: dialogFieldDecoration(),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        selectedCategoryName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const Icon(Icons.arrow_drop_down),
+                                  ],
+                                ),
+                              ),
+                            );
                           },
                         ),
                       ),
