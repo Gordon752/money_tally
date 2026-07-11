@@ -206,6 +206,15 @@ class _FinanceHomeState extends State<FinanceHome> {
     return _sectionBody();
   }
 
+  Future<void> _openManagementSection(FinanceSection section) async {
+    HapticFeedback.selectionClick();
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => FinanceManagementScreen(section: section),
+      ),
+    );
+  }
+
   Widget _sectionBody() {
     return NotificationListener<ScrollNotification>(
       onNotification: _handleScrollNotification,
@@ -244,14 +253,48 @@ class _FinanceHomeState extends State<FinanceHome> {
               FinanceSection.reports => const ReportsView(),
               FinanceSection.categories => const CategoriesView(),
               FinanceSection.settings => SettingsView(
-                onSelectSection: (section) => setState(() {
-                  selected = section;
-                }),
+                onSelectSection: _openManagementSection,
               ),
             },
           ),
         ),
         ],
+      ),
+    );
+  }
+}
+
+class FinanceManagementScreen extends StatelessWidget {
+  const FinanceManagementScreen({required this.section, super.key});
+
+  final FinanceSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = switch (section) {
+      FinanceSection.accounts => 'Accounts',
+      FinanceSection.categories => 'Categories',
+      FinanceSection.budgets => 'Budgets',
+      FinanceSection.reports => 'Reports',
+      _ => section.label,
+    };
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(title),
+        scrolledUnderElevation: 0,
+      ),
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 112),
+          child: switch (section) {
+            FinanceSection.accounts => const AccountsView(),
+            FinanceSection.categories => const CategoriesView(),
+            FinanceSection.budgets => const BudgetsView(),
+            FinanceSection.reports => const ReportsView(),
+            _ => const SizedBox.shrink(),
+          },
+        ),
       ),
     );
   }
@@ -1096,7 +1139,39 @@ class AccountGroupCard extends StatelessWidget {
                           index < accounts.length;
                           index++
                         )
-                          AccountCard(
+                          Dismissible(
+                            key: ValueKey(
+                              'account-swipe-${accounts[index].id}',
+                            ),
+                            direction: DismissDirection.horizontal,
+                            dismissThresholds: const {
+                              DismissDirection.startToEnd: 0.22,
+                              DismissDirection.endToStart: 0.22,
+                            },
+                            background: const SwipeActionBackground(
+                              alignment: Alignment.centerLeft,
+                              icon: Icons.swap_horiz,
+                              label: 'Expense  Income  Transfer',
+                            ),
+                            secondaryBackground: const SwipeActionBackground(
+                              alignment: Alignment.centerRight,
+                              icon: Icons.edit_outlined,
+                              label: 'Edit  Archive  Delete',
+                              destructive: true,
+                            ),
+                            confirmDismiss: (direction) async {
+                              HapticFeedback.selectionClick();
+                              await showAccountOptions(
+                                context,
+                                accounts[index].id,
+                                allowedActions:
+                                    direction == DismissDirection.startToEnd
+                                    ? const {'expense', 'income', 'transfer'}
+                                    : const {'edit', 'archive', 'delete'},
+                              );
+                              return false;
+                            },
+                            child: AccountCard(
                             account: accounts[index],
                             balanceMinor: store.balanceForAccount(
                               accounts[index].id,
@@ -1124,6 +1199,7 @@ class AccountGroupCard extends StatelessWidget {
                             onLongPress: () => showAccountOptions(
                               context,
                               accounts[index].id,
+                            ),
                             ),
                           ),
                       ],
@@ -1369,6 +1445,8 @@ class _LedgerViewState extends State<LedgerView> {
   var accountFilterId = '';
   var categoryFilterId = '';
   var dateFilter = LedgerDateFilter.all;
+  final _collapsedMonthKeys = <String>{};
+  final _monthAnchors = <String, GlobalKey>{};
 
   @override
   void initState() {
@@ -1452,6 +1530,16 @@ class _LedgerViewState extends State<LedgerView> {
       categoryFilterId.isNotEmpty,
       dateFilter != LedgerDateFilter.all,
     ].where((isActive) => isActive).length;
+    final transactionsByMonth = <DateTime, List<TransactionRecord>>{};
+    for (final transaction in transactions) {
+      final month = DateTime(transaction.date.year, transaction.date.month);
+      transactionsByMonth.putIfAbsent(month, () => []).add(transaction);
+    }
+    final visibleMonths = transactionsByMonth.keys.toList(growable: false)
+      ..sort((a, b) => b.compareTo(a));
+    for (final month in visibleMonths) {
+      _monthAnchors.putIfAbsent(ledgerMonthKey(month), () => GlobalKey());
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1477,6 +1565,7 @@ class _LedgerViewState extends State<LedgerView> {
                   selectedAccountLabel: selectedAccountLabel,
                   selectedCategoryLabel: selectedCategoryLabel,
                   selectedDateLabel: selectedDateLabel,
+                  visibleMonths: visibleMonths,
                 ),
                 icon: const Icon(Icons.tune_outlined),
                 label: Text(
@@ -1510,35 +1599,29 @@ class _LedgerViewState extends State<LedgerView> {
             ),
           )
         else
-          AppCard(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Column(
-              children: [
-                for (var index = 0; index < transactions.length; index++) ...[
-                  TransactionRow(
-                    transaction: transactions[index],
-                    currency: store.preferences.currency,
-                    accountName:
-                        accountsById[transactions[index].accountId]?.name,
-                    categoryName: transactions[index].categoryId == null
-                        ? null
-                        : categoriesById[transactions[index].categoryId]?.name,
-                    dateLabel: compactDate(transactions[index].date),
-                    onTap: () => showTransactionDetails(
-                      context,
-                      transactions[index].id,
-                    ),
-                    onLongPress: () {
-                      HapticFeedback.mediumImpact();
-                      showTransactionOptions(context, transactions[index].id);
-                    },
-                  ),
-                  if (index != transactions.length - 1)
-                    const Divider(height: 1, indent: 12, endIndent: 12),
-                ],
-              ],
+          for (final month in visibleMonths) ...[
+            LedgerMonthSection(
+              key: _monthAnchors[ledgerMonthKey(month)],
+              month: month,
+              transactions: transactionsByMonth[month]!,
+              store: store,
+              accountsById: accountsById,
+              categoriesById: categoriesById,
+              isCollapsed: _collapsedMonthKeys.contains(
+                ledgerMonthKey(month),
+              ),
+              onToggle: () {
+                HapticFeedback.selectionClick();
+                setState(() {
+                  final key = ledgerMonthKey(month);
+                  if (!_collapsedMonthKeys.add(key)) {
+                    _collapsedMonthKeys.remove(key);
+                  }
+                });
+              },
             ),
-          ),
+            const SizedBox(height: AppSpacing.sm),
+          ],
       ],
     );
   }
@@ -1560,6 +1643,7 @@ class _LedgerViewState extends State<LedgerView> {
     required String selectedAccountLabel,
     required String selectedCategoryLabel,
     required String selectedDateLabel,
+    required List<DateTime> visibleMonths,
   }) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -1659,6 +1743,32 @@ class _LedgerViewState extends State<LedgerView> {
                       Navigator.pop(sheetContext);
                     },
                   ),
+                  if (visibleMonths.isNotEmpty)
+                    LedgerFilterButton<String>(
+                      buttonKey: const ValueKey('ledger-jump-month'),
+                      icon: Icons.event_outlined,
+                      label: 'Jump to month',
+                      items: [
+                        for (final month in visibleMonths)
+                          PopupMenuItem(
+                            value: ledgerMonthKey(month),
+                            child: Text(monthLabel(month)),
+                          ),
+                      ],
+                      onSelected: (value) {
+                        Navigator.pop(sheetContext);
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          final anchor = _monthAnchors[value]?.currentContext;
+                          if (anchor == null) return;
+                          Scrollable.ensureVisible(
+                            anchor,
+                            duration: const Duration(milliseconds: 280),
+                            curve: Curves.easeOutCubic,
+                            alignment: 0.08,
+                          );
+                        });
+                      },
+                    ),
                 ],
               ),
               const SizedBox(height: AppSpacing.md),
@@ -1677,6 +1787,388 @@ class _LedgerViewState extends State<LedgerView> {
     );
   }
 }
+
+String ledgerMonthKey(DateTime month) => '${month.year}-${month.month}';
+
+class LedgerMonthSection extends StatelessWidget {
+  const LedgerMonthSection({
+    required this.month,
+    required this.transactions,
+    required this.store,
+    required this.accountsById,
+    required this.categoriesById,
+    required this.isCollapsed,
+    required this.onToggle,
+    super.key,
+  });
+
+  final DateTime month;
+  final List<TransactionRecord> transactions;
+  final FinanceDataStore store;
+  final Map<String, v2_account.AccountRecord> accountsById;
+  final Map<String, v2_category.CategoryRecord> categoriesById;
+  final bool isCollapsed;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final income = transactions
+        .where((item) => item.type == TransactionType.income)
+        .fold(0, (total, item) => total + item.amountMinor.abs());
+    final expenses = transactions
+        .where((item) => item.type == TransactionType.expense)
+        .fold(0, (total, item) => total + item.amountMinor.abs());
+    final adjustments = transactions
+        .where((item) => item.type == TransactionType.adjustment)
+        .fold(0, (total, item) => total + item.amountMinor);
+    final net = income - expenses + adjustments;
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 13, 16, 12),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      AnimatedRotation(
+                        turns: isCollapsed ? -0.25 : 0,
+                        duration: reduceMotion
+                            ? Duration.zero
+                            : const Duration(milliseconds: 170),
+                        curve: Curves.easeOutCubic,
+                        child: const Icon(Icons.arrow_drop_down_rounded),
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      Expanded(
+                        child: Text(
+                          monthLabel(month),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                      Text(
+                        '${transactions.length} ${transactions.length == 1 ? 'transaction' : 'transactions'}',
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: LedgerMonthMetric(
+                          label: 'Income',
+                          amountMinor: income,
+                          currency: store.preferences.currency,
+                        ),
+                      ),
+                      Expanded(
+                        child: LedgerMonthMetric(
+                          label: 'Expenses',
+                          amountMinor: -expenses,
+                          currency: store.preferences.currency,
+                        ),
+                      ),
+                      Expanded(
+                        child: LedgerMonthMetric(
+                          label: 'Net',
+                          amountMinor: net,
+                          currency: store.preferences.currency,
+                          showPositiveSign: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 190),
+            reverseDuration: reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 150),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: isCollapsed
+                ? const SizedBox.shrink()
+                : Column(
+                    children: [
+                      const Divider(height: 1),
+                      for (
+                        var index = 0;
+                        index < transactions.length;
+                        index++
+                      ) ...[
+                        LedgerJournalRow(
+                          transaction: transactions[index],
+                          currency: store.preferences.currency,
+                          accountName:
+                              accountsById[transactions[index].accountId]
+                                  ?.name,
+                          categoryName:
+                              transactions[index].categoryId == null
+                              ? null
+                              : categoriesById[transactions[index].categoryId]
+                                    ?.name,
+                          onTap: () => showTransactionDetails(
+                            context,
+                            transactions[index].id,
+                          ),
+                          onLongPress: () {
+                            HapticFeedback.mediumImpact();
+                            showTransactionOptions(
+                              context,
+                              transactions[index].id,
+                            );
+                          },
+                        ),
+                        if (index != transactions.length - 1)
+                          const Divider(
+                            height: 1,
+                            indent: 62,
+                            endIndent: 12,
+                          ),
+                      ],
+                    ],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class LedgerMonthMetric extends StatelessWidget {
+  const LedgerMonthMetric({
+    required this.label,
+    required this.amountMinor,
+    required this.currency,
+    this.showPositiveSign = false,
+    super.key,
+  });
+
+  final String label;
+  final int amountMinor;
+  final CurrencyFormatSettings currency;
+  final bool showPositiveSign;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 2),
+        MoneyText(
+          amountMinor: amountMinor,
+          currency: currency,
+          fontSize: 14,
+          fontWeight: FontWeight.w800,
+          showPositiveSign: showPositiveSign && amountMinor > 0,
+          color: amountMinor < 0 ? AppColors.danger : null,
+        ),
+      ],
+    );
+  }
+}
+
+class LedgerJournalRow extends StatelessWidget {
+  const LedgerJournalRow({
+    required this.transaction,
+    required this.currency,
+    required this.onTap,
+    required this.onLongPress,
+    this.accountName,
+    this.categoryName,
+    super.key,
+  });
+
+  final TransactionRecord transaction;
+  final CurrencyFormatSettings currency;
+  final String? accountName;
+  final String? categoryName;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final signedAmount = switch (transaction.type) {
+      TransactionType.expense => -transaction.amountMinor.abs(),
+      TransactionType.income => transaction.amountMinor.abs(),
+      TransactionType.transfer => transaction.amountMinor.abs(),
+      TransactionType.adjustment => transaction.amountMinor,
+    };
+    final secondary = [
+      if (accountName != null) accountName,
+      if (categoryName != null) categoryName,
+      if (transaction.isSplit) 'Split',
+      if (transaction.isTransfer) 'Transfer',
+    ].join(' • ');
+
+    return Dismissible(
+      key: ValueKey('ledger-swipe-${transaction.id}'),
+      dismissThresholds: const {
+        DismissDirection.startToEnd: 0.28,
+        DismissDirection.endToStart: 0.28,
+      },
+      confirmDismiss: (direction) async {
+        HapticFeedback.selectionClick();
+        await showTransactionOptions(
+          context,
+          transaction.id,
+          allowedActions: direction == DismissDirection.endToStart
+              ? const {'edit', 'delete'}
+              : const {'duplicate', 'split', 'schedule'},
+        );
+        return false;
+      },
+      background: const SwipeActionBackground(
+        alignment: Alignment.centerLeft,
+        icon: Icons.copy_outlined,
+        label: 'More',
+      ),
+      secondaryBackground: const SwipeActionBackground(
+        alignment: Alignment.centerRight,
+        icon: Icons.edit_outlined,
+        label: 'Actions',
+      ),
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 46,
+                child: Text(
+                  '${monthAbbreviation(transaction.date.month)}\n${transaction.date.day}',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      transaction.payee,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (secondary.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        secondary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              MoneyText(
+                amountMinor: signedAmount,
+                currency: currency,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                showPositiveSign: transaction.type == TransactionType.income,
+                color: signedAmount < 0 ? AppColors.danger : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SwipeActionBackground extends StatelessWidget {
+  const SwipeActionBackground({
+    required this.alignment,
+    required this.icon,
+    required this.label,
+    this.destructive = false,
+    super.key,
+  });
+
+  final Alignment alignment;
+  final IconData icon;
+  final String label;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive ? AppColors.danger : AppTheme.accent;
+    return Container(
+      color: color.withValues(alpha: 0.12),
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: AppSpacing.xs),
+          Text(
+            label,
+            style: TextStyle(color: color, fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String monthAbbreviation(int month) => const [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+][month - 1];
 
 class LedgerFilterButton<T> extends StatelessWidget {
   const LedgerFilterButton({
@@ -1850,6 +2342,7 @@ String ledgerDateFilterLabel(LedgerDateFilter filter) {
 Future<void> showTransactionOptions(
   BuildContext context,
   String transactionId,
+  {Set<String>? allowedActions},
 ) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final transaction = dataStore.transactions.firstWhere(
@@ -1862,7 +2355,8 @@ Future<void> showTransactionOptions(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile(
+          if (allowedActions == null || allowedActions.contains('edit'))
+            ListTile(
             enabled:
                 transaction.type == TransactionType.expense ||
                 transaction.type == TransactionType.income ||
@@ -1876,12 +2370,14 @@ Future<void> showTransactionOptions(
                 ? () => Navigator.pop(sheetContext, 'edit')
                 : null,
           ),
-          ListTile(
+          if (allowedActions == null || allowedActions.contains('duplicate'))
+            ListTile(
             leading: const Icon(Icons.copy_outlined),
             title: const Text('Duplicate'),
             onTap: () => Navigator.pop(sheetContext, 'duplicate'),
           ),
-          ListTile(
+          if (allowedActions == null || allowedActions.contains('split'))
+            ListTile(
             enabled:
                 transaction.type == TransactionType.expense ||
                 transaction.type == TransactionType.income,
@@ -1893,7 +2389,8 @@ Future<void> showTransactionOptions(
                 ? () => Navigator.pop(sheetContext, 'split')
                 : null,
           ),
-          ListTile(
+          if (allowedActions == null || allowedActions.contains('schedule'))
+            ListTile(
             enabled: transaction.type != TransactionType.adjustment,
             leading: const Icon(Icons.event_repeat_outlined),
             title: const Text('Make Scheduled'),
@@ -1901,7 +2398,8 @@ Future<void> showTransactionOptions(
                 ? () => Navigator.pop(sheetContext, 'schedule')
                 : null,
           ),
-          ListTile(
+          if (allowedActions == null || allowedActions.contains('delete'))
+            ListTile(
             leading: const Icon(Icons.delete_outline),
             title: const Text('Delete'),
             textColor: AppTheme.rose,
@@ -2593,7 +3091,37 @@ class _ScheduledViewState extends State<ScheduledView> {
                         ),
                       ),
                       for (final item in entry.value)
-                        ScheduledTransactionRow(
+                        Dismissible(
+                          key: ValueKey('scheduled-swipe-${item.id}'),
+                          direction: DismissDirection.horizontal,
+                          dismissThresholds: const {
+                            DismissDirection.startToEnd: 0.22,
+                            DismissDirection.endToStart: 0.22,
+                          },
+                          background: const SwipeActionBackground(
+                            alignment: Alignment.centerLeft,
+                            icon: Icons.edit_outlined,
+                            label: 'Edit',
+                          ),
+                          secondaryBackground: const SwipeActionBackground(
+                            alignment: Alignment.centerRight,
+                            icon: Icons.skip_next_outlined,
+                            label: 'Skip Once  Delete',
+                            destructive: true,
+                          ),
+                          confirmDismiss: (direction) async {
+                            HapticFeedback.selectionClick();
+                            await showScheduledTransactionActions(
+                              context,
+                              item,
+                              allowedActions:
+                                  direction == DismissDirection.startToEnd
+                                  ? const {'edit'}
+                                  : const {'skip', 'delete'},
+                            );
+                            return false;
+                          },
+                          child: ScheduledTransactionRow(
                           key: ValueKey('scheduled-row-${item.id}'),
                           scheduledTransaction: item,
                           currency: store.preferences.currency,
@@ -2601,6 +3129,7 @@ class _ScheduledViewState extends State<ScheduledView> {
                               showScheduledTransactionDetails(context, item),
                           onLongPress: () =>
                               showScheduledTransactionActions(context, item),
+                          ),
                         ),
                     ],
                 ],
@@ -3132,7 +3661,14 @@ class SettingsView extends StatelessWidget {
                 icon: Icons.person_outline,
                 title: 'Manage payees',
                 trailingText: 'Open',
-                onTap: () => showPayeesSheet(context),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (context) => const PayeesManagementScreen(),
+                    ),
+                  );
+                },
               ),
               SettingsActionRow(
                 icon: Icons.pie_chart_outline,
@@ -3205,55 +3741,295 @@ class SettingsView extends StatelessWidget {
   }
 }
 
-Future<void> showPayeesSheet(BuildContext context) async {
-  final payees = savedPayees(FinanceDataStoreScope.read(context));
-  await showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    builder: (sheetContext) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md,
-          0,
-          AppSpacing.md,
-          AppSpacing.md,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+class PayeesManagementScreen extends StatelessWidget {
+  const PayeesManagementScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = FinanceDataStoreScope.watch(context);
+    final payees = savedPayees(store);
+    final archived = archivedPayees(store);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Payees'),
+        scrolledUnderElevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Add payee',
+            onPressed: () => addManagedPayee(context),
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
           children: [
-            Text(
-              'Saved payees',
-              style: Theme.of(
-                sheetContext,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: AppSpacing.sm),
             if (payees.isEmpty)
-              Text(
-                'Payees appear here after transactions are saved.',
-                style: Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+              AppCard(
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.person_add_alt_outlined,
+                      color: AppTheme.accent,
+                      size: 32,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'No saved payees',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      'Payees are remembered from transactions, or you can add one now.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    FilledButton.icon(
+                      onPressed: () => addManagedPayee(context),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add payee'),
+                    ),
+                  ],
                 ),
               )
             else
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: payees.length,
-                  separatorBuilder: (context, index) =>
-                      const Divider(height: 1),
-                  itemBuilder: (context, index) => ListTile(
-                    leading: const Icon(Icons.person_outline),
-                    title: Text(payees[index]),
+              AppCard(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  children: [
+                    for (var index = 0; index < payees.length; index++) ...[
+                      ListTile(
+                        leading: const Icon(Icons.person_outline),
+                        title: Text(
+                          payees[index],
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => showManagedPayeeActions(
+                          context,
+                          payees[index],
+                        ),
+                      ),
+                      if (index != payees.length - 1)
+                        const Divider(height: 1, indent: 56),
+                    ],
+                  ],
+                ),
+              ),
+            if (archived.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.lg),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  'Archived',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
+              const SizedBox(height: AppSpacing.xs),
+              AppCard(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: [
+                    for (final payee in archived)
+                      ListTile(
+                        leading: const Icon(Icons.archive_outlined),
+                        title: Text(payee),
+                        trailing: TextButton(
+                          onPressed: () => restoreManagedPayee(context, payee),
+                          child: const Text('Restore'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
+    );
+  }
+}
+
+Future<String?> showPayeeNameDialog(
+  BuildContext context, {
+  String initialName = '',
+}) async {
+  final controller = TextEditingController(text: initialName);
+  final result = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      alignment: Alignment.topCenter,
+      insetPadding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+      title: Text(initialName.isEmpty ? 'Add payee' : 'Edit payee'),
+      content: SizedBox(
+        width: 420,
+        child: DialogFieldGroup(
+          label: 'Name',
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            textInputAction: TextInputAction.done,
+            decoration: dialogFieldDecoration(),
+            onSubmitted: (value) => Navigator.pop(
+              dialogContext,
+              value.trim(),
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(
+            dialogContext,
+            controller.text.trim(),
+          ),
+          child: const Text('Save'),
+        ),
+      ],
     ),
   );
+  controller.dispose();
+  if (result == null || result.trim().isEmpty) return null;
+  return result.trim();
+}
+
+Future<void> addManagedPayee(BuildContext context) async {
+  final name = await showPayeeNameDialog(context);
+  if (!context.mounted || name == null) return;
+  final store = FinanceDataStoreScope.read(context);
+  final saved = [...store.preferences.savedPayeeNames];
+  saved.removeWhere((item) => item.toLowerCase() == name.toLowerCase());
+  saved.insert(0, name);
+  final archived = {...store.preferences.archivedPayeeNames}
+    ..remove(name.toLowerCase());
+  await store.savePreferences(
+    store.preferences.copyWith(
+      savedPayeeNames: saved,
+      archivedPayeeNames: archived,
+    ),
+  );
+  HapticFeedback.mediumImpact();
+}
+
+Future<void> showManagedPayeeActions(
+  BuildContext context,
+  String payee,
+) async {
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit'),
+            onTap: () => Navigator.pop(sheetContext, 'edit'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.archive_outlined),
+            title: const Text('Archive'),
+            onTap: () => Navigator.pop(sheetContext, 'archive'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Delete from saved payees'),
+            textColor: AppColors.danger,
+            iconColor: AppColors.danger,
+            onTap: () => Navigator.pop(sheetContext, 'delete'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (!context.mounted || action == null) return;
+  switch (action) {
+    case 'edit':
+      await renameManagedPayee(context, payee);
+    case 'archive':
+      await archiveManagedPayee(context, payee);
+    case 'delete':
+      await deleteManagedPayee(context, payee);
+  }
+}
+
+Future<void> renameManagedPayee(BuildContext context, String oldName) async {
+  final newName = await showPayeeNameDialog(context, initialName: oldName);
+  if (!context.mounted || newName == null || newName == oldName) return;
+  final store = FinanceDataStoreScope.read(context);
+  for (final transaction in store.transactions.where(
+    (item) =>
+        !item.isDeleted &&
+        item.payee.toLowerCase() == oldName.toLowerCase(),
+  )) {
+    await store.saveTransaction(transaction.copyWith(payee: newName));
+  }
+  final saved = [...store.preferences.savedPayeeNames]
+    ..removeWhere((item) => item.toLowerCase() == oldName.toLowerCase());
+  saved.insert(0, newName);
+  final archived = {...store.preferences.archivedPayeeNames}
+    ..remove(oldName.toLowerCase());
+  await store.savePreferences(
+    store.preferences.copyWith(
+      savedPayeeNames: saved,
+      archivedPayeeNames: archived,
+    ),
+  );
+  HapticFeedback.mediumImpact();
+}
+
+Future<void> archiveManagedPayee(BuildContext context, String payee) async {
+  final store = FinanceDataStoreScope.read(context);
+  final archived = {...store.preferences.archivedPayeeNames}
+    ..add(payee.toLowerCase());
+  await store.savePreferences(
+    store.preferences.copyWith(archivedPayeeNames: archived),
+  );
+  HapticFeedback.selectionClick();
+}
+
+Future<void> restoreManagedPayee(BuildContext context, String payee) async {
+  final store = FinanceDataStoreScope.read(context);
+  final archived = {...store.preferences.archivedPayeeNames}
+    ..remove(payee.toLowerCase());
+  await store.savePreferences(
+    store.preferences.copyWith(archivedPayeeNames: archived),
+  );
+  HapticFeedback.selectionClick();
+}
+
+Future<void> deleteManagedPayee(BuildContext context, String payee) async {
+  final store = FinanceDataStoreScope.read(context);
+  final saved = [...store.preferences.savedPayeeNames]
+    ..removeWhere((item) => item.toLowerCase() == payee.toLowerCase());
+  final archived = {...store.preferences.archivedPayeeNames}
+    ..add(payee.toLowerCase());
+  await store.savePreferences(
+    store.preferences.copyWith(
+      savedPayeeNames: saved,
+      archivedPayeeNames: archived,
+    ),
+  );
+  HapticFeedback.mediumImpact();
 }
 
 Future<void> showCustomCurrencyDialog(BuildContext context) async {
@@ -4103,7 +4879,36 @@ class BudgetProgressRow extends StatelessWidget {
     final isOver = budget.isOverBudget(spent);
     final categorySummary = budgetCategorySummary(store, budget);
 
-    return InkWell(
+    return Dismissible(
+      key: ValueKey('budget-swipe-${budget.id}'),
+      direction: DismissDirection.horizontal,
+      dismissThresholds: const {
+        DismissDirection.startToEnd: 0.22,
+        DismissDirection.endToStart: 0.22,
+      },
+      background: const SwipeActionBackground(
+        alignment: Alignment.centerLeft,
+        icon: Icons.tune,
+        label: 'Adjust Budget',
+      ),
+      secondaryBackground: const SwipeActionBackground(
+        alignment: Alignment.centerRight,
+        icon: Icons.edit_outlined,
+        label: 'Edit  Delete',
+        destructive: true,
+      ),
+      confirmDismiss: (direction) async {
+        HapticFeedback.selectionClick();
+        await showBudgetActions(
+          context,
+          budget,
+          allowedActions: direction == DismissDirection.startToEnd
+              ? const {'adjust'}
+              : const {'edit', 'delete'},
+        );
+        return false;
+      },
+      child: InkWell(
       onLongPress: () {
         HapticFeedback.mediumImpact();
         showBudgetActions(context, budget);
@@ -4152,6 +4957,7 @@ class BudgetProgressRow extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -4300,8 +5106,11 @@ Future<void> showBudgetDialog(
 
 Future<void> showBudgetActions(
   BuildContext context,
-  BudgetRecord budget,
-) async {
+  BudgetRecord budget, {
+  Set<String>? allowedActions,
+}) async {
+  bool allows(String action) =>
+      allowedActions == null || allowedActions.contains(action);
   final action = await showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
@@ -4309,17 +5118,26 @@ Future<void> showBudgetActions(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile(
+          if (allows('adjust'))
+            ListTile(
+              leading: const Icon(Icons.tune),
+              title: const Text('Adjust Budget'),
+              onTap: () => Navigator.pop(sheetContext, 'adjust'),
+            ),
+          if (allows('edit'))
+            ListTile(
             leading: const Icon(Icons.edit_outlined),
             title: const Text('Edit'),
             onTap: () => Navigator.pop(sheetContext, 'edit'),
           ),
-          ListTile(
+          if (allows('archive'))
+            ListTile(
             leading: const Icon(Icons.archive_outlined),
             title: const Text('Archive'),
             onTap: () => Navigator.pop(sheetContext, 'archive'),
           ),
-          ListTile(
+          if (allows('delete'))
+            ListTile(
             leading: const Icon(Icons.delete_outline),
             title: const Text('Delete'),
             textColor: AppTheme.rose,
@@ -4333,6 +5151,8 @@ Future<void> showBudgetActions(
 
   if (!context.mounted || action == null) return;
   switch (action) {
+    case 'adjust':
+      await showBudgetDialog(context, budget: budget);
     case 'edit':
       await showBudgetDialog(context, budget: budget);
     case 'archive':
@@ -4385,7 +5205,13 @@ Future<void> showAdjustBalanceDialog(
   );
 }
 
-Future<void> showAccountOptions(BuildContext context, String accountId) async {
+Future<void> showAccountOptions(
+  BuildContext context,
+  String accountId, {
+  Set<String>? allowedActions,
+}) async {
+  bool allows(String action) =>
+      allowedActions == null || allowedActions.contains(action);
   final dataStore = FinanceDataStoreScope.read(context);
   final account = dataStore.accountById(accountId);
   final groupAccounts = dataStore.activeAccountsInDisplayOrder
@@ -4404,17 +5230,20 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
+            if (allows('expense'))
+              ListTile(
               leading: const Icon(Icons.remove_circle_outline),
               title: const Text('Add Expense'),
               onTap: () => Navigator.pop(context, 'expense'),
             ),
-            ListTile(
+            if (allows('income'))
+              ListTile(
               leading: const Icon(Icons.add_circle_outline),
               title: const Text('Add Income'),
               onTap: () => Navigator.pop(context, 'income'),
             ),
-            ListTile(
+            if (allows('transfer'))
+              ListTile(
               enabled: dataStore.activeAccountsInDisplayOrder.length > 1,
               leading: const Icon(Icons.swap_horiz),
               title: const Text('Transfer'),
@@ -4422,18 +5251,21 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
                   ? () => Navigator.pop(context, 'transfer')
                   : null,
             ),
-            ListTile(
+            if (allows('adjust'))
+              ListTile(
               leading: const Icon(Icons.tune),
               title: const Text('Adjust Balance'),
               onTap: () => Navigator.pop(context, 'adjust'),
             ),
-            ListTile(
+            if (allows('moveUp'))
+              ListTile(
               enabled: canMoveUp,
               leading: const Icon(Icons.arrow_upward),
               title: const Text('Move Up'),
               onTap: canMoveUp ? () => Navigator.pop(context, 'moveUp') : null,
             ),
-            ListTile(
+            if (allows('moveDown'))
+              ListTile(
               enabled: canMoveDown,
               leading: const Icon(Icons.arrow_downward),
               title: const Text('Move Down'),
@@ -4441,22 +5273,26 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
                   ? () => Navigator.pop(context, 'moveDown')
                   : null,
             ),
-            ListTile(
+            if (allows('changeType'))
+              ListTile(
               leading: const Icon(Icons.category_outlined),
               title: const Text('Change Type'),
               onTap: () => Navigator.pop(context, 'changeType'),
             ),
-            ListTile(
+            if (allows('edit'))
+              ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: const Text('Edit'),
               onTap: () => Navigator.pop(context, 'edit'),
             ),
-            ListTile(
+            if (allows('archive'))
+              ListTile(
               leading: const Icon(Icons.archive_outlined),
               title: const Text('Archive'),
               onTap: () => Navigator.pop(context, 'archive'),
             ),
-            ListTile(
+            if (allows('delete'))
+              ListTile(
               leading: const Icon(Icons.delete_outline),
               title: const Text('Delete'),
               textColor: AppTheme.rose,
@@ -5892,8 +6728,11 @@ Future<void> showScheduledTransactionDetails(
 
 Future<void> showScheduledTransactionActions(
   BuildContext context,
-  v2_scheduled.ScheduledTransactionRecord item,
-) async {
+  v2_scheduled.ScheduledTransactionRecord item, {
+  Set<String>? allowedActions,
+}) async {
+  bool allows(String action) =>
+      allowedActions == null || allowedActions.contains(action);
   final action = await showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
@@ -5901,27 +6740,32 @@ Future<void> showScheduledTransactionActions(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile(
+          if (allows('paid'))
+            ListTile(
             leading: const Icon(Icons.check_circle_outline),
             title: const Text('Mark Paid'),
             onTap: () => Navigator.pop(sheetContext, 'paid'),
           ),
-          ListTile(
+          if (allows('skip'))
+            ListTile(
             leading: const Icon(Icons.skip_next_outlined),
             title: const Text('Skip Once'),
             onTap: () => Navigator.pop(sheetContext, 'skip'),
           ),
-          ListTile(
+          if (allows('edit'))
+            ListTile(
             leading: const Icon(Icons.edit_outlined),
             title: const Text('Edit'),
             onTap: () => Navigator.pop(sheetContext, 'edit'),
           ),
-          ListTile(
+          if (allows('duplicate'))
+            ListTile(
             leading: const Icon(Icons.copy_outlined),
             title: const Text('Duplicate'),
             onTap: () => Navigator.pop(sheetContext, 'duplicate'),
           ),
-          ListTile(
+          if (allows('delete'))
+            ListTile(
             leading: const Icon(Icons.delete_outline),
             title: const Text('Delete'),
             textColor: AppTheme.rose,
@@ -7288,15 +8132,45 @@ Iterable<String> rankedPayeeSuggestions(
 List<String> savedPayees(FinanceDataStore store) {
   final seen = <String>{};
   final payees = <String>[];
+  final archived = store.preferences.archivedPayeeNames;
+  for (final savedPayee in store.preferences.savedPayeeNames) {
+    final payee = savedPayee.trim();
+    final normalized = payee.toLowerCase();
+    if (payee.isEmpty || archived.contains(normalized) || !seen.add(normalized)) {
+      continue;
+    }
+    payees.add(payee);
+  }
   final transactions = store.transactions.where((item) => !item.isDeleted)
       .toList(growable: false)
     ..sort((a, b) => b.date.compareTo(a.date));
   for (final transaction in transactions) {
     final payee = transaction.payee.trim();
-    if (payee.isEmpty || !seen.add(payee.toLowerCase())) continue;
+    final normalized = payee.toLowerCase();
+    if (payee.isEmpty || archived.contains(normalized) || !seen.add(normalized)) {
+      continue;
+    }
     payees.add(payee);
   }
   return payees;
+}
+
+List<String> archivedPayees(FinanceDataStore store) {
+  final namesByNormalized = <String, String>{};
+  for (final payee in [
+    ...store.preferences.savedPayeeNames,
+    ...store.transactions
+        .where((item) => !item.isDeleted)
+        .map((item) => item.payee),
+  ]) {
+    final trimmed = payee.trim();
+    if (trimmed.isEmpty) continue;
+    namesByNormalized.putIfAbsent(trimmed.toLowerCase(), () => trimmed);
+  }
+  return [
+    for (final normalized in store.preferences.archivedPayeeNames)
+      namesByNormalized[normalized] ?? normalized,
+  ]..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 }
 
 String? sanitizedCategoryIconName(String? iconName) {
