@@ -892,7 +892,6 @@ class AccountGroupCard extends StatelessWidget {
     return AppCard(
       padding: EdgeInsets.zero,
       child: InkWell(
-        onLongPress: () => showAccountGroupActions(context, group),
         borderRadius: BorderRadius.circular(AppRadii.card),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -995,6 +994,8 @@ class AccountGroupCard extends StatelessWidget {
                         ? null
                         : () => onOpenLedgerForAccount!(accounts[index].id),
                     onLongPress: () =>
+                        showAccountOptions(context, accounts[index].id),
+                    onMorePressed: () =>
                         showAccountOptions(context, accounts[index].id),
                   ),
                 ],
