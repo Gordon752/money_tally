@@ -25,6 +25,7 @@ class ScheduledTransactionRecord {
     required this.nextDate,
     required this.frequency,
     required this.sync,
+    this.note = '',
     this.transferAccountId,
     this.categoryId,
     this.endDate,
@@ -42,6 +43,7 @@ class ScheduledTransactionRecord {
   final String? transferAccountId;
   final String? categoryId;
   final String payee;
+  final String note;
   final int amountMinor;
   final DateTime nextDate;
   final RecurrenceFrequency frequency;
@@ -63,6 +65,7 @@ class ScheduledTransactionRecord {
     String? transferAccountId,
     String? categoryId,
     String? payee,
+    String? note,
     int? amountMinor,
     DateTime? nextDate,
     RecurrenceFrequency? frequency,
@@ -89,6 +92,7 @@ class ScheduledTransactionRecord {
           : transferAccountId ?? this.transferAccountId,
       categoryId: clearCategory ? null : categoryId ?? this.categoryId,
       payee: payee ?? this.payee,
+      note: note ?? this.note,
       amountMinor: amountMinor ?? this.amountMinor,
       nextDate: nextDate ?? this.nextDate,
       frequency: frequency ?? this.frequency,
@@ -117,6 +121,7 @@ class ScheduledTransactionRecord {
       'transferAccountId': transferAccountId,
       'categoryId': categoryId,
       'payee': payee,
+      'note': note,
       'amountMinor': amountMinor,
       'nextDate': nextDate.toIso8601String(),
       'frequency': frequency.name,
@@ -143,6 +148,7 @@ class ScheduledTransactionRecord {
       transferAccountId: json['transferAccountId'] as String?,
       categoryId: json['categoryId'] as String?,
       payee: json['payee'] as String? ?? '',
+      note: json['note'] as String? ?? '',
       amountMinor: json['amountMinor'] as int? ?? 0,
       nextDate: dateTimeFromJson(json['nextDate']),
       frequency: enumByName(
