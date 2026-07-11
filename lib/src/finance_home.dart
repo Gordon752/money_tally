@@ -3866,49 +3866,78 @@ Future<String?> showPayeeNameDialog(
   BuildContext context, {
   String initialName = '',
 }) async {
-  final controller = TextEditingController(text: initialName);
-  final result = await showDialog<String>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      alignment: Alignment.topCenter,
-      insetPadding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
-      actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
-      title: Text(initialName.isEmpty ? 'Add payee' : 'Edit payee'),
-      content: SizedBox(
-        width: 420,
-        child: DialogFieldGroup(
-          label: 'Name',
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            textCapitalization: TextCapitalization.words,
-            textInputAction: TextInputAction.done,
-            decoration: dialogFieldDecoration(),
-            onSubmitted: (value) => Navigator.pop(
-              dialogContext,
-              value.trim(),
-            ),
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(
-            dialogContext,
-            controller.text.trim(),
-          ),
-          child: const Text('Save'),
-        ),
-      ],
+  return Navigator.of(context).push<String>(
+    MaterialPageRoute<String>(
+      builder: (context) => PayeeEditorScreen(initialName: initialName),
     ),
   );
-  controller.dispose();
-  if (result == null || result.trim().isEmpty) return null;
-  return result.trim();
+}
+
+class PayeeEditorScreen extends StatefulWidget {
+  const PayeeEditorScreen({required this.initialName, super.key});
+
+  final String initialName;
+
+  @override
+  State<PayeeEditorScreen> createState() => _PayeeEditorScreenState();
+}
+
+class _PayeeEditorScreenState extends State<PayeeEditorScreen> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final value = _controller.text.trim();
+    if (value.isEmpty) return;
+    HapticFeedback.mediumImpact();
+    Navigator.pop(context, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEditing = widget.initialName.isNotEmpty;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(isEditing ? 'Edit Payee' : 'Add Payee'),
+        scrolledUnderElevation: 0,
+        actions: [
+          TextButton(onPressed: _save, child: const Text('Save')),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
+          children: [
+            AppCard(
+              child: DialogFieldGroup(
+                label: 'Name',
+                child: TextField(
+                  controller: _controller,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.words,
+                  textInputAction: TextInputAction.done,
+                  decoration: dialogFieldDecoration(),
+                  onSubmitted: (_) => _save(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 Future<void> addManagedPayee(BuildContext context) async {
@@ -3962,6 +3991,9 @@ Future<void> showManagedPayeeActions(
     ),
   );
   if (!context.mounted || action == null) return;
+  // Let the action sheet finish dismissing before pushing another route.
+  await Future<void>.delayed(const Duration(milliseconds: 180));
+  if (!context.mounted) return;
   switch (action) {
     case 'edit':
       await renameManagedPayee(context, payee);
