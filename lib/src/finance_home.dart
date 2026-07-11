@@ -2497,41 +2497,67 @@ class _ScheduledViewState extends State<ScheduledView> {
               }),
             ),
             const Divider(height: 1),
-            if (visibleScheduled.isEmpty)
-              ListTile(
-                leading: const Icon(
-                  Icons.event_busy_outlined,
-                  color: AppTheme.muted,
+            AnimatedSwitcher(
+              duration: MediaQuery.of(context).disableAnimations
+                  ? Duration.zero
+                  : const Duration(milliseconds: 170),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SizeTransition(
+                  sizeFactor: animation,
+                  axisAlignment: -1,
+                  child: child,
                 ),
-                title: Text(
-                  _selectedDate == null
-                      ? 'No scheduled transactions'
-                      : 'No scheduled transactions for ${shortDate(_selectedDate!)}',
+              ),
+              child: Column(
+                key: ValueKey(
+                  '${_selectedDate?.toIso8601String() ?? 'all'}:'
+                  '${visibleScheduled.map((item) => item.id).join(',')}',
                 ),
-              )
-            else
-              for (final entry in groupedScheduled.entries) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      shortDate(entry.key),
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                children: [
+                  if (visibleScheduled.isEmpty)
+                    ListTile(
+                      leading: const Icon(
+                        Icons.event_busy_outlined,
                         color: AppTheme.muted,
-                        fontWeight: FontWeight.w900,
                       ),
-                    ),
-                  ),
-                ),
-                for (final item in entry.value)
-                  ScheduledTransactionRow(
-                    scheduledTransaction: item,
-                    currency: store.preferences.currency,
-                    onLongPress: () =>
-                        showScheduledTransactionActions(context, item),
-                  ),
-              ],
+                      title: Text(
+                        _selectedDate == null
+                            ? 'No scheduled transactions'
+                            : 'No scheduled transactions for '
+                                  '${shortDate(_selectedDate!)}',
+                      ),
+                    )
+                  else
+                    for (final entry in groupedScheduled.entries) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            shortDate(entry.key),
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: AppTheme.muted,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                        ),
+                      ),
+                      for (final item in entry.value)
+                        ScheduledTransactionRow(
+                          key: ValueKey('scheduled-row-${item.id}'),
+                          scheduledTransaction: item,
+                          currency: store.preferences.currency,
+                          onLongPress: () =>
+                              showScheduledTransactionActions(context, item),
+                        ),
+                    ],
+                ],
+              ),
+            ),
             const Divider(height: 1),
             const ListTile(
               leading: Icon(
