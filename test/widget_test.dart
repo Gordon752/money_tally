@@ -246,14 +246,28 @@ void main() {
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Collapse Banking'));
+    final checkingCard = tester.widget<AccountCard>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is AccountCard && widget.account.name == 'Checking',
+      ),
+    );
+    expect(checkingCard.subtitle, contains(' · '));
+    expect(checkingCard.subtitle, isNot('Banking'));
+    expect(checkingCard.balanceFontSize, 17);
+
+    await tester.tap(
+      find.byKey(const ValueKey('account-group-banking')),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Banking'), findsWidgets);
     expect(find.text('Checking'), findsNothing);
     expect(find.byTooltip('Expand Banking'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Expand Banking'));
+    await tester.tap(
+      find.byKey(const ValueKey('account-group-banking')),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Checking'), findsOneWidget);
@@ -410,7 +424,7 @@ void main() {
       find.descendant(of: typeSelector, matching: find.text('Transfer')),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Edit transfer'), findsOneWidget);
+    expect(find.text('Edit transaction'), findsOneWidget);
   });
 
   testWidgets('ledger search filters visible transactions', (tester) async {
@@ -600,7 +614,13 @@ void main() {
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit transfer'), findsOneWidget);
+    expect(find.text('Edit transaction'), findsOneWidget);
+    final transferTypeSelector =
+        tester.widget<SegmentedButton<TransactionType>>(
+          find.byType(SegmentedButton<TransactionType>),
+        );
+    expect(transferTypeSelector.selected, {TransactionType.transfer});
+    expect(transferTypeSelector.showSelectedIcon, isFalse);
     final transferAmountField = tester.widget<TextField>(
       find.byKey(const ValueKey('transfer-amount')),
     );
@@ -809,7 +829,7 @@ void main() {
     await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Add transfer'), findsOneWidget);
+    expect(find.text('Add transaction'), findsOneWidget);
   });
 
   testWidgets('add transaction honors last used transfer preference', (
@@ -839,7 +859,7 @@ void main() {
     await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Add transfer'), findsOneWidget);
+    expect(find.text('Add transaction'), findsOneWidget);
   });
 
   testWidgets('add transaction dialog saves entered date', (tester) async {

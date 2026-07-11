@@ -39,6 +39,8 @@ class _FinanceHomeState extends State<FinanceHome> {
   var selected = FinanceSection.dashboard;
   String? ledgerAccountFilterId;
   var _appliedLaunchPreference = false;
+  var _isScrolling = false;
+  Timer? _scrollSettleTimer;
 
   @override
   void didChangeDependencies() {
@@ -51,6 +53,28 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   @override
+  void dispose() {
+    _scrollSettleTimer?.cancel();
+    super.dispose();
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    if (notification is ScrollStartNotification) {
+      _scrollSettleTimer?.cancel();
+      if (!_isScrolling) setState(() => _isScrolling = true);
+    } else if (notification is ScrollEndNotification) {
+      _scrollSettleTimer?.cancel();
+      _scrollSettleTimer = Timer(const Duration(milliseconds: 120), () {
+        if (mounted && _isScrolling) {
+          setState(() => _isScrolling = false);
+        }
+      });
+    }
+    return false;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.sizeOf(context).width >= 880;
     final dataStore = FinanceDataStoreScope.watch(context);
@@ -60,10 +84,31 @@ class _FinanceHomeState extends State<FinanceHome> {
     return Scaffold(
       body: SafeArea(child: isWide ? _wideLayout() : _compactLayout()),
       floatingActionButton: selected.supportsFloatingAdd
-          ? MoneyTallyFloatingActionButton(
-              tooltip: 'Add',
-              onPressed: () => showFloatingAddMenu(context),
-              child: const Icon(Icons.add),
+          ? Builder(
+              builder: (context) {
+                final reduceMotion = MediaQuery.of(context).disableAnimations;
+                final duration = reduceMotion
+                    ? Duration.zero
+                    : const Duration(milliseconds: 180);
+                return IgnorePointer(
+                  ignoring: _isScrolling,
+                  child: AnimatedScale(
+                    scale: _isScrolling ? 0.78 : 1,
+                    duration: duration,
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: _isScrolling ? 0.18 : 1,
+                      duration: duration,
+                      curve: Curves.easeOutCubic,
+                      child: MoneyTallyFloatingActionButton(
+                        tooltip: 'Add',
+                        onPressed: () => showFloatingAddMenu(context),
+                        child: const Icon(Icons.add),
+                      ),
+                    ),
+                  ),
+                );
+              },
             )
           : null,
       floatingActionButtonLocation:
@@ -134,8 +179,10 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   Widget _sectionBody() {
-    return CustomScrollView(
-      slivers: [
+    return NotificationListener<ScrollNotification>(
+      onNotification: _handleScrollNotification,
+      child: CustomScrollView(
+        slivers: [
         SliverToBoxAdapter(
           child: PageHeader(
             section: selected,
@@ -176,7 +223,8 @@ class _FinanceHomeState extends State<FinanceHome> {
             },
           ),
         ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -877,6 +925,7 @@ class AccountGroupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final isCollapsed = store.preferences.collapsedAccountGroupNames.contains(
       group.name,
     );
@@ -888,122 +937,147 @@ class AccountGroupCard extends StatelessWidget {
           (total, account) => total + store.balanceForAccount(account.id),
         );
     final progress = accountGroupProgress(context, store, group);
+    final headerTextStyle = theme.textTheme.titleMedium?.copyWith(
+      color: AppTheme.accentStrong,
+      fontSize: 19,
+      fontWeight: FontWeight.w700,
+    );
 
     return AppCard(
       padding: EdgeInsets.zero,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.sm,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              GestureDetector(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.sm,
+          AppSpacing.md,
+          AppSpacing.sm,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Tooltip(
+              message: isCollapsed ? 'Expand $label' : 'Collapse $label',
+              child: InkWell(
                 key: ValueKey('account-group-${group.name}'),
-                behavior: HitTestBehavior.opaque,
+                borderRadius: BorderRadius.circular(AppRadii.card),
+                onTap: () => toggleAccountGroupCollapsed(
+                  context,
+                  group,
+                  isCollapsed: isCollapsed,
+                ),
                 onLongPress: () => showAccountGroupActions(context, group),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: AppTheme.accent.withValues(alpha: 0.09),
-                        borderRadius: BorderRadius.circular(AppRadii.card),
-                      ),
-                      child: Icon(
-                        accountGroupIcon(group.name),
-                        color: AppTheme.accent,
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: AppTheme.accentStrong,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    MoneyText(
-                      amountMinor: balanceMinor,
-                      currency: store.preferences.currency,
-                      color: balanceMinor < 0 ? AppColors.danger : null,
-                      fontSize: 19,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    IconButton(
-                      tooltip: isCollapsed
-                          ? 'Expand $label'
-                          : 'Collapse $label',
-                      onPressed: () => toggleAccountGroupCollapsed(
-                        context,
-                        group,
-                        isCollapsed: isCollapsed,
-                      ),
-                      icon: Icon(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: AppSpacing.xs,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(
                         isCollapsed
-                            ? Icons.keyboard_arrow_right
-                            : Icons.keyboard_arrow_down,
+                            ? Icons.arrow_right_rounded
+                            : Icons.arrow_drop_down_rounded,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        size: 24,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: AppSpacing.xs),
+                      Expanded(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: headerTextStyle,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Container(
+                        height: 28,
+                        constraints: const BoxConstraints(minWidth: 112),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        alignment: Alignment.centerRight,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          border: Border.all(
+                            color: theme.colorScheme.outlineVariant,
+                          ),
+                          borderRadius: BorderRadius.circular(AppRadii.pill),
+                        ),
+                        child: MoneyText(
+                          amountMinor: balanceMinor,
+                          currency: store.preferences.currency,
+                          color: balanceMinor < 0 ? AppColors.danger : null,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              if (progress != null && !isCollapsed) ...[
-                const SizedBox(height: AppSpacing.xs),
-                progress,
-              ],
-              if (!isCollapsed) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Divider(
-                  height: 1,
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.outlineVariant.withValues(alpha: 0.55),
-                ),
-                for (var index = 0; index < accounts.length; index++) ...[
-                  AccountCard(
-                    account: accounts[index],
-                    balanceMinor: store.balanceForAccount(accounts[index].id),
-                    currency: store.preferences.currency,
-                    groupLabel: label,
-                    framed: false,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.xs,
-                    ),
-                    leading: Icon(
-                      accountGroupIcon(group.name),
-                      color: AppTheme.accent,
-                      size: 22,
-                    ),
-                    onTap: onOpenLedgerForAccount == null
-                        ? null
-                        : () => onOpenLedgerForAccount!(accounts[index].id),
-                    onLongPress: () =>
-                        showAccountOptions(context, accounts[index].id),
-                  ),
-                ],
-              ],
+            ),
+            if (progress != null && !isCollapsed) ...[
+              const SizedBox(height: AppSpacing.xs),
+              progress,
             ],
-          ),
+            if (!isCollapsed) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Divider(
+                height: 1,
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+              ),
+              for (var index = 0; index < accounts.length; index++)
+                AccountCard(
+                  account: accounts[index],
+                  balanceMinor: store.balanceForAccount(accounts[index].id),
+                  currency: store.preferences.currency,
+                  subtitle: lastAccountActivitySubtitle(
+                    store,
+                    accounts[index].id,
+                  ),
+                  balanceFontSize: 17,
+                  framed: false,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: AppSpacing.sm,
+                  ),
+                  leading: Icon(
+                    accountGroupIcon(group.name),
+                    color: AppTheme.accent,
+                    size: 22,
+                  ),
+                  onTap: onOpenLedgerForAccount == null
+                      ? null
+                      : () => onOpenLedgerForAccount!(accounts[index].id),
+                  onLongPress: () =>
+                      showAccountOptions(context, accounts[index].id),
+                ),
+            ],
+          ],
         ),
       ),
     );
   }
+}
+
+String lastAccountActivitySubtitle(
+  FinanceDataStore store,
+  String accountId,
+) {
+  final activity = store.transactions
+      .where(
+        (transaction) =>
+            !transaction.isDeleted &&
+            (transaction.accountId == accountId ||
+                transaction.transferAccountId == accountId),
+      )
+      .toList(growable: false)
+    ..sort((a, b) => b.date.compareTo(a.date));
+  if (activity.isEmpty) return 'No transactions yet';
+
+  final latest = activity.first;
+  final payee = latest.payee.trim().isEmpty
+      ? transactionTypeLabel(latest.type)
+      : latest.payee.trim();
+  return '$payee · ${compactDate(latest.date)}';
 }
 
 Widget? accountGroupProgress(
@@ -4686,6 +4760,7 @@ Future<void> showTransferDialog(
     return;
   }
 
+  final payeeOptions = savedPayees(dataStore);
   final payee = TextEditingController(text: transfer?.payee ?? 'Transfer');
   final date = TextEditingController(
     text: dateInput(transfer?.date ?? DateTime.now()),
@@ -4704,6 +4779,7 @@ Future<void> showTransferDialog(
           transfer?.transferAccountId != fromAccountId
       ? transfer!.transferAccountId!
       : accounts.firstWhere((account) => account.id != fromAccountId).id;
+  TransactionType? switchToType;
 
   final result =
       await showDialog<
@@ -4719,96 +4795,155 @@ Future<void> showTransferDialog(
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
-            title: Text(transfer == null ? 'Add transfer' : 'Edit transfer'),
+            title: Text(
+              transfer == null ? 'Add transaction' : 'Edit transaction',
+            ),
             content: SizedBox(
               width: 420,
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
-                      key: const ValueKey('transfer-payee'),
-                      controller: payee,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(labelText: 'Payee'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      key: const ValueKey('transfer-date'),
-                      controller: date,
-                      readOnly: true,
-                      showCursor: false,
-                      enableInteractiveSelection: false,
-                      decoration: const InputDecoration(
-                        labelText: 'Date',
-                        hintText: 'M/D/YY',
-                      ),
-                      onTap: () async {
-                        FocusManager.instance.primaryFocus?.unfocus();
-                        final picked = await pickDateForField(
-                          context,
-                          parseDateInput(date.text, DateTime.now()),
-                        );
-                        if (picked != null) {
-                          date.text = dateInput(picked);
-                        }
-                        FocusManager.instance.primaryFocus?.unfocus();
+                    SegmentedButton<TransactionType>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: TransactionType.expense,
+                          label: Text('Expense'),
+                        ),
+                        ButtonSegment(
+                          value: TransactionType.income,
+                          label: Text('Income'),
+                        ),
+                        ButtonSegment(
+                          value: TransactionType.transfer,
+                          label: Text('Transfer'),
+                        ),
+                      ],
+                      selected: const {TransactionType.transfer},
+                      onSelectionChanged: (values) {
+                        final selectedType = values.first;
+                        if (selectedType == TransactionType.transfer) return;
+                        switchToType = selectedType;
+                        Navigator.pop(context);
                       },
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      key: const ValueKey('transfer-note'),
-                      controller: note,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(labelText: 'Note'),
-                      minLines: 1,
-                      maxLines: 3,
+                    DialogFieldGroup(
+                      label: 'Payee',
+                      child: TextField(
+                        key: const ValueKey('transfer-payee'),
+                        controller: payee,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: dialogFieldDecoration().copyWith(
+                          suffixIcon: payeeOptions.isEmpty
+                              ? null
+                              : PopupMenuButton<String>(
+                                  tooltip: 'Saved payees',
+                                  icon: const Icon(
+                                    Icons.history_outlined,
+                                    size: 20,
+                                  ),
+                                  onSelected: (value) => payee.text = value,
+                                  itemBuilder: (context) => [
+                                    for (final option in payeeOptions.take(12))
+                                      PopupMenuItem(
+                                        value: option,
+                                        child: Text(option),
+                                      ),
+                                  ],
+                                ),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    AmountEntryField(
-                      fieldKey: const ValueKey('transfer-amount'),
-                      initialMinor: amountMinor,
-                      currency: dataStore.preferences.currency,
-                      labelText: 'Amount',
-                      autofocus: transfer == null,
-                      onChanged: (value) => amountMinor = value,
+                    DialogFieldGroup(
+                      label: 'Date',
+                      child: TextField(
+                        key: const ValueKey('transfer-date'),
+                        controller: date,
+                        readOnly: true,
+                        showCursor: false,
+                        enableInteractiveSelection: false,
+                        decoration: dialogFieldDecoration(),
+                        onTap: () async {
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          final picked = await pickDateForField(
+                            context,
+                            parseDateInput(date.text, DateTime.now()),
+                          );
+                          if (picked != null) {
+                            date.text = dateInput(picked);
+                          }
+                          FocusManager.instance.primaryFocus?.unfocus();
+                        },
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: fromAccountId,
-                      decoration: const InputDecoration(labelText: 'From'),
-                      items: [
-                        for (final account in accounts)
-                          DropdownMenuItem(
-                            value: account.id,
-                            child: Text(account.name),
-                          ),
-                      ],
-                      onChanged: (value) => setDialogState(() {
-                        fromAccountId = value ?? fromAccountId;
-                        if (toAccountId == fromAccountId) {
-                          toAccountId = accounts
-                              .firstWhere(
-                                (account) => account.id != fromAccountId,
-                              )
-                              .id;
-                        }
-                      }),
+                    DialogFieldGroup(
+                      label: 'Note',
+                      child: TextField(
+                        key: const ValueKey('transfer-note'),
+                        controller: note,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: dialogFieldDecoration(),
+                        minLines: 1,
+                        maxLines: 3,
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: toAccountId,
-                      decoration: const InputDecoration(labelText: 'To'),
-                      items: [
-                        for (final account in accounts)
-                          if (account.id != fromAccountId)
+                    DialogFieldGroup(
+                      label: 'Amount',
+                      child: AmountEntryField(
+                        fieldKey: const ValueKey('transfer-amount'),
+                        initialMinor: amountMinor,
+                        currency: dataStore.preferences.currency,
+                        labelText: null,
+                        onChanged: (value) => amountMinor = value,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DialogFieldGroup(
+                      label: 'From',
+                      child: DropdownButtonFormField<String>(
+                        initialValue: fromAccountId,
+                        decoration: dialogFieldDecoration(),
+                        items: [
+                          for (final account in accounts)
                             DropdownMenuItem(
                               value: account.id,
                               child: Text(account.name),
                             ),
-                      ],
-                      onChanged: (value) => setDialogState(
-                        () => toAccountId = value ?? toAccountId,
+                        ],
+                        onChanged: (value) => setDialogState(() {
+                          fromAccountId = value ?? fromAccountId;
+                          if (toAccountId == fromAccountId) {
+                            toAccountId = accounts
+                                .firstWhere(
+                                  (account) => account.id != fromAccountId,
+                                )
+                                .id;
+                          }
+                        }),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DialogFieldGroup(
+                      label: 'To',
+                      child: DropdownButtonFormField<String>(
+                        initialValue: toAccountId,
+                        decoration: dialogFieldDecoration(),
+                        items: [
+                          for (final account in accounts)
+                            if (account.id != fromAccountId)
+                              DropdownMenuItem(
+                                value: account.id,
+                                child: Text(account.name),
+                              ),
+                        ],
+                        onChanged: (value) => setDialogState(
+                          () => toAccountId = value ?? toAccountId,
+                        ),
                       ),
                     ),
                   ],
@@ -4838,6 +4973,15 @@ Future<void> showTransferDialog(
         ),
       );
 
+  if (switchToType != null && context.mounted) {
+    await showTransactionDialog(
+      context,
+      initialIsExpense: switchToType == TransactionType.expense,
+      initialAccountId: fromAccountId,
+      transaction: transfer,
+    );
+    return;
+  }
   if (result == null) return;
   if (transfer == null) {
     await dataStore.addTransfer(
@@ -5501,6 +5645,8 @@ Future<void> showTransactionDialog(
       : activeAccounts.first.id;
   var isExpense =
       transaction?.type == TransactionType.expense ||
+      (transaction?.type == TransactionType.transfer &&
+          (initialIsExpense ?? true)) ||
       (transaction == null &&
           (initialIsExpense ?? isExpenseDefault(dataStore.preferences)));
   var categoryId =
