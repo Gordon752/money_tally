@@ -35,7 +35,6 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
   var _isUpdating = false;
-  var _hasUserEdited = false;
 
   MoneyFormatter get _formatter => MoneyFormatter(widget.currency);
 
@@ -97,14 +96,13 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
         fontFeatures: const [FontFeature.tabularFigures()],
         fontWeight: FontWeight.w900,
       ),
-      onTap: _selectExistingAmount,
+      onTap: _moveCursorToEnd,
       onChanged: _handleChanged,
     );
   }
 
   void _handleChanged(String rawValue) {
     if (_isUpdating) return;
-    _hasUserEdited = true;
     final isNegative = widget.allowNegative && rawValue.trim().startsWith('-');
     final digits = rawValue.replaceAll(RegExp(r'[^0-9]'), '');
     final unsignedMinor = _formatter.parseDigitsToMinor(digits);
@@ -115,15 +113,13 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
 
   void _handleFocusChanged() {
     if (_focusNode.hasFocus) {
-      _selectExistingAmount();
+      _moveCursorToEnd();
     }
   }
 
-  void _selectExistingAmount() {
-    if (_hasUserEdited || widget.initialMinor == 0) return;
-    _controller.selection = TextSelection(
-      baseOffset: 0,
-      extentOffset: _controller.text.length,
+  void _moveCursorToEnd() {
+    _controller.selection = TextSelection.collapsed(
+      offset: _controller.text.length,
     );
   }
 
