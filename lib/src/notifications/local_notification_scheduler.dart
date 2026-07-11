@@ -39,7 +39,13 @@ class LocalNotificationScheduler implements NotificationScheduler {
         requestSoundPermission: false,
       ),
     );
-    await _plugin.initialize(settings: settings);
+    await _plugin.initialize(
+      settings: settings,
+      onDidReceiveNotificationResponse: (_) {
+        // Opening a reminder currently returns to Money Tally's normal launch
+        // screen. Navigation to a specific schedule can be added later.
+      },
+    );
     _initialized = true;
   }
 
