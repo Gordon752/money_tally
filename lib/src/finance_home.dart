@@ -3976,11 +3976,14 @@ Future<void> renameManagedPayee(BuildContext context, String oldName) async {
   final newName = await showPayeeNameDialog(context, initialName: oldName);
   if (!context.mounted || newName == null || newName == oldName) return;
   final store = FinanceDataStoreScope.read(context);
-  for (final transaction in store.transactions.where(
-    (item) =>
-        !item.isDeleted &&
-        item.payee.toLowerCase() == oldName.toLowerCase(),
-  )) {
+  final matchingTransactions = store.transactions
+      .where(
+        (item) =>
+            !item.isDeleted &&
+            item.payee.toLowerCase() == oldName.toLowerCase(),
+      )
+      .toList(growable: false);
+  for (final transaction in matchingTransactions) {
     await store.saveTransaction(transaction.copyWith(payee: newName));
   }
   final saved = [...store.preferences.savedPayeeNames]
