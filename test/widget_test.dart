@@ -1086,7 +1086,12 @@ void main() {
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(0), 'Rent');
     await tester.enterText(fields.at(1), '900.00');
-    await tester.enterText(fields.at(2), '2026-08-01');
+    final nextDateField = tester.widget<TextField>(
+      find.byKey(const ValueKey('scheduled-next-date')),
+    );
+    expect(nextDateField.readOnly, isTrue);
+    expect(nextDateField.showCursor, isFalse);
+    nextDateField.controller!.text = '2026-08-01';
     await tester.tap(find.text('Add').last);
     await tester.pumpAndSettle();
 
@@ -1444,9 +1449,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('August 2026'), findsOneWidget);
 
-    await tester.tap(
-      find.byKey(const ValueKey('scheduled-calendar-day-2026-8-1')),
+    final augustFirst = find.byKey(
+      const ValueKey('scheduled-calendar-day-2026-8-1'),
     );
+    expect(
+      find.descendant(of: augustFirst, matching: find.text('2')),
+      findsOneWidget,
+    );
+    await tester.tap(augustFirst);
     await tester.pumpAndSettle();
 
     expect(find.text('Aug 1, 2026'), findsOneWidget);
@@ -1613,7 +1623,11 @@ void main() {
     expect(find.text('Edit scheduled transaction'), findsOneWidget);
     await tester.enterText(find.byType(TextField).at(0), 'Mortgage');
     await tester.enterText(find.byType(TextField).at(1), '925.50');
-    await tester.enterText(find.byType(TextField).at(2), '2026-08-15');
+    final nextDateField = tester.widget<TextField>(
+      find.byKey(const ValueKey('scheduled-next-date')),
+    );
+    expect(nextDateField.readOnly, isTrue);
+    nextDateField.controller!.text = '2026-08-15';
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -1656,7 +1670,11 @@ void main() {
 
     expect(find.text('Custom alert time'), findsOneWidget);
     expect(find.text('11:15 AM'), findsOneWidget);
-    await tester.enterText(find.byType(TextField).at(3), '14:30');
+    final alertTimeField = tester.widget<TextField>(
+      find.byKey(const ValueKey('scheduled-alert-time')),
+    );
+    expect(alertTimeField.readOnly, isTrue);
+    alertTimeField.controller!.text = '2:30 PM';
     await tester.ensureVisible(find.byType(CheckboxListTile));
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pumpAndSettle();
