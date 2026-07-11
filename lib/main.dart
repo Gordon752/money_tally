@@ -32,6 +32,8 @@ import 'src/domain/sync_metadata.dart' as v2_sync;
 import 'src/domain/transaction.dart';
 import 'src/domain/user_preferences.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
+import 'src/notifications/local_notification_scheduler.dart';
+import 'src/notifications/notification_scheduler.dart';
 import 'src/persistence/backup_codec.dart';
 import 'src/persistence/finance_record_repository.dart';
 import 'src/persistence/firestore_record_repository.dart';
@@ -71,8 +73,14 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+    final notificationScheduler = LocalNotificationScheduler();
+    await notificationScheduler.initialize();
     final legacyStore = await FinanceStore.load();
-    final dataStore = await _loadV2StoreFromLegacy(legacyStore);
+    final dataStore = await _loadV2StoreFromLegacy(
+      legacyStore,
+      notificationScheduler: notificationScheduler,
+    );
+    await dataStore.refreshScheduledNotifications();
     final mirror = LegacyV2StoreMirror(
       legacyStore: legacyStore,
       dataStore: dataStore,
@@ -93,8 +101,9 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
   }
 
   Future<FinanceDataStore> _loadV2StoreFromLegacy(
-    FinanceStore legacyStore,
-  ) async {
+    FinanceStore legacyStore, {
+    required NotificationScheduler notificationScheduler,
+  }) async {
     final localRepository = const LocalFinanceDataSetRepository();
     final localDataSet = await localRepository.load();
     final migrated = const V1SnapshotMigrator().migrate(
@@ -104,7 +113,11 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
         ? migrated
         : mergeDataSetsPreferCurrent(incoming: migrated, current: localDataSet);
     await localRepository.save(dataSet);
-    return FinanceDataStore(dataSet: dataSet, localRepository: localRepository);
+    return FinanceDataStore(
+      dataSet: dataSet,
+      localRepository: localRepository,
+      notificationScheduler: notificationScheduler,
+    );
   }
 
   @override
