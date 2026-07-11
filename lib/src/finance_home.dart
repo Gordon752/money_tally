@@ -5170,6 +5170,7 @@ Future<void> showScheduledTransactionDialog(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SegmentedButton<TransactionType>(
+                        showSelectedIcon: false,
                         segments: [
                           const ButtonSegment(
                             value: TransactionType.expense,
@@ -5207,7 +5208,6 @@ Future<void> showScheduledTransactionDialog(
                           controller: payee,
                           textCapitalization: TextCapitalization.words,
                           decoration: dialogFieldDecoration(),
-                          autofocus: true,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -5224,10 +5224,14 @@ Future<void> showScheduledTransactionDialog(
                       DialogFieldGroup(
                         label: 'Next date',
                         child: TextField(
+                          key: const ValueKey('scheduled-next-date'),
                           controller: nextDate,
-                          keyboardType: TextInputType.datetime,
+                          readOnly: true,
+                          showCursor: false,
+                          enableInteractiveSelection: false,
                           decoration: dialogFieldDecoration(),
                           onTap: () async {
+                            FocusManager.instance.primaryFocus?.unfocus();
                             final picked = await pickDateForField(
                               context,
                               parseDateInput(nextDate.text, DateTime.now()),
@@ -5235,6 +5239,7 @@ Future<void> showScheduledTransactionDialog(
                             if (picked != null) {
                               nextDate.text = dateInput(picked);
                             }
+                            FocusManager.instance.primaryFocus?.unfocus();
                           },
                         ),
                       ),
@@ -5350,13 +5355,45 @@ Future<void> showScheduledTransactionDialog(
                         const SizedBox(height: 12),
                         DialogFieldGroup(
                           label: 'Custom alert time',
-                          helperText: 'Use AM or PM, for example 9:00 AM',
+                          helperText: 'Tap to choose a time',
                           child: TextField(
+                            key: const ValueKey('scheduled-alert-time'),
                             controller: customAlertTime,
-                            keyboardType: TextInputType.datetime,
-                            decoration: dialogFieldDecoration(
-                              hintText: '9:00 AM',
+                            readOnly: true,
+                            showCursor: false,
+                            enableInteractiveSelection: false,
+                            decoration: dialogFieldDecoration().copyWith(
+                              suffixIcon: const Icon(
+                                Icons.schedule_outlined,
+                              ),
                             ),
+                            onTap: () async {
+                              FocusManager.instance.primaryFocus?.unfocus();
+                              final minutes = parseAlertTimeMinutes(
+                                customAlertTime.text,
+                                9 * 60,
+                              );
+                              final picked = await showTimePicker(
+                                context: context,
+                                initialTime: TimeOfDay(
+                                  hour: minutes ~/ 60,
+                                  minute: minutes % 60,
+                                ),
+                                initialEntryMode: TimePickerEntryMode.dial,
+                                builder: (context, child) => MediaQuery(
+                                  data: MediaQuery.of(context).copyWith(
+                                    alwaysUse24HourFormat: false,
+                                  ),
+                                  child: child!,
+                                ),
+                              );
+                              if (picked != null) {
+                                customAlertTime.text = alertTimeInput(
+                                  picked.hour * 60 + picked.minute,
+                                );
+                              }
+                              FocusManager.instance.primaryFocus?.unfocus();
+                            },
                           ),
                         ),
                       ],
