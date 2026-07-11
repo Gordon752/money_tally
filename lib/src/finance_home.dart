@@ -4716,12 +4716,14 @@ Future<void> showAccountDialog(BuildContext context) async {
           builder: (context, setDialogState) => AlertDialog(
             alignment: Alignment.topCenter,
             insetPadding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
+            actionsPadding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
             title: const Text('Add account'),
             content: SizedBox(
               width: 420,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                   DialogFieldGroup(
                     label: 'Name',
                     child: TextField(
@@ -4825,7 +4827,8 @@ Future<void> showAccountDialog(BuildContext context) async {
                       onChanged: (value) => openingBalanceCents = value,
                     ),
                   ),
-                ],
+                  ],
+                ),
               ),
             ),
             actions: [
