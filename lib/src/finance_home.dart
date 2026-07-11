@@ -4101,7 +4101,7 @@ Future<void> showBudgetActions(
 
 Future<void> showAdjustBalanceDialog(
   BuildContext context,
-  Account account,
+  v2_account.AccountRecord account,
 ) async {
   final dataStore = FinanceDataStoreScope.read(context);
   var targetBalanceMinor = dataStore.balanceForAccount(account.id);
@@ -4142,12 +4142,10 @@ Future<void> showAdjustBalanceDialog(
 }
 
 Future<void> showAccountOptions(BuildContext context, String accountId) async {
-  final store = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
-  final account = store.accountById(accountId);
-  final v2Account = dataStore.accountById(accountId);
+  final account = dataStore.accountById(accountId);
   final groupAccounts = dataStore.activeAccountsInDisplayOrder
-      .where((item) => item.group == v2Account.group)
+      .where((item) => item.group == account.group)
       .toList(growable: false);
   final accountIndex = groupAccounts.indexWhere((item) => item.id == accountId);
   final canMoveUp = accountIndex > 0;
@@ -4252,33 +4250,28 @@ Future<void> showAccountOptions(BuildContext context, String accountId) async {
   } else if (action == 'edit' && context.mounted) {
     await showEditAccountDialog(context, account);
   } else if (action == 'archive' && context.mounted) {
-    final archived = store.archiveAccount(account.id);
-    await saveLegacyAccountToV2(context, archived);
+    await dataStore.archiveAccount(account.id);
   } else if (action == 'delete' && context.mounted) {
-    // Persist the v2 tombstone before the legacy store emits its mirror refresh.
-    // The refresh merge will then preserve the deletion instead of racing it.
     await dataStore.deleteAccount(account.id);
-    store.archiveAccount(account.id);
   }
 }
 
 Future<void> showChangeAccountTypeDialog(
   BuildContext context,
-  Account account,
+  v2_account.AccountRecord account,
 ) async {
-  final store = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
-  final selectedType = await showModalBottomSheet<AccountType>(
+  final selectedType = await showModalBottomSheet<v2_account.AccountType>(
     context: context,
     showDragHandle: true,
     builder: (sheetContext) => SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          for (final type in AccountType.values)
+          for (final type in v2_account.AccountType.values)
             ListTile(
-              leading: Icon(accountIcon(type)),
-              title: Text(accountTypeLabel(type)),
+              leading: Icon(v2AccountIcon(type)),
+              title: Text(v2AccountTypeLabel(type)),
               trailing: type == account.type
                   ? const Icon(Icons.check, color: AppTheme.accent)
                   : null,
@@ -4289,35 +4282,32 @@ Future<void> showChangeAccountTypeDialog(
     ),
   );
   if (selectedType == null || selectedType == account.type) return;
-
-  final updated = store.editAccount(
-    accountId: account.id,
-    name: account.name,
-    type: selectedType,
+  await dataStore.saveAccount(
+    account.copyWith(
+      type: selectedType,
+      clearCreditLimit: selectedType != v2_account.AccountType.creditCard,
+      clearOriginalLoanAmount: selectedType != v2_account.AccountType.loan,
+    ),
   );
-  if (!context.mounted) return;
-  await saveLegacyAccountToV2(context, updated, dataStore: dataStore);
 }
 
 Future<void> showEditAccountDialog(
   BuildContext context,
-  Account account,
+  v2_account.AccountRecord account,
 ) async {
-  final store = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
-  final v2Account = dataStore.accountById(account.id);
   final name = TextEditingController(text: account.name);
-  var creditLimitMinor = v2Account.creditLimitMinor ?? 0;
-  var originalLoanAmountMinor = v2Account.originalLoanAmountMinor ?? 0;
+  var creditLimitMinor = account.creditLimitMinor ?? 0;
+  var originalLoanAmountMinor = account.originalLoanAmountMinor ?? 0;
   var type = account.type;
-  var includeInGroupBalance = v2Account.includeInGroupBalance;
-  var includeInNetWorth = v2Account.includeInNetWorth;
+  var includeInGroupBalance = account.includeInGroupBalance;
+  var includeInNetWorth = account.includeInNetWorth;
 
   final result =
       await showDialog<
         ({
           String name,
-          AccountType type,
+          v2_account.AccountType type,
           int? creditLimitMinor,
           int? originalLoanAmountMinor,
           bool includeInGroupBalance,
@@ -4340,20 +4330,20 @@ Future<void> showEditAccountDialog(
                     autofocus: true,
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<AccountType>(
+                  DropdownButtonFormField<v2_account.AccountType>(
                     initialValue: type,
                     decoration: const InputDecoration(labelText: 'Type'),
                     items: [
-                      for (final item in AccountType.values)
+                      for (final item in v2_account.AccountType.values)
                         DropdownMenuItem(
                           value: item,
-                          child: Text(accountTypeLabel(item)),
+                          child: Text(v2AccountTypeLabel(item)),
                         ),
                     ],
                     onChanged: (value) =>
                         setDialogState(() => type = value ?? type),
                   ),
-                  if (type == AccountType.creditCard) ...[
+                  if (type == v2_account.AccountType.creditCard) ...[
                     const SizedBox(height: 12),
                     AmountEntryField(
                       fieldKey: const ValueKey('account-credit-limit'),
@@ -4363,7 +4353,7 @@ Future<void> showEditAccountDialog(
                       onChanged: (value) => creditLimitMinor = value.abs(),
                     ),
                   ],
-                  if (type == AccountType.loan) ...[
+                  if (type == v2_account.AccountType.loan) ...[
                     const SizedBox(height: 12),
                     AmountEntryField(
                       fieldKey: const ValueKey('account-original-loan-amount'),
@@ -4403,10 +4393,10 @@ Future<void> showEditAccountDialog(
                       ? account.name
                       : name.text.trim(),
                   type: type,
-                  creditLimitMinor: type == AccountType.creditCard
+                  creditLimitMinor: type == v2_account.AccountType.creditCard
                       ? optionalPositiveMinor(creditLimitMinor)
                       : null,
-                  originalLoanAmountMinor: type == AccountType.loan
+                  originalLoanAmountMinor: type == v2_account.AccountType.loan
                       ? optionalPositiveMinor(originalLoanAmountMinor)
                       : null,
                   includeInGroupBalance: includeInGroupBalance,
@@ -4420,22 +4410,17 @@ Future<void> showEditAccountDialog(
       );
 
   if (result == null) return;
-  final updated = store.editAccount(
-    accountId: account.id,
-    name: result.name,
-    type: result.type,
-  );
-  if (!context.mounted) return;
-  await saveLegacyAccountToV2(
-    context,
-    updated,
-    dataStore: dataStore,
-    creditLimitMinor: result.creditLimitMinor,
-    originalLoanAmountMinor: result.originalLoanAmountMinor,
-    updateCreditLimit: true,
-    updateOriginalLoanAmount: true,
-    includeInGroupBalance: result.includeInGroupBalance,
-    includeInNetWorth: result.includeInNetWorth,
+  await dataStore.saveAccount(
+    account.copyWith(
+      name: result.name,
+      type: result.type,
+      creditLimitMinor: result.creditLimitMinor,
+      originalLoanAmountMinor: result.originalLoanAmountMinor,
+      clearCreditLimit: result.creditLimitMinor == null,
+      clearOriginalLoanAmount: result.originalLoanAmountMinor == null,
+      includeInGroupBalance: result.includeInGroupBalance,
+      includeInNetWorth: result.includeInNetWorth,
+    ),
   );
 }
 
@@ -6058,6 +6043,28 @@ v2_account.AccountType v2AccountTypeFor(AccountType type) {
     AccountType.savings => v2_account.AccountType.savings,
     AccountType.creditCard => v2_account.AccountType.creditCard,
     AccountType.loan => v2_account.AccountType.loan,
+  };
+}
+
+String v2AccountTypeLabel(v2_account.AccountType type) {
+  return switch (type) {
+    v2_account.AccountType.cash => 'Cash',
+    v2_account.AccountType.checking => 'Checking',
+    v2_account.AccountType.savings => 'Savings',
+    v2_account.AccountType.creditCard => 'Credit Card',
+    v2_account.AccountType.loan => 'Loan',
+    v2_account.AccountType.otherBanking => 'Other Banking',
+  };
+}
+
+IconData v2AccountIcon(v2_account.AccountType type) {
+  return switch (type) {
+    v2_account.AccountType.cash => Icons.payments_outlined,
+    v2_account.AccountType.checking => Icons.account_balance_outlined,
+    v2_account.AccountType.savings => Icons.savings_outlined,
+    v2_account.AccountType.creditCard => Icons.credit_card_outlined,
+    v2_account.AccountType.loan => Icons.request_quote_outlined,
+    v2_account.AccountType.otherBanking => Icons.account_balance_wallet_outlined,
   };
 }
 
