@@ -258,7 +258,10 @@ class _AuthGateState extends State<AuthGate> {
     FinanceDataStore dataStore,
   ) async {
     try {
-      if (remoteRepository != null) {
+      // The record repository supersedes the legacy all-in-one snapshot.
+      // Running both allows an old snapshot to resurrect records before the
+      // tombstone-aware record sync attaches.
+      if (remoteRepository != null && recordRepository == null) {
         final pulled = await store.pullSnapshot(
           remoteRepository: remoteRepository,
           userId: userId,
@@ -282,7 +285,7 @@ class _AuthGateState extends State<AuthGate> {
         _syncingUid = null;
         _syncLabel = 'Synced';
       });
-      if (remoteRepository != null) {
+      if (remoteRepository != null && recordRepository == null) {
         _attachStoreSync(userId, remoteRepository, store);
       }
     } on Exception {
