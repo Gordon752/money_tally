@@ -1083,7 +1083,13 @@ void main() {
     await tester.tap(find.text('Scheduled Transaction'));
     await tester.pumpAndSettle();
 
+    final scheduledTypeSelector =
+        tester.widget<SegmentedButton<TransactionType>>(
+          find.byType(SegmentedButton<TransactionType>),
+        );
+    expect(scheduledTypeSelector.showSelectedIcon, isFalse);
     final fields = find.byType(TextField);
+    expect(tester.widget<TextField>(fields.at(0)).autofocus, isFalse);
     await tester.enterText(fields.at(0), 'Rent');
     await tester.enterText(fields.at(1), '900.00');
     final nextDateField = tester.widget<TextField>(
