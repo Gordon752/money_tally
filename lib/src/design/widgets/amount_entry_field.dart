@@ -13,6 +13,7 @@ class AmountEntryField extends StatefulWidget {
     this.labelText = 'Amount',
     this.autofocus = false,
     this.allowNegative = false,
+    this.keyboardType,
     this.fieldKey,
     super.key,
   });
@@ -22,6 +23,7 @@ class AmountEntryField extends StatefulWidget {
   final String? labelText;
   final bool autofocus;
   final bool allowNegative;
+  final TextInputType? keyboardType;
   final Key? fieldKey;
   final ValueChanged<int> onChanged;
 
@@ -70,9 +72,9 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
       key: widget.fieldKey,
       controller: _controller,
       focusNode: _focusNode,
-      keyboardType: TextInputType.numberWithOptions(
-        signed: widget.allowNegative,
-      ),
+      keyboardType:
+          widget.keyboardType ??
+          TextInputType.numberWithOptions(signed: widget.allowNegative),
       textAlign: TextAlign.right,
       textAlignVertical: TextAlignVertical.center,
       autofocus: widget.autofocus,

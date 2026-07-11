@@ -395,6 +395,22 @@ void main() {
 
     expect(find.text('Edit transaction'), findsOneWidget);
     expect(find.byKey(const ValueKey('transaction-payee')), findsOneWidget);
+    final transactionDateField = tester.widget<TextField>(
+      find.byKey(const ValueKey('transaction-date')),
+    );
+    expect(transactionDateField.readOnly, isTrue);
+    expect(transactionDateField.showCursor, isFalse);
+
+    final typeSelector = find.byType(SegmentedButton<TransactionType>);
+    expect(
+      find.descendant(of: typeSelector, matching: find.text('Transfer')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.descendant(of: typeSelector, matching: find.text('Transfer')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Edit transfer'), findsOneWidget);
   });
 
   testWidgets('ledger search filters visible transactions', (tester) async {
@@ -585,13 +601,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Edit transfer'), findsOneWidget);
+    final transferAmountField = tester.widget<TextField>(
+      find.byKey(const ValueKey('transfer-amount')),
+    );
+    expect(transferAmountField.autofocus, isFalse);
+    final transferDateField = tester.widget<TextField>(
+      find.byKey(const ValueKey('transfer-date')),
+    );
+    expect(transferDateField.readOnly, isTrue);
+    expect(transferDateField.showCursor, isFalse);
     await tester.enterText(
       find.byKey(const ValueKey('transfer-payee')),
       'Cash refill',
-    );
-    await tester.enterText(
-      find.byKey(const ValueKey('transfer-date')),
-      '2026-07-06',
     );
     await tester.enterText(
       find.byKey(const ValueKey('transfer-note')),
@@ -612,7 +633,7 @@ void main() {
     expect(edited.transferAccountId, 'cash');
     expect(edited.categoryId, isNull);
     expect(edited.amountMinor, 7500);
-    expect(edited.date, DateTime(2026, 7, 6));
+    expect(edited.date, DateTime(2026, 7, 5));
     expect(edited.note, 'Updated note');
     expect(find.text('Cash refill'), findsOneWidget);
   });
@@ -1289,6 +1310,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Adjust Balance'));
     await tester.pumpAndSettle();
+
+    final adjustmentField = tester.widget<TextField>(
+      find.byKey(const ValueKey('account-adjust-balance')),
+    );
+    expect(adjustmentField.autofocus, isTrue);
+    expect(adjustmentField.keyboardType, TextInputType.number);
 
     await tester.enterText(
       find.byKey(const ValueKey('account-adjust-balance')),

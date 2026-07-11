@@ -4116,6 +4116,7 @@ Future<void> showAdjustBalanceDialog(
           labelText: 'Target balance',
           autofocus: true,
           allowNegative: true,
+          keyboardType: TextInputType.number,
           onChanged: (value) => targetBalanceMinor = value,
         ),
       ),
@@ -4735,12 +4736,15 @@ Future<void> showTransferDialog(
                     TextField(
                       key: const ValueKey('transfer-date'),
                       controller: date,
-                      keyboardType: TextInputType.datetime,
+                      readOnly: true,
+                      showCursor: false,
+                      enableInteractiveSelection: false,
                       decoration: const InputDecoration(
                         labelText: 'Date',
                         hintText: 'M/D/YY',
                       ),
                       onTap: () async {
+                        FocusManager.instance.primaryFocus?.unfocus();
                         final picked = await pickDateForField(
                           context,
                           parseDateInput(date.text, DateTime.now()),
@@ -4748,6 +4752,7 @@ Future<void> showTransferDialog(
                         if (picked != null) {
                           date.text = dateInput(picked);
                         }
+                        FocusManager.instance.primaryFocus?.unfocus();
                       },
                     ),
                     const SizedBox(height: 12),
@@ -4765,7 +4770,7 @@ Future<void> showTransferDialog(
                       initialMinor: amountMinor,
                       currency: dataStore.preferences.currency,
                       labelText: 'Amount',
-                      autofocus: true,
+                      autofocus: transfer == null,
                       onChanged: (value) => amountMinor = value,
                     ),
                     const SizedBox(height: 12),
@@ -5501,6 +5506,7 @@ Future<void> showTransactionDialog(
   var categoryId =
       transaction?.categoryId ??
       defaultV2CategoryIdForTransactionKind(dataStore, isExpense);
+  var switchToTransfer = false;
 
   final result =
       await showDialog<
@@ -5537,19 +5543,42 @@ Future<void> showTransactionDialog(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      SegmentedButton<bool>(
+                      SegmentedButton<TransactionType>(
+                        showSelectedIcon: false,
                         segments: const [
-                          ButtonSegment(value: true, label: Text('Expense')),
-                          ButtonSegment(value: false, label: Text('Income')),
+                          ButtonSegment(
+                            value: TransactionType.expense,
+                            label: Text('Expense'),
+                          ),
+                          ButtonSegment(
+                            value: TransactionType.income,
+                            label: Text('Income'),
+                          ),
+                          ButtonSegment(
+                            value: TransactionType.transfer,
+                            label: Text('Transfer'),
+                          ),
                         ],
-                        selected: {isExpense},
-                        onSelectionChanged: (values) => setDialogState(() {
-                          isExpense = values.first;
-                          categoryId = defaultV2CategoryIdForTransactionKind(
-                            dataStore,
-                            isExpense,
-                          );
-                        }),
+                        selected: {
+                          isExpense
+                              ? TransactionType.expense
+                              : TransactionType.income,
+                        },
+                        onSelectionChanged: (values) {
+                          final selectedType = values.first;
+                          if (selectedType == TransactionType.transfer) {
+                            switchToTransfer = true;
+                            Navigator.pop(context);
+                            return;
+                          }
+                          setDialogState(() {
+                            isExpense = selectedType == TransactionType.expense;
+                            categoryId = defaultV2CategoryIdForTransactionKind(
+                              dataStore,
+                              isExpense,
+                            );
+                          });
+                        },
                       ),
                       const SizedBox(height: 12),
                       DialogFieldGroup(
@@ -5587,9 +5616,12 @@ Future<void> showTransactionDialog(
                         child: TextField(
                           key: const ValueKey('transaction-date'),
                           controller: date,
-                          keyboardType: TextInputType.datetime,
+                          readOnly: true,
+                          showCursor: false,
+                          enableInteractiveSelection: false,
                           decoration: dialogFieldDecoration(),
                           onTap: () async {
+                            FocusManager.instance.primaryFocus?.unfocus();
                             final picked = await pickDateForField(
                               context,
                               parseDateInput(date.text, DateTime.now()),
@@ -5597,6 +5629,7 @@ Future<void> showTransactionDialog(
                             if (picked != null) {
                               date.text = dateInput(picked);
                             }
+                            FocusManager.instance.primaryFocus?.unfocus();
                           },
                         ),
                       ),
@@ -5710,6 +5743,14 @@ Future<void> showTransactionDialog(
         ),
       );
 
+  if (switchToTransfer && context.mounted) {
+    await showTransferDialog(
+      context,
+      initialFromAccountId: accountId,
+      transfer: transaction,
+    );
+    return;
+  }
   if (result == null) return;
   if (transaction == null) {
     if (result.isExpense) {
