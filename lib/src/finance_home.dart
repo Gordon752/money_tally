@@ -5654,52 +5654,51 @@ Future<void> markScheduledTransactionPaid(
   v2_scheduled.ScheduledTransactionRecord item,
 ) async {
   final dataStore = FinanceDataStoreScope.read(context);
-  TransactionRecord paidTransaction;
   switch (item.type) {
     case TransactionType.expense:
       if (item.categoryId == null) {
         showMissingScheduledCategoryMessage(context);
         return;
       }
-      paidTransaction = await dataStore.addExpense(
+      await dataStore.addExpense(
         accountId: item.accountId,
         categoryId: item.categoryId!,
         date: item.nextDate,
         payee: item.payee,
         amountMinor: item.amountMinor,
+        scheduledTransactionId: item.id,
       );
     case TransactionType.income:
       if (item.categoryId == null) {
         showMissingScheduledCategoryMessage(context);
         return;
       }
-      paidTransaction = await dataStore.addIncome(
+      await dataStore.addIncome(
         accountId: item.accountId,
         categoryId: item.categoryId!,
         date: item.nextDate,
         payee: item.payee,
         amountMinor: item.amountMinor,
+        scheduledTransactionId: item.id,
       );
     case TransactionType.transfer:
       if (item.transferAccountId == null) {
         showMissingScheduledTransferMessage(context);
         return;
       }
-      paidTransaction = await dataStore.addTransfer(
+      await dataStore.addTransfer(
         fromAccountId: item.accountId,
         toAccountId: item.transferAccountId!,
         date: item.nextDate,
         payee: item.payee,
         amountMinor: item.amountMinor,
+        scheduledTransactionId: item.id,
       );
     case TransactionType.adjustment:
       showMissingScheduledCategoryMessage(context);
       return;
   }
 
-  await dataStore.saveTransaction(
-    paidTransaction.copyWith(scheduledTransactionId: item.id),
-  );
   await advanceOrCloseScheduledTransaction(
     dataStore,
     item,
