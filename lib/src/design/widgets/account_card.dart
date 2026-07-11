@@ -12,6 +12,8 @@ class AccountCard extends StatelessWidget {
     required this.balanceMinor,
     this.currency = const CurrencyFormatSettings(),
     this.groupLabel,
+    this.subtitle,
+    this.balanceFontSize = 17,
     this.leading,
     this.onTap,
     this.onLongPress,
@@ -24,6 +26,8 @@ class AccountCard extends StatelessWidget {
   final int balanceMinor;
   final CurrencyFormatSettings currency;
   final String? groupLabel;
+  final String? subtitle;
+  final double balanceFontSize;
   final Widget? leading;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
@@ -62,7 +66,9 @@ class AccountCard extends StatelessWidget {
                       ),
                       const SizedBox(height: AppSpacing.xxs),
                       Text(
-                        groupLabel ?? _groupLabel(account.group.name),
+                        subtitle ??
+                            groupLabel ??
+                            _groupLabel(account.group.name),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         softWrap: false,
@@ -77,7 +83,7 @@ class AccountCard extends StatelessWidget {
                   amountMinor: balanceMinor,
                   currency: currency,
                   color: balanceMinor < 0 ? AppColors.danger : null,
-                  fontSize: 19,
+                  fontSize: balanceFontSize,
                   fontWeight: FontWeight.w700,
                 ),
               ],
