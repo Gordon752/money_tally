@@ -862,6 +862,45 @@ void main() {
     expect(find.text('Add transaction'), findsOneWidget);
   });
 
+  testWidgets('transaction category picker can create a category', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('transaction-category-picker')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New category...'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add category'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'Road Supplies');
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      dataStore.categories.any((category) => category.name == 'Road Supplies'),
+      isTrue,
+    );
+    expect(find.text('Road Supplies'), findsOneWidget);
+  });
+
   testWidgets('add transaction dialog saves entered date', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(
