@@ -4714,6 +4714,8 @@ Future<void> showAccountDialog(BuildContext context) async {
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
+            alignment: Alignment.topCenter,
+            insetPadding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
             title: const Text('Add account'),
             content: SizedBox(
               width: 420,
@@ -4732,34 +4734,29 @@ Future<void> showAccountDialog(BuildContext context) async {
                   const SizedBox(height: 12),
                   DialogFieldGroup(
                     label: 'Type',
-                    child: LayoutBuilder(
-                      builder: (context, constraints) =>
-                          PopupMenuButton<AccountType>(
-                            constraints: BoxConstraints.tightFor(
-                              width: constraints.maxWidth,
-                            ),
-                            position: PopupMenuPosition.under,
-                            offset: const Offset(0, 4),
-                            borderRadius: BorderRadius.circular(AppRadii.card),
-                            itemBuilder: (context) => [
-                              for (final item in AccountType.values)
-                                PopupMenuItem(
-                                  value: item,
-                                  child: Text(accountTypeLabel(item)),
-                                ),
-                            ],
-                            onSelected: (value) =>
-                                setDialogState(() => type = value),
-                            child: InputDecorator(
-                              decoration: dialogFieldDecoration(),
-                              child: Row(
-                                children: [
-                                  Expanded(child: Text(accountTypeLabel(type))),
-                                  const Icon(Icons.arrow_drop_down),
-                                ],
-                              ),
-                            ),
-                          ),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      onTap: () async {
+                        FocusManager.instance.primaryFocus?.unfocus();
+                        final selectedType = await showAccountTypePicker(
+                          context,
+                          selected: type,
+                        );
+                        if (selectedType != null) {
+                          setDialogState(() => type = selectedType);
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: dialogFieldDecoration(),
+                        child: Row(
+                          children: [
+                            Icon(accountIcon(type), color: AppTheme.accent),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(child: Text(accountTypeLabel(type))),
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                   AnimatedSwitcher(
@@ -7256,6 +7253,50 @@ int? parseOptionalCents(String value) {
   final parsed = double.tryParse(cleaned);
   if (parsed == null) return null;
   return (parsed * 100).round();
+}
+
+Future<AccountType?> showAccountTypePicker(
+  BuildContext context, {
+  required AccountType selected,
+}) {
+  return showModalBottomSheet<AccountType>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              0,
+              AppSpacing.md,
+              AppSpacing.xs,
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Account type',
+                style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+          for (final type in AccountType.values)
+            ListTile(
+              leading: Icon(accountIcon(type), color: AppTheme.accent),
+              title: Text(accountTypeLabel(type)),
+              trailing: type == selected
+                  ? const Icon(Icons.check, color: AppTheme.accent)
+                  : null,
+              onTap: () => Navigator.pop(sheetContext, type),
+            ),
+          const SizedBox(height: AppSpacing.xs),
+        ],
+      ),
+    ),
+  );
 }
 
 int? optionalPositiveMinor(int value) => value > 0 ? value : null;
