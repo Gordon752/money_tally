@@ -2341,9 +2341,9 @@ String ledgerDateFilterLabel(LedgerDateFilter filter) {
 
 Future<void> showTransactionOptions(
   BuildContext context,
-  String transactionId,
-  {Set<String>? allowedActions},
-) async {
+  String transactionId, {
+  Set<String>? allowedActions,
+}) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final transaction = dataStore.transactions.firstWhere(
     (item) => item.id == transactionId,
