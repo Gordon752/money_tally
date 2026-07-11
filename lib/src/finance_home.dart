@@ -4732,41 +4732,90 @@ Future<void> showAccountDialog(BuildContext context) async {
                   const SizedBox(height: 12),
                   DialogFieldGroup(
                     label: 'Type',
-                    child: DropdownButtonFormField<AccountType>(
-                      initialValue: type,
-                      decoration: dialogFieldDecoration(),
-                      items: [
-                        for (final item in AccountType.values)
-                          DropdownMenuItem(
-                            value: item,
-                            child: Text(accountTypeLabel(item)),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) =>
+                          PopupMenuButton<AccountType>(
+                            constraints: BoxConstraints.tightFor(
+                              width: constraints.maxWidth,
+                            ),
+                            position: PopupMenuPosition.under,
+                            offset: const Offset(0, 4),
+                            borderRadius: BorderRadius.circular(AppRadii.card),
+                            itemBuilder: (context) => [
+                              for (final item in AccountType.values)
+                                PopupMenuItem(
+                                  value: item,
+                                  child: Text(accountTypeLabel(item)),
+                                ),
+                            ],
+                            onSelected: (value) =>
+                                setDialogState(() => type = value),
+                            child: InputDecorator(
+                              decoration: dialogFieldDecoration(),
+                              child: Row(
+                                children: [
+                                  Expanded(child: Text(accountTypeLabel(type))),
+                                  const Icon(Icons.arrow_drop_down),
+                                ],
+                              ),
+                            ),
                           ),
-                      ],
-                      onChanged: (value) =>
-                          setDialogState(() => type = value ?? type),
                     ),
                   ),
-                  if (type == AccountType.creditCard) ...[
-                    const SizedBox(height: 12),
-                    AmountEntryField(
-                      fieldKey: const ValueKey('account-credit-limit'),
-                      initialMinor: creditLimitMinor,
-                      currency: dataStore.preferences.currency,
-                      labelText: 'Credit limit',
-                      onChanged: (value) => creditLimitMinor = value.abs(),
+                  AnimatedSwitcher(
+                    duration: MediaQuery.of(context).disableAnimations
+                        ? Duration.zero
+                        : const Duration(milliseconds: 165),
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: SizeTransition(
+                        sizeFactor: animation,
+                        axisAlignment: -1,
+                        child: child,
+                      ),
                     ),
-                  ],
-                  if (type == AccountType.loan) ...[
-                    const SizedBox(height: 12),
-                    AmountEntryField(
-                      fieldKey: const ValueKey('account-original-loan-amount'),
-                      initialMinor: originalLoanAmountMinor,
-                      currency: dataStore.preferences.currency,
-                      labelText: 'Original loan amount',
-                      onChanged: (value) =>
-                          originalLoanAmountMinor = value.abs(),
-                    ),
-                  ],
+                    child: type == AccountType.creditCard
+                        ? Padding(
+                            key: const ValueKey('credit-limit-field'),
+                            padding: const EdgeInsets.only(top: 12),
+                            child: DialogFieldGroup(
+                              label: 'Credit limit',
+                              child: AmountEntryField(
+                                fieldKey: const ValueKey(
+                                  'account-credit-limit',
+                                ),
+                                initialMinor: creditLimitMinor,
+                                currency: dataStore.preferences.currency,
+                                labelText: null,
+                                keyboardType: TextInputType.number,
+                                onChanged: (value) =>
+                                    creditLimitMinor = value.abs(),
+                              ),
+                            ),
+                          )
+                        : type == AccountType.loan
+                        ? Padding(
+                            key: const ValueKey('loan-amount-field'),
+                            padding: const EdgeInsets.only(top: 12),
+                            child: DialogFieldGroup(
+                              label: 'Original loan amount',
+                              child: AmountEntryField(
+                                fieldKey: const ValueKey(
+                                  'account-original-loan-amount',
+                                ),
+                                initialMinor: originalLoanAmountMinor,
+                                currency: dataStore.preferences.currency,
+                                labelText: null,
+                                keyboardType: TextInputType.number,
+                                onChanged: (value) =>
+                                    originalLoanAmountMinor = value.abs(),
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(
+                            key: ValueKey('no-account-extra-field'),
+                          ),
+                  ),
                   const SizedBox(height: 12),
                   DialogFieldGroup(
                     label: 'Opening balance',
@@ -4775,6 +4824,7 @@ Future<void> showAccountDialog(BuildContext context) async {
                       currency: dataStore.preferences.currency,
                       labelText: null,
                       allowNegative: true,
+                      keyboardType: TextInputType.number,
                       onChanged: (value) => openingBalanceCents = value,
                     ),
                   ),
