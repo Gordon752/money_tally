@@ -1064,22 +1064,35 @@ void main() {
     expect(find.text('Rent'), findsOneWidget);
   });
 
-  testWidgets('account long press can edit account name', (tester) async {
+  testWidgets('account long press edits a v2-only account', (tester) async {
     final legacyStore = FinanceStore.seeded();
-    final dataSet = const V1SnapshotMigrator().migrate(
+    final migrated = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
     );
+    final dataSet = migrated.copyWith(
+      accounts: [
+        ...migrated.accounts,
+        v2_account.AccountRecord(
+          id: 'cloud-only',
+          name: 'Cloud Only',
+          type: v2_account.AccountType.checking,
+          openingBalanceMinor: 0,
+          sync: v2_sync.SyncMetadata.fresh(),
+        ),
+      ],
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
       MoneyTallyApp(
         store: legacyStore,
-        dataStore: FinanceDataStore(dataSet: dataSet),
+        dataStore: dataStore,
       ),
     );
 
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
-    await tester.longPress(find.text('Checking'));
+    await tester.longPress(find.text('Cloud Only'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
@@ -1088,7 +1101,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Main Checking'), findsOneWidget);
-    expect(legacyStore.accountById('checking').name, 'Main Checking');
+    expect(dataStore.accountById('cloud-only').name, 'Main Checking');
   });
 
   testWidgets('account edit can toggle balance inclusion flags', (
