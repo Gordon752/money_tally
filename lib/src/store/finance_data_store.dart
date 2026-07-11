@@ -668,6 +668,7 @@ class FinanceDataStore extends ChangeNotifier {
     required int amountMinor,
     String note = '',
     List<TransactionSplitLine> splitLines = const [],
+    String? scheduledTransactionId,
   }) async {
     final transaction = TransactionRecord(
       id: _newId('txn'),
@@ -679,6 +680,7 @@ class FinanceDataStore extends ChangeNotifier {
       amountMinor: amountMinor.abs(),
       note: note,
       splitLines: splitLines,
+      scheduledTransactionId: scheduledTransactionId,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
     await saveTransaction(transaction);
@@ -692,6 +694,7 @@ class FinanceDataStore extends ChangeNotifier {
     required String payee,
     required int amountMinor,
     String note = '',
+    String? scheduledTransactionId,
   }) async {
     final transaction = TransactionRecord(
       id: _newId('txn'),
@@ -702,6 +705,7 @@ class FinanceDataStore extends ChangeNotifier {
       payee: payee,
       amountMinor: amountMinor.abs(),
       note: note,
+      scheduledTransactionId: scheduledTransactionId,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
     await saveTransaction(transaction);
@@ -715,6 +719,7 @@ class FinanceDataStore extends ChangeNotifier {
     required String payee,
     required int amountMinor,
     String note = '',
+    String? scheduledTransactionId,
   }) async {
     final transaction = TransactionRecord(
       id: _newId('txn'),
@@ -725,6 +730,7 @@ class FinanceDataStore extends ChangeNotifier {
       payee: payee,
       amountMinor: amountMinor.abs(),
       note: note,
+      scheduledTransactionId: scheduledTransactionId,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
     await saveTransaction(transaction);
@@ -824,32 +830,36 @@ class FinanceDataStore extends ChangeNotifier {
     final remote = remoteRepository;
     final currentUserId = userId;
     if (remote != null && currentUserId != null) {
-      for (final account in accounts) {
-        await remote.saveAccount(userId: currentUserId, account: account);
-      }
-      if (category != null) {
-        await remote.saveCategory(userId: currentUserId, category: category);
-      }
-      if (transaction != null) {
-        await remote.saveTransaction(
-          userId: currentUserId,
-          transaction: transaction,
-        );
-      }
-      if (scheduledTransaction != null) {
-        await remote.saveScheduledTransaction(
-          userId: currentUserId,
-          scheduledTransaction: scheduledTransaction,
-        );
-      }
-      if (budget != null) {
-        await remote.saveBudget(userId: currentUserId, budget: budget);
-      }
-      if (preferences != null) {
-        await remote.savePreferences(
-          userId: currentUserId,
-          preferences: preferences,
-        );
+      try {
+        for (final account in accounts) {
+          await remote.saveAccount(userId: currentUserId, account: account);
+        }
+        if (category != null) {
+          await remote.saveCategory(userId: currentUserId, category: category);
+        }
+        if (transaction != null) {
+          await remote.saveTransaction(
+            userId: currentUserId,
+            transaction: transaction,
+          );
+        }
+        if (scheduledTransaction != null) {
+          await remote.saveScheduledTransaction(
+            userId: currentUserId,
+            scheduledTransaction: scheduledTransaction,
+          );
+        }
+        if (budget != null) {
+          await remote.saveBudget(userId: currentUserId, budget: budget);
+        }
+        if (preferences != null) {
+          await remote.savePreferences(
+            userId: currentUserId,
+            preferences: preferences,
+          );
+        }
+      } on Exception catch (error) {
+        debugPrint('Remote finance save failed; local change retained: $error');
       }
     }
   }
