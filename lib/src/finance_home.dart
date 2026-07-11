@@ -1855,7 +1855,6 @@ int compareTransactionsNewestFirst(
 }
 
 String ledgerDayContext(DateTime date) {
-  if (isSameDay(date, DateTime.now())) return 'Today';
   return switch (date.weekday) {
     DateTime.monday => 'Mon',
     DateTime.tuesday => 'Tue',
