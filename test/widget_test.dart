@@ -890,8 +890,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Add category'), findsOneWidget);
-    await tester.enterText(find.byType(TextField).last, 'Road Supplies');
-    await tester.tap(find.text('Save').last);
+    await tester.enterText(
+      find.byKey(const ValueKey('new-transaction-category-name')),
+      'Road Supplies',
+    );
+    await tester.tap(find.text('Add category'));
     await tester.pumpAndSettle();
 
     expect(
