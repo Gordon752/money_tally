@@ -73,14 +73,27 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    final notificationScheduler = LocalNotificationScheduler();
-    await notificationScheduler.initialize();
+    NotificationScheduler notificationScheduler =
+        const NoopNotificationScheduler();
+    try {
+      final localNotificationScheduler = LocalNotificationScheduler();
+      await localNotificationScheduler.initialize();
+      notificationScheduler = localNotificationScheduler;
+    } catch (error, stackTrace) {
+      debugPrint('Local notification initialization failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
     final legacyStore = await FinanceStore.load();
     final dataStore = await _loadV2StoreFromLegacy(
       legacyStore,
       notificationScheduler: notificationScheduler,
     );
-    await dataStore.refreshScheduledNotifications();
+    try {
+      await dataStore.refreshScheduledNotifications();
+    } catch (error, stackTrace) {
+      debugPrint('Scheduled notification refresh failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
     final mirror = LegacyV2StoreMirror(
       legacyStore: legacyStore,
       dataStore: dataStore,
