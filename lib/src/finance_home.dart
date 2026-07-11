@@ -891,6 +891,7 @@ class AccountGroupCard extends StatelessWidget {
     final progress = accountGroupProgress(context, store, group);
     final headerTextStyle = theme.textTheme.titleMedium?.copyWith(
       color: AppTheme.accentStrong,
+      fontSize: 19,
       fontWeight: FontWeight.w700,
     );
 
@@ -4720,6 +4721,7 @@ Future<void> showTransferDialog(
     return;
   }
 
+  final payeeOptions = savedPayees(dataStore);
   final payee = TextEditingController(text: transfer?.payee ?? 'Transfer');
   final date = TextEditingController(
     text: dateInput(transfer?.date ?? DateTime.now()),
@@ -4738,6 +4740,7 @@ Future<void> showTransferDialog(
           transfer?.transferAccountId != fromAccountId
       ? transfer!.transferAccountId!
       : accounts.firstWhere((account) => account.id != fromAccountId).id;
+  TransactionType? switchToType;
 
   final result =
       await showDialog<
@@ -4753,96 +4756,155 @@ Future<void> showTransferDialog(
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
-            title: Text(transfer == null ? 'Add transfer' : 'Edit transfer'),
+            title: Text(
+              transfer == null ? 'Add transaction' : 'Edit transaction',
+            ),
             content: SizedBox(
               width: 420,
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
-                      key: const ValueKey('transfer-payee'),
-                      controller: payee,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(labelText: 'Payee'),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      key: const ValueKey('transfer-date'),
-                      controller: date,
-                      readOnly: true,
-                      showCursor: false,
-                      enableInteractiveSelection: false,
-                      decoration: const InputDecoration(
-                        labelText: 'Date',
-                        hintText: 'M/D/YY',
-                      ),
-                      onTap: () async {
-                        FocusManager.instance.primaryFocus?.unfocus();
-                        final picked = await pickDateForField(
-                          context,
-                          parseDateInput(date.text, DateTime.now()),
-                        );
-                        if (picked != null) {
-                          date.text = dateInput(picked);
-                        }
-                        FocusManager.instance.primaryFocus?.unfocus();
+                    SegmentedButton<TransactionType>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: TransactionType.expense,
+                          label: Text('Expense'),
+                        ),
+                        ButtonSegment(
+                          value: TransactionType.income,
+                          label: Text('Income'),
+                        ),
+                        ButtonSegment(
+                          value: TransactionType.transfer,
+                          label: Text('Transfer'),
+                        ),
+                      ],
+                      selected: const {TransactionType.transfer},
+                      onSelectionChanged: (values) {
+                        final selectedType = values.first;
+                        if (selectedType == TransactionType.transfer) return;
+                        switchToType = selectedType;
+                        Navigator.pop(context);
                       },
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      key: const ValueKey('transfer-note'),
-                      controller: note,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(labelText: 'Note'),
-                      minLines: 1,
-                      maxLines: 3,
+                    DialogFieldGroup(
+                      label: 'Payee',
+                      child: TextField(
+                        key: const ValueKey('transfer-payee'),
+                        controller: payee,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: dialogFieldDecoration().copyWith(
+                          suffixIcon: payeeOptions.isEmpty
+                              ? null
+                              : PopupMenuButton<String>(
+                                  tooltip: 'Saved payees',
+                                  icon: const Icon(
+                                    Icons.history_outlined,
+                                    size: 20,
+                                  ),
+                                  onSelected: (value) => payee.text = value,
+                                  itemBuilder: (context) => [
+                                    for (final option in payeeOptions.take(12))
+                                      PopupMenuItem(
+                                        value: option,
+                                        child: Text(option),
+                                      ),
+                                  ],
+                                ),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    AmountEntryField(
-                      fieldKey: const ValueKey('transfer-amount'),
-                      initialMinor: amountMinor,
-                      currency: dataStore.preferences.currency,
-                      labelText: 'Amount',
-                      autofocus: transfer == null,
-                      onChanged: (value) => amountMinor = value,
+                    DialogFieldGroup(
+                      label: 'Date',
+                      child: TextField(
+                        key: const ValueKey('transfer-date'),
+                        controller: date,
+                        readOnly: true,
+                        showCursor: false,
+                        enableInteractiveSelection: false,
+                        decoration: dialogFieldDecoration(),
+                        onTap: () async {
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          final picked = await pickDateForField(
+                            context,
+                            parseDateInput(date.text, DateTime.now()),
+                          );
+                          if (picked != null) {
+                            date.text = dateInput(picked);
+                          }
+                          FocusManager.instance.primaryFocus?.unfocus();
+                        },
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: fromAccountId,
-                      decoration: const InputDecoration(labelText: 'From'),
-                      items: [
-                        for (final account in accounts)
-                          DropdownMenuItem(
-                            value: account.id,
-                            child: Text(account.name),
-                          ),
-                      ],
-                      onChanged: (value) => setDialogState(() {
-                        fromAccountId = value ?? fromAccountId;
-                        if (toAccountId == fromAccountId) {
-                          toAccountId = accounts
-                              .firstWhere(
-                                (account) => account.id != fromAccountId,
-                              )
-                              .id;
-                        }
-                      }),
+                    DialogFieldGroup(
+                      label: 'Note',
+                      child: TextField(
+                        key: const ValueKey('transfer-note'),
+                        controller: note,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: dialogFieldDecoration(),
+                        minLines: 1,
+                        maxLines: 3,
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: toAccountId,
-                      decoration: const InputDecoration(labelText: 'To'),
-                      items: [
-                        for (final account in accounts)
-                          if (account.id != fromAccountId)
+                    DialogFieldGroup(
+                      label: 'Amount',
+                      child: AmountEntryField(
+                        fieldKey: const ValueKey('transfer-amount'),
+                        initialMinor: amountMinor,
+                        currency: dataStore.preferences.currency,
+                        labelText: null,
+                        onChanged: (value) => amountMinor = value,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DialogFieldGroup(
+                      label: 'From',
+                      child: DropdownButtonFormField<String>(
+                        initialValue: fromAccountId,
+                        decoration: dialogFieldDecoration(),
+                        items: [
+                          for (final account in accounts)
                             DropdownMenuItem(
                               value: account.id,
                               child: Text(account.name),
                             ),
-                      ],
-                      onChanged: (value) => setDialogState(
-                        () => toAccountId = value ?? toAccountId,
+                        ],
+                        onChanged: (value) => setDialogState(() {
+                          fromAccountId = value ?? fromAccountId;
+                          if (toAccountId == fromAccountId) {
+                            toAccountId = accounts
+                                .firstWhere(
+                                  (account) => account.id != fromAccountId,
+                                )
+                                .id;
+                          }
+                        }),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DialogFieldGroup(
+                      label: 'To',
+                      child: DropdownButtonFormField<String>(
+                        initialValue: toAccountId,
+                        decoration: dialogFieldDecoration(),
+                        items: [
+                          for (final account in accounts)
+                            if (account.id != fromAccountId)
+                              DropdownMenuItem(
+                                value: account.id,
+                                child: Text(account.name),
+                              ),
+                        ],
+                        onChanged: (value) => setDialogState(
+                          () => toAccountId = value ?? toAccountId,
+                        ),
                       ),
                     ),
                   ],
@@ -4872,6 +4934,15 @@ Future<void> showTransferDialog(
         ),
       );
 
+  if (switchToType != null && context.mounted) {
+    await showTransactionDialog(
+      context,
+      initialIsExpense: switchToType == TransactionType.expense,
+      initialAccountId: fromAccountId,
+      transaction: transfer,
+    );
+    return;
+  }
   if (result == null) return;
   if (transfer == null) {
     await dataStore.addTransfer(
@@ -5535,6 +5606,8 @@ Future<void> showTransactionDialog(
       : activeAccounts.first.id;
   var isExpense =
       transaction?.type == TransactionType.expense ||
+      (transaction?.type == TransactionType.transfer &&
+          (initialIsExpense ?? true)) ||
       (transaction == null &&
           (initialIsExpense ?? isExpenseDefault(dataStore.preferences)));
   var categoryId =
