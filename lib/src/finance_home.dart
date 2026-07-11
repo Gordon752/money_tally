@@ -973,12 +973,17 @@ class AccountGroupCard extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Icon(
-                        isCollapsed
-                            ? Icons.arrow_right_rounded
-                            : Icons.arrow_drop_down_rounded,
-                        color: theme.colorScheme.onSurfaceVariant,
-                        size: 24,
+                      AnimatedRotation(
+                        turns: isCollapsed ? -0.25 : 0,
+                        duration: MediaQuery.of(context).disableAnimations
+                            ? Duration.zero
+                            : const Duration(milliseconds: 160),
+                        curve: Curves.easeOutCubic,
+                        child: Icon(
+                          Icons.arrow_drop_down_rounded,
+                          color: theme.colorScheme.onSurfaceVariant,
+                          size: 24,
+                        ),
                       ),
                       const SizedBox(width: AppSpacing.xs),
                       Expanded(
@@ -1015,42 +1020,69 @@ class AccountGroupCard extends StatelessWidget {
                 ),
               ),
             ),
-            if (progress != null && !isCollapsed) ...[
-              const SizedBox(height: AppSpacing.xs),
-              progress,
-            ],
-            if (!isCollapsed) ...[
-              const SizedBox(height: AppSpacing.xs),
-              Divider(
-                height: 1,
-                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
-              ),
-              for (var index = 0; index < accounts.length; index++)
-                AccountCard(
-                  account: accounts[index],
-                  balanceMinor: store.balanceForAccount(accounts[index].id),
-                  currency: store.preferences.currency,
-                  subtitle: lastAccountActivitySubtitle(
-                    store,
-                    accounts[index].id,
-                  ),
-                  balanceFontSize: 17,
-                  framed: false,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: AppSpacing.sm,
-                  ),
-                  leading: Icon(
-                    accountGroupIcon(group.name),
-                    color: AppTheme.accent,
-                    size: 22,
-                  ),
-                  onTap: onOpenLedgerForAccount == null
-                      ? null
-                      : () => onOpenLedgerForAccount!(accounts[index].id),
-                  onLongPress: () =>
-                      showAccountOptions(context, accounts[index].id),
-                ),
-            ],
+            AnimatedSize(
+              duration: MediaQuery.of(context).disableAnimations
+                  ? Duration.zero
+                  : const Duration(milliseconds: 175),
+              reverseDuration: MediaQuery.of(context).disableAnimations
+                  ? Duration.zero
+                  : const Duration(milliseconds: 145),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: isCollapsed
+                  ? const SizedBox.shrink()
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (progress != null) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          progress,
+                        ],
+                        const SizedBox(height: AppSpacing.xs),
+                        Divider(
+                          height: 1,
+                          color: theme.colorScheme.outlineVariant.withValues(
+                            alpha: 0.55,
+                          ),
+                        ),
+                        for (
+                          var index = 0;
+                          index < accounts.length;
+                          index++
+                        )
+                          AccountCard(
+                            account: accounts[index],
+                            balanceMinor: store.balanceForAccount(
+                              accounts[index].id,
+                            ),
+                            currency: store.preferences.currency,
+                            subtitle: lastAccountActivitySubtitle(
+                              store,
+                              accounts[index].id,
+                            ),
+                            balanceFontSize: 17,
+                            framed: false,
+                            padding: const EdgeInsets.symmetric(
+                              vertical: AppSpacing.sm,
+                            ),
+                            leading: Icon(
+                              accountGroupIcon(group.name),
+                              color: AppTheme.accent,
+                              size: 22,
+                            ),
+                            onTap: onOpenLedgerForAccount == null
+                                ? null
+                                : () => onOpenLedgerForAccount!(
+                                    accounts[index].id,
+                                  ),
+                            onLongPress: () => showAccountOptions(
+                              context,
+                              accounts[index].id,
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
           ],
         ),
       ),
