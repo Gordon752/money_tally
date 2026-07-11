@@ -977,15 +977,7 @@ class AccountGroupCard extends StatelessWidget {
                 height: 1,
                 color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
               ),
-              for (var index = 0; index < accounts.length; index++) ...[
-                if (index > 0)
-                  Divider(
-                    height: 1,
-                    indent: 30 + AppSpacing.sm,
-                    color: theme.colorScheme.outlineVariant.withValues(
-                      alpha: 0.35,
-                    ),
-                  ),
+              for (var index = 0; index < accounts.length; index++)
                 AccountCard(
                   account: accounts[index],
                   balanceMinor: store.balanceForAccount(accounts[index].id),
@@ -1010,7 +1002,6 @@ class AccountGroupCard extends StatelessWidget {
                   onLongPress: () =>
                       showAccountOptions(context, accounts[index].id),
                 ),
-              ],
             ],
           ],
         ),
