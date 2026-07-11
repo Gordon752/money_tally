@@ -5384,67 +5384,89 @@ Future<void> showScheduledTransactionDialog(
                               ),
                             ),
                       ),
-                      if (alertPreference ==
-                          v2_scheduled.AlertPreference.custom) ...[
-                        const SizedBox(height: 12),
-                        DialogFieldGroup(
-                          label: 'Custom alert time',
-                          helperText: 'Tap to choose a time',
-                          child: TextField(
-                            key: const ValueKey('scheduled-alert-time'),
-                            controller: customAlertTime,
-                            readOnly: true,
-                            showCursor: false,
-                            enableInteractiveSelection: false,
-                            decoration: dialogFieldDecoration().copyWith(
-                              suffixIcon: const Icon(
-                                Icons.schedule_outlined,
-                              ),
-                            ),
-                            onTap: () async {
-                              FocusManager.instance.primaryFocus?.unfocus();
-                              final minutes = parseAlertTimeMinutes(
-                                customAlertTime.text,
-                                9 * 60,
-                              );
-                              final picked = await showTimePicker(
-                                context: context,
-                                initialTime: TimeOfDay(
-                                  hour: minutes ~/ 60,
-                                  minute: minutes % 60,
-                                ),
-                                initialEntryMode: TimePickerEntryMode.dial,
-                                builder: (context, child) => MediaQuery(
-                                  data: MediaQuery.of(context).copyWith(
-                                    alwaysUse24HourFormat: false,
+                      AnimatedSize(
+                        duration: MediaQuery.of(context).disableAnimations
+                            ? Duration.zero
+                            : const Duration(milliseconds: 165),
+                        reverseDuration:
+                            MediaQuery.of(context).disableAnimations
+                            ? Duration.zero
+                            : const Duration(milliseconds: 140),
+                        curve: Curves.easeOutCubic,
+                        alignment: Alignment.topCenter,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (alertPreference ==
+                                v2_scheduled.AlertPreference.custom) ...[
+                              const SizedBox(height: 12),
+                              DialogFieldGroup(
+                                label: 'Custom alert time',
+                                helperText: 'Tap to choose a time',
+                                child: TextField(
+                                  key: const ValueKey(
+                                    'scheduled-alert-time',
                                   ),
-                                  child: child!,
+                                  controller: customAlertTime,
+                                  readOnly: true,
+                                  showCursor: false,
+                                  enableInteractiveSelection: false,
+                                  decoration: dialogFieldDecoration().copyWith(
+                                    suffixIcon: const Icon(
+                                      Icons.schedule_outlined,
+                                    ),
+                                  ),
+                                  onTap: () async {
+                                    FocusManager.instance.primaryFocus
+                                        ?.unfocus();
+                                    final minutes = parseAlertTimeMinutes(
+                                      customAlertTime.text,
+                                      9 * 60,
+                                    );
+                                    final picked = await showTimePicker(
+                                      context: context,
+                                      initialTime: TimeOfDay(
+                                        hour: minutes ~/ 60,
+                                        minute: minutes % 60,
+                                      ),
+                                      initialEntryMode:
+                                          TimePickerEntryMode.dial,
+                                      builder: (context, child) => MediaQuery(
+                                        data: MediaQuery.of(context).copyWith(
+                                          alwaysUse24HourFormat: false,
+                                        ),
+                                        child: child!,
+                                      ),
+                                    );
+                                    if (picked != null) {
+                                      customAlertTime.text = alertTimeInput(
+                                        picked.hour * 60 + picked.minute,
+                                      );
+                                    }
+                                    FocusManager.instance.primaryFocus
+                                        ?.unfocus();
+                                  },
                                 ),
-                              );
-                              if (picked != null) {
-                                customAlertTime.text = alertTimeInput(
-                                  picked.hour * 60 + picked.minute,
-                                );
-                              }
-                              FocusManager.instance.primaryFocus?.unfocus();
-                            },
-                          ),
+                              ),
+                            ],
+                            if (alertPreference !=
+                                v2_scheduled.AlertPreference.none) ...[
+                              const SizedBox(height: 12),
+                              CheckboxListTile(
+                                value: repeatAlertUntilResolved,
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text(
+                                  'Repeat alert until marked paid/skipped',
+                                ),
+                                onChanged: (value) => setDialogState(
+                                  () => repeatAlertUntilResolved =
+                                      value ?? false,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
-                      if (alertPreference !=
-                          v2_scheduled.AlertPreference.none) ...[
-                        const SizedBox(height: 12),
-                        CheckboxListTile(
-                          value: repeatAlertUntilResolved,
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text(
-                            'Repeat alert until marked paid/skipped',
-                          ),
-                          onChanged: (value) => setDialogState(
-                            () => repeatAlertUntilResolved = value ?? false,
-                          ),
-                        ),
-                      ],
+                      ),
                     ],
                   ),
                 ),
