@@ -5545,6 +5545,13 @@ Future<void> showScheduledTransactionDialog(
     return;
   }
 
+  if (result.alertPreference != v2_scheduled.AlertPreference.none &&
+      !dataStore.preferences.notificationsEnabled) {
+    await dataStore.savePreferences(
+      dataStore.preferences.copyWith(notificationsEnabled: true),
+    );
+  }
+
   final scheduledTransaction = existing == null
       ? v2_scheduled.ScheduledTransactionRecord(
           id: 'sched_${DateTime.now().microsecondsSinceEpoch}',
