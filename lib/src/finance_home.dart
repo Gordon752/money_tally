@@ -39,6 +39,8 @@ class _FinanceHomeState extends State<FinanceHome> {
   var selected = FinanceSection.dashboard;
   String? ledgerAccountFilterId;
   var _appliedLaunchPreference = false;
+  var _isScrolling = false;
+  Timer? _scrollSettleTimer;
 
   @override
   void didChangeDependencies() {
@@ -51,6 +53,28 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   @override
+  void dispose() {
+    _scrollSettleTimer?.cancel();
+    super.dispose();
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    if (notification is ScrollStartNotification) {
+      _scrollSettleTimer?.cancel();
+      if (!_isScrolling) setState(() => _isScrolling = true);
+    } else if (notification is ScrollEndNotification) {
+      _scrollSettleTimer?.cancel();
+      _scrollSettleTimer = Timer(const Duration(milliseconds: 120), () {
+        if (mounted && _isScrolling) {
+          setState(() => _isScrolling = false);
+        }
+      });
+    }
+    return false;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.sizeOf(context).width >= 880;
     final dataStore = FinanceDataStoreScope.watch(context);
@@ -60,10 +84,31 @@ class _FinanceHomeState extends State<FinanceHome> {
     return Scaffold(
       body: SafeArea(child: isWide ? _wideLayout() : _compactLayout()),
       floatingActionButton: selected.supportsFloatingAdd
-          ? MoneyTallyFloatingActionButton(
-              tooltip: 'Add',
-              onPressed: () => showFloatingAddMenu(context),
-              child: const Icon(Icons.add),
+          ? Builder(
+              builder: (context) {
+                final reduceMotion = MediaQuery.of(context).disableAnimations;
+                final duration = reduceMotion
+                    ? Duration.zero
+                    : const Duration(milliseconds: 180);
+                return IgnorePointer(
+                  ignoring: _isScrolling,
+                  child: AnimatedScale(
+                    scale: _isScrolling ? 0.78 : 1,
+                    duration: duration,
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: _isScrolling ? 0.18 : 1,
+                      duration: duration,
+                      curve: Curves.easeOutCubic,
+                      child: MoneyTallyFloatingActionButton(
+                        tooltip: 'Add',
+                        onPressed: () => showFloatingAddMenu(context),
+                        child: const Icon(Icons.add),
+                      ),
+                    ),
+                  ),
+                );
+              },
             )
           : null,
       floatingActionButtonLocation:
@@ -134,8 +179,10 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   Widget _sectionBody() {
-    return CustomScrollView(
-      slivers: [
+    return NotificationListener<ScrollNotification>(
+      onNotification: _handleScrollNotification,
+      child: CustomScrollView(
+        slivers: [
         SliverToBoxAdapter(
           child: PageHeader(
             section: selected,
@@ -176,7 +223,8 @@ class _FinanceHomeState extends State<FinanceHome> {
             },
           ),
         ),
-      ],
+        ],
+      ),
     );
   }
 }
