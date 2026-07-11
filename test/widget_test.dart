@@ -246,14 +246,28 @@ void main() {
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Collapse Banking'));
+    final checkingCard = tester.widget<AccountCard>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is AccountCard && widget.account.name == 'Checking',
+      ),
+    );
+    expect(checkingCard.subtitle, contains(' · '));
+    expect(checkingCard.subtitle, isNot('Banking'));
+    expect(checkingCard.balanceFontSize, 17);
+
+    await tester.tap(
+      find.byKey(const ValueKey('account-group-banking')),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Banking'), findsWidgets);
     expect(find.text('Checking'), findsNothing);
     expect(find.byTooltip('Expand Banking'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Expand Banking'));
+    await tester.tap(
+      find.byKey(const ValueKey('account-group-banking')),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Checking'), findsOneWidget);
