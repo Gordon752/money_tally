@@ -585,6 +585,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Edit transfer'), findsOneWidget);
+    final transferAmountField = tester.widget<TextField>(
+      find.byKey(const ValueKey('transfer-amount')),
+    );
+    expect(transferAmountField.autofocus, isFalse);
     await tester.enterText(
       find.byKey(const ValueKey('transfer-payee')),
       'Cash refill',
@@ -1289,6 +1293,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Adjust Balance'));
     await tester.pumpAndSettle();
+
+    final adjustmentField = tester.widget<TextField>(
+      find.byKey(const ValueKey('account-adjust-balance')),
+    );
+    expect(adjustmentField.autofocus, isTrue);
+    expect(adjustmentField.keyboardType, TextInputType.number);
 
     await tester.enterText(
       find.byKey(const ValueKey('account-adjust-balance')),
