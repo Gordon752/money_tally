@@ -877,6 +877,7 @@ class AccountGroupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final isCollapsed = store.preferences.collapsedAccountGroupNames.contains(
       group.name,
     );
@@ -888,122 +889,155 @@ class AccountGroupCard extends StatelessWidget {
           (total, account) => total + store.balanceForAccount(account.id),
         );
     final progress = accountGroupProgress(context, store, group);
+    final headerTextStyle = theme.textTheme.titleMedium?.copyWith(
+      color: AppTheme.accentStrong,
+      fontWeight: FontWeight.w700,
+    );
 
     return AppCard(
       padding: EdgeInsets.zero,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.sm,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              GestureDetector(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.sm,
+          AppSpacing.md,
+          AppSpacing.sm,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Tooltip(
+              message: isCollapsed ? 'Expand $label' : 'Collapse $label',
+              child: InkWell(
                 key: ValueKey('account-group-${group.name}'),
-                behavior: HitTestBehavior.opaque,
+                borderRadius: BorderRadius.circular(AppRadii.card),
+                onTap: () => toggleAccountGroupCollapsed(
+                  context,
+                  group,
+                  isCollapsed: isCollapsed,
+                ),
                 onLongPress: () => showAccountGroupActions(context, group),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: AppTheme.accent.withValues(alpha: 0.09),
-                        borderRadius: BorderRadius.circular(AppRadii.card),
-                      ),
-                      child: Icon(
-                        accountGroupIcon(group.name),
-                        color: AppTheme.accent,
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: AppTheme.accentStrong,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    MoneyText(
-                      amountMinor: balanceMinor,
-                      currency: store.preferences.currency,
-                      color: balanceMinor < 0 ? AppColors.danger : null,
-                      fontSize: 19,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    IconButton(
-                      tooltip: isCollapsed
-                          ? 'Expand $label'
-                          : 'Collapse $label',
-                      onPressed: () => toggleAccountGroupCollapsed(
-                        context,
-                        group,
-                        isCollapsed: isCollapsed,
-                      ),
-                      icon: Icon(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: AppSpacing.xs,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(
                         isCollapsed
-                            ? Icons.keyboard_arrow_right
-                            : Icons.keyboard_arrow_down,
+                            ? Icons.arrow_right_rounded
+                            : Icons.arrow_drop_down_rounded,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        size: 24,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: AppSpacing.xs),
+                      Expanded(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: headerTextStyle,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Container(
+                        height: 28,
+                        constraints: const BoxConstraints(minWidth: 112),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        alignment: Alignment.centerRight,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          border: Border.all(
+                            color: theme.colorScheme.outlineVariant,
+                          ),
+                          borderRadius: BorderRadius.circular(AppRadii.pill),
+                        ),
+                        child: MoneyText(
+                          amountMinor: balanceMinor,
+                          currency: store.preferences.currency,
+                          color: balanceMinor < 0 ? AppColors.danger : null,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              if (progress != null && !isCollapsed) ...[
-                const SizedBox(height: AppSpacing.xs),
-                progress,
-              ],
-              if (!isCollapsed) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Divider(
-                  height: 1,
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.outlineVariant.withValues(alpha: 0.55),
-                ),
-                for (var index = 0; index < accounts.length; index++) ...[
-                  AccountCard(
-                    account: accounts[index],
-                    balanceMinor: store.balanceForAccount(accounts[index].id),
-                    currency: store.preferences.currency,
-                    groupLabel: label,
-                    framed: false,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.xs,
+            ),
+            if (progress != null && !isCollapsed) ...[
+              const SizedBox(height: AppSpacing.xs),
+              progress,
+            ],
+            if (!isCollapsed) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Divider(
+                height: 1,
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+              ),
+              for (var index = 0; index < accounts.length; index++) ...[
+                if (index > 0)
+                  Divider(
+                    height: 1,
+                    indent: 30 + AppSpacing.sm,
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.35,
                     ),
-                    leading: Icon(
-                      accountGroupIcon(group.name),
-                      color: AppTheme.accent,
-                      size: 22,
-                    ),
-                    onTap: onOpenLedgerForAccount == null
-                        ? null
-                        : () => onOpenLedgerForAccount!(accounts[index].id),
-                    onLongPress: () =>
-                        showAccountOptions(context, accounts[index].id),
                   ),
-                ],
+                AccountCard(
+                  account: accounts[index],
+                  balanceMinor: store.balanceForAccount(accounts[index].id),
+                  currency: store.preferences.currency,
+                  subtitle: lastAccountActivitySubtitle(
+                    store,
+                    accounts[index].id,
+                  ),
+                  balanceFontSize: 17,
+                  framed: false,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: AppSpacing.sm,
+                  ),
+                  leading: Icon(
+                    accountGroupIcon(group.name),
+                    color: AppTheme.accent,
+                    size: 22,
+                  ),
+                  onTap: onOpenLedgerForAccount == null
+                      ? null
+                      : () => onOpenLedgerForAccount!(accounts[index].id),
+                  onLongPress: () =>
+                      showAccountOptions(context, accounts[index].id),
+                ),
               ],
             ],
-          ),
+          ],
         ),
       ),
     );
   }
+}
+
+String lastAccountActivitySubtitle(
+  FinanceDataStore store,
+  String accountId,
+) {
+  final activity = store.transactions
+      .where(
+        (transaction) =>
+            !transaction.isDeleted &&
+            (transaction.accountId == accountId ||
+                transaction.transferAccountId == accountId),
+      )
+      .toList(growable: false)
+    ..sort((a, b) => b.date.compareTo(a.date));
+  if (activity.isEmpty) return 'No transactions yet';
+
+  final latest = activity.first;
+  final payee = latest.payee.trim().isEmpty
+      ? transactionTypeLabel(latest.type)
+      : latest.payee.trim();
+  return '$payee · ${compactDate(latest.date)}';
 }
 
 Widget? accountGroupProgress(
