@@ -2563,12 +2563,15 @@ class ScheduledCalendarPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final markedDays = {
-      for (final item in scheduledTransactions)
-        if (item.nextDate.year == month.year &&
-            item.nextDate.month == month.month)
-          item.nextDate.day,
-    };
+    final transactionCountByDay = <int, int>{};
+    for (final item in scheduledTransactions) {
+      if (item.nextDate.year != month.year ||
+          item.nextDate.month != month.month) {
+        continue;
+      }
+      transactionCountByDay[item.nextDate.day] =
+          (transactionCountByDay[item.nextDate.day] ?? 0) + 1;
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
@@ -2597,10 +2600,13 @@ class ScheduledCalendarPreview extends StatelessWidget {
               IconButton(
                 tooltip: isCollapsed ? 'Expand calendar' : 'Collapse calendar',
                 onPressed: onToggleCollapsed,
-                icon: Icon(
-                  isCollapsed
-                      ? Icons.keyboard_arrow_down
-                      : Icons.keyboard_arrow_up,
+                icon: AnimatedRotation(
+                  turns: isCollapsed ? 0 : 0.5,
+                  duration: MediaQuery.of(context).disableAnimations
+                      ? Duration.zero
+                      : const Duration(milliseconds: 160),
+                  curve: Curves.easeOutCubic,
+                  child: const Icon(Icons.keyboard_arrow_down),
                 ),
               ),
             ],
@@ -2612,7 +2618,7 @@ class ScheduledCalendarPreview extends StatelessWidget {
                 : CrossFadeState.showFirst,
             firstChild: ScheduledCalendarGrid(
               month: month,
-              markedDays: markedDays,
+              transactionCountByDay: transactionCountByDay,
               selectedDate: selectedDate,
               onSelectDate: onSelectDate,
             ),
@@ -2627,14 +2633,14 @@ class ScheduledCalendarPreview extends StatelessWidget {
 class ScheduledCalendarGrid extends StatelessWidget {
   const ScheduledCalendarGrid({
     required this.month,
-    required this.markedDays,
+    required this.transactionCountByDay,
     required this.selectedDate,
     required this.onSelectDate,
     super.key,
   });
 
   final DateTime month;
-  final Set<int> markedDays;
+  final Map<int, int> transactionCountByDay;
   final DateTime? selectedDate;
   final ValueChanged<DateTime> onSelectDate;
 
@@ -2678,7 +2684,9 @@ class ScheduledCalendarGrid extends StatelessWidget {
                       child: ScheduledCalendarDayCell(
                         day: day,
                         month: month,
-                        markedDays: markedDays,
+                        transactionCount: day == null
+                            ? 0
+                            : transactionCountByDay[day] ?? 0,
                         isSelected:
                             selectedDate != null &&
                             selectedDate!.year == month.year &&
@@ -2700,7 +2708,7 @@ class ScheduledCalendarDayCell extends StatelessWidget {
   const ScheduledCalendarDayCell({
     required this.day,
     required this.month,
-    required this.markedDays,
+    required this.transactionCount,
     required this.isSelected,
     required this.onSelectDate,
     super.key,
@@ -2708,7 +2716,7 @@ class ScheduledCalendarDayCell extends StatelessWidget {
 
   final int? day;
   final DateTime month;
-  final Set<int> markedDays;
+  final int transactionCount;
   final bool isSelected;
   final ValueChanged<DateTime> onSelectDate;
 
@@ -2716,62 +2724,90 @@ class ScheduledCalendarDayCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (day == null) {
-      return const SizedBox(height: 36);
+      return const SizedBox(height: 48);
     }
-    final isMarked = markedDays.contains(day);
+    final isMarked = transactionCount > 0;
     return SizedBox(
-      height: 40,
+      height: 48,
       child: Center(
         child: InkWell(
           key: ValueKey(
             'scheduled-calendar-day-${month.year}-${month.month}-$day',
           ),
-          borderRadius: BorderRadius.circular(15),
+          borderRadius: BorderRadius.circular(18),
           onTap: () => onSelectDate(DateTime(month.year, month.month, day!)),
-          child: Container(
-            width: 30,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? AppTheme.accent
-                  : isMarked
-                  ? AppTheme.accent.withValues(alpha: 0.12)
-                  : null,
-              borderRadius: BorderRadius.circular(15),
-              border: isMarked && !isSelected
-                  ? Border.all(color: AppTheme.accent.withValues(alpha: 0.35))
-                  : null,
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+          child: SizedBox(
+            width: 40,
+            height: 44,
+            child: Stack(
+              clipBehavior: Clip.none,
               children: [
-                Text(
-                  '$day',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontWeight: isMarked || isSelected
-                        ? FontWeight.w900
-                        : FontWeight.w600,
-                    color: isSelected
-                        ? Colors.white
-                        : isMarked
-                        ? AppTheme.accent
-                        : null,
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppTheme.accent
+                          : isMarked
+                          ? AppTheme.accent.withValues(alpha: 0.10)
+                          : null,
+                      borderRadius: BorderRadius.circular(18),
+                      border: isMarked && !isSelected
+                          ? Border.all(
+                              color: AppTheme.accent.withValues(alpha: 0.30),
+                            )
+                          : null,
+                    ),
+                    child: Center(
+                      child: Text(
+                        '$day',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: isMarked || isSelected
+                              ? FontWeight.w900
+                              : FontWeight.w600,
+                          color: isSelected
+                              ? Colors.white
+                              : isMarked
+                              ? AppTheme.accent
+                              : null,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 1),
-                SizedBox(
-                  width: 4,
-                  height: 4,
-                  child: isMarked
-                      ? DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: isSelected ? Colors.white : AppTheme.accent,
-                            shape: BoxShape.circle,
-                          ),
-                        )
-                      : null,
-                ),
+                if (transactionCount > 0)
+                  Positioned(
+                    top: -3,
+                    right: -3,
+                    child: Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 17,
+                        minHeight: 17,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? theme.colorScheme.surface
+                            : AppTheme.accent,
+                        borderRadius: BorderRadius.circular(AppRadii.pill),
+                        border: Border.all(
+                          color: theme.colorScheme.surface,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Text(
+                        transactionCount > 99 ? '99+' : '$transactionCount',
+                        style: TextStyle(
+                          color: isSelected
+                              ? AppTheme.accent
+                              : theme.colorScheme.onPrimary,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
