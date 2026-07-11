@@ -43,18 +43,39 @@ class _FinanceHomeState extends State<FinanceHome> {
   Timer? _scrollSettleTimer;
 
   @override
+  void initState() {
+    super.initState();
+    scheduledNotificationLaunchPayload.addListener(
+      _openScheduledFromNotification,
+    );
+  }
+
+  void _openScheduledFromNotification() {
+    if (scheduledNotificationLaunchPayload.value == null) return;
+    scheduledNotificationLaunchPayload.value = null;
+    if (mounted) setState(() => selected = FinanceSection.scheduled);
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_appliedLaunchPreference) return;
     selected = financeSectionForLaunchScreen(
       FinanceDataStoreScope.read(context).preferences.launchScreen,
     );
+    if (scheduledNotificationLaunchPayload.value != null) {
+      scheduledNotificationLaunchPayload.value = null;
+      selected = FinanceSection.scheduled;
+    }
     _appliedLaunchPreference = true;
   }
 
   @override
   void dispose() {
     _scrollSettleTimer?.cancel();
+    scheduledNotificationLaunchPayload.removeListener(
+      _openScheduledFromNotification,
+    );
     super.dispose();
   }
 
@@ -4502,25 +4523,31 @@ Future<void> showEditAccountDialog(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextField(
-                    controller: name,
-                    decoration: const InputDecoration(labelText: 'Name'),
-                    textCapitalization: TextCapitalization.words,
-                    autofocus: true,
+                  DialogFieldGroup(
+                    label: 'Name',
+                    child: TextField(
+                      controller: name,
+                      decoration: dialogFieldDecoration(),
+                      textCapitalization: TextCapitalization.words,
+                      autofocus: true,
+                    ),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<v2_account.AccountType>(
-                    initialValue: type,
-                    decoration: const InputDecoration(labelText: 'Type'),
-                    items: [
-                      for (final item in v2_account.AccountType.values)
-                        DropdownMenuItem(
-                          value: item,
-                          child: Text(v2AccountTypeLabel(item)),
-                        ),
-                    ],
-                    onChanged: (value) =>
-                        setDialogState(() => type = value ?? type),
+                  DialogFieldGroup(
+                    label: 'Type',
+                    child: DropdownButtonFormField<v2_account.AccountType>(
+                      initialValue: type,
+                      decoration: dialogFieldDecoration(),
+                      items: [
+                        for (final item in v2_account.AccountType.values)
+                          DropdownMenuItem(
+                            value: item,
+                            child: Text(v2AccountTypeLabel(item)),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setDialogState(() => type = value ?? type),
+                    ),
                   ),
                   if (type == v2_account.AccountType.creditCard) ...[
                     const SizedBox(height: 12),
@@ -4690,25 +4717,31 @@ Future<void> showAccountDialog(BuildContext context) async {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextField(
-                    controller: name,
-                    decoration: const InputDecoration(labelText: 'Name'),
-                    textCapitalization: TextCapitalization.words,
-                    autofocus: true,
+                  DialogFieldGroup(
+                    label: 'Name',
+                    child: TextField(
+                      controller: name,
+                      decoration: dialogFieldDecoration(),
+                      textCapitalization: TextCapitalization.words,
+                      autofocus: true,
+                    ),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<AccountType>(
-                    initialValue: type,
-                    decoration: const InputDecoration(labelText: 'Type'),
-                    items: [
-                      for (final item in AccountType.values)
-                        DropdownMenuItem(
-                          value: item,
-                          child: Text(accountTypeLabel(item)),
-                        ),
-                    ],
-                    onChanged: (value) =>
-                        setDialogState(() => type = value ?? type),
+                  DialogFieldGroup(
+                    label: 'Type',
+                    child: DropdownButtonFormField<AccountType>(
+                      initialValue: type,
+                      decoration: dialogFieldDecoration(),
+                      items: [
+                        for (final item in AccountType.values)
+                          DropdownMenuItem(
+                            value: item,
+                            child: Text(accountTypeLabel(item)),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setDialogState(() => type = value ?? type),
+                    ),
                   ),
                   if (type == AccountType.creditCard) ...[
                     const SizedBox(height: 12),
@@ -4732,12 +4765,15 @@ Future<void> showAccountDialog(BuildContext context) async {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  AmountEntryField(
-                    initialMinor: openingBalanceCents,
-                    currency: dataStore.preferences.currency,
-                    labelText: 'Opening balance',
-                    allowNegative: true,
-                    onChanged: (value) => openingBalanceCents = value,
+                  DialogFieldGroup(
+                    label: 'Opening balance',
+                    child: AmountEntryField(
+                      initialMinor: openingBalanceCents,
+                      currency: dataStore.preferences.currency,
+                      labelText: null,
+                      allowNegative: true,
+                      onChanged: (value) => openingBalanceCents = value,
+                    ),
                   ),
                 ],
               ),
