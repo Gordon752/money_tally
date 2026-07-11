@@ -238,7 +238,14 @@ class _FinanceHomeState extends State<FinanceHome> {
           ),
           sliver: SliverToBoxAdapter(
             child: switch (selected) {
-              FinanceSection.dashboard => const DashboardView(),
+              FinanceSection.dashboard => DashboardView(
+                onViewLedger: () => setState(() {
+                  ledgerAccountFilterId = null;
+                  selected = FinanceSection.ledger;
+                }),
+                onViewBudgets: () =>
+                    setState(() => selected = FinanceSection.budgets),
+              ),
               FinanceSection.accounts => AccountsView(
                 onOpenLedgerForAccount: (accountId) => setState(() {
                   ledgerAccountFilterId = accountId;
@@ -572,7 +579,14 @@ InputDecoration dialogFieldDecoration({String? hintText}) {
 }
 
 class DashboardView extends StatelessWidget {
-  const DashboardView({super.key});
+  const DashboardView({
+    required this.onViewLedger,
+    required this.onViewBudgets,
+    super.key,
+  });
+
+  final VoidCallback onViewLedger;
+  final VoidCallback onViewBudgets;
 
   @override
   Widget build(BuildContext context) {
@@ -610,15 +624,17 @@ class DashboardView extends StatelessWidget {
               maxRows: 4,
               compact: true,
             ),
-            const BudgetPanel(
+            BudgetPanel(
               title: 'Budgets Preview',
-              maxRows: 3,
+              maxRows: 2,
               compact: true,
+              onViewAll: onViewBudgets,
             ),
-            const RecentTransactionsPanel(
+            RecentTransactionsPanel(
               title: 'Recent Transactions',
               maxRows: 3,
               compact: true,
+              onViewAll: onViewLedger,
             ),
           ],
         ),
@@ -1501,7 +1517,7 @@ class _LedgerViewState extends State<LedgerView> {
               ),
             )
             .toList()
-          ..sort((a, b) => b.date.compareTo(a.date));
+          ..sort(compareTransactionsNewestFirst);
     final hasFilters =
         typeFilterName.isNotEmpty ||
         accountFilterId.isNotEmpty ||
@@ -1544,14 +1560,41 @@ class _LedgerViewState extends State<LedgerView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
-          decoration: const InputDecoration(
-            labelText: 'Search transactions',
-            prefixIcon: Icon(Icons.search),
+        SizedBox(
+          height: 48,
+          child: TextField(
+            decoration: InputDecoration(
+              hintText: 'Search',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
+              ),
+              filled: true,
+              fillColor: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(
+                  color: Theme.of(context).colorScheme.primary,
+                  width: 1.2,
+                ),
+              ),
+            ),
+            onChanged: (value) => setState(() => query = value),
           ),
-          onChanged: (value) => setState(() => query = value),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
@@ -1572,6 +1615,16 @@ class _LedgerViewState extends State<LedgerView> {
                   activeFilterCount == 0
                       ? 'Filters'
                       : 'Filters ($activeFilterCount)',
+                ),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(40),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  shape: const StadiumBorder(),
+                  side: BorderSide(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.outline.withValues(alpha: 0.32),
+                  ),
                 ),
               ),
             ),
@@ -1790,6 +1843,31 @@ class _LedgerViewState extends State<LedgerView> {
 
 String ledgerMonthKey(DateTime month) => '${month.year}-${month.month}';
 
+int compareTransactionsNewestFirst(
+  TransactionRecord a,
+  TransactionRecord b,
+) {
+  final dateOrder = b.date.compareTo(a.date);
+  if (dateOrder != 0) return dateOrder;
+  final createdOrder = b.sync.createdAt.compareTo(a.sync.createdAt);
+  if (createdOrder != 0) return createdOrder;
+  return b.id.compareTo(a.id);
+}
+
+String ledgerDayContext(DateTime date) {
+  if (isSameDay(date, DateTime.now())) return 'Today';
+  return switch (date.weekday) {
+    DateTime.monday => 'Mon',
+    DateTime.tuesday => 'Tue',
+    DateTime.wednesday => 'Wed',
+    DateTime.thursday => 'Thu',
+    DateTime.friday => 'Fri',
+    DateTime.saturday => 'Sat',
+    DateTime.sunday => 'Sun',
+    _ => '',
+  };
+}
+
 class LedgerMonthSection extends StatelessWidget {
   const LedgerMonthSection({
     required this.month,
@@ -1909,7 +1987,13 @@ class LedgerMonthSection extends StatelessWidget {
                 ? const SizedBox.shrink()
                 : Column(
                     children: [
-                      const Divider(height: 1),
+                      Divider(
+                        height: 1,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .outlineVariant
+                            .withValues(alpha: 0.25),
+                      ),
                       for (
                         var index = 0;
                         index < transactions.length;
@@ -1939,10 +2023,14 @@ class LedgerMonthSection extends StatelessWidget {
                           },
                         ),
                         if (index != transactions.length - 1)
-                          const Divider(
+                          Divider(
                             height: 1,
                             indent: 62,
                             endIndent: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outlineVariant
+                                .withValues(alpha: 0.24),
                           ),
                       ],
                     ],
@@ -2058,13 +2146,13 @@ class LedgerJournalRow extends StatelessWidget {
         onTap: onTap,
         onLongPress: onLongPress,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
               SizedBox(
-                width: 46,
+                width: 38,
                 child: Text(
-                  '${monthAbbreviation(transaction.date.month)}\n${transaction.date.day}',
+                  '${transaction.date.day}\n${ledgerDayContext(transaction.date)}',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -4517,6 +4605,7 @@ class BudgetPanel extends StatelessWidget {
     this.title = 'Budgets',
     this.maxRows,
     this.compact = false,
+    this.onViewAll,
     super.key,
   });
 
@@ -4524,6 +4613,7 @@ class BudgetPanel extends StatelessWidget {
   final String title;
   final int? maxRows;
   final bool compact;
+  final VoidCallback? onViewAll;
 
   @override
   Widget build(BuildContext context) {
@@ -4555,6 +4645,16 @@ class BudgetPanel extends StatelessWidget {
             ),
           for (final budget in visibleBudgets)
             BudgetProgressRow(budget: budget),
+          if (onViewAll != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: onViewAll,
+                child: const Text('View All Budgets →'),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -4566,19 +4666,21 @@ class RecentTransactionsPanel extends StatelessWidget {
     this.title = 'Recent ledger',
     this.maxRows = 3,
     this.compact = false,
+    this.onViewAll,
     super.key,
   });
 
   final String title;
   final int maxRows;
   final bool compact;
+  final VoidCallback? onViewAll;
 
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final transactions = [...store.transactions]
       ..removeWhere((transaction) => transaction.isDeleted)
-      ..sort((a, b) => b.date.compareTo(a.date));
+      ..sort(compareTransactionsNewestFirst);
     final accountsById = {
       for (final account in store.accounts) account.id: account,
     };
@@ -4609,6 +4711,16 @@ class RecentTransactionsPanel extends StatelessWidget {
                   ? null
                   : categoriesById[transaction.categoryId]?.name,
             ),
+          if (onViewAll != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: onViewAll,
+                child: const Text('View Full Ledger →'),
+              ),
+            ),
+          ],
         ],
       ),
     );
