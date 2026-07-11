@@ -1064,7 +1064,7 @@ void main() {
     expect(find.text('Rent'), findsOneWidget);
   });
 
-  testWidgets('account long press can edit account name', (tester) async {
+  testWidgets('account action button can edit account name', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
@@ -1079,7 +1079,7 @@ void main() {
 
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
-    await tester.longPress(find.text('Checking'));
+    await tester.tap(find.byTooltip('Account actions').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
