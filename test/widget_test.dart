@@ -424,7 +424,7 @@ void main() {
       find.descendant(of: typeSelector, matching: find.text('Transfer')),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Edit transfer'), findsOneWidget);
+    expect(find.text('Edit transaction'), findsOneWidget);
   });
 
   testWidgets('ledger search filters visible transactions', (tester) async {
@@ -614,7 +614,13 @@ void main() {
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit transfer'), findsOneWidget);
+    expect(find.text('Edit transaction'), findsOneWidget);
+    final transferTypeSelector =
+        tester.widget<SegmentedButton<TransactionType>>(
+          find.byType(SegmentedButton<TransactionType>),
+        );
+    expect(transferTypeSelector.selected, {TransactionType.transfer});
+    expect(transferTypeSelector.showSelectedIcon, isFalse);
     final transferAmountField = tester.widget<TextField>(
       find.byKey(const ValueKey('transfer-amount')),
     );
@@ -823,7 +829,7 @@ void main() {
     await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Add transfer'), findsOneWidget);
+    expect(find.text('Add transaction'), findsOneWidget);
   });
 
   testWidgets('add transaction honors last used transfer preference', (
@@ -853,7 +859,7 @@ void main() {
     await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Add transfer'), findsOneWidget);
+    expect(find.text('Add transaction'), findsOneWidget);
   });
 
   testWidgets('add transaction dialog saves entered date', (tester) async {
