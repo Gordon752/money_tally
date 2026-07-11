@@ -1064,7 +1064,7 @@ void main() {
     expect(find.text('Rent'), findsOneWidget);
   });
 
-  testWidgets('account action button edits a v2-only account', (tester) async {
+  testWidgets('account long press edits a v2-only account', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final migrated = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
@@ -1092,16 +1092,7 @@ void main() {
 
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
-    final accountCard = find.ancestor(
-      of: find.text('Cloud Only'),
-      matching: find.byType(AccountCard),
-    );
-    await tester.tap(
-      find.descendant(
-        of: accountCard,
-        matching: find.byTooltip('Account actions'),
-      ),
-    );
+    await tester.longPress(find.text('Cloud Only'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
