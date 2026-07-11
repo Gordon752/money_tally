@@ -5282,41 +5282,63 @@ Future<void> showScheduledTransactionDialog(
                         ),
                       ),
                       const SizedBox(height: 12),
-                      if (type == TransactionType.transfer)
-                        DialogFieldGroup(
-                          label: 'To',
-                          child: DropdownButtonFormField<String>(
-                            initialValue: transferAccountId,
-                            decoration: dialogFieldDecoration(),
-                            items: [
-                              for (final account in accounts)
-                                if (account.id != accountId)
-                                  DropdownMenuItem(
-                                    value: account.id,
-                                    child: Text(account.name),
-                                  ),
-                            ],
-                            onChanged: (value) =>
-                                setDialogState(() => transferAccountId = value),
-                          ),
-                        )
-                      else
-                        DialogFieldGroup(
-                          label: 'Category',
-                          child: DropdownButtonFormField<String>(
-                            initialValue: categoryId,
-                            decoration: dialogFieldDecoration(),
-                            items: [
-                              for (final category in categories)
-                                DropdownMenuItem(
-                                  value: category.id,
-                                  child: Text(category.name),
-                                ),
-                            ],
-                            onChanged: (value) =>
-                                setDialogState(() => categoryId = value),
+                      AnimatedSwitcher(
+                        duration: MediaQuery.of(context).disableAnimations
+                            ? Duration.zero
+                            : const Duration(milliseconds: 165),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: SizeTransition(
+                            sizeFactor: animation,
+                            axisAlignment: -1,
+                            child: child,
                           ),
                         ),
+                        child: type == TransactionType.transfer
+                            ? DialogFieldGroup(
+                                key: const ValueKey(
+                                  'scheduled-transfer-destination',
+                                ),
+                                label: 'To',
+                                child: DropdownButtonFormField<String>(
+                                  initialValue: transferAccountId,
+                                  decoration: dialogFieldDecoration(),
+                                  items: [
+                                    for (final account in accounts)
+                                      if (account.id != accountId)
+                                        DropdownMenuItem(
+                                          value: account.id,
+                                          child: Text(account.name),
+                                        ),
+                                  ],
+                                  onChanged: (value) => setDialogState(
+                                    () => transferAccountId = value,
+                                  ),
+                                ),
+                              )
+                            : DialogFieldGroup(
+                                key: const ValueKey(
+                                  'scheduled-transaction-category',
+                                ),
+                                label: 'Category',
+                                child: DropdownButtonFormField<String>(
+                                  initialValue: categoryId,
+                                  decoration: dialogFieldDecoration(),
+                                  items: [
+                                    for (final category in categories)
+                                      DropdownMenuItem(
+                                        value: category.id,
+                                        child: Text(category.name),
+                                      ),
+                                  ],
+                                  onChanged: (value) => setDialogState(
+                                    () => categoryId = value,
+                                  ),
+                                ),
+                              ),
+                      ),
                       const SizedBox(height: 12),
                       DialogFieldGroup(
                         label: 'Repeat',
