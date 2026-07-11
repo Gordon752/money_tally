@@ -15,7 +15,6 @@ class AccountCard extends StatelessWidget {
     this.leading,
     this.onTap,
     this.onLongPress,
-    this.onMorePressed,
     this.framed = true,
     this.padding = const EdgeInsets.all(AppSpacing.md),
     super.key,
@@ -28,7 +27,6 @@ class AccountCard extends StatelessWidget {
   final Widget? leading;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
-  final VoidCallback? onMorePressed;
   final bool framed;
   final EdgeInsetsGeometry padding;
 
@@ -82,15 +80,6 @@ class AccountCard extends StatelessWidget {
                   fontSize: 19,
                   fontWeight: FontWeight.w700,
                 ),
-                if (onMorePressed != null) ...[
-                  const SizedBox(width: AppSpacing.xs),
-                  IconButton(
-                    tooltip: 'Account actions',
-                    onPressed: onMorePressed,
-                    icon: const Icon(Icons.more_vert),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
               ],
             ),
             if (metric != null) ...[
