@@ -3169,16 +3169,22 @@ class _ScheduledViewState extends State<ScheduledView> {
               onToggleCollapsed: () =>
                   setState(() => _calendarCollapsed = !_calendarCollapsed),
               onPreviousMonth: () => setState(
-                () => _visibleMonth = DateTime(
-                  _visibleMonth.year,
-                  _visibleMonth.month - 1,
-                ),
+                () {
+                  _dateAnchors.clear();
+                  _visibleMonth = DateTime(
+                    _visibleMonth.year,
+                    _visibleMonth.month - 1,
+                  );
+                },
               ),
               onNextMonth: () => setState(
-                () => _visibleMonth = DateTime(
-                  _visibleMonth.year,
-                  _visibleMonth.month + 1,
-                ),
+                () {
+                  _dateAnchors.clear();
+                  _visibleMonth = DateTime(
+                    _visibleMonth.year,
+                    _visibleMonth.month + 1,
+                  );
+                },
               ),
               selectedDate: _selectedDate,
               onSelectDate: _selectDate,
@@ -3200,8 +3206,7 @@ class _ScheduledViewState extends State<ScheduledView> {
               ),
               child: Column(
                 key: ValueKey(
-                  '${_visibleMonth.year}-${_visibleMonth.month}:'
-                  '${visibleScheduled.map((item) => item.id).join(',')}',
+                  '${_visibleMonth.year}-${_visibleMonth.month}',
                 ),
                 children: [
                   if (visibleScheduled.isEmpty)
