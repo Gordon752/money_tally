@@ -241,7 +241,7 @@ class _FinanceHomeState extends State<FinanceHome> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
               child: Material(
                 color: Theme.of(context).colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(AppRadii.md),
+                borderRadius: BorderRadius.circular(AppRadii.card),
                 child: ListTile(
                   dense: true,
                   leading: const Icon(Icons.cloud_off_outlined),
