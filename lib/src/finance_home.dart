@@ -18,9 +18,17 @@ enum FinanceSection {
 }
 
 class FinanceHome extends StatefulWidget {
-  const FinanceHome({this.syncLabel = 'Synced', this.onSignOut, super.key});
+  const FinanceHome({
+    this.syncLabel = 'Synced',
+    this.lastSuccessfulSyncLabel,
+    this.onSyncNow,
+    this.onSignOut,
+    super.key,
+  });
 
   final String syncLabel;
+  final String? lastSuccessfulSyncLabel;
+  final Future<void> Function()? onSyncNow;
   final VoidCallback? onSignOut;
 
   @override
@@ -223,12 +231,28 @@ class _FinanceHomeState extends State<FinanceHome> {
         SliverToBoxAdapter(
           child: PageHeader(
             section: selected,
-            syncLabel: widget.syncLabel,
-            onSignOut: widget.onSignOut,
             onOpenSettings: () =>
                 setState(() => selected = FinanceSection.settings),
           ),
         ),
+        if (widget.syncLabel == 'Sync issue')
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              child: Material(
+                color: Theme.of(context).colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                child: ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.cloud_off_outlined),
+                  title: const Text('Cloud sync needs attention'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      setState(() => selected = FinanceSection.settings),
+                ),
+              ),
+            ),
+          ),
         SliverPadding(
           padding: EdgeInsets.fromLTRB(
             16,
@@ -245,6 +269,8 @@ class _FinanceHomeState extends State<FinanceHome> {
                 }),
                 onViewBudgets: () =>
                     setState(() => selected = FinanceSection.budgets),
+                onViewScheduled: () =>
+                    setState(() => selected = FinanceSection.scheduled),
               ),
               FinanceSection.accounts => AccountsView(
                 onOpenLedgerForAccount: (accountId) => setState(() {
@@ -261,6 +287,10 @@ class _FinanceHomeState extends State<FinanceHome> {
               FinanceSection.categories => const CategoriesView(),
               FinanceSection.settings => SettingsView(
                 onSelectSection: _openManagementSection,
+                syncLabel: widget.syncLabel,
+                lastSuccessfulSyncLabel: widget.lastSuccessfulSyncLabel,
+                onSyncNow: widget.onSyncNow,
+                onSignOut: widget.onSignOut,
               ),
             },
           ),
@@ -378,22 +408,18 @@ class CountBadge extends StatelessWidget {
 class PageHeader extends StatelessWidget {
   const PageHeader({
     required this.section,
-    required this.syncLabel,
     required this.onOpenSettings,
-    this.onSignOut,
     super.key,
   });
 
   final FinanceSection section;
-  final String syncLabel;
   final VoidCallback onOpenSettings;
-  final VoidCallback? onSignOut;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -409,36 +435,15 @@ class PageHeader extends StatelessWidget {
                   ),
                 ),
               ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  border: Border.all(color: theme.colorScheme.outlineVariant),
-                  borderRadius: BorderRadius.circular(AppRadii.pill),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SyncPill(label: syncLabel, onSignOut: onSignOut),
-                    SizedBox(
-                      height: 26,
-                      child: VerticalDivider(
-                        width: 1,
-                        thickness: 1,
-                        color: theme.colorScheme.outlineVariant,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Settings',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: onOpenSettings,
-                      icon: const Icon(Icons.settings_outlined, size: 21),
-                    ),
-                  ],
-                ),
+              IconButton(
+                tooltip: 'Settings',
+                visualDensity: VisualDensity.compact,
+                onPressed: onOpenSettings,
+                icon: const Icon(Icons.settings_outlined, size: 21),
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
             section.label,
             style: TextStyle(
@@ -582,11 +587,13 @@ class DashboardView extends StatelessWidget {
   const DashboardView({
     required this.onViewLedger,
     required this.onViewBudgets,
+    required this.onViewScheduled,
     super.key,
   });
 
   final VoidCallback onViewLedger;
   final VoidCallback onViewBudgets;
+  final VoidCallback onViewScheduled;
 
   @override
   Widget build(BuildContext context) {
@@ -618,7 +625,11 @@ class DashboardView extends StatelessWidget {
               expensesMinor: expensesThisMonth,
               currency: currency,
             ),
-            NextScheduledCard(scheduled: scheduled, currency: currency),
+            NextScheduledCard(
+              scheduled: scheduled,
+              currency: currency,
+              onViewAll: onViewScheduled,
+            ),
             const AccountBalancePanel(
               title: 'Accounts Preview',
               maxRows: 4,
@@ -839,65 +850,99 @@ class NextScheduledCard extends StatelessWidget {
   const NextScheduledCard({
     required this.scheduled,
     required this.currency,
+    required this.onViewAll,
     super.key,
   });
 
   final List<v2_scheduled.ScheduledTransactionRecord> scheduled;
   final CurrencyFormatSettings currency;
+  final VoidCallback onViewAll;
 
   @override
   Widget build(BuildContext context) {
-    final next = scheduled.isEmpty ? null : scheduled.first;
+    final nextItems = scheduled.take(3).toList(growable: false);
     return AppCard(
       title: 'Next Scheduled',
       padding: const EdgeInsets.all(AppSpacing.sm),
-      child: next == null
+      child: nextItems.isEmpty
           ? const CompactEmptyRow(
               icon: Icons.event_repeat_outlined,
               label: 'No scheduled transactions',
             )
-          : Row(
+          : Column(
               children: [
-                const Icon(Icons.event_repeat_outlined, color: AppTheme.accent),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        next.payee,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
-                        shortDate(next.nextDate),
-                        style: TextStyle(
-                          color: AppTheme.ink.withValues(alpha: 0.7),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
+                for (var index = 0; index < nextItems.length; index++) ...[
+                  _NextScheduledRow(
+                    scheduled: nextItems[index],
+                    currency: currency,
                   ),
-                ),
-                MoneyText(
-                  amountMinor: next.type.name == 'expense'
-                      ? -next.amountMinor.abs()
-                      : next.amountMinor,
-                  currency: currency,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                  color: next.type.name == 'expense'
-                      ? AppTheme.rose
-                      : AppTheme.ink,
-                  showPositiveSign: next.type.name == 'income',
+                  if (index != nextItems.length - 1)
+                    Divider(
+                      height: 16,
+                      color: Theme.of(context)
+                          .dividerColor
+                          .withValues(alpha: 0.24),
+                    ),
+                ],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: onViewAll,
+                    label: const Text('View All Scheduled'),
+                    iconAlignment: IconAlignment.end,
+                    icon: const Icon(Icons.arrow_forward, size: 17),
+                  ),
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _NextScheduledRow extends StatelessWidget {
+  const _NextScheduledRow({required this.scheduled, required this.currency});
+
+  final v2_scheduled.ScheduledTransactionRecord scheduled;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.event_repeat_outlined, color: AppTheme.accent),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                scheduled.payee,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: AppSpacing.xxs),
+              Text(
+                shortDate(scheduled.nextDate),
+                style: TextStyle(
+                  color: AppTheme.ink.withValues(alpha: 0.7),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        MoneyText(
+          amountMinor: scheduled.type.name == 'expense'
+              ? -scheduled.amountMinor.abs()
+              : scheduled.amountMinor,
+          currency: currency,
+          fontSize: 17,
+          fontWeight: FontWeight.w900,
+          color: scheduled.type.name == 'expense' ? AppTheme.rose : AppTheme.ink,
+          showPositiveSign: scheduled.type.name == 'income',
+        ),
+      ],
     );
   }
 }
@@ -3065,12 +3110,37 @@ class ScheduledView extends StatefulWidget {
 
 class _ScheduledViewState extends State<ScheduledView> {
   var _calendarCollapsed = false;
+  final Map<String, GlobalKey> _dateAnchors = {};
   late DateTime _visibleMonth = DateTime(
     DateTime.now().year,
     DateTime.now().month,
   );
-  DateTime? _selectedDate;
-  var _hasAlignedVisibleMonth = false;
+  late DateTime _selectedDate = DateTime(
+    DateTime.now().year,
+    DateTime.now().month,
+    DateTime.now().day,
+  );
+
+  String _dateKey(DateTime date) => '${date.year}-${date.month}-${date.day}';
+
+  void _selectDate(DateTime date) {
+    setState(() {
+      _selectedDate = date;
+      _visibleMonth = DateTime(date.year, date.month);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final anchorContext = _dateAnchors[_dateKey(date)]?.currentContext;
+      if (anchorContext == null) return;
+      Scrollable.ensureVisible(
+        anchorContext,
+        duration: MediaQuery.of(context).disableAnimations
+            ? Duration.zero
+            : const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        alignment: 0.08,
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3078,24 +3148,13 @@ class _ScheduledViewState extends State<ScheduledView> {
     final scheduled = [...store.scheduledTransactions]
       ..removeWhere((item) => item.isDeleted)
       ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
-    if (!_hasAlignedVisibleMonth &&
-        scheduled.isNotEmpty &&
-        scheduled.every(
+    final visibleScheduled = scheduled
+        .where(
           (item) =>
-              item.nextDate.year != _visibleMonth.year ||
-              item.nextDate.month != _visibleMonth.month,
-        )) {
-      _visibleMonth = DateTime(
-        scheduled.first.nextDate.year,
-        scheduled.first.nextDate.month,
-      );
-    }
-    _hasAlignedVisibleMonth = true;
-    final visibleScheduled = _selectedDate == null
-        ? scheduled
-        : scheduled
-              .where((item) => isSameDay(item.nextDate, _selectedDate!))
-              .toList(growable: false);
+              item.nextDate.year == _visibleMonth.year &&
+              item.nextDate.month == _visibleMonth.month,
+        )
+        .toList(growable: false);
     final groupedScheduled = scheduledByDate(visibleScheduled);
     return AppCard(
       padding: EdgeInsets.zero,
@@ -3122,10 +3181,7 @@ class _ScheduledViewState extends State<ScheduledView> {
                 ),
               ),
               selectedDate: _selectedDate,
-              onSelectDate: (date) => setState(() {
-                _selectedDate = date;
-                _visibleMonth = DateTime(date.year, date.month);
-              }),
+              onSelectDate: _selectDate,
             ),
             const Divider(height: 1),
             AnimatedSwitcher(
@@ -3144,7 +3200,7 @@ class _ScheduledViewState extends State<ScheduledView> {
               ),
               child: Column(
                 key: ValueKey(
-                  '${_selectedDate?.toIso8601String() ?? 'all'}:'
+                  '${_visibleMonth.year}-${_visibleMonth.month}:'
                   '${visibleScheduled.map((item) => item.id).join(',')}',
                 ),
                 children: [
@@ -3155,15 +3211,16 @@ class _ScheduledViewState extends State<ScheduledView> {
                         color: AppTheme.muted,
                       ),
                       title: Text(
-                        _selectedDate == null
-                            ? 'No scheduled transactions'
-                            : 'No scheduled transactions for '
-                                  '${shortDate(_selectedDate!)}',
+                        'No scheduled transactions in ${monthLabel(_visibleMonth)}',
                       ),
                     )
                   else
                     for (final entry in groupedScheduled.entries) ...[
                       Padding(
+                        key: _dateAnchors.putIfAbsent(
+                          _dateKey(entry.key),
+                          () => GlobalKey(),
+                        ),
                         padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
                         child: Align(
                           alignment: Alignment.centerLeft,
@@ -3397,6 +3454,10 @@ class ScheduledCalendarGrid extends StatelessWidget {
                             selectedDate!.year == month.year &&
                             selectedDate!.month == month.month &&
                             selectedDate!.day == day,
+                        isToday:
+                            DateTime.now().year == month.year &&
+                            DateTime.now().month == month.month &&
+                            DateTime.now().day == day,
                         onSelectDate: onSelectDate,
                       ),
                     );
@@ -3415,6 +3476,7 @@ class ScheduledCalendarDayCell extends StatelessWidget {
     required this.month,
     required this.transactionCount,
     required this.isSelected,
+    required this.isToday,
     required this.onSelectDate,
     super.key,
   });
@@ -3423,6 +3485,7 @@ class ScheduledCalendarDayCell extends StatelessWidget {
   final DateTime month;
   final int transactionCount;
   final bool isSelected;
+  final bool isToday;
   final ValueChanged<DateTime> onSelectDate;
 
   @override
@@ -3456,7 +3519,9 @@ class ScheduledCalendarDayCell extends StatelessWidget {
                           ? AppTheme.accent.withValues(alpha: 0.10)
                           : null,
                       borderRadius: BorderRadius.circular(18),
-                      border: isMarked && !isSelected
+                      border: isToday && !isSelected
+                          ? Border.all(color: AppTheme.accent, width: 1.5)
+                          : isMarked && !isSelected
                           ? Border.all(
                               color: AppTheme.accent.withValues(alpha: 0.30),
                             )
@@ -3589,9 +3654,20 @@ class CategoriesView extends StatelessWidget {
 }
 
 class SettingsView extends StatelessWidget {
-  const SettingsView({this.onSelectSection, super.key});
+  const SettingsView({
+    this.onSelectSection,
+    this.syncLabel = 'Synced',
+    this.lastSuccessfulSyncLabel,
+    this.onSyncNow,
+    this.onSignOut,
+    super.key,
+  });
 
   final ValueChanged<FinanceSection>? onSelectSection;
+  final String syncLabel;
+  final String? lastSuccessfulSyncLabel;
+  final Future<void> Function()? onSyncNow;
+  final VoidCallback? onSignOut;
 
   static const _currencyOptions = [
     CurrencyFormatSettings(currencyCode: 'USD', symbol: r'$'),
@@ -3611,6 +3687,43 @@ class SettingsView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        AppCard(
+          title: 'Cloud Sync',
+          child: Column(
+            children: [
+              SettingsActionRow(
+                icon: syncLabel == 'Sync issue'
+                    ? Icons.cloud_off_outlined
+                    : Icons.cloud_done_outlined,
+                title: 'Status',
+                trailingText: syncLabel,
+                onTap: onSyncNow == null ? null : () => onSyncNow!.call(),
+              ),
+              SettingsActionRow(
+                icon: Icons.schedule_outlined,
+                title: 'Last successful sync',
+                trailingText: lastSuccessfulSyncLabel ??
+                    (syncLabel == 'Synced' ? 'This session' : 'Not available'),
+                onTap: null,
+              ),
+              if (onSyncNow != null)
+                SettingsActionRow(
+                  icon: Icons.sync_outlined,
+                  title: 'Sync now',
+                  trailingText: 'Refresh',
+                  onTap: () => onSyncNow!.call(),
+                ),
+              if (onSignOut != null)
+                SettingsActionRow(
+                  icon: Icons.logout_outlined,
+                  title: 'Sign out',
+                  trailingText: 'Sign out',
+                  onTap: onSignOut,
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
         AppCard(
           title: 'App Preferences',
           child: Column(
