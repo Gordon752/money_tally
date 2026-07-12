@@ -6,12 +6,38 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function ownsUserDocument(userId) {
+    function ownsUserData(userId) {
       return signedIn() && request.auth.uid == userId;
     }
 
+    match /users/{userId}/accounts/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/categories/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/transactions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/scheduledTransactions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/budgets/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/preferences/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    // Retain access to the legacy snapshot while existing installations
+    // complete migration to the record-based collections above.
     match /users/{userId}/finance/{documentId} {
-      allow read, write: if ownsUserDocument(userId);
+      allow read, write: if ownsUserData(userId);
     }
   }
 }
