@@ -145,6 +145,7 @@ class _AuthGateState extends State<AuthGate> {
   var _localOnly = false;
   var _isSigningIn = false;
   var _syncLabel = 'Synced';
+  DateTime? _lastSuccessfulSyncAt;
   String? _authError;
   String? _syncingUid;
   String? _syncedUid;
@@ -205,6 +206,13 @@ class _AuthGateState extends State<AuthGate> {
         });
         return FinanceHome(
           syncLabel: user.isLocalOnly ? 'Local only' : _syncLabel,
+          lastSuccessfulSyncLabel: _lastSuccessfulSyncAt == null
+              ? null
+              : '${shortDate(_lastSuccessfulSyncAt!.toLocal())} '
+                    '${TimeOfDay.fromDateTime(_lastSuccessfulSyncAt!.toLocal()).format(context)}',
+          onSyncNow: user.isLocalOnly
+              ? null
+              : () => _syncNow(user, store, dataStore),
           onSignOut: user.isLocalOnly ? null : widget.authService.signOut,
         );
       },
@@ -258,9 +266,7 @@ class _AuthGateState extends State<AuthGate> {
     FinanceDataStore dataStore,
   ) async {
     try {
-      // The record repository supersedes the legacy all-in-one snapshot.
-      // Running both allows an old snapshot to resurrect records before the
-      // tombstone-aware record sync attaches.
+      // The tombstone-aware record repository supersedes the legacy snapshot.
       if (remoteRepository != null && recordRepository == null) {
         final pulled = await store.pullSnapshot(
           remoteRepository: remoteRepository,
@@ -284,6 +290,7 @@ class _AuthGateState extends State<AuthGate> {
         _syncedUid = userId;
         _syncingUid = null;
         _syncLabel = 'Synced';
+        _lastSuccessfulSyncAt = DateTime.now();
       });
       if (remoteRepository != null && recordRepository == null) {
         _attachStoreSync(userId, remoteRepository, store);
@@ -295,6 +302,26 @@ class _AuthGateState extends State<AuthGate> {
         _syncLabel = 'Sync issue';
       });
     }
+  }
+
+  Future<void> _syncNow(
+    MoneyTallyUser user,
+    FinanceStore store,
+    FinanceDataStore dataStore,
+  ) async {
+    if (_syncingUid != null) return;
+    setState(() {
+      _syncedUid = null;
+      _syncingUid = user.uid;
+      _syncLabel = 'Syncing';
+    });
+    await _syncUser(
+      user.uid,
+      widget.remoteRepository,
+      widget.recordRepository,
+      store,
+      dataStore,
+    );
   }
 
   void _attachStoreSync(
@@ -336,7 +363,10 @@ class _AuthGateState extends State<AuthGate> {
         userId: userId,
       );
       if (mounted && _syncLabel != 'Synced') {
-        setState(() => _syncLabel = 'Synced');
+        setState(() {
+          _syncLabel = 'Synced';
+          _lastSuccessfulSyncAt = DateTime.now();
+        });
       }
     } on Exception {
       if (mounted) setState(() => _syncLabel = 'Sync issue');
