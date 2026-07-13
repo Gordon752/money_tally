@@ -134,6 +134,10 @@ class _FinanceHomeState extends State<FinanceHome> {
                         onPressed: () => showFloatingAddMenu(
                           context,
                           section: selected,
+                          initialAccountId:
+                              selected == FinanceSection.ledger
+                              ? ledgerAccountFilterId
+                              : null,
                         ),
                         child: const Icon(Icons.add),
                       ),
@@ -160,7 +164,12 @@ class _FinanceHomeState extends State<FinanceHome> {
                   : 0,
               onDestinationSelected: (index) {
                 HapticFeedback.selectionClick();
-                setState(() => selected = compactSections[index]);
+                setState(() {
+                  selected = compactSections[index];
+                  if (selected == FinanceSection.ledger) {
+                    ledgerAccountFilterId = null;
+                  }
+                });
               },
               destinations: [
                 for (final section in compactSections)
@@ -187,7 +196,12 @@ class _FinanceHomeState extends State<FinanceHome> {
           selectedIndex: FinanceSection.values.indexOf(selected),
           onDestinationSelected: (index) {
             HapticFeedback.selectionClick();
-            setState(() => selected = FinanceSection.values[index]);
+            setState(() {
+              selected = FinanceSection.values[index];
+              if (selected == FinanceSection.ledger) {
+                ledgerAccountFilterId = null;
+              }
+            });
           },
           leading: const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
@@ -279,6 +293,9 @@ class _FinanceHomeState extends State<FinanceHome> {
                 }),
               ),
               FinanceSection.ledger => LedgerView(
+                key: ValueKey(
+                  'ledger-${ledgerAccountFilterId ?? 'all-accounts'}',
+                ),
                 initialAccountFilterId: ledgerAccountFilterId,
               ),
               FinanceSection.budgets => const BudgetsView(),
@@ -1605,8 +1622,44 @@ class _LedgerViewState extends State<LedgerView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (accountFilterId.isNotEmpty &&
+            accountsById[accountFilterId] != null) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        accountsById[accountFilterId]!.name,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
+                      Text(
+                        'Current balance',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                MoneyText(
+                  amountMinor: store.balanceForAccount(accountFilterId),
+                  currency: store.preferences.currency,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ],
+            ),
+          ),
+        ],
         SizedBox(
-          height: 48,
+          height: 44,
           child: TextField(
             decoration: InputDecoration(
               hintText: 'Search',
@@ -5777,6 +5830,7 @@ Future<void> showEditAccountDialog(
 Future<void> showFloatingAddMenu(
   BuildContext context, {
   FinanceSection? section,
+  String? initialAccountId,
 }) async {
   final isScheduled = section == FinanceSection.scheduled;
   final orderedActions = isScheduled
@@ -5869,7 +5923,11 @@ Future<void> showFloatingAddMenu(
           initialType: TransactionType.expense,
         );
       } else {
-        await showTransactionDialog(context, initialIsExpense: true);
+        await showTransactionDialog(
+          context,
+          initialIsExpense: true,
+          initialAccountId: initialAccountId,
+        );
       }
     case 'income':
       if (isScheduled) {
@@ -5878,7 +5936,11 @@ Future<void> showFloatingAddMenu(
           initialType: TransactionType.income,
         );
       } else {
-        await showTransactionDialog(context, initialIsExpense: false);
+        await showTransactionDialog(
+          context,
+          initialIsExpense: false,
+          initialAccountId: initialAccountId,
+        );
       }
     case 'category':
       await showCategoryDialog(context);
@@ -5891,7 +5953,10 @@ Future<void> showFloatingAddMenu(
           initialType: TransactionType.transfer,
         );
       } else {
-        await showTransferDialog(context);
+        await showTransferDialog(
+          context,
+          initialFromAccountId: initialAccountId,
+        );
       }
     case 'budget':
       await showBudgetDialog(context);
@@ -6165,7 +6230,7 @@ Future<void> showTransferDialog(
   }
 
   final payeeOptions = savedPayees(dataStore);
-  final payee = TextEditingController(text: transfer?.payee ?? 'Transfer');
+  final payee = TextEditingController(text: transfer?.payee ?? '');
   final date = TextEditingController(
     text: dateInput(transfer?.date ?? DateTime.now()),
   );
@@ -6177,12 +6242,12 @@ Future<void> showTransferDialog(
             account.id == (transfer?.accountId ?? initialFromAccountId),
       )
       ? (transfer?.accountId ?? initialFromAccountId)!
-      : accounts.first.id;
+      : '';
   var toAccountId =
       accounts.any((account) => account.id == transfer?.transferAccountId) &&
           transfer?.transferAccountId != fromAccountId
       ? transfer!.transferAccountId!
-      : accounts.firstWhere((account) => account.id != fromAccountId).id;
+      : '';
   TransactionType? switchToType;
 
   final result =
@@ -6237,6 +6302,71 @@ Future<void> showTransferDialog(
                     ),
                     const SizedBox(height: 12),
                     DialogFieldGroup(
+                      label: 'From account',
+                      child: DropdownButtonFormField<String>(
+                        initialValue:
+                            fromAccountId.isEmpty ? null : fromAccountId,
+                        decoration: dialogFieldDecoration(
+                          hintText: 'Choose account',
+                        ),
+                        items: [
+                          for (final account in accounts)
+                            DropdownMenuItem(
+                              value: account.id,
+                              child: Text(account.name),
+                            ),
+                        ],
+                        onChanged: (value) => setDialogState(() {
+                          fromAccountId = value ?? '';
+                          if (toAccountId == fromAccountId) toAccountId = '';
+                        }),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DialogFieldGroup(
+                      label: 'Amount',
+                      child: AmountEntryField(
+                        fieldKey: const ValueKey('transfer-amount'),
+                        initialMinor: amountMinor,
+                        currency: dataStore.preferences.currency,
+                        labelText: null,
+                        autofocus:
+                            transfer == null && fromAccountId.isNotEmpty,
+                        textStyle: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                        ),
+                        onChanged: (value) => amountMinor = value,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DialogFieldGroup(
+                      label: 'To account',
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey('transfer-to-$fromAccountId'),
+                        initialValue: toAccountId.isEmpty ? null : toAccountId,
+                        decoration: dialogFieldDecoration(
+                          hintText: fromAccountId.isEmpty
+                              ? 'Choose a source account first'
+                              : 'Choose destination',
+                        ),
+                        items: [
+                          for (final account in accounts)
+                            if (account.id != fromAccountId)
+                              DropdownMenuItem(
+                                value: account.id,
+                                child: Text(account.name),
+                              ),
+                        ],
+                        onChanged: fromAccountId.isEmpty
+                            ? null
+                            : (value) => setDialogState(
+                                () => toAccountId = value ?? '',
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DialogFieldGroup(
                       label: 'Payee',
                       child: PayeeAutocompleteField(
                         fieldKey: const ValueKey('transfer-payee'),
@@ -6260,78 +6390,21 @@ Future<void> showTransferDialog(
                             context,
                             parseDateInput(date.text, DateTime.now()),
                           );
-                          if (picked != null) {
-                            date.text = dateInput(picked);
-                          }
+                          if (picked != null) date.text = dateInput(picked);
                           FocusManager.instance.primaryFocus?.unfocus();
                         },
                       ),
                     ),
                     const SizedBox(height: 12),
                     DialogFieldGroup(
-                      label: 'Note',
+                      label: 'Notes',
                       child: TextField(
                         key: const ValueKey('transfer-note'),
                         controller: note,
                         textCapitalization: TextCapitalization.sentences,
-                        decoration: dialogFieldDecoration(),
+                        decoration: dialogFieldDecoration(hintText: 'Optional'),
                         minLines: 1,
                         maxLines: 3,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DialogFieldGroup(
-                      label: 'Amount',
-                      child: AmountEntryField(
-                        fieldKey: const ValueKey('transfer-amount'),
-                        initialMinor: amountMinor,
-                        currency: dataStore.preferences.currency,
-                        labelText: null,
-                        onChanged: (value) => amountMinor = value,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DialogFieldGroup(
-                      label: 'From',
-                      child: DropdownButtonFormField<String>(
-                        initialValue: fromAccountId,
-                        decoration: dialogFieldDecoration(),
-                        items: [
-                          for (final account in accounts)
-                            DropdownMenuItem(
-                              value: account.id,
-                              child: Text(account.name),
-                            ),
-                        ],
-                        onChanged: (value) => setDialogState(() {
-                          fromAccountId = value ?? fromAccountId;
-                          if (toAccountId == fromAccountId) {
-                            toAccountId = accounts
-                                .firstWhere(
-                                  (account) => account.id != fromAccountId,
-                                )
-                                .id;
-                          }
-                        }),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DialogFieldGroup(
-                      label: 'To',
-                      child: DropdownButtonFormField<String>(
-                        initialValue: toAccountId,
-                        decoration: dialogFieldDecoration(),
-                        items: [
-                          for (final account in accounts)
-                            if (account.id != fromAccountId)
-                              DropdownMenuItem(
-                                value: account.id,
-                                child: Text(account.name),
-                              ),
-                        ],
-                        onChanged: (value) => setDialogState(
-                          () => toAccountId = value ?? toAccountId,
-                        ),
                       ),
                     ),
                   ],
@@ -6344,7 +6417,9 @@ Future<void> showTransferDialog(
                 child: const Text('Cancel'),
               ),
               FilledButton(
-                onPressed: () => Navigator.pop(context, (
+                onPressed: fromAccountId.isEmpty || toAccountId.isEmpty
+                    ? null
+                    : () => Navigator.pop(context, (
                   fromAccountId: fromAccountId,
                   toAccountId: toAccountId,
                   payee: payee.text.trim().isEmpty
@@ -6354,7 +6429,7 @@ Future<void> showTransferDialog(
                   note: note.text.trim(),
                   amountMinor: amountMinor.abs(),
                 )),
-                child: Text(transfer == null ? 'Add' : 'Save'),
+                child: const Text('Save'),
               ),
             ],
           ),
@@ -7247,16 +7322,14 @@ Future<void> showTransactionDialog(
         (account) => account.id == (transaction?.accountId ?? initialAccountId),
       )
       ? (transaction?.accountId ?? initialAccountId)!
-      : activeAccounts.first.id;
+      : '';
   var isExpense =
       transaction?.type == TransactionType.expense ||
       (transaction?.type == TransactionType.transfer &&
           (initialIsExpense ?? true)) ||
       (transaction == null &&
           (initialIsExpense ?? isExpenseDefault(dataStore.preferences)));
-  var categoryId =
-      transaction?.categoryId ??
-      defaultV2CategoryIdForTransactionKind(dataStore, isExpense);
+  var categoryId = transaction?.categoryId ?? '';
   var switchToTransfer = false;
   var isCreatingCategory = false;
   final newCategoryName = TextEditingController();
@@ -7282,9 +7355,7 @@ Future<void> showTransactionDialog(
               isExpense,
             );
             if (!categoryOptions.any((category) => category.id == categoryId)) {
-              categoryId = categoryOptions.isEmpty
-                  ? ''
-                  : categoryOptions.first.id;
+              categoryId = '';
             }
 
             return AlertDialog(
@@ -7330,55 +7401,27 @@ Future<void> showTransactionDialog(
                           }
                           setDialogState(() {
                             isExpense = selectedType == TransactionType.expense;
-                            categoryId = defaultV2CategoryIdForTransactionKind(
-                              dataStore,
-                              isExpense,
-                            );
+                            categoryId = '';
                           });
                         },
                       ),
                       const SizedBox(height: 12),
                       DialogFieldGroup(
-                        label: 'Payee',
-                        child: PayeeAutocompleteField(
-                          fieldKey: const ValueKey('transaction-payee'),
-                          controller: payee,
-                          options: payeeOptions,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DialogFieldGroup(
-                        label: 'Date',
-                        child: TextField(
-                          key: const ValueKey('transaction-date'),
-                          controller: date,
-                          readOnly: true,
-                          showCursor: false,
-                          enableInteractiveSelection: false,
-                          decoration: dialogFieldDecoration(),
-                          onTap: () async {
-                            FocusManager.instance.primaryFocus?.unfocus();
-                            final picked = await pickDateForField(
-                              context,
-                              parseDateInput(date.text, DateTime.now()),
-                            );
-                            if (picked != null) {
-                              date.text = dateInput(picked);
-                            }
-                            FocusManager.instance.primaryFocus?.unfocus();
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DialogFieldGroup(
-                        label: 'Note',
-                        child: TextField(
-                          key: const ValueKey('transaction-note'),
-                          controller: note,
-                          textCapitalization: TextCapitalization.sentences,
-                          decoration: dialogFieldDecoration(),
-                          minLines: 1,
-                          maxLines: 3,
+                        label: 'Account',
+                        child: DropdownButtonFormField<String>(
+                          initialValue: accountId.isEmpty ? null : accountId,
+                          decoration: dialogFieldDecoration(
+                            hintText: 'Choose account',
+                          ),
+                          items: [
+                            for (final account in activeAccounts)
+                              DropdownMenuItem(
+                                value: account.id,
+                                child: Text(account.name),
+                              ),
+                          ],
+                          onChanged: (value) =>
+                              setDialogState(() => accountId = value ?? ''),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -7389,23 +7432,22 @@ Future<void> showTransactionDialog(
                           initialMinor: amountMinor,
                           currency: dataStore.preferences.currency,
                           labelText: null,
+                          autofocus:
+                              transaction == null && accountId.isNotEmpty,
+                          textStyle: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w900,
+                          ),
                           onChanged: (value) => amountMinor = value,
                         ),
                       ),
                       const SizedBox(height: 12),
                       DialogFieldGroup(
-                        label: 'Account',
-                        child: DropdownButtonFormField<String>(
-                          initialValue: accountId,
-                          decoration: dialogFieldDecoration(),
-                          items: [
-                            for (final account in activeAccounts)
-                              DropdownMenuItem(
-                                value: account.id,
-                                child: Text(account.name),
-                              ),
-                          ],
-                          onChanged: (value) => accountId = value ?? accountId,
+                        label: 'Payee',
+                        child: PayeeAutocompleteField(
+                          fieldKey: const ValueKey('transaction-payee'),
+                          controller: payee,
+                          options: payeeOptions,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -7631,6 +7673,41 @@ Future<void> showTransactionDialog(
                                 ),
                               ),
                       ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: 'Date',
+                        child: TextField(
+                          key: const ValueKey('transaction-date'),
+                          controller: date,
+                          readOnly: true,
+                          showCursor: false,
+                          enableInteractiveSelection: false,
+                          decoration: dialogFieldDecoration(),
+                          onTap: () async {
+                            FocusManager.instance.primaryFocus?.unfocus();
+                            final picked = await pickDateForField(
+                              context,
+                              parseDateInput(date.text, DateTime.now()),
+                            );
+                            if (picked != null) date.text = dateInput(picked);
+                            FocusManager.instance.primaryFocus?.unfocus();
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DialogFieldGroup(
+                        label: 'Notes',
+                        child: TextField(
+                          key: const ValueKey('transaction-note'),
+                          controller: note,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: dialogFieldDecoration(
+                            hintText: 'Optional',
+                          ),
+                          minLines: 1,
+                          maxLines: 3,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -7641,7 +7718,7 @@ Future<void> showTransactionDialog(
                   child: const Text('Cancel'),
                 ),
                 FilledButton(
-                  onPressed: categoryId.isEmpty
+                  onPressed: accountId.isEmpty || categoryId.isEmpty
                       ? null
                       : () {
                           Navigator.pop(context, (
@@ -7659,7 +7736,7 @@ Future<void> showTransactionDialog(
                             isExpense: isExpense,
                           ));
                         },
-                  child: Text(transaction == null ? 'Add' : 'Save'),
+                  child: const Text('Save'),
                 ),
               ],
             );
@@ -8257,6 +8334,7 @@ String defaultTransactionTypeLabel(DefaultTransactionType type) {
 }
 
 const newCategoryDropdownValue = '__new_category__';
+const newPayeeSuggestionValue = '__create_new_payee__';
 
 class PayeeAutocompleteField extends StatefulWidget {
   const PayeeAutocompleteField({
@@ -8277,6 +8355,7 @@ class PayeeAutocompleteField extends StatefulWidget {
 
 class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
   final _focusNode = FocusNode();
+  var _lastQuery = '';
 
   @override
   void dispose() {
@@ -8289,12 +8368,36 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
     return RawAutocomplete<String>(
       textEditingController: widget.controller,
       focusNode: _focusNode,
-      displayStringForOption: (option) => option,
-      optionsBuilder: (value) => rankedPayeeSuggestions(
-        widget.options,
-        value.text,
-      ),
-      onSelected: (_) {
+      displayStringForOption: (option) => option == newPayeeSuggestionValue
+          ? _lastQuery.trim()
+          : option,
+      optionsBuilder: (value) {
+        _lastQuery = value.text;
+        final suggestions = rankedPayeeSuggestions(
+          widget.options,
+          value.text,
+        ).toList(growable: false);
+        if (value.text.trim().isNotEmpty && suggestions.isEmpty) {
+          return const [newPayeeSuggestionValue];
+        }
+        return value.text.trim().isEmpty
+            ? suggestions.take(5)
+            : suggestions;
+      },
+      onSelected: (option) {
+        if (option == newPayeeSuggestionValue) {
+          final name = _lastQuery.trim();
+          widget.controller.value = TextEditingValue(
+            text: name,
+            selection: TextSelection.collapsed(offset: name.length),
+          );
+        } else {
+          widget.controller.value = TextEditingValue(
+            text: option,
+            selection: TextSelection.collapsed(offset: option.length),
+          );
+        }
+        _rememberPayee(widget.controller.text.trim());
         HapticFeedback.selectionClick();
         _focusNode.unfocus();
       },
@@ -8305,30 +8408,17 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
           focusNode: focusNode,
           textCapitalization: TextCapitalization.words,
           textInputAction: TextInputAction.done,
-          onSubmitted: (_) => onSubmitted(),
-          decoration: dialogFieldDecoration().copyWith(
-            suffixIcon: widget.options.isEmpty
-                ? null
-                : PopupMenuButton<String>(
-                    tooltip: 'Recent payees',
-                    icon: const Icon(Icons.history_outlined, size: 20),
-                    onSelected: (value) {
-                      controller.text = value;
-                      controller.selection = TextSelection.collapsed(
-                        offset: value.length,
-                      );
-                      HapticFeedback.selectionClick();
-                    },
-                    itemBuilder: (context) => [
-                      for (final option in widget.options.take(12))
-                        PopupMenuItem(value: option, child: Text(option)),
-                    ],
-                  ),
+          onSubmitted: (value) {
+            _rememberPayee(value.trim());
+            onSubmitted();
+          },
+          decoration: dialogFieldDecoration(
+            hintText: 'Type or choose a recent payee',
           ),
         );
       },
       optionsViewBuilder: (context, onSelected, options) {
-        final visible = options.take(6).toList(growable: false);
+        final visible = options.toList(growable: false);
         return Align(
           alignment: Alignment.topLeft,
           child: Material(
@@ -8337,17 +8427,25 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
             borderRadius: BorderRadius.circular(14),
             clipBehavior: Clip.antiAlias,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 264),
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 216),
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 shrinkWrap: true,
                 itemCount: visible.length,
                 itemBuilder: (context, index) {
                   final option = visible[index];
+                  final isCreate = option == newPayeeSuggestionValue;
                   return ListTile(
                     dense: true,
-                    leading: const Icon(Icons.history_outlined, size: 18),
-                    title: Text(option),
+                    leading: Icon(
+                      isCreate ? Icons.person_add_outlined : Icons.person_outline,
+                      size: 18,
+                    ),
+                    title: Text(
+                      isCreate ? 'Create New Payee' : option,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     onTap: () => onSelected(option),
                   );
                 },
@@ -8356,6 +8454,19 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
           ),
         );
       },
+    );
+  }
+
+  void _rememberPayee(String name) {
+    if (name.isEmpty) return;
+    final store = FinanceDataStoreScope.read(context);
+    final saved = [...store.preferences.savedPayeeNames]
+      ..removeWhere((item) => item.toLowerCase() == name.toLowerCase())
+      ..insert(0, name);
+    unawaited(
+      store.savePreferences(
+        store.preferences.copyWith(savedPayeeNames: saved),
+      ),
     );
   }
 }
