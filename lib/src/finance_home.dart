@@ -3645,8 +3645,15 @@ class ScheduledCalendarDayCell extends StatelessWidget {
   }
 }
 
-class CategoriesView extends StatelessWidget {
+class CategoriesView extends StatefulWidget {
   const CategoriesView({super.key});
+
+  @override
+  State<CategoriesView> createState() => _CategoriesViewState();
+}
+
+class _CategoriesViewState extends State<CategoriesView> {
+  final Set<String> _collapsedCategoryIds = <String>{};
 
   @override
   Widget build(BuildContext context) {
@@ -3654,7 +3661,10 @@ class CategoriesView extends StatelessWidget {
     final categories = store.categories
         .where((category) => category.isVisible)
         .toList(growable: false);
-    final displayCategories = categoriesInDisplayOrder(categories);
+    final displayCategories = visibleCategoriesInDisplayOrder(
+      categories,
+      _collapsedCategoryIds,
+    );
     final categoriesById = {
       for (final category in categories) category.id: category,
     };
@@ -3671,38 +3681,95 @@ class CategoriesView extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         AppCard(
-          padding: EdgeInsets.zero,
+          padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(
             children: [
-              for (final category in displayCategories)
-                Padding(
-                  padding: EdgeInsets.only(
-                    left: category.parentCategoryId == null ? 0 : 20,
-                  ),
-                  child: ListTile(
-                    onLongPress: () => showCategoryActions(context, category),
-                    leading: CircleAvatar(
-                      backgroundColor: category.colorValue == null
-                          ? AppTheme.line
-                          : Color(category.colorValue!),
-                      child: Icon(
-                        categoryIcon(category),
-                        color: AppTheme.ink,
-                        size: 18,
+              for (var index = 0; index < displayCategories.length; index++) ...[
+                Builder(
+                  builder: (context) {
+                    final category = displayCategories[index];
+                    final depth = categoryDepth(category, categoriesById);
+                    final hasChildren = categories.any(
+                      (candidate) =>
+                          candidate.parentCategoryId == category.id,
+                    );
+                    final isExpanded =
+                        !_collapsedCategoryIds.contains(category.id);
+                    return Padding(
+                      padding: EdgeInsets.only(left: depth * 18.0),
+                      child: ListTile(
+                        dense: true,
+                        visualDensity: const VisualDensity(vertical: -1),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 2,
+                        ),
+                        onTap: () => showCategoryDialog(
+                          context,
+                          categoryId: category.id,
+                        ),
+                        onLongPress: () =>
+                            showCategoryActions(context, category),
+                        leading: CircleAvatar(
+                          radius: 18,
+                          backgroundColor: category.colorValue == null
+                              ? AppTheme.line
+                              : Color(category.colorValue!),
+                          child: Icon(
+                            categoryIcon(category),
+                            color: AppTheme.ink,
+                            size: 17,
+                          ),
+                        ),
+                        title: Text(
+                          category.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        subtitle: Text(
+                          categorySubtitle(category, categoriesById),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        trailing: hasChildren
+                            ? IconButton(
+                                tooltip: isExpanded
+                                    ? 'Collapse ${category.name}'
+                                    : 'Expand ${category.name}',
+                                onPressed: () {
+                                  HapticFeedback.selectionClick();
+                                  setState(() {
+                                    if (isExpanded) {
+                                      _collapsedCategoryIds.add(category.id);
+                                    } else {
+                                      _collapsedCategoryIds.remove(category.id);
+                                    }
+                                  });
+                                },
+                                icon: AnimatedRotation(
+                                  turns: isExpanded ? 0.25 : 0,
+                                  duration: const Duration(milliseconds: 180),
+                                  curve: Curves.easeOutCubic,
+                                  child: const Icon(Icons.chevron_right),
+                                ),
+                              )
+                            : const Icon(Icons.chevron_right),
                       ),
-                    ),
-                    title: Text(
-                      category.name,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    subtitle: Text(categorySubtitle(category, categoriesById)),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: () =>
-                          showCategoryDialog(context, categoryId: category.id),
-                    ),
-                  ),
+                    );
+                  },
                 ),
+                if (index < displayCategories.length - 1)
+                  Divider(
+                    height: 1,
+                    indent:
+                        58 +
+                        categoryDepth(
+                              displayCategories[index],
+                              categoriesById,
+                            ) *
+                            18.0,
+                  ),
+              ],
             ],
           ),
         ),
@@ -8194,6 +8261,47 @@ List<v2_category.CategoryRecord> categoriesInDisplayOrder(
   return ordered;
 }
 
+int categoryDepth(
+  v2_category.CategoryRecord category,
+  Map<String, v2_category.CategoryRecord> categoriesById,
+) {
+  var depth = 0;
+  var parentId = category.parentCategoryId;
+  final visited = <String>{category.id};
+  while (parentId != null && visited.add(parentId)) {
+    final parent = categoriesById[parentId];
+    if (parent == null) break;
+    depth += 1;
+    parentId = parent.parentCategoryId;
+  }
+  return depth;
+}
+
+List<v2_category.CategoryRecord> visibleCategoriesInDisplayOrder(
+  List<v2_category.CategoryRecord> categories,
+  Set<String> collapsedCategoryIds,
+) {
+  final categoriesById = {
+    for (final category in categories) category.id: category,
+  };
+
+  bool hasCollapsedAncestor(v2_category.CategoryRecord category) {
+    var parentId = category.parentCategoryId;
+    final visited = <String>{category.id};
+    while (parentId != null && visited.add(parentId)) {
+      if (collapsedCategoryIds.contains(parentId)) return true;
+      final parent = categoriesById[parentId];
+      if (parent == null) break;
+      parentId = parent.parentCategoryId;
+    }
+    return false;
+  }
+
+  return categoriesInDisplayOrder(categories)
+      .where((category) => !hasCollapsedAncestor(category))
+      .toList(growable: false);
+}
+
 IconData categoryIcon(v2_category.CategoryRecord category) {
   return switch (category.iconName) {
     'fork.knife' => Icons.restaurant_outlined,
@@ -8899,15 +9007,25 @@ Future<String?> showTransactionCategoryPicker(
   required List<v2_category.CategoryRecord> categories,
   required String selectedCategoryId,
 }) {
+  final collapsedCategoryIds = <String>{};
+  final categoriesById = {
+    for (final category in categories) category.id: category,
+  };
   return showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
-    builder: (sheetContext) => SafeArea(
-      child: SizedBox(
-        height: MediaQuery.sizeOf(sheetContext).height * 0.68,
-        child: Column(
-          children: [
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) {
+        final visibleCategories = visibleCategoriesInDisplayOrder(
+          categories,
+          collapsedCategoryIds,
+        );
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheetContext).height * 0.68,
+            child: Column(
+              children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.md,
@@ -8925,37 +9043,89 @@ Future<String?> showTransactionCategoryPicker(
                 ),
               ),
             ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: categories.length,
-                itemBuilder: (context, index) {
-                  final category = categories[index];
-                  return ListTile(
-                    leading: Icon(
-                      categoryIcon(category),
-                      color: AppTheme.accent,
-                    ),
-                    title: Text(category.name),
-                    trailing: category.id == selectedCategoryId
-                        ? const Icon(Icons.check, color: AppTheme.accent)
-                        : null,
-                    onTap: () => Navigator.pop(sheetContext, category.id),
-                  );
-                },
-              ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: visibleCategories.length,
+                    itemBuilder: (context, index) {
+                      final category = visibleCategories[index];
+                      final depth = categoryDepth(category, categoriesById);
+                      final hasChildren = categories.any(
+                        (candidate) =>
+                            candidate.parentCategoryId == category.id,
+                      );
+                      final isExpanded =
+                          !collapsedCategoryIds.contains(category.id);
+                      return Padding(
+                        padding: EdgeInsets.only(left: depth * 18.0),
+                        child: ListTile(
+                          dense: true,
+                          leading: Icon(
+                            categoryIcon(category),
+                            color: AppTheme.accent,
+                          ),
+                          title: Text(category.name),
+                          subtitle: depth == 0
+                              ? null
+                              : Text(
+                                  categoriesById[category.parentCategoryId]
+                                          ?.name ??
+                                      '',
+                                ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (category.id == selectedCategoryId)
+                                const Icon(
+                                  Icons.check,
+                                  color: AppTheme.accent,
+                                ),
+                              if (hasChildren)
+                                IconButton(
+                                  tooltip: isExpanded
+                                      ? 'Collapse ${category.name}'
+                                      : 'Expand ${category.name}',
+                                  onPressed: () {
+                                    HapticFeedback.selectionClick();
+                                    setSheetState(() {
+                                      if (isExpanded) {
+                                        collapsedCategoryIds.add(category.id);
+                                      } else {
+                                        collapsedCategoryIds.remove(
+                                          category.id,
+                                        );
+                                      }
+                                    });
+                                  },
+                                  icon: AnimatedRotation(
+                                    turns: isExpanded ? 0.25 : 0,
+                                    duration: const Duration(milliseconds: 180),
+                                    curve: Curves.easeOutCubic,
+                                    child: const Icon(Icons.chevron_right),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          onTap: () =>
+                              Navigator.pop(sheetContext, category.id),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.add, color: AppTheme.accent),
+                  title: const Text('New category...'),
+                  onTap: () => Navigator.pop(
+                    sheetContext,
+                    newCategoryDropdownValue,
+                  ),
+                ),
+              ],
             ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.add, color: AppTheme.accent),
-              title: const Text('New category...'),
-              onTap: () => Navigator.pop(
-                sheetContext,
-                newCategoryDropdownValue,
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     ),
   );
 }
