@@ -14,6 +14,7 @@ class AmountEntryField extends StatefulWidget {
     this.autofocus = false,
     this.allowNegative = false,
     this.keyboardType,
+    this.textStyle,
     this.fieldKey,
     super.key,
   });
@@ -24,6 +25,7 @@ class AmountEntryField extends StatefulWidget {
   final bool autofocus;
   final bool allowNegative;
   final TextInputType? keyboardType;
+  final TextStyle? textStyle;
   final Key? fieldKey;
   final ValueChanged<int> onChanged;
 
@@ -92,10 +94,12 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
           vertical: AppSpacing.sm,
         ),
       ),
-      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-        fontFeatures: const [FontFeature.tabularFigures()],
-        fontWeight: FontWeight.w900,
-      ),
+      style:
+          widget.textStyle ??
+          Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontFeatures: const [FontFeature.tabularFigures()],
+            fontWeight: FontWeight.w900,
+          ),
       onTap: _moveCursorToEnd,
       onChanged: _handleChanged,
     );
