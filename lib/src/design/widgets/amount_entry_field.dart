@@ -13,6 +13,8 @@ class AmountEntryField extends StatefulWidget {
     this.labelText = 'Amount',
     this.autofocus = false,
     this.allowNegative = false,
+    this.forceNegative = false,
+    this.selectAllOnFocus = false,
     this.keyboardType,
     this.textStyle,
     this.fieldKey,
@@ -24,6 +26,8 @@ class AmountEntryField extends StatefulWidget {
   final String? labelText;
   final bool autofocus;
   final bool allowNegative;
+  final bool forceNegative;
+  final bool selectAllOnFocus;
   final TextInputType? keyboardType;
   final TextStyle? textStyle;
   final Key? fieldKey;
@@ -37,6 +41,7 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
   var _isUpdating = false;
+  var _hasAppliedInitialSelection = false;
 
   MoneyFormatter get _formatter => MoneyFormatter(widget.currency);
 
@@ -75,12 +80,14 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
       focusNode: _focusNode,
       keyboardType:
           widget.keyboardType ??
-          TextInputType.numberWithOptions(signed: widget.allowNegative),
+          TextInputType.numberWithOptions(
+            signed: widget.allowNegative && !widget.forceNegative,
+          ),
       textAlign: TextAlign.right,
       textAlignVertical: TextAlignVertical.center,
       autofocus: widget.autofocus,
       inputFormatters: [
-        widget.allowNegative
+        widget.allowNegative && !widget.forceNegative
             ? FilteringTextInputFormatter.allow(RegExp(r'[-0-9]'))
             : FilteringTextInputFormatter.digitsOnly,
       ],
@@ -107,7 +114,9 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
 
   void _handleChanged(String rawValue) {
     if (_isUpdating) return;
-    final isNegative = widget.allowNegative && rawValue.trim().startsWith('-');
+    final isNegative =
+        widget.forceNegative ||
+        (widget.allowNegative && rawValue.trim().startsWith('-'));
     final digits = rawValue.replaceAll(RegExp(r'[^0-9]'), '');
     final unsignedMinor = _formatter.parseDigitsToMinor(digits);
     final minor = isNegative ? -unsignedMinor : unsignedMinor;
@@ -116,9 +125,19 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
   }
 
   void _handleFocusChanged() {
-    if (_focusNode.hasFocus) {
-      _moveCursorToEnd();
+    if (!_focusNode.hasFocus) return;
+    if (widget.selectAllOnFocus && !_hasAppliedInitialSelection) {
+      _hasAppliedInitialSelection = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_focusNode.hasFocus) return;
+        _controller.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _controller.text.length,
+        );
+      });
+      return;
     }
+    _moveCursorToEnd();
   }
 
   void _moveCursorToEnd() {
