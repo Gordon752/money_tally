@@ -7408,20 +7408,49 @@ Future<void> showTransactionDialog(
                       const SizedBox(height: 12),
                       DialogFieldGroup(
                         label: 'Account',
-                        child: DropdownButtonFormField<String>(
-                          initialValue: accountId.isEmpty ? null : accountId,
-                          decoration: dialogFieldDecoration(
-                            hintText: 'Choose account',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(AppRadii.control),
+                          onTap: () async {
+                            FocusManager.instance.primaryFocus?.unfocus();
+                            final selectedAccountId =
+                                await showTransactionAccountPicker(
+                                  context,
+                                  accounts: activeAccounts,
+                                  selectedAccountId: accountId,
+                                );
+                            if (selectedAccountId != null) {
+                              setDialogState(
+                                () => accountId = selectedAccountId,
+                              );
+                            }
+                          },
+                          child: InputDecorator(
+                            decoration: dialogFieldDecoration(),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    accountId.isEmpty
+                                        ? 'Choose account'
+                                        : activeAccounts
+                                              .firstWhere(
+                                                (account) =>
+                                                    account.id == accountId,
+                                              )
+                                              .name,
+                                    style: accountId.isEmpty
+                                        ? TextStyle(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          )
+                                        : null,
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
                           ),
-                          items: [
-                            for (final account in activeAccounts)
-                              DropdownMenuItem(
-                                value: account.id,
-                                child: Text(account.name),
-                              ),
-                          ],
-                          onChanged: (value) =>
-                              setDialogState(() => accountId = value ?? ''),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -7583,93 +7612,76 @@ Future<void> showTransactionDialog(
                                   'transaction-category-field',
                                 ),
                                 label: 'Category',
-                                child: LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final selectedCategoryName =
-                                        categoryOptions.any(
-                                          (category) =>
-                                              category.id == categoryId,
-                                        )
-                                        ? categoryOptions
-                                              .firstWhere(
-                                                (category) =>
-                                                    category.id == categoryId,
-                                              )
-                                              .name
-                                        : 'Choose category';
-                                    return PopupMenuButton<String>(
-                                      key: const ValueKey(
-                                        'transaction-category-picker',
-                                      ),
-                                      constraints: BoxConstraints.tightFor(
-                                        width: constraints.maxWidth,
-                                      ),
-                                      position: PopupMenuPosition.under,
-                                      offset: const Offset(0, 4),
-                                      borderRadius: BorderRadius.circular(
-                                        AppRadii.card,
-                                      ),
-                                      itemBuilder: (context) => [
-                                        for (final category in categoryOptions)
-                                          PopupMenuItem(
-                                            value: category.id,
-                                            child: Text(category.name),
-                                          ),
-                                        const PopupMenuDivider(),
-                                        const PopupMenuItem(
-                                          value: newCategoryDropdownValue,
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.add, size: 20),
-                                              SizedBox(width: AppSpacing.sm),
-                                              Text('New category...'),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                      onSelected: (value) {
-                                        if (value ==
-                                            newCategoryDropdownValue) {
-                                          FocusManager.instance.primaryFocus
-                                              ?.unfocus();
-                                          setDialogState(() {
-                                            isCreatingCategory = true;
-                                            newCategoryName.clear();
-                                          });
-                                          WidgetsBinding.instance
-                                              .addPostFrameCallback((_) {
-                                                if (newCategoryFocusNode
-                                                    .canRequestFocus) {
-                                                  newCategoryFocusNode
-                                                      .requestFocus();
-                                                }
-                                              });
-                                          return;
-                                        }
-                                        setDialogState(
-                                          () => categoryId = value,
+                                child: InkWell(
+                                  key: const ValueKey(
+                                    'transaction-category-picker',
+                                  ),
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadii.control,
+                                  ),
+                                  onTap: () async {
+                                    FocusManager.instance.primaryFocus
+                                        ?.unfocus();
+                                    final selectedCategoryId =
+                                        await showTransactionCategoryPicker(
+                                          context,
+                                          categories: categoryOptions,
+                                          selectedCategoryId: categoryId,
                                         );
-                                      },
-                                      child: InputDecorator(
-                                        decoration: dialogFieldDecoration(),
-                                        child: Row(
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                selectedCategoryName,
-                                                maxLines: 1,
-                                                overflow:
-                                                    TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                            const Icon(
-                                              Icons.arrow_drop_down,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
+                                    if (selectedCategoryId == null) return;
+                                    if (selectedCategoryId ==
+                                        newCategoryDropdownValue) {
+                                      setDialogState(() {
+                                        isCreatingCategory = true;
+                                        newCategoryName.clear();
+                                      });
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback((_) {
+                                            if (newCategoryFocusNode
+                                                .canRequestFocus) {
+                                              newCategoryFocusNode
+                                                  .requestFocus();
+                                            }
+                                          });
+                                      return;
+                                    }
+                                    setDialogState(
+                                      () => categoryId = selectedCategoryId,
                                     );
                                   },
+                                  child: InputDecorator(
+                                    decoration: dialogFieldDecoration(),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            categoryOptions.any(
+                                                  (category) =>
+                                                      category.id == categoryId,
+                                                )
+                                                ? categoryOptions
+                                                      .firstWhere(
+                                                        (category) =>
+                                                            category.id ==
+                                                            categoryId,
+                                                      )
+                                                      .name
+                                                : 'Choose category',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: categoryId.isEmpty
+                                                ? TextStyle(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                  )
+                                                : null,
+                                          ),
+                                        ),
+                                        const Icon(Icons.chevron_right),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
                       ),
@@ -8356,10 +8368,19 @@ class PayeeAutocompleteField extends StatefulWidget {
 class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
   final _focusNode = FocusNode();
   var _lastQuery = '';
+  var _suggestionsDismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_handleFocusChanged);
+  }
 
   @override
   void dispose() {
-    _focusNode.dispose();
+    _focusNode
+      ..removeListener(_handleFocusChanged)
+      ..dispose();
     super.dispose();
   }
 
@@ -8373,6 +8394,7 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
           : option,
       optionsBuilder: (value) {
         _lastQuery = value.text;
+        if (_suggestionsDismissed) return const Iterable<String>.empty();
         final suggestions = rankedPayeeSuggestions(
           widget.options,
           value.text,
@@ -8399,7 +8421,7 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
         }
         _rememberPayee(widget.controller.text.trim());
         HapticFeedback.selectionClick();
-        _focusNode.unfocus();
+        _dismissSuggestions();
       },
       fieldViewBuilder: (context, controller, focusNode, onSubmitted) {
         return TextField(
@@ -8408,12 +8430,30 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
           focusNode: focusNode,
           textCapitalization: TextCapitalization.words,
           textInputAction: TextInputAction.done,
+          onTap: () {
+            if (_suggestionsDismissed) {
+              setState(() => _suggestionsDismissed = false);
+            }
+          },
+          onChanged: (_) {
+            if (_suggestionsDismissed) {
+              setState(() => _suggestionsDismissed = false);
+            }
+          },
           onSubmitted: (value) {
             _rememberPayee(value.trim());
-            onSubmitted();
+            _dismissSuggestions();
           },
           decoration: dialogFieldDecoration(
             hintText: 'Type or choose a recent payee',
+          ).copyWith(
+            suffixIcon: focusNode.hasFocus && !_suggestionsDismissed
+                ? IconButton(
+                    tooltip: 'Hide suggestions',
+                    onPressed: _dismissSuggestions,
+                    icon: const Icon(Icons.keyboard_arrow_up),
+                  )
+                : null,
           ),
         );
       },
@@ -8455,6 +8495,18 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
         );
       },
     );
+  }
+
+  void _handleFocusChanged() {
+    if (!mounted) return;
+    setState(() {
+      if (_focusNode.hasFocus) _suggestionsDismissed = false;
+    });
+  }
+
+  void _dismissSuggestions() {
+    if (mounted) setState(() => _suggestionsDismissed = true);
+    FocusManager.instance.primaryFocus?.unfocus();
   }
 
   void _rememberPayee(String name) {
@@ -8780,6 +8832,129 @@ Future<AccountType?> showAccountTypePicker(
             ),
           const SizedBox(height: AppSpacing.xs),
         ],
+      ),
+    ),
+  );
+}
+
+Future<String?> showTransactionAccountPicker(
+  BuildContext context, {
+  required List<v2_account.AccountRecord> accounts,
+  required String selectedAccountId,
+}) {
+  return showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheetContext) => SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(sheetContext).height * 0.62,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.md,
+                AppSpacing.xs,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Choose account',
+                  style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemCount: accounts.length,
+                itemBuilder: (context, index) {
+                  final account = accounts[index];
+                  return ListTile(
+                    leading: Icon(
+                      v2AccountIcon(account.type),
+                      color: AppTheme.accent,
+                    ),
+                    title: Text(account.name),
+                    trailing: account.id == selectedAccountId
+                        ? const Icon(Icons.check, color: AppTheme.accent)
+                        : null,
+                    onTap: () => Navigator.pop(sheetContext, account.id),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Future<String?> showTransactionCategoryPicker(
+  BuildContext context, {
+  required List<v2_category.CategoryRecord> categories,
+  required String selectedCategoryId,
+}) {
+  return showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheetContext) => SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(sheetContext).height * 0.68,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.md,
+                AppSpacing.xs,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Choose category',
+                  style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemCount: categories.length,
+                itemBuilder: (context, index) {
+                  final category = categories[index];
+                  return ListTile(
+                    leading: Icon(
+                      categoryIcon(category),
+                      color: AppTheme.accent,
+                    ),
+                    title: Text(category.name),
+                    trailing: category.id == selectedCategoryId
+                        ? const Icon(Icons.check, color: AppTheme.accent)
+                        : null,
+                    onTap: () => Navigator.pop(sheetContext, category.id),
+                  );
+                },
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.add, color: AppTheme.accent),
+              title: const Text('New category...'),
+              onTap: () => Navigator.pop(
+                sheetContext,
+                newCategoryDropdownValue,
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );
