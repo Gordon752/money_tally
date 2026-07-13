@@ -5551,34 +5551,105 @@ Future<void> showAdjustBalanceDialog(
   v2_account.AccountRecord account,
 ) async {
   final dataStore = FinanceDataStoreScope.read(context);
-  var targetBalanceMinor = dataStore.balanceForAccount(account.id);
+  final isCreditCard =
+      account.group == v2_account.AccountGroup.creditCards;
+  final currentBalanceMinor = dataStore.balanceForAccount(account.id);
+  var enteredBalanceMinor = isCreditCard
+      ? currentBalanceMinor.abs()
+      : currentBalanceMinor;
+  var isDebtBalance = currentBalanceMinor <= 0;
+
   final value = await showDialog<int>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text('Adjust ${account.name}'),
-      content: SizedBox(
-        width: 360,
-        child: AmountEntryField(
-          fieldKey: const ValueKey('account-adjust-balance'),
-          initialMinor: targetBalanceMinor,
-          currency: dataStore.preferences.currency,
-          labelText: 'Target balance',
-          autofocus: true,
-          allowNegative: true,
-          keyboardType: TextInputType.number,
-          onChanged: (value) => targetBalanceMinor = value,
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, targetBalanceMinor),
-          child: const Text('Save'),
-        ),
-      ],
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        final targetBalanceMinor = isCreditCard
+            ? (isDebtBalance
+                  ? -enteredBalanceMinor.abs()
+                  : enteredBalanceMinor.abs())
+            : enteredBalanceMinor;
+        final amountStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
+          color: targetBalanceMinor < 0 ? AppTheme.rose : null,
+          fontFeatures: const [FontFeature.tabularFigures()],
+          fontWeight: FontWeight.w900,
+        );
+
+        return AlertDialog(
+          title: Text('Adjust ${account.name}'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (isCreditCard) ...[
+                  DialogFieldGroup(
+                    label: 'Balance type',
+                    child: SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment<bool>(
+                          value: true,
+                          label: Text('Debt'),
+                          icon: Icon(Icons.remove_circle_outline),
+                        ),
+                        ButtonSegment<bool>(
+                          value: false,
+                          label: Text('Credit'),
+                          icon: Icon(Icons.add_circle_outline),
+                        ),
+                      ],
+                      selected: {isDebtBalance},
+                      showSelectedIcon: false,
+                      onSelectionChanged: (selection) {
+                        HapticFeedback.selectionClick();
+                        setDialogState(
+                          () => isDebtBalance = selection.first,
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+                DialogFieldGroup(
+                  label: 'Target balance',
+                  child: AmountEntryField(
+                    fieldKey: const ValueKey('account-adjust-balance'),
+                    initialMinor: targetBalanceMinor,
+                    currency: dataStore.preferences.currency,
+                    labelText: null,
+                    autofocus: true,
+                    selectAllOnFocus: true,
+                    allowNegative: !isCreditCard,
+                    forceNegative: isCreditCard && isDebtBalance,
+                    keyboardType: isCreditCard
+                        ? TextInputType.number
+                        : const TextInputType.numberWithOptions(signed: true),
+                    textStyle: amountStyle,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        enteredBalanceMinor = isCreditCard
+                            ? value.abs()
+                            : value;
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(context, targetBalanceMinor),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
     ),
   );
   if (value == null) return;
