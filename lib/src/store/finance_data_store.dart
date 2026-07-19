@@ -694,6 +694,7 @@ class FinanceDataStore extends ChangeNotifier {
     required String payee,
     required int amountMinor,
     String note = '',
+    List<TransactionSplitLine> splitLines = const [],
     String? scheduledTransactionId,
   }) async {
     final transaction = TransactionRecord(
@@ -705,6 +706,7 @@ class FinanceDataStore extends ChangeNotifier {
       payee: payee,
       amountMinor: amountMinor.abs(),
       note: note,
+      splitLines: splitLines,
       scheduledTransactionId: scheduledTransactionId,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );

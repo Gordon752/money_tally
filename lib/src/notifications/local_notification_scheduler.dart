@@ -12,10 +12,8 @@ class LocalNotificationScheduler implements NotificationScheduler {
   LocalNotificationScheduler({
     FlutterLocalNotificationsPlugin? plugin,
     this.onNotificationSelected,
-    ScheduledNotificationPlanner planner =
-        const ScheduledNotificationPlanner(),
-  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
-       _planner = planner;
+    this._planner = const ScheduledNotificationPlanner(),
+  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
 
   final FlutterLocalNotificationsPlugin _plugin;
   final ScheduledNotificationPlanner _planner;
@@ -82,10 +80,7 @@ class LocalNotificationScheduler implements NotificationScheduler {
     ScheduledTransactionRecord scheduledTransaction,
   ) async {
     await initialize();
-    final request = _planner.planOne(
-      scheduledTransaction,
-      now: DateTime.now(),
-    );
+    final request = _planner.planOne(scheduledTransaction, now: DateTime.now());
     if (request == null) return const [];
 
     const details = NotificationDetails(

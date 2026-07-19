@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
-import 'package:money_tally/src/design/widgets/transaction_row.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/category.dart' as v2_category;
 import 'package:money_tally/src/domain/money.dart';
@@ -19,6 +18,13 @@ import 'package:money_tally/src/persistence/local_finance_data_set_repository.da
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+Finder ledgerRowWithText(String text) => find.ancestor(
+  of: find.text(text),
+  matching: find.byWidgetPredicate(
+    (widget) => widget.runtimeType.toString() == 'LedgerJournalRow',
+  ),
+);
 
 void main() {
   testWidgets('amount entry field formats typed digits as money', (
@@ -248,26 +254,21 @@ void main() {
 
     final checkingCard = tester.widget<AccountCard>(
       find.byWidgetPredicate(
-        (widget) =>
-            widget is AccountCard && widget.account.name == 'Checking',
+        (widget) => widget is AccountCard && widget.account.name == 'Checking',
       ),
     );
     expect(checkingCard.subtitle, contains(' · '));
     expect(checkingCard.subtitle, isNot('Banking'));
     expect(checkingCard.balanceFontSize, 17);
 
-    await tester.tap(
-      find.byKey(const ValueKey('account-group-banking')),
-    );
+    await tester.tap(find.byKey(const ValueKey('account-group-banking')));
     await tester.pumpAndSettle();
 
     expect(find.text('Banking'), findsWidgets);
     expect(find.text('Checking'), findsNothing);
     expect(find.byTooltip('Expand Banking'), findsOneWidget);
 
-    await tester.tap(
-      find.byKey(const ValueKey('account-group-banking')),
-    );
+    await tester.tap(find.byKey(const ValueKey('account-group-banking')));
     await tester.pumpAndSettle();
 
     expect(find.text('Checking'), findsOneWidget);
@@ -396,7 +397,7 @@ void main() {
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(TransactionRow, 'Walmart').first);
+    await tester.tap(ledgerRowWithText('Walmart').first);
     await tester.pumpAndSettle();
 
     expect(find.text('Transaction details'), findsOneWidget);
@@ -407,24 +408,17 @@ void main() {
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit transaction'), findsOneWidget);
+    expect(find.text('Edit Transaction'), findsOneWidget);
     expect(find.byKey(const ValueKey('transaction-payee')), findsOneWidget);
-    final transactionDateField = tester.widget<TextField>(
-      find.byKey(const ValueKey('transaction-date')),
-    );
-    expect(transactionDateField.readOnly, isTrue);
-    expect(transactionDateField.showCursor, isFalse);
-
-    final typeSelector = find.byType(SegmentedButton<TransactionType>);
     expect(
-      find.descendant(of: typeSelector, matching: find.text('Transfer')),
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Text &&
+            widget.data != null &&
+            RegExp(r'^[A-Z][a-z]+ \d{1,2}, \d{4}$').hasMatch(widget.data!),
+      ),
       findsOneWidget,
     );
-    await tester.tap(
-      find.descendant(of: typeSelector, matching: find.text('Transfer')),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('Edit transaction'), findsOneWidget);
   });
 
   testWidgets('ledger search filters visible transactions', (tester) async {
@@ -435,9 +429,9 @@ void main() {
     await tester.enterText(find.byType(TextField).first, 'Diner');
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(TransactionRow, 'Diner'), findsOneWidget);
-    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
-    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
+    expect(ledgerRowWithText('Diner'), findsOneWidget);
+    expect(ledgerRowWithText('Walmart'), findsNothing);
+    expect(ledgerRowWithText('Settlement'), findsNothing);
   });
 
   testWidgets('ledger filters by account type category and date', (
@@ -455,9 +449,9 @@ void main() {
     await tester.tap(find.text('Credit Card').last);
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(TransactionRow, 'Diner'), findsOneWidget);
-    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
-    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
+    expect(ledgerRowWithText('Diner'), findsOneWidget);
+    expect(ledgerRowWithText('Walmart'), findsNothing);
+    expect(ledgerRowWithText('Settlement'), findsNothing);
 
     await tester.tap(find.byTooltip('Clear filters'));
     await tester.pumpAndSettle();
@@ -468,9 +462,9 @@ void main() {
     await tester.tap(find.text('Income').last);
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsOneWidget);
-    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
-    expect(find.widgetWithText(TransactionRow, 'Diner'), findsNothing);
+    expect(ledgerRowWithText('Settlement'), findsOneWidget);
+    expect(ledgerRowWithText('Walmart'), findsNothing);
+    expect(ledgerRowWithText('Diner'), findsNothing);
 
     await tester.tap(find.byTooltip('Clear filters'));
     await tester.pumpAndSettle();
@@ -481,9 +475,9 @@ void main() {
     await tester.tap(find.text('Dining').last);
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(TransactionRow, 'Diner'), findsOneWidget);
-    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
-    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
+    expect(ledgerRowWithText('Diner'), findsOneWidget);
+    expect(ledgerRowWithText('Walmart'), findsNothing);
+    expect(ledgerRowWithText('Settlement'), findsNothing);
 
     await tester.tap(find.byTooltip('Clear filters'));
     await tester.pumpAndSettle();
@@ -494,9 +488,9 @@ void main() {
     await tester.tap(find.text('Today').last);
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(TransactionRow, 'Diner'), findsNothing);
-    expect(find.widgetWithText(TransactionRow, 'Walmart'), findsNothing);
-    expect(find.widgetWithText(TransactionRow, 'Settlement'), findsNothing);
+    expect(ledgerRowWithText('Diner'), findsNothing);
+    expect(ledgerRowWithText('Walmart'), findsNothing);
+    expect(ledgerRowWithText('Settlement'), findsNothing);
     expect(find.text('No transactions match'), findsOneWidget);
   });
 
@@ -562,10 +556,6 @@ void main() {
       'Walmart Grocery',
     );
     await tester.enterText(
-      find.byKey(const ValueKey('transaction-date')),
-      '2026-07-03',
-    );
-    await tester.enterText(
       find.byKey(const ValueKey('transaction-note')),
       'Pickup order',
     );
@@ -580,7 +570,6 @@ void main() {
       (transaction) => transaction.payee == 'Walmart Grocery',
     );
     expect(edited.amountMinor, 1234);
-    expect(edited.date, DateTime(2026, 7, 3));
     expect(edited.note, 'Pickup order');
     expect(edited.type, v2_transaction.TransactionType.expense);
     expect(find.text('Walmart Grocery'), findsOneWidget);
@@ -615,11 +604,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Edit transaction'), findsOneWidget);
-    final transferTypeSelector =
-        tester.widget<SegmentedButton<TransactionType>>(
-          find.byType(SegmentedButton<TransactionType>),
+    final transferTypeSelector = tester
+        .widget<SegmentedButton<v2_transaction.TransactionType>>(
+          find.byType(SegmentedButton<v2_transaction.TransactionType>),
         );
-    expect(transferTypeSelector.selected, {TransactionType.transfer});
+    expect(transferTypeSelector.selected, {
+      v2_transaction.TransactionType.transfer,
+    });
     expect(transferTypeSelector.showSelectedIcon, isFalse);
     final transferAmountField = tester.widget<TextField>(
       find.byKey(const ValueKey('transfer-amount')),
@@ -882,9 +873,7 @@ void main() {
     await tester.tap(find.text('Expense'));
     await tester.pumpAndSettle();
 
-    await tester.tap(
-      find.byKey(const ValueKey('transaction-category-picker')),
-    );
+    await tester.tap(find.byKey(const ValueKey('transaction-category-picker')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('New category...'));
     await tester.pumpAndSettle();
@@ -938,7 +927,7 @@ void main() {
       find.byKey(const ValueKey('transaction-amount')),
       '4599',
     );
-    await tester.tap(find.text('Add').last);
+    await tester.tap(find.text('Save').last);
     await tester.pumpAndSettle();
 
     final transaction = dataStore.transactions.singleWhere(
@@ -1046,7 +1035,7 @@ void main() {
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(0), 'Travel Fund');
     await tester.enterText(fields.at(1), '123.45');
-    await tester.tap(find.text('Add').last);
+    await tester.tap(find.text('Save').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Travel Fund'), findsOneWidget);
@@ -1065,6 +1054,12 @@ void main() {
       legacyStore.snapshot().toJson(),
     );
     final dataStore = FinanceDataStore(dataSet: dataSet);
+    final checking = dataStore.accounts.singleWhere(
+      (account) => account.name == 'Checking',
+    );
+    final cash = dataStore.accounts.singleWhere(
+      (account) => account.name == 'Cash',
+    );
 
     await tester.pumpWidget(
       MoneyTallyApp(store: legacyStore, dataStore: dataStore),
@@ -1075,10 +1070,25 @@ void main() {
     await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
-    await tester.enterText(
+    await tester.tap(find.byKey(const ValueKey('transfer-from-account')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Checking').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('transfer-to-${checking.id}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cash').last);
+    await tester.pumpAndSettle();
+
+    final now = DateTime.now();
+    final transferDate = DateTime(now.year, now.month, now.day);
+    await tester.ensureVisible(
       find.byKey(const ValueKey('transfer-date')),
-      '2026-07-05',
     );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('transfer-date')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('transfer-note')),
       'ATM cash',
@@ -1087,15 +1097,16 @@ void main() {
       find.byKey(const ValueKey('transfer-amount')),
       '5000',
     );
-    await tester.tap(find.text('Add').last);
+    await tester.tap(find.text('Save').last);
     await tester.pumpAndSettle();
 
     final transfer = dataStore.transactions.singleWhere(
       (transaction) =>
           transaction.type == v2_transaction.TransactionType.transfer,
     );
-    expect(transfer.transferAccountId, 'cash');
-    expect(transfer.date, DateTime(2026, 7, 5));
+    expect(transfer.accountId, checking.id);
+    expect(transfer.transferAccountId, cash.id);
+    expect(transfer.date, transferDate);
     expect(transfer.note, 'ATM cash');
     expect(
       dataStore.preferences.lastUsedTransactionType,
@@ -1125,9 +1136,9 @@ void main() {
     await tester.tap(find.text('Scheduled Transaction'));
     await tester.pumpAndSettle();
 
-    final scheduledTypeSelector =
-        tester.widget<SegmentedButton<TransactionType>>(
-          find.byType(SegmentedButton<TransactionType>),
+    final scheduledTypeSelector = tester
+        .widget<SegmentedButton<v2_transaction.TransactionType>>(
+          find.byType(SegmentedButton<v2_transaction.TransactionType>),
         );
     expect(scheduledTypeSelector.showSelectedIcon, isFalse);
     final fields = find.byType(TextField);
@@ -1178,10 +1189,7 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(
-        store: legacyStore,
-        dataStore: dataStore,
-      ),
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
     );
 
     await tester.tap(find.text('Accounts').last);
@@ -2453,10 +2461,7 @@ void main() {
     );
     final dataStore = FinanceDataStore(
       dataSet: migrated.copyWith(
-        transactions: [
-          deletedTransaction,
-          ...migrated.transactions.skip(1),
-        ],
+        transactions: [deletedTransaction, ...migrated.transactions.skip(1)],
       ),
       localRepository: repository,
     );

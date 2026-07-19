@@ -17,6 +17,8 @@ class AmountEntryField extends StatefulWidget {
     this.selectAllOnFocus = false,
     this.keyboardType,
     this.textStyle,
+    this.textAlign = TextAlign.right,
+    this.decoration,
     this.fieldKey,
     super.key,
   });
@@ -30,6 +32,8 @@ class AmountEntryField extends StatefulWidget {
   final bool selectAllOnFocus;
   final TextInputType? keyboardType;
   final TextStyle? textStyle;
+  final TextAlign textAlign;
+  final InputDecoration? decoration;
   final Key? fieldKey;
   final ValueChanged<int> onChanged;
 
@@ -83,7 +87,7 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
           TextInputType.numberWithOptions(
             signed: widget.allowNegative && !widget.forceNegative,
           ),
-      textAlign: TextAlign.right,
+      textAlign: widget.textAlign,
       textAlignVertical: TextAlignVertical.center,
       autofocus: widget.autofocus,
       inputFormatters: [
@@ -91,16 +95,18 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
             ? FilteringTextInputFormatter.allow(RegExp(r'[-0-9]'))
             : FilteringTextInputFormatter.digitsOnly,
       ],
-      decoration: InputDecoration(
-        labelText: widget.labelText,
-        floatingLabelBehavior: widget.labelText == null
-            ? FloatingLabelBehavior.never
-            : FloatingLabelBehavior.always,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
-        ),
-      ),
+      decoration:
+          widget.decoration ??
+          InputDecoration(
+            labelText: widget.labelText,
+            floatingLabelBehavior: widget.labelText == null
+                ? FloatingLabelBehavior.never
+                : FloatingLabelBehavior.always,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
+          ),
       style:
           widget.textStyle ??
           Theme.of(context).textTheme.titleLarge?.copyWith(
