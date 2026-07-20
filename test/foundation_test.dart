@@ -16,6 +16,56 @@ import 'package:money_tally/src/persistence/local_finance_data_set_repository.da
 import 'package:money_tally/src/store/finance_data_store.dart';
 
 void main() {
+  test('scheduled occurrence metadata round trips', () {
+    final scheduled = ScheduledTransactionRecord(
+      id: 'sched-card',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      payee: 'Card payment',
+      amountMinor: 25000,
+      nextDate: DateTime(2026, 8, 1),
+      frequency: RecurrenceFrequency.monthly,
+      occurrences: [
+        ScheduledOccurrenceRecord(
+          scheduledDate: DateTime(2026, 7, 1),
+          plannedAmountMinor: 25000,
+          status: ScheduledOccurrenceStatus.paid,
+          actualAmountMinor: 90000,
+          actualPaymentDate: DateTime(2026, 7, 3),
+          transactionId: 'txn-paid',
+        ),
+      ],
+      sync: SyncMetadata.fresh(now: DateTime(2026, 7, 1)),
+    );
+    final transaction = TransactionRecord(
+      id: 'txn-paid',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      date: DateTime(2026, 7, 3),
+      payee: 'Card payment',
+      amountMinor: 90000,
+      scheduledTransactionId: 'sched-card',
+      scheduledOccurrenceDate: DateTime(2026, 7, 1),
+      scheduledPlannedAmountMinor: 25000,
+      sync: SyncMetadata.fresh(now: DateTime(2026, 7, 3)),
+    );
+
+    final restoredSchedule = ScheduledTransactionRecord.fromJson(
+      scheduled.toJson(),
+    );
+    final restoredTransaction = TransactionRecord.fromJson(
+      transaction.toJson(),
+    );
+
+    expect(restoredSchedule.occurrences, hasLength(1));
+    expect(restoredSchedule.occurrences.single.actualAmountMinor, 90000);
+    expect(restoredSchedule.occurrences.single.plannedAmountMinor, 25000);
+    expect(restoredTransaction.scheduledOccurrenceDate, DateTime(2026, 7, 1));
+    expect(restoredTransaction.scheduledPlannedAmountMinor, 25000);
+  });
+
   test(
     'account balances are derived from opening balance and ledger activity',
     () async {
@@ -139,13 +189,13 @@ void main() {
     );
     await store.deleteBudget('budget');
 
-    final reloaded = await FinanceDataStore.load(
-      localRepository: repository,
-    );
+    final reloaded = await FinanceDataStore.load(localRepository: repository);
 
     expect(reloaded.accountById('checking').isDeleted, isTrue);
     expect(
-      reloaded.transactions.singleWhere((item) => item.id == 'transaction').isDeleted,
+      reloaded.transactions
+          .singleWhere((item) => item.id == 'transaction')
+          .isDeleted,
       isTrue,
     );
     expect(
@@ -155,10 +205,9 @@ void main() {
       isTrue,
     );
     expect(reloaded.budgetById('budget').isDeleted, isTrue);
-    expect(
-      reloaded.activeAccountsInDisplayOrder.map((item) => item.id),
-      ['cash'],
-    );
+    expect(reloaded.activeAccountsInDisplayOrder.map((item) => item.id), [
+      'cash',
+    ]);
   });
 
   test('store can reorder accounts within a fixed group', () async {
@@ -725,6 +774,9 @@ void main() {
       collapsedAccountGroupNames: {'cash'},
       accountGroupOrderNames: ['cash', 'banking', 'creditCards', 'loans'],
       accountGroupLabelOverrides: {'banking': 'Everyday Money'},
+      savedPayeeNames: ['Cafe', 'Old Store'],
+      archivedPayeeNames: {'cafe'},
+      deletedPayeeNames: {'old store'},
     );
 
     final updated = preferences.copyWith(
@@ -749,6 +801,9 @@ void main() {
     expect(roundTripped.accountGroupLabelOverrides, {
       'banking': 'Everyday Money',
     });
+    expect(roundTripped.savedPayeeNames, ['Cafe', 'Old Store']);
+    expect(roundTripped.archivedPayeeNames, {'cafe'});
+    expect(roundTripped.deletedPayeeNames, {'old store'});
   });
 
   test('notification planner converts alert preferences into requests', () {

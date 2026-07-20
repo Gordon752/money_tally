@@ -114,6 +114,7 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
             fontWeight: FontWeight.w900,
           ),
       onTap: _moveCursorToEnd,
+      onTapOutside: (_) => _focusNode.unfocus(),
       onChanged: _handleChanged,
     );
   }

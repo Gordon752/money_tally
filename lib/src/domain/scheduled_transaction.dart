@@ -15,6 +15,54 @@ enum AlertPreference {
 
 enum ScheduledAction { none, paid, skipped }
 
+enum ScheduledOccurrenceStatus { paid, skipped }
+
+class ScheduledOccurrenceRecord {
+  const ScheduledOccurrenceRecord({
+    required this.scheduledDate,
+    required this.plannedAmountMinor,
+    required this.status,
+    this.actualAmountMinor,
+    this.actualPaymentDate,
+    this.transactionId,
+  });
+
+  final DateTime scheduledDate;
+  final int plannedAmountMinor;
+  final ScheduledOccurrenceStatus status;
+  final int? actualAmountMinor;
+  final DateTime? actualPaymentDate;
+  final String? transactionId;
+
+  Map<String, Object?> toJson() {
+    return {
+      'scheduledDate': scheduledDate.toIso8601String(),
+      'plannedAmountMinor': plannedAmountMinor,
+      'status': status.name,
+      'actualAmountMinor': actualAmountMinor,
+      'actualPaymentDate': actualPaymentDate?.toIso8601String(),
+      'transactionId': transactionId,
+    };
+  }
+
+  factory ScheduledOccurrenceRecord.fromJson(Map<String, Object?> json) {
+    return ScheduledOccurrenceRecord(
+      scheduledDate: dateTimeFromJson(json['scheduledDate']),
+      plannedAmountMinor: json['plannedAmountMinor'] as int? ?? 0,
+      status: enumByName(
+        ScheduledOccurrenceStatus.values,
+        json['status'],
+        ScheduledOccurrenceStatus.paid,
+      ),
+      actualAmountMinor: json['actualAmountMinor'] as int?,
+      actualPaymentDate: json['actualPaymentDate'] == null
+          ? null
+          : dateTimeFromJson(json['actualPaymentDate']),
+      transactionId: json['transactionId'] as String?,
+    );
+  }
+}
+
 class ScheduledTransactionRecord {
   const ScheduledTransactionRecord({
     required this.id,
@@ -35,6 +83,7 @@ class ScheduledTransactionRecord {
     this.scheduledNotificationIds = const [],
     this.lastReminderScheduledAt,
     this.lastAction = ScheduledAction.none,
+    this.occurrences = const [],
   });
 
   final String id;
@@ -54,6 +103,7 @@ class ScheduledTransactionRecord {
   final List<int> scheduledNotificationIds;
   final DateTime? lastReminderScheduledAt;
   final ScheduledAction lastAction;
+  final List<ScheduledOccurrenceRecord> occurrences;
   final SyncMetadata sync;
 
   bool get hasAlert => alertPreference != AlertPreference.none;
@@ -76,6 +126,7 @@ class ScheduledTransactionRecord {
     List<int>? scheduledNotificationIds,
     DateTime? lastReminderScheduledAt,
     ScheduledAction? lastAction,
+    List<ScheduledOccurrenceRecord>? occurrences,
     SyncMetadata? sync,
     bool clearTransferAccount = false,
     bool clearCategory = false,
@@ -109,6 +160,7 @@ class ScheduledTransactionRecord {
           ? null
           : lastReminderScheduledAt ?? this.lastReminderScheduledAt,
       lastAction: lastAction ?? this.lastAction,
+      occurrences: occurrences ?? this.occurrences,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -132,6 +184,7 @@ class ScheduledTransactionRecord {
       'scheduledNotificationIds': scheduledNotificationIds,
       'lastReminderScheduledAt': lastReminderScheduledAt?.toIso8601String(),
       'lastAction': lastAction.name,
+      'occurrences': occurrences.map((item) => item.toJson()).toList(),
       'sync': sync.toJson(),
     };
   }
@@ -179,6 +232,9 @@ class ScheduledTransactionRecord {
         json['lastAction'],
         ScheduledAction.none,
       ),
+      occurrences: stringMapList(
+        json['occurrences'],
+      ).map(ScheduledOccurrenceRecord.fromJson).toList(),
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

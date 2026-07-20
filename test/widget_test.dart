@@ -6,6 +6,7 @@ import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/category.dart' as v2_category;
+import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart'
     as v2_scheduled;
@@ -13,6 +14,7 @@ import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
 import 'package:money_tally/src/domain/transaction.dart' as v2_transaction;
 import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
+import 'package:money_tally/src/notifications/notification_scheduler.dart';
 import 'package:money_tally/src/persistence/backup_codec.dart';
 import 'package:money_tally/src/persistence/local_finance_data_set_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
@@ -25,6 +27,49 @@ Finder ledgerRowWithText(String text) => find.ancestor(
     (widget) => widget.runtimeType.toString() == 'LedgerJournalRow',
   ),
 );
+
+Future<void> collapseScheduledCalendar(WidgetTester tester) async {
+  final collapse = find.byTooltip('Collapse calendar');
+  if (collapse.evaluate().isEmpty) return;
+  await tester.tap(collapse);
+  await tester.pumpAndSettle();
+}
+
+class TestNotificationScheduler implements NotificationScheduler {
+  final scheduledIds = <String>[];
+  final cancelledIds = <String>[];
+  final badgeCounts = <int>[];
+
+  @override
+  Future<void> cancelScheduledTransaction(
+    v2_scheduled.ScheduledTransactionRecord scheduledTransaction,
+  ) async {
+    cancelledIds.add(scheduledTransaction.id);
+  }
+
+  @override
+  Future<bool> requestPermissionIfNeeded() async => true;
+
+  @override
+  Future<void> rescheduleScheduledTransaction(
+    v2_scheduled.ScheduledTransactionRecord scheduledTransaction,
+  ) async {
+    scheduledIds.add(scheduledTransaction.id);
+  }
+
+  @override
+  Future<List<int>> scheduleScheduledTransaction(
+    v2_scheduled.ScheduledTransactionRecord scheduledTransaction,
+  ) async {
+    scheduledIds.add(scheduledTransaction.id);
+    return const [7101];
+  }
+
+  @override
+  Future<void> updateBadgeCount(int dueOrOverdueCount) async {
+    badgeCounts.add(dueOrOverdueCount);
+  }
+}
 
 void main() {
   testWidgets('amount entry field formats typed digits as money', (
@@ -603,7 +648,10 @@ void main() {
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit transaction'), findsOneWidget);
+    expect(find.text('Edit Transaction'), findsOneWidget);
+    expect(find.text('Description'), findsOneWidget);
+    expect(find.text('Payee'), findsNothing);
+    expect(find.text('Add a description (optional)'), findsOneWidget);
     final transferTypeSelector = tester
         .widget<SegmentedButton<v2_transaction.TransactionType>>(
           find.byType(SegmentedButton<v2_transaction.TransactionType>),
@@ -616,11 +664,7 @@ void main() {
       find.byKey(const ValueKey('transfer-amount')),
     );
     expect(transferAmountField.autofocus, isFalse);
-    final transferDateField = tester.widget<TextField>(
-      find.byKey(const ValueKey('transfer-date')),
-    );
-    expect(transferDateField.readOnly, isTrue);
-    expect(transferDateField.showCursor, isFalse);
+    expect(find.byKey(const ValueKey('transfer-date')), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('transfer-payee')),
       'Cash refill',
@@ -667,14 +711,40 @@ void main() {
     await tester.tap(find.text('Split'));
     await tester.pumpAndSettle();
 
-    await tester.enterText(
-      find.byKey(const ValueKey('split-amount-0')),
-      '3000',
+    final splitSection = find.byKey(
+      const ValueKey('transaction-split-category-field'),
     );
-    await tester.enterText(
-      find.byKey(const ValueKey('split-amount-1')),
-      '34.28',
+    expect(splitSection, findsOneWidget);
+    expect(
+      find.descendant(of: splitSection, matching: find.byType(TextField)),
+      findsOneWidget,
     );
+
+    await tester.scrollUntilVisible(
+      find.text('Add split'),
+      160,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Add split'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: splitSection, matching: find.text('Choose category')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dining').last);
+    await tester.pumpAndSettle();
+
+    final splitAmountFields = find.descendant(
+      of: splitSection,
+      matching: find.byType(TextField),
+    );
+    expect(splitAmountFields, findsNWidgets(2));
+    await tester.enterText(splitAmountFields.at(1), '3428');
+    await tester.pump();
+    expect(find.text('Balanced'), findsOneWidget);
+    expect(find.text(r'$30.00'), findsOneWidget);
+    expect(find.text(r'$34.28'), findsOneWidget);
+
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -820,7 +890,7 @@ void main() {
     await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Add transaction'), findsOneWidget);
+    expect(find.text('Add Transaction'), findsOneWidget);
   });
 
   testWidgets('add transaction honors last used transfer preference', (
@@ -850,7 +920,7 @@ void main() {
     await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Add transaction'), findsOneWidget);
+    expect(find.text('Add Transaction'), findsOneWidget);
   });
 
   testWidgets('transaction category picker can create a category', (
@@ -938,6 +1008,37 @@ void main() {
     expect(transaction.note, 'Paint and fasteners');
   });
 
+  testWidgets('transaction payee suggestion can be selected', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
+    await tester.pumpAndSettle();
+
+    final payeeField = find.byKey(const ValueKey('transaction-payee'));
+    await tester.enterText(payeeField, 'Wal');
+    await tester.pumpAndSettle();
+    final walmartSuggestion = find.byKey(
+      const ValueKey('payee-suggestion-Walmart'),
+    );
+    expect(walmartSuggestion, findsOneWidget);
+
+    await tester.tap(walmartSuggestion);
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<TextField>(payeeField).controller!.text, 'Walmart');
+    expect(walmartSuggestion, findsNothing);
+  });
+
   testWidgets('floating add menu opens income transaction dialog', (
     tester,
   ) async {
@@ -1019,12 +1120,10 @@ void main() {
     final dataSet = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
     );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(
-        store: legacyStore,
-        dataStore: FinanceDataStore(dataSet: dataSet),
-      ),
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -1035,6 +1134,18 @@ void main() {
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(0), 'Travel Fund');
     await tester.enterText(fields.at(1), '123.45');
+    final groupBalanceOption = find.widgetWithText(
+      SwitchListTile,
+      'Include in group balance',
+    );
+    final netWorthOption = find.widgetWithText(
+      SwitchListTile,
+      'Include in net worth',
+    );
+    await tester.ensureVisible(groupBalanceOption);
+    await tester.tap(groupBalanceOption);
+    await tester.ensureVisible(netWorthOption);
+    await tester.tap(netWorthOption);
     await tester.tap(find.text('Save').last);
     await tester.pumpAndSettle();
 
@@ -1044,6 +1155,11 @@ void main() {
       legacyStore.accounts.map((account) => account.name),
       contains('Travel Fund'),
     );
+    final account = dataStore.accounts.singleWhere(
+      (account) => account.name == 'Travel Fund',
+    );
+    expect(account.includeInGroupBalance, isFalse);
+    expect(account.includeInNetWorth, isFalse);
   });
 
   testWidgets('floating add transfer creates first-class transfer', (
@@ -1070,20 +1186,53 @@ void main() {
     await tester.tap(find.text('Transfer'));
     await tester.pumpAndSettle();
 
+    expect(
+      tester.widget<InkWell>(find.byKey(const ValueKey('transfer-to-'))).onTap,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Save'))
+          .onPressed,
+      isNull,
+    );
     await tester.tap(find.byKey(const ValueKey('transfer-from-account')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Checking').last);
     await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<InkWell>(find.byKey(ValueKey('transfer-to-${checking.id}')))
+          .onTap,
+      isNotNull,
+    );
     await tester.tap(find.byKey(ValueKey('transfer-to-${checking.id}')));
     await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byType(ListTile),
+        matching: find.text('Checking'),
+      ),
+      findsNothing,
+    );
     await tester.tap(find.text('Cash').last);
     await tester.pumpAndSettle();
 
+    final transferSheet = find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString() == 'TransactionSheetFrame',
+    );
+    expect(transferSheet, findsOneWidget);
+    expect(
+      find.descendant(
+        of: transferSheet,
+        matching: find.textContaining('Balance'),
+      ),
+      findsNWidgets(2),
+    );
+
     final now = DateTime.now();
     final transferDate = DateTime(now.year, now.month, now.day);
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('transfer-date')),
-    );
+    await tester.ensureVisible(find.byKey(const ValueKey('transfer-date')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('transfer-date')));
     await tester.pumpAndSettle();
@@ -1094,9 +1243,18 @@ void main() {
       'ATM cash',
     );
     await tester.enterText(
+      find.byKey(const ValueKey('transfer-payee')),
+      'Savings transfer',
+    );
+    await tester.enterText(
       find.byKey(const ValueKey('transfer-amount')),
       '5000',
     );
+    await tester.pumpAndSettle();
+    final saveButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Save'),
+    );
+    expect(saveButton.onPressed, isNotNull);
     await tester.tap(find.text('Save').last);
     await tester.pumpAndSettle();
 
@@ -1106,6 +1264,7 @@ void main() {
     );
     expect(transfer.accountId, checking.id);
     expect(transfer.transferAccountId, cash.id);
+    expect(transfer.payee, 'Savings transfer');
     expect(transfer.date, transferDate);
     expect(transfer.note, 'ATM cash');
     expect(
@@ -1141,17 +1300,64 @@ void main() {
           find.byType(SegmentedButton<v2_transaction.TransactionType>),
         );
     expect(scheduledTypeSelector.showSelectedIcon, isFalse);
-    final fields = find.byType(TextField);
-    expect(tester.widget<TextField>(fields.at(0)).autofocus, isFalse);
-    await tester.enterText(fields.at(0), 'Rent');
-    await tester.enterText(fields.at(1), '900.00');
-    final nextDateField = tester.widget<TextField>(
-      find.byKey(const ValueKey('scheduled-next-date')),
+    expect(find.text('Create Scheduled Transaction'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('scheduled-amount')))
+          .autofocus,
+      isFalse,
     );
-    expect(nextDateField.readOnly, isTrue);
-    expect(nextDateField.showCursor, isFalse);
-    nextDateField.controller!.text = '2026-08-01';
-    await tester.tap(find.text('Add').last);
+    expect(find.text('Choose account'), findsOneWidget);
+    expect(find.text('Choose category'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Save'))
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.byKey(const ValueKey('scheduled-account')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(BottomSheet).last,
+        matching: find.text(dataStore.accounts.first.name),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('scheduled-payee')),
+      'Rent',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('scheduled-payee')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('scheduled-frequency')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('scheduled-frequency')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('scheduled-payee')))
+          .focusNode!
+          .hasFocus,
+      isFalse,
+    );
+    await tester.tap(find.text('Once').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('scheduled-amount')),
+      '900.00',
+    );
+    await tester.pumpAndSettle();
+    final saveButton = find.widgetWithText(FilledButton, 'Save');
+    expect(tester.widget<FilledButton>(saveButton).onPressed, isNotNull);
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
 
     final scheduled = dataStore.scheduledTransactions.singleWhere(
@@ -1159,14 +1365,157 @@ void main() {
     );
     expect(scheduled.type, v2_transaction.TransactionType.expense);
     expect(scheduled.amountMinor, 90000);
-    expect(scheduled.nextDate, DateTime(2026, 8));
-    expect(scheduled.frequency, v2_scheduled.RecurrenceFrequency.monthly);
-    expect(scheduled.categoryId, isNotNull);
+    final today = DateTime.now();
+    expect(scheduled.nextDate, DateTime(today.year, today.month, today.day));
+    expect(scheduled.frequency, v2_scheduled.RecurrenceFrequency.once);
+    expect(scheduled.categoryId, isNull);
 
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Rent'), findsOneWidget);
+  });
+
+  testWidgets('scheduled income uses polished fields and saves', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Scheduled Transaction'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(SegmentedButton<v2_transaction.TransactionType>),
+        matching: find.text('Income'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Choose account'), findsOneWidget);
+    expect(find.text('Choose category'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('scheduled-account')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(BottomSheet).last,
+        matching: find.text(dataStore.accounts.first.name),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('scheduled-amount')),
+      '1250.00',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('scheduled-payee')),
+      'Payroll',
+    );
+    await tester.ensureVisible(find.text('Save').last);
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    final scheduled = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.payee == 'Payroll',
+    );
+    expect(scheduled.type, v2_transaction.TransactionType.income);
+    expect(scheduled.amountMinor, 125000);
+    expect(scheduled.accountId, isNotEmpty);
+  });
+
+  testWidgets('scheduled transfer saves distinct accounts and description', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Scheduled Transaction'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Transfer'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('From Account'), findsOneWidget);
+    expect(find.text('To Account'), findsOneWidget);
+    expect(find.text('Description'), findsOneWidget);
+    expect(find.text('Payee'), findsNothing);
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Save'))
+          .onPressed,
+      isNull,
+    );
+    final sourceAccount = dataStore.accounts.first;
+    final destinationAccount = dataStore.accounts.firstWhere(
+      (account) => account.id != sourceAccount.id,
+    );
+    expect(find.text('Choose account'), findsOneWidget);
+    expect(find.text('Choose a source account first'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('scheduled-account')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(BottomSheet).last,
+        matching: find.text(sourceAccount.name),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(ValueKey('scheduled-to-${sourceAccount.id}')),
+    );
+    await tester.tap(find.byKey(ValueKey('scheduled-to-${sourceAccount.id}')));
+    await tester.pumpAndSettle();
+    final destinationPicker = find.byType(BottomSheet).last;
+    expect(
+      find.descendant(
+        of: destinationPicker,
+        matching: find.text(sourceAccount.name),
+      ),
+      findsNothing,
+    );
+    await tester.tap(
+      find.descendant(
+        of: destinationPicker,
+        matching: find.text(destinationAccount.name),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('scheduled-amount')),
+      '300.00',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('scheduled-payee')),
+      'Weekly settlement',
+    );
+    await tester.ensureVisible(find.text('Save').last);
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    final scheduled = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.payee == 'Weekly settlement',
+    );
+    expect(scheduled.type, v2_transaction.TransactionType.transfer);
+    expect(scheduled.accountId, isNot(scheduled.transferAccountId));
+    expect(scheduled.transferAccountId, isNotNull);
+    expect(scheduled.categoryId, isNull);
+    expect(scheduled.amountMinor, 30000);
   });
 
   testWidgets('account long press edits a v2-only account', (tester) async {
@@ -1498,7 +1847,11 @@ void main() {
     await tester.tap(find.byTooltip('Expand calendar'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Next month'));
+    tester
+        .widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.chevron_right).first,
+        )
+        .onPressed!();
     await tester.pumpAndSettle();
     expect(find.text('September 2026'), findsOneWidget);
     await tester.tap(find.byTooltip('Previous month'));
@@ -1512,6 +1865,11 @@ void main() {
       find.descendant(of: augustFirst, matching: find.text('2')),
       findsOneWidget,
     );
+    final categoryPillSize = tester.getSize(
+      find.byKey(const ValueKey('category-count-dining')),
+    );
+    expect(categoryPillSize.height, 24);
+    expect(categoryPillSize.width, greaterThan(categoryPillSize.height));
     await tester.tap(augustFirst);
     await tester.pumpAndSettle();
 
@@ -1520,6 +1878,305 @@ void main() {
     expect(find.text('Electric'), findsOneWidget);
     expect(find.text('Internet'), findsNothing);
     expect(find.text('Local alerts'), findsOneWidget);
+  });
+
+  testWidgets('scheduled calendar shows planned paid and remaining totals', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final now = DateTime.now();
+    final month = DateTime(now.year, now.month);
+    final nextMonth = DateTime(now.year, now.month + 1);
+    final followingMonth = DateTime(now.year, now.month + 2);
+    final paidSchedule =
+        scheduledExpense(
+          id: 'sched-paid',
+          payee: 'Planned card payment',
+          amountMinor: 10000,
+          nextDate: nextMonth,
+        ).copyWith(
+          frequency: v2_scheduled.RecurrenceFrequency.once,
+          lastAction: v2_scheduled.ScheduledAction.paid,
+          occurrences: [
+            v2_scheduled.ScheduledOccurrenceRecord(
+              scheduledDate: DateTime(month.year, month.month, 5),
+              plannedAmountMinor: 10000,
+              actualAmountMinor: 90000,
+              actualPaymentDate: DateTime(month.year, month.month, 6),
+              transactionId: 'paid-actual',
+              status: v2_scheduled.ScheduledOccurrenceStatus.paid,
+            ),
+          ],
+          sync: v2_sync.SyncMetadata.fresh().deleted(),
+        );
+    final skippedSchedule =
+        scheduledExpense(
+          id: 'sched-skipped',
+          payee: 'Skipped bill',
+          amountMinor: 10000,
+          nextDate: nextMonth,
+        ).copyWith(
+          frequency: v2_scheduled.RecurrenceFrequency.once,
+          lastAction: v2_scheduled.ScheduledAction.skipped,
+          occurrences: [
+            v2_scheduled.ScheduledOccurrenceRecord(
+              scheduledDate: DateTime(month.year, month.month, 11),
+              plannedAmountMinor: 10000,
+              status: v2_scheduled.ScheduledOccurrenceStatus.skipped,
+            ),
+          ],
+          sync: v2_sync.SyncMetadata.fresh().deleted(),
+        );
+    v2_scheduled.ScheduledTransactionRecord once(
+      v2_scheduled.ScheduledTransactionRecord item,
+    ) => item.copyWith(frequency: v2_scheduled.RecurrenceFrequency.once);
+    final schedules = [
+      paidSchedule,
+      skippedSchedule,
+      once(
+        scheduledExpense(
+          id: 'sched-unpaid',
+          payee: 'Unpaid bill',
+          amountMinor: 2000000,
+          nextDate: DateTime(month.year, month.month, 10),
+        ),
+      ),
+      once(
+        scheduledExpense(
+          id: 'sched-income',
+          payee: 'Paycheck',
+          amountMinor: 50000,
+          nextDate: DateTime(month.year, month.month, 14),
+        ).copyWith(type: v2_transaction.TransactionType.income),
+      ),
+      once(
+        scheduledExpense(
+          id: 'sched-mixed-expense',
+          payee: 'Mixed expense',
+          amountMinor: 10000,
+          nextDate: DateTime(month.year, month.month, 14),
+        ),
+      ),
+      once(
+        scheduledExpense(
+          id: 'sched-apple',
+          payee: 'Apple',
+          amountMinor: 999,
+          nextDate: DateTime(month.year, month.month, 15),
+        ),
+      ),
+      once(
+        scheduledExpense(
+          id: 'sched-netflix',
+          payee: 'Netflix',
+          amountMinor: 2167,
+          nextDate: DateTime(month.year, month.month, 15),
+        ),
+      ),
+      once(
+        scheduledExpense(
+          id: 'sched-transfer',
+          payee: 'Savings transfer',
+          amountMinor: 30000,
+          nextDate: DateTime(month.year, month.month, 12),
+        ).copyWith(
+          type: v2_transaction.TransactionType.transfer,
+          transferAccountId: 'savings',
+          clearCategory: true,
+        ),
+      ),
+      scheduledExpense(
+        id: 'sched-next-month',
+        payee: 'Next month only',
+        amountMinor: 7700,
+        nextDate: DateTime(nextMonth.year, nextMonth.month, 8),
+      ),
+    ];
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        scheduledTransactions: schedules,
+        transactions: [
+          ...migrated.transactions,
+          v2_transaction.TransactionRecord(
+            id: 'paid-actual',
+            type: v2_transaction.TransactionType.expense,
+            accountId: 'checking',
+            categoryId: 'dining',
+            date: DateTime(month.year, month.month, 6),
+            payee: 'Planned card payment',
+            amountMinor: 90000,
+            scheduledTransactionId: 'sched-paid',
+            scheduledOccurrenceDate: DateTime(month.year, month.month, 5),
+            scheduledPlannedAmountMinor: 10000,
+            sync: v2_sync.SyncMetadata.fresh(),
+          ),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+          .data,
+      r'$20,831.66',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-paid')))
+          .data,
+      r'$900.00',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-remaining')))
+          .data,
+      r'$20,631.66',
+    );
+
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(
+              ValueKey(
+                'scheduled-calendar-total-${month.year}-${month.month}-10',
+              ),
+            ),
+          )
+          .data,
+      r'-$20,000.00',
+    );
+
+    final mixedDay = find.byKey(
+      ValueKey('scheduled-calendar-day-${month.year}-${month.month}-14'),
+    );
+    expect(
+      find.descendant(of: mixedDay, matching: find.text('2')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(
+              ValueKey(
+                'scheduled-calendar-total-${month.year}-${month.month}-14',
+              ),
+            ),
+          )
+          .data,
+      r'+$400.00',
+    );
+    final expenseDay = find.byKey(
+      ValueKey('scheduled-calendar-day-${month.year}-${month.month}-15'),
+    );
+    expect(
+      find.descendant(of: expenseDay, matching: find.text('2')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(
+              ValueKey(
+                'scheduled-calendar-total-${month.year}-${month.month}-15',
+              ),
+            ),
+          )
+          .data,
+      r'-$31.66',
+    );
+    expect(
+      find.byKey(
+        ValueKey('scheduled-calendar-total-${month.year}-${month.month}-11'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byKey(
+        ValueKey('scheduled-calendar-total-${month.year}-${month.month}-12'),
+      ),
+      findsNothing,
+    );
+
+    final ordinaryDecoration = tester.widget<DecoratedBox>(
+      find.byKey(
+        ValueKey(
+          'scheduled-calendar-selection-${month.year}-${month.month}-14',
+        ),
+      ),
+    );
+    expect((ordinaryDecoration.decoration as BoxDecoration).color, isNull);
+    expect((ordinaryDecoration.decoration as BoxDecoration).border, isNull);
+    final pageScroll = tester.state<ScrollableState>(
+      find.byType(Scrollable).first,
+    );
+    expect(pageScroll.position.pixels, 0);
+    final expenseDayRect = tester.getRect(expenseDay);
+    await tester.tapAt(
+      Offset(expenseDayRect.left + 1, expenseDayRect.center.dy),
+    );
+    await tester.pumpAndSettle();
+    expect(pageScroll.position.pixels, greaterThan(0));
+    final selectedDecoration = tester.widget<DecoratedBox>(
+      find.byKey(
+        ValueKey(
+          'scheduled-calendar-selection-${month.year}-${month.month}-15',
+        ),
+      ),
+    );
+    expect((selectedDecoration.decoration as BoxDecoration).color, isNotNull);
+    expect((selectedDecoration.decoration as BoxDecoration).border, isNotNull);
+    expect(find.text('Apple'), findsOneWidget);
+    expect(find.text('Netflix'), findsOneWidget);
+
+    tester
+        .widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.chevron_right).first,
+        )
+        .onPressed!();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+          .data,
+      r'$77.00',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-remaining')))
+          .data,
+      r'$77.00',
+    );
+    expect(find.text('Next month only'), findsOneWidget);
+    expect(find.textContaining('No scheduled transactions in'), findsNothing);
+
+    tester
+        .widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.chevron_right).first,
+        )
+        .onPressed!();
+    await tester.pumpAndSettle();
+    expect(find.text('Next month only'), findsOneWidget);
+    expect(find.textContaining('No scheduled transactions in'), findsNothing);
+    pageScroll.position.jumpTo(0);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(
+        ValueKey(
+          'scheduled-calendar-day-${followingMonth.year}-${followingMonth.month}-8',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(pageScroll.position.pixels, greaterThan(0));
   });
 
   testWidgets('dashboard shows scheduled due count', (tester) async {
@@ -1545,13 +2202,18 @@ void main() {
     expect(find.text('Rent'), findsOneWidget);
   });
 
-  testWidgets('scheduled long press can mark paid and advance item', (
+  testWidgets('scheduled details uses polished sheet and edit still opens', (
     tester,
   ) async {
     final legacyStore = FinanceStore.seeded();
+    final now = DateTime.now();
     final dataSet = const V1SnapshotMigrator()
         .migrate(legacyStore.snapshot().toJson())
-        .copyWith(scheduledTransactions: [rentSchedule()]);
+        .copyWith(
+          scheduledTransactions: [
+            rentSchedule(nextDate: DateTime(now.year, now.month, now.day)),
+          ],
+        );
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
@@ -1560,27 +2222,165 @@ void main() {
 
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
-    await tester.longPress(find.text('Rent'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Mark Paid'));
+    await collapseScheduledCalendar(tester);
+    await tester.tap(find.text('Rent'));
     await tester.pumpAndSettle();
 
-    final paid = dataStore.transactions.singleWhere(
-      (transaction) => transaction.scheduledTransactionId == 'sched-rent',
+    expect(find.text('Scheduled Transaction'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('scheduled-detail-payee')),
+      findsOneWidget,
     );
+    expect(find.text('Scheduled amount'), findsOneWidget);
+    expect(find.text('Mark as Paid'), findsOneWidget);
+    expect(find.text('Close'), findsOneWidget);
+    expect(find.text('Edit'), findsOneWidget);
+    expect(find.byType(AlertDialog), findsNothing);
+
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit Scheduled Transaction'), findsOneWidget);
+  });
+
+  testWidgets('mark as paid records actual amount and occurrence once', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final now = DateTime.now();
+    final dueDate = DateTime(now.year, now.month, now.day);
+    final paymentDate = dueDate.subtract(const Duration(days: 2));
+    final schedule = rentSchedule(nextDate: dueDate).copyWith(
+      amountMinor: 25000,
+      note: 'Recurring note',
+      alertPreference: v2_scheduled.AlertPreference.sameDay,
+    );
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final scheduler = TestNotificationScheduler();
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        preferences: migrated.preferences.copyWith(notificationsEnabled: true),
+        scheduledTransactions: [schedule],
+      ),
+      notificationScheduler: scheduler,
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+    await collapseScheduledCalendar(tester);
+    await tester.ensureVisible(find.text('Rent'));
+    await tester.longPress(find.text('Rent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Paid'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Mark as Paid'), findsOneWidget);
+    expect(find.text(r'$250.00'), findsWidgets);
+    expect(find.text('Today'), findsOneWidget);
+    final amountField = tester.widget<TextField>(
+      find.byKey(const ValueKey('mark-paid-actual-amount')),
+    );
+    expect(amountField.controller!.text, r'$250.00');
+    await tester.enterText(
+      find.byKey(const ValueKey('mark-paid-actual-amount')),
+      '0',
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Confirm'))
+          .onPressed,
+      isNull,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('mark-paid-actual-amount')),
+      '90000',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('mark-paid-note')),
+      'Occurrence note',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('mark-paid-date')));
+    await tester.tap(find.byKey(const ValueKey('mark-paid-date')));
+    await tester.pumpAndSettle();
+    tester
+        .widget<CalendarDatePicker>(find.byType(CalendarDatePicker))
+        .onDateChanged(paymentDate);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    final confirm = find.widgetWithText(FilledButton, 'Confirm');
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull);
+    await tester.tap(confirm);
+    await tester.tap(confirm);
+    await tester.pumpAndSettle();
+
+    final paidTransactions = dataStore.transactions
+        .where(
+          (transaction) => transaction.scheduledTransactionId == 'sched-rent',
+        )
+        .toList();
+    expect(paidTransactions, hasLength(1));
+    final paid = paidTransactions.single;
     expect(paid.type, v2_transaction.TransactionType.expense);
     expect(paid.amountMinor, 90000);
+    expect(paid.date, paymentDate);
+    expect(paid.payee, 'Rent');
+    expect(paid.categoryId, 'dining');
+    expect(paid.note, 'Occurrence note');
+    expect(paid.scheduledOccurrenceDate, dueDate);
+    expect(paid.scheduledPlannedAmountMinor, 25000);
 
     final scheduled = dataStore.scheduledTransactions.singleWhere(
       (item) => item.id == 'sched-rent',
     );
-    expect(scheduled.nextDate, DateTime(2026, 9));
+    expect(scheduled.amountMinor, 25000);
+    expect(
+      scheduled.nextDate,
+      DateTime(dueDate.year, dueDate.month + 1, dueDate.day),
+    );
+    expect(scheduled.note, 'Recurring note');
     expect(scheduled.lastAction, v2_scheduled.ScheduledAction.none);
+    expect(scheduled.occurrences, hasLength(1));
+    expect(
+      scheduled.occurrences.single.status,
+      v2_scheduled.ScheduledOccurrenceStatus.paid,
+    );
+    expect(scheduled.occurrences.single.plannedAmountMinor, 25000);
+    expect(scheduled.occurrences.single.actualAmountMinor, 90000);
+    expect(scheduled.occurrences.single.actualPaymentDate, paymentDate);
+    expect(scheduler.scheduledIds, contains('sched-rent'));
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+          .data,
+      r'$250.00',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-paid')))
+          .data,
+      r'$900.00',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-remaining')))
+          .data,
+      r'$0.00',
+    );
   });
 
   testWidgets('scheduled long press can mark transfer paid', (tester) async {
     final legacyStore = FinanceStore.seeded();
-    final scheduledTransfer = rentSchedule().copyWith(
+    final now = DateTime.now();
+    final dueDate = DateTime(now.year, now.month, now.day);
+    final scheduledTransfer = rentSchedule(nextDate: dueDate).copyWith(
       type: v2_transaction.TransactionType.transfer,
       transferAccountId: 'cash',
       payee: 'Cash draw',
@@ -1598,9 +2398,35 @@ void main() {
 
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
+    await collapseScheduledCalendar(tester);
+    await tester.tap(find.text('Cash draw'));
+    await tester.pumpAndSettle();
+    expect(find.text('Description'), findsOneWidget);
+    expect(find.text('From Account'), findsOneWidget);
+    expect(find.text('To Account'), findsOneWidget);
+    expect(find.text('Category'), findsNothing);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    await collapseScheduledCalendar(tester);
+    await tester.ensureVisible(find.text('Cash draw'));
     await tester.longPress(find.text('Cash draw'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Mark Paid'));
+    await tester.tap(find.text('Mark as Paid'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('From Account'), findsOneWidget);
+    expect(find.text('To Account'), findsOneWidget);
+    expect(find.text('Description'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const ValueKey('mark-paid-actual-amount')),
+          )
+          .controller!
+          .text,
+      r'$50.00',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
     await tester.pumpAndSettle();
 
     final paid = dataStore.transactions.singleWhere(
@@ -1611,12 +2437,97 @@ void main() {
     expect(paid.transferAccountId, 'cash');
     expect(paid.categoryId, isNull);
     expect(paid.amountMinor, 5000);
+    expect(paid.payee, 'Cash draw');
+    expect(paid.scheduledOccurrenceDate, dueDate);
 
     final scheduled = dataStore.scheduledTransactions.singleWhere(
       (item) => item.id == 'sched-rent',
     );
-    expect(scheduled.nextDate, DateTime(2026, 9));
+    expect(scheduled.accountId, isNot(scheduled.transferAccountId));
     expect(scheduled.lastAction, v2_scheduled.ScheduledAction.none);
+    expect(
+      scheduled.occurrences.single.status,
+      v2_scheduled.ScheduledOccurrenceStatus.paid,
+    );
+  });
+
+  testWidgets('mark as paid preserves scheduled income payee and category', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final now = DateTime.now();
+    final schedule =
+        rentSchedule(nextDate: DateTime(now.year, now.month, now.day)).copyWith(
+          type: v2_transaction.TransactionType.income,
+          categoryId: 'income',
+          payee: 'Salary',
+          amountMinor: 125000,
+        );
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(scheduledTransactions: [schedule]);
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+    await collapseScheduledCalendar(tester);
+    await tester.ensureVisible(find.text('Salary'));
+    await tester.longPress(find.text('Salary'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Paid'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.pumpAndSettle();
+
+    final paid = dataStore.transactions.singleWhere(
+      (transaction) => transaction.scheduledTransactionId == 'sched-rent',
+    );
+    expect(paid.type, v2_transaction.TransactionType.income);
+    expect(paid.payee, 'Salary');
+    expect(paid.categoryId, 'income');
+    expect(paid.amountMinor, 125000);
+  });
+
+  testWidgets('skip once records skipped occurrence without transaction', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final now = DateTime.now();
+    final dueDate = DateTime(now.year, now.month, now.day);
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(scheduledTransactions: [rentSchedule(nextDate: dueDate)]);
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+    await collapseScheduledCalendar(tester);
+    await tester.ensureVisible(find.text('Rent'));
+    await tester.longPress(find.text('Rent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip Once'));
+    await tester.pumpAndSettle();
+
+    expect(
+      dataStore.transactions.where(
+        (transaction) => transaction.scheduledTransactionId == 'sched-rent',
+      ),
+      isEmpty,
+    );
+    final scheduled = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.id == 'sched-rent',
+    );
+    expect(scheduled.occurrences, hasLength(1));
+    expect(
+      scheduled.occurrences.single.status,
+      v2_scheduled.ScheduledOccurrenceStatus.skipped,
+    );
   });
 
   testWidgets('scheduled long press can duplicate and delete item', (
@@ -1634,6 +2545,8 @@ void main() {
 
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
+    await collapseScheduledCalendar(tester);
+    await tester.ensureVisible(find.text('Rent'));
     await tester.longPress(find.text('Rent'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Duplicate'));
@@ -1645,6 +2558,8 @@ void main() {
     );
     expect(find.text('Rent copy'), findsOneWidget);
 
+    await collapseScheduledCalendar(tester);
+    await tester.ensureVisible(find.text('Rent'));
     await tester.longPress(find.text('Rent'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
@@ -1660,9 +2575,14 @@ void main() {
 
   testWidgets('scheduled long press can edit item', (tester) async {
     final legacyStore = FinanceStore.seeded();
+    final now = DateTime.now();
     final dataSet = const V1SnapshotMigrator()
         .migrate(legacyStore.snapshot().toJson())
-        .copyWith(scheduledTransactions: [rentSchedule()]);
+        .copyWith(
+          scheduledTransactions: [
+            rentSchedule(nextDate: DateTime(now.year, now.month, now.day)),
+          ],
+        );
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
@@ -1671,19 +2591,36 @@ void main() {
 
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
+    await collapseScheduledCalendar(tester);
+    await tester.ensureVisible(find.text('Rent'));
     await tester.longPress(find.text('Rent'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit scheduled transaction'), findsOneWidget);
-    await tester.enterText(find.byType(TextField).at(0), 'Mortgage');
-    await tester.enterText(find.byType(TextField).at(1), '925.50');
-    final nextDateField = tester.widget<TextField>(
+    expect(find.text('Edit Scheduled Transaction'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('scheduled-payee')),
+      'Mortgage',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('scheduled-amount')),
+      '925.50',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
       find.byKey(const ValueKey('scheduled-next-date')),
     );
-    expect(nextDateField.readOnly, isTrue);
-    nextDateField.controller!.text = '2026-08-15';
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('scheduled-next-date')));
+    await tester.pumpAndSettle();
+    tester
+        .widget<CalendarDatePicker>(find.byType(CalendarDatePicker))
+        .onDateChanged(DateTime(2026, 8, 15));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save'));
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -1693,18 +2630,31 @@ void main() {
     expect(edited.payee, 'Mortgage');
     expect(edited.amountMinor, 92550);
     expect(edited.nextDate, DateTime(2026, 8, 15));
+    expect(edited.frequency, v2_scheduled.RecurrenceFrequency.monthly);
     expect(edited.lastAction, v2_scheduled.ScheduledAction.none);
+    await tester.ensureVisible(find.byTooltip('Next month'));
+    await tester.tap(find.byTooltip('Next month'));
+    await tester.pumpAndSettle();
     expect(find.text('Mortgage'), findsOneWidget);
     expect(find.text('Rent'), findsNothing);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+          .data,
+      r'$925.50',
+    );
   });
 
   testWidgets('scheduled edit persists custom alert options', (tester) async {
     final legacyStore = FinanceStore.seeded();
+    final now = DateTime.now();
     final dataSet = const V1SnapshotMigrator()
         .migrate(legacyStore.snapshot().toJson())
         .copyWith(
           scheduledTransactions: [
-            rentSchedule().copyWith(
+            rentSchedule(
+              nextDate: DateTime(now.year, now.month, now.day),
+            ).copyWith(
               alertPreference: v2_scheduled.AlertPreference.custom,
               customAlertTimeMinutes: 11 * 60 + 15,
               repeatAlertUntilResolved: true,
@@ -1719,21 +2669,21 @@ void main() {
 
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
+    await collapseScheduledCalendar(tester);
+    await tester.ensureVisible(find.text('Rent'));
     await tester.longPress(find.text('Rent'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Custom alert time'), findsOneWidget);
+    expect(find.text('Time'), findsOneWidget);
     expect(find.text('11:15 AM'), findsOneWidget);
-    final alertTimeField = tester.widget<TextField>(
-      find.byKey(const ValueKey('scheduled-alert-time')),
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('scheduled-repeat-alert')),
     );
-    expect(alertTimeField.readOnly, isTrue);
-    alertTimeField.controller!.text = '2:30 PM';
-    await tester.ensureVisible(find.byType(CheckboxListTile));
-    await tester.tap(find.byType(CheckboxListTile));
+    await tester.tap(find.byKey(const ValueKey('scheduled-repeat-alert')));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save'));
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -1741,7 +2691,7 @@ void main() {
       (item) => item.id == 'sched-rent',
     );
     expect(edited.alertPreference, v2_scheduled.AlertPreference.custom);
-    expect(edited.customAlertTimeMinutes, 14 * 60 + 30);
+    expect(edited.customAlertTimeMinutes, 11 * 60 + 15);
     expect(edited.repeatAlertUntilResolved, isFalse);
   });
 
@@ -1901,12 +2851,10 @@ void main() {
             category,
       ],
     );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(
-        store: legacyStore,
-        dataStore: FinanceDataStore(dataSet: dataSet),
-      ),
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
     );
 
     await tester.tap(find.text('Categories').last);
@@ -1917,6 +2865,52 @@ void main() {
       tester.getTopLeft(find.text('Snacks')).dx,
       greaterThan(tester.getTopLeft(find.text('Dining')).dx),
     );
+    expect(
+      find.byKey(const ValueKey('category-branch-snacks')),
+      findsOneWidget,
+    );
+    final parentAvatar = tester.widget<CircleAvatar>(
+      find.descendant(
+        of: find.byKey(const ValueKey('category-row-dining')),
+        matching: find.byType(CircleAvatar),
+      ),
+    );
+    final childAvatar = tester.widget<CircleAvatar>(
+      find.descendant(
+        of: find.byKey(const ValueKey('category-row-snacks')),
+        matching: find.byType(CircleAvatar),
+      ),
+    );
+    expect(parentAvatar.radius, 18);
+    expect(childAvatar.radius, 14);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('category-count-dining')),
+        matching: find.text(
+          '${transactionCountForCategory(dataStore, 'dining')}',
+        ),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byTooltip('Collapse Dining'));
+    await tester.pumpAndSettle();
+    expect(find.text('Snacks'), findsNothing);
+    expect(find.text('Expense · 1 subcategory'), findsOneWidget);
+    await tester.tap(find.byTooltip('Expand Dining'));
+    await tester.pumpAndSettle();
+    expect(find.text('Snacks'), findsOneWidget);
+    expect(find.text('Expense · Dining'), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const ValueKey('category-swipe-snacks')),
+      const Offset(-240, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('category-archive-snacks')));
+    await tester.pumpAndSettle();
+    expect(dataStore.categoryById('snacks').isArchived, isTrue);
+    expect(find.text('Snacks'), findsNothing);
   });
 
   testWidgets('category dialog creates v2 and legacy category', (tester) async {
@@ -2048,6 +3042,244 @@ void main() {
     expect(category.isArchived, isTrue);
     expect(category.isDeleted, isTrue);
     expect(find.text('Dining'), findsNothing);
+  });
+
+  testWidgets('payee manager groups archived payees and restores them', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        preferences: migrated.preferences.copyWith(
+          savedPayeeNames: const ['Walmart', 'Cafe', 'Old Store'],
+          archivedPayeeNames: const {'cafe', 'old store'},
+          deletedPayeeNames: const {'old store'},
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    final managePayees = find.widgetWithText(ListTile, 'Manage payees');
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.tap(managePayees);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Payees'), findsOneWidget);
+    expect(find.text('Archived (1)'), findsOneWidget);
+    expect(find.byKey(const ValueKey('archived-payee-cafe')), findsNothing);
+    expect(find.text('Old Store'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('archived-payees-header')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('archived-payee-cafe')), findsOneWidget);
+
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+    expect(dataStore.preferences.archivedPayeeNames, isNot(contains('cafe')));
+    expect(find.text('Archived (1)'), findsNothing);
+    expect(find.text('Cafe'), findsOneWidget);
+    expect(
+      savedPayees(
+        dataStore,
+      ).map((payee) => payee.toLowerCase()).where((payee) => payee == 'cafe'),
+      hasLength(1),
+    );
+  });
+
+  testWidgets('payee manager alphabetizes sections counts and swipe actions', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        preferences: migrated.preferences.copyWith(
+          savedPayeeNames: const ['Burger King', 'Apple', 'Best Buy', 'Amazon'],
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Manage payees'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('payee-section-A')), findsOneWidget);
+    expect(find.byKey(const ValueKey('payee-section-B')), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Amazon')).dy,
+      lessThan(tester.getTopLeft(find.text('Apple')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('Best Buy')).dy,
+      lessThan(tester.getTopLeft(find.text('Burger King')).dy),
+    );
+    expect(find.byIcon(Icons.person_outline), findsNothing);
+    expect(find.byType(Divider), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('payee-count-apple')),
+        matching: find.text('${transactionCountForPayee(dataStore, 'Apple')}'),
+      ),
+      findsOneWidget,
+    );
+    final payeePillSize = tester.getSize(
+      find.byKey(const ValueKey('payee-count-apple')),
+    );
+    expect(payeePillSize.height, 24);
+    expect(payeePillSize.width, greaterThan(payeePillSize.height));
+    expect(
+      tester.getSize(find.byKey(const ValueKey('payee-row-apple'))).height,
+      lessThanOrEqualTo(48),
+    );
+
+    final bestBuySwipe = find.byKey(const ValueKey('payee-swipe-best buy'));
+    await tester.ensureVisible(bestBuySwipe);
+    await tester.drag(bestBuySwipe, const Offset(-240, 0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('payee-archive-best buy')));
+    await tester.pumpAndSettle();
+
+    expect(dataStore.preferences.archivedPayeeNames, contains('best buy'));
+    expect(find.byKey(const ValueKey('payee-row-best buy')), findsNothing);
+    expect(find.text('Archived (1)'), findsOneWidget);
+    expect(find.byKey(const ValueKey('archived-payee-best buy')), findsNothing);
+  });
+
+  testWidgets('permanently deleted payee stays deleted after reload and sync', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        preferences: migrated.preferences.copyWith(
+          savedPayeeNames: const ['Cafe'],
+          archivedPayeeNames: const {'cafe'},
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    final managePayees = find.widgetWithText(ListTile, 'Manage payees');
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.tap(managePayees);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('archived-payees-header')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Delete Cafe permanently'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete permanently').last);
+    await tester.pumpAndSettle();
+
+    expect(dataStore.preferences.deletedPayeeNames, contains('cafe'));
+    expect(dataStore.preferences.archivedPayeeNames, isNot(contains('cafe')));
+    expect(savedPayees(dataStore), isNot(contains('Cafe')));
+    expect(archivedPayees(dataStore), isNot(contains('Cafe')));
+
+    final reloadedStore = FinanceDataStore(
+      dataSet: FinanceDataSet.fromJson(dataStore.dataSet.toJson()),
+    );
+    expect(reloadedStore.preferences.deletedPayeeNames, contains('cafe'));
+    expect(savedPayees(reloadedStore), isNot(contains('Cafe')));
+
+    final staleRemote = migrated.copyWith(
+      preferences: migrated.preferences.copyWith(
+        savedPayeeNames: const ['Cafe'],
+      ),
+    );
+    final merged = mergeFinanceDataSetsPreferCurrent(
+      incoming: staleRemote,
+      current: reloadedStore.dataSet,
+    );
+    final mergedStore = FinanceDataStore(dataSet: merged);
+    expect(mergedStore.preferences.deletedPayeeNames, contains('cafe'));
+    expect(savedPayees(mergedStore), isNot(contains('Cafe')));
+    expect(
+      savedPayees(mergedStore)
+          .map((payee) => payee.toLowerCase())
+          .toSet()
+          .intersection(
+            archivedPayees(
+              mergedStore,
+            ).map((payee) => payee.toLowerCase()).toSet(),
+          ),
+      isEmpty,
+    );
+  });
+
+  testWidgets('archived and deleted payees stay out of suggestions', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        preferences: migrated.preferences.copyWith(
+          savedPayeeNames: const ['Walmart', 'Cafe'],
+          archivedPayeeNames: const {'cafe'},
+          deletedPayeeNames: const {'walmart'},
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
+    await tester.pumpAndSettle();
+    final payeeField = find.byKey(const ValueKey('transaction-payee'));
+    await tester.enterText(payeeField, 'Wal');
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('payee-suggestion-Walmart')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('payee-suggestion-__create_new_payee__')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('settings screen renders v2 preferences on wide layout', (

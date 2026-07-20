@@ -669,6 +669,8 @@ class FinanceDataStore extends ChangeNotifier {
     String note = '',
     List<TransactionSplitLine> splitLines = const [],
     String? scheduledTransactionId,
+    DateTime? scheduledOccurrenceDate,
+    int? scheduledPlannedAmountMinor,
   }) async {
     final transaction = TransactionRecord(
       id: _newId('txn'),
@@ -681,6 +683,8 @@ class FinanceDataStore extends ChangeNotifier {
       note: note,
       splitLines: splitLines,
       scheduledTransactionId: scheduledTransactionId,
+      scheduledOccurrenceDate: scheduledOccurrenceDate,
+      scheduledPlannedAmountMinor: scheduledPlannedAmountMinor,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
     await saveTransaction(transaction);
@@ -696,6 +700,8 @@ class FinanceDataStore extends ChangeNotifier {
     String note = '',
     List<TransactionSplitLine> splitLines = const [],
     String? scheduledTransactionId,
+    DateTime? scheduledOccurrenceDate,
+    int? scheduledPlannedAmountMinor,
   }) async {
     final transaction = TransactionRecord(
       id: _newId('txn'),
@@ -708,6 +714,8 @@ class FinanceDataStore extends ChangeNotifier {
       note: note,
       splitLines: splitLines,
       scheduledTransactionId: scheduledTransactionId,
+      scheduledOccurrenceDate: scheduledOccurrenceDate,
+      scheduledPlannedAmountMinor: scheduledPlannedAmountMinor,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
     await saveTransaction(transaction);
@@ -722,6 +730,8 @@ class FinanceDataStore extends ChangeNotifier {
     required int amountMinor,
     String note = '',
     String? scheduledTransactionId,
+    DateTime? scheduledOccurrenceDate,
+    int? scheduledPlannedAmountMinor,
   }) async {
     final transaction = TransactionRecord(
       id: _newId('txn'),
@@ -733,6 +743,8 @@ class FinanceDataStore extends ChangeNotifier {
       amountMinor: amountMinor.abs(),
       note: note,
       scheduledTransactionId: scheduledTransactionId,
+      scheduledOccurrenceDate: scheduledOccurrenceDate,
+      scheduledPlannedAmountMinor: scheduledPlannedAmountMinor,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
     await saveTransaction(transaction);

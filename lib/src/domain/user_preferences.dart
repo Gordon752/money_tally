@@ -31,6 +31,7 @@ class UserPreferences {
     this.accountGroupLabelOverrides = const {},
     this.savedPayeeNames = const [],
     this.archivedPayeeNames = const {},
+    this.deletedPayeeNames = const {},
   });
 
   final LaunchScreen launchScreen;
@@ -45,6 +46,7 @@ class UserPreferences {
   final Map<String, String> accountGroupLabelOverrides;
   final List<String> savedPayeeNames;
   final Set<String> archivedPayeeNames;
+  final Set<String> deletedPayeeNames;
 
   UserPreferences copyWith({
     LaunchScreen? launchScreen,
@@ -59,6 +61,7 @@ class UserPreferences {
     Map<String, String>? accountGroupLabelOverrides,
     List<String>? savedPayeeNames,
     Set<String>? archivedPayeeNames,
+    Set<String>? deletedPayeeNames,
   }) {
     return UserPreferences(
       launchScreen: launchScreen ?? this.launchScreen,
@@ -79,6 +82,7 @@ class UserPreferences {
           accountGroupLabelOverrides ?? this.accountGroupLabelOverrides,
       savedPayeeNames: savedPayeeNames ?? this.savedPayeeNames,
       archivedPayeeNames: archivedPayeeNames ?? this.archivedPayeeNames,
+      deletedPayeeNames: deletedPayeeNames ?? this.deletedPayeeNames,
     );
   }
 
@@ -96,6 +100,7 @@ class UserPreferences {
       'accountGroupLabelOverrides': accountGroupLabelOverrides,
       'savedPayeeNames': savedPayeeNames,
       'archivedPayeeNames': archivedPayeeNames.toList()..sort(),
+      'deletedPayeeNames': deletedPayeeNames.toList()..sort(),
     };
   }
 
@@ -149,6 +154,12 @@ class UserPreferences {
           const [],
       archivedPayeeNames:
           (json['archivedPayeeNames'] as List<Object?>?)
+              ?.whereType<String>()
+              .map((value) => value.toLowerCase())
+              .toSet() ??
+          const {},
+      deletedPayeeNames:
+          (json['deletedPayeeNames'] as List<Object?>?)
               ?.whereType<String>()
               .map((value) => value.toLowerCase())
               .toSet() ??

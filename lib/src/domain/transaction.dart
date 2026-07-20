@@ -52,6 +52,8 @@ class TransactionRecord {
     this.status = TransactionStatus.cleared,
     this.splitLines = const [],
     this.scheduledTransactionId,
+    this.scheduledOccurrenceDate,
+    this.scheduledPlannedAmountMinor,
   });
 
   final String id;
@@ -66,6 +68,8 @@ class TransactionRecord {
   final TransactionStatus status;
   final List<TransactionSplitLine> splitLines;
   final String? scheduledTransactionId;
+  final DateTime? scheduledOccurrenceDate;
+  final int? scheduledPlannedAmountMinor;
   final SyncMetadata sync;
 
   bool get isDeleted => sync.isDeleted;
@@ -109,6 +113,8 @@ class TransactionRecord {
     TransactionStatus? status,
     List<TransactionSplitLine>? splitLines,
     String? scheduledTransactionId,
+    DateTime? scheduledOccurrenceDate,
+    int? scheduledPlannedAmountMinor,
     SyncMetadata? sync,
     bool clearTransferAccount = false,
     bool clearCategory = false,
@@ -131,6 +137,12 @@ class TransactionRecord {
       scheduledTransactionId: clearScheduledTransaction
           ? null
           : scheduledTransactionId ?? this.scheduledTransactionId,
+      scheduledOccurrenceDate: clearScheduledTransaction
+          ? null
+          : scheduledOccurrenceDate ?? this.scheduledOccurrenceDate,
+      scheduledPlannedAmountMinor: clearScheduledTransaction
+          ? null
+          : scheduledPlannedAmountMinor ?? this.scheduledPlannedAmountMinor,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -149,6 +161,8 @@ class TransactionRecord {
       'status': status.name,
       'splitLines': splitLines.map((line) => line.toJson()).toList(),
       'scheduledTransactionId': scheduledTransactionId,
+      'scheduledOccurrenceDate': scheduledOccurrenceDate?.toIso8601String(),
+      'scheduledPlannedAmountMinor': scheduledPlannedAmountMinor,
       'sync': sync.toJson(),
     };
   }
@@ -177,6 +191,10 @@ class TransactionRecord {
         json['splitLines'],
       ).map(TransactionSplitLine.fromJson).toList(),
       scheduledTransactionId: json['scheduledTransactionId'] as String?,
+      scheduledOccurrenceDate: json['scheduledOccurrenceDate'] == null
+          ? null
+          : dateTimeFromJson(json['scheduledOccurrenceDate']),
+      scheduledPlannedAmountMinor: json['scheduledPlannedAmountMinor'] as int?,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }
