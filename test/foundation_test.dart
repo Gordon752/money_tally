@@ -566,6 +566,49 @@ void main() {
     expect(remote.savedTransactions.single.type, TransactionType.income);
   });
 
+  test(
+    'paired transaction and schedule save rolls back on local failure',
+    () async {
+      final store = FinanceDataStore(
+        dataSet: _dataSet(),
+        localRepository: const AlwaysFailingLocalRepository(),
+      );
+      final schedule = ScheduledTransactionRecord(
+        id: 'sched-paired',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        payee: 'Paired save',
+        amountMinor: 2500,
+        nextDate: DateTime(2026, 8, 1),
+        frequency: RecurrenceFrequency.monthly,
+        sync: SyncMetadata.fresh(now: DateTime(2026, 7, 1)),
+      );
+      final transaction = TransactionRecord(
+        id: 'txn-paired',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        date: DateTime(2026, 7, 1),
+        payee: 'Paired save',
+        amountMinor: 2500,
+        scheduledTransactionId: schedule.id,
+        sync: SyncMetadata.fresh(now: DateTime(2026, 7, 1)),
+      );
+
+      await expectLater(
+        store.saveTransactionAndSchedule(
+          transaction: transaction,
+          scheduledTransaction: schedule,
+        ),
+        throwsStateError,
+      );
+
+      expect(store.transactions, isEmpty);
+      expect(store.scheduledTransactions, isEmpty);
+    },
+  );
+
   test('store seeds empty per-record remote when sync attaches', () async {
     final remote = FakeRecordRepository(dataSet: _emptyDataSet());
     final store = FinanceDataStore(dataSet: _dataSet());
@@ -1449,5 +1492,14 @@ class FakeRecordRepository implements FinanceRecordRepository {
   @override
   Stream<FinanceDataSet> watchDataSet(String userId) async* {
     yield _dataSet();
+  }
+}
+
+class AlwaysFailingLocalRepository extends LocalFinanceDataSetRepository {
+  const AlwaysFailingLocalRepository();
+
+  @override
+  Future<void> save(FinanceDataSet dataSet) {
+    throw StateError('Local paired save failed');
   }
 }

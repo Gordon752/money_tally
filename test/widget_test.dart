@@ -472,7 +472,7 @@ void main() {
     await tester.tap(ledgerRowWithText('Walmart').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Transaction details'), findsOneWidget);
+    expect(find.text('Transaction Details'), findsOneWidget);
     expect(find.text('Walmart'), findsWidgets);
     expect(find.text('Amount'), findsOneWidget);
     expect(find.text(r'-$64.28'), findsWidgets);
@@ -483,6 +483,10 @@ void main() {
     expect(find.text('Edit Transaction'), findsOneWidget);
     expect(find.byKey(const ValueKey('transaction-payee')), findsOneWidget);
     expect(
+      find.byKey(const ValueKey('transaction-schedule-toggle')),
+      findsOneWidget,
+    );
+    expect(
       find.byWidgetPredicate(
         (widget) =>
             widget is Text &&
@@ -492,6 +496,78 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'editing a transaction can create and reopen one future schedule',
+    (tester) async {
+      final legacyStore = FinanceStore.seeded();
+      final dataStore = FinanceDataStore(
+        dataSet: const V1SnapshotMigrator().migrate(
+          legacyStore.snapshot().toJson(),
+        ),
+      );
+      final original = dataStore.transactions.singleWhere(
+        (transaction) => transaction.payee == 'Walmart',
+      );
+      final initialScheduleCount = dataStore.scheduledTransactions.length;
+
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+      await tester.tap(find.text('Ledger').last);
+      await tester.pumpAndSettle();
+      await tester.tap(ledgerRowWithText('Walmart').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+
+      final scheduleToggle = find.byKey(
+        const ValueKey('transaction-schedule-toggle'),
+      );
+      await tester.ensureVisible(scheduleToggle);
+      await tester.tap(scheduleToggle);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('transaction-schedule-controls')),
+        findsOneWidget,
+      );
+      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      final updated = dataStore.transactions.singleWhere(
+        (transaction) => transaction.id == original.id,
+      );
+      expect(updated.scheduledTransactionId, isNotNull);
+      expect(
+        dataStore.scheduledTransactions,
+        hasLength(initialScheduleCount + 1),
+      );
+      final schedule = dataStore.scheduledTransactions.singleWhere(
+        (item) => item.id == updated.scheduledTransactionId,
+      );
+      expect(schedule.payee, 'Walmart');
+      expect(schedule.nextDate.isAfter(DateTime.now()), isTrue);
+
+      await tester.tap(ledgerRowWithText('Walmart').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit future schedule'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('transaction-schedule-toggle')),
+        findsNothing,
+      );
+      await tester.ensureVisible(find.text('Edit future schedule'));
+      await tester.tap(find.text('Edit future schedule'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit Scheduled Transaction'), findsOneWidget);
+      expect(
+        dataStore.scheduledTransactions,
+        hasLength(initialScheduleCount + 1),
+      );
+    },
+  );
 
   testWidgets('ledger search filters visible transactions', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
@@ -692,6 +768,10 @@ void main() {
     );
     expect(transferAmountField.autofocus, isFalse);
     expect(find.byKey(const ValueKey('transfer-date')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('transfer-schedule-toggle')),
+      findsOneWidget,
+    );
     await tester.enterText(
       find.byKey(const ValueKey('transfer-payee')),
       'Cash refill',
@@ -718,6 +798,62 @@ void main() {
     expect(edited.date, DateTime(2026, 7, 5));
     expect(edited.note, 'Updated note');
     expect(find.text('Cash refill'), findsOneWidget);
+  });
+
+  testWidgets('editing a transfer can create one future schedule', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await dataStore.addTransfer(
+      fromAccountId: 'checking',
+      toAccountId: 'cash',
+      date: DateTime(2026, 7, 5),
+      payee: 'Scheduled cash refill',
+      amountMinor: 5000,
+    );
+    final original = dataStore.transactions.singleWhere(
+      (transaction) => transaction.payee == 'Scheduled cash refill',
+    );
+    final initialScheduleCount = dataStore.scheduledTransactions.length;
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Scheduled cash refill').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    final toggle = find.byKey(const ValueKey('transfer-schedule-toggle'));
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    final updated = dataStore.transactions.singleWhere(
+      (transaction) => transaction.id == original.id,
+    );
+    expect(updated.scheduledTransactionId, isNotNull);
+    expect(
+      dataStore.scheduledTransactions,
+      hasLength(initialScheduleCount + 1),
+    );
+    final schedule = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.id == updated.scheduledTransactionId,
+    );
+    expect(schedule.type, v2_transaction.TransactionType.transfer);
+    expect(schedule.accountId, 'checking');
+    expect(schedule.transferAccountId, 'cash');
+    expect(schedule.nextDate.isAfter(DateTime.now()), isTrue);
   });
 
   testWidgets('ledger long press can split transaction', (tester) async {
@@ -805,6 +941,7 @@ void main() {
       legacyStore.snapshot().toJson(),
     );
     final dataStore = FinanceDataStore(dataSet: dataSet);
+    final initialScheduleCount = dataStore.scheduledTransactions.length;
 
     await tester.pumpWidget(
       MoneyTallyApp(store: legacyStore, dataStore: dataStore),
@@ -817,13 +954,38 @@ void main() {
     await tester.tap(find.text('Make Scheduled'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Create Scheduled Transaction'), findsOneWidget);
+    expect(find.text('Walmart'), findsWidgets);
+    expect(find.text(r'$64.28'), findsOneWidget);
+    expect(find.text('Checking'), findsOneWidget);
+    expect(find.byKey(const ValueKey('scheduled-category')), findsOneWidget);
+    expect(find.byKey(const ValueKey('scheduled-next-date')), findsOneWidget);
+    expect(find.byKey(const ValueKey('scheduled-alert-time')), findsOneWidget);
+    expect(dataStore.scheduledTransactions, hasLength(initialScheduleCount));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('scheduled-frequency')),
+    );
+    await tester.tap(find.byKey(const ValueKey('scheduled-frequency')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Weekly').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('scheduled-alert')));
+    await tester.tap(find.byKey(const ValueKey('scheduled-alert')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('1 day before').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
     final schedule = dataStore.scheduledTransactions.singleWhere(
       (item) => item.payee == 'Walmart',
     );
     expect(schedule.type, v2_transaction.TransactionType.expense);
     expect(schedule.accountId, 'checking');
     expect(schedule.categoryId, 'walmart');
-    expect(schedule.frequency, v2_scheduled.RecurrenceFrequency.monthly);
+    expect(schedule.frequency, v2_scheduled.RecurrenceFrequency.weekly);
+    expect(schedule.alertPreference, v2_scheduled.AlertPreference.oneDayBefore);
+    expect(schedule.customAlertTimeMinutes, 9 * 60);
     expect(schedule.nextDate.isAfter(DateTime.now()), isTrue);
 
     final transaction = dataStore.transactions.singleWhere(
@@ -838,6 +1000,7 @@ void main() {
       legacyStore.snapshot().toJson(),
     );
     final dataStore = FinanceDataStore(dataSet: dataSet);
+    final initialScheduleCount = dataStore.scheduledTransactions.length;
     await dataStore.addTransfer(
       fromAccountId: 'checking',
       toAccountId: 'cash',
@@ -857,6 +1020,15 @@ void main() {
     await tester.tap(find.text('Make Scheduled'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Create Scheduled Transaction'), findsOneWidget);
+    expect(find.text('ATM transfer'), findsWidgets);
+    expect(find.text(r'$50.00'), findsWidgets);
+    expect(find.text('Checking'), findsOneWidget);
+    expect(find.text('Cash'), findsOneWidget);
+    expect(dataStore.scheduledTransactions, hasLength(initialScheduleCount));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
     final schedule = dataStore.scheduledTransactions.singleWhere(
       (item) => item.payee == 'ATM transfer',
     );
@@ -870,6 +1042,38 @@ void main() {
       (item) => item.payee == 'ATM transfer',
     );
     expect(transaction.scheduledTransactionId, schedule.id);
+  });
+
+  testWidgets('ledger Make Scheduled cancel creates nothing', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    final original = dataStore.transactions.singleWhere(
+      (transaction) => transaction.payee == 'Walmart',
+    );
+    final initialScheduleCount = dataStore.scheduledTransactions.length;
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Walmart').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Make Scheduled'));
+    await tester.pumpAndSettle();
+    expect(find.text('Create Scheduled Transaction'), findsOneWidget);
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(dataStore.scheduledTransactions, hasLength(initialScheduleCount));
+    expect(
+      dataStore.transactions.singleWhere((item) => item.id == original.id),
+      original,
+    );
   });
 
   testWidgets('add transaction dialog honors default income preference', (
@@ -904,6 +1108,174 @@ void main() {
         );
 
     expect(segmented.selected, {v2_transaction.TransactionType.income});
+  });
+
+  testWidgets(
+    'add transaction schedules future occurrences only when enabled',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final legacyStore = FinanceStore.seeded();
+      final dataStore = FinanceDataStore(
+        dataSet: const V1SnapshotMigrator().migrate(
+          legacyStore.snapshot().toJson(),
+        ),
+      );
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+
+      await tester.tap(find.byTooltip('Add'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Expense'));
+      await tester.pumpAndSettle();
+      expect(find.text('Schedule future occurrences'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('transaction-schedule-controls')),
+        findsNothing,
+      );
+
+      await tester.tap(find.text('Choose account'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Checking').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('transaction-payee')),
+        'Future utility',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('transaction-amount')),
+        '12500',
+      );
+      await tester.tap(find.text('Choose category'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dining').last);
+      await tester.pumpAndSettle();
+      final scheduleToggle = find.byKey(
+        const ValueKey('transaction-schedule-toggle'),
+      );
+      await tester.ensureVisible(scheduleToggle);
+      await tester.tap(scheduleToggle);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('transaction-schedule-controls')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('transaction-schedule-first-date')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('transaction-schedule-time')),
+        findsOneWidget,
+      );
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('transaction-schedule-frequency')),
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('transaction-schedule-frequency')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Weekly').last);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('transaction-schedule-alert')),
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('transaction-schedule-alert')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('1 day before').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Save'),
+        warnIfMissed: false,
+      );
+      await tester.pumpAndSettle();
+
+      final current = dataStore.transactions.singleWhere(
+        (transaction) => transaction.payee == 'Future utility',
+      );
+      final scheduled = dataStore.scheduledTransactions.singleWhere(
+        (item) => item.payee == 'Future utility',
+      );
+      expect(current.scheduledTransactionId, scheduled.id);
+      expect(scheduled.amountMinor, 12500);
+      expect(scheduled.frequency, v2_scheduled.RecurrenceFrequency.weekly);
+      expect(
+        scheduled.alertPreference,
+        v2_scheduled.AlertPreference.oneDayBefore,
+      );
+      expect(scheduled.customAlertTimeMinutes, 9 * 60);
+      expect(scheduled.nextDate.isAfter(DateTime.now()), isTrue);
+      expect(
+        dataStore.transactions.where(
+          (transaction) => transaction.payee == 'Future utility',
+        ),
+        hasLength(1),
+      );
+    },
+  );
+
+  testWidgets('disabling future scheduling creates only the transaction', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    final initialScheduleCount = dataStore.scheduledTransactions.length;
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose account'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Checking').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-payee')),
+      'One time only',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-amount')),
+      '2500',
+    );
+    await tester.tap(find.text('Choose category'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dining').last);
+    await tester.pumpAndSettle();
+    final toggle = find.byKey(const ValueKey('transaction-schedule-toggle'));
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(
+      dataStore.transactions.any(
+        (transaction) => transaction.payee == 'One time only',
+      ),
+      isTrue,
+    );
+    expect(dataStore.scheduledTransactions, hasLength(initialScheduleCount));
   });
 
   testWidgets('add transaction honors default transfer preference', (
@@ -1112,76 +1484,68 @@ void main() {
     },
   );
 
-  testWidgets('transaction category flow creates income and subcategories', (
-    tester,
-  ) async {
-    final legacyStore = FinanceStore.seeded();
-    final dataSet = const V1SnapshotMigrator().migrate(
-      legacyStore.snapshot().toJson(),
-    );
-    final dataStore = FinanceDataStore(dataSet: dataSet);
-    await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
-    );
+  testWidgets(
+    'transaction category flow creates income and expense categories',
+    (tester) async {
+      final legacyStore = FinanceStore.seeded();
+      final dataSet = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final dataStore = FinanceDataStore(dataSet: dataSet);
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
 
-    await tester.tap(find.byTooltip('Add'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Income').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose category'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Add New Category'));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('transaction-new-category-name')),
-      'Consulting',
-    );
-    await tester.tap(
-      find.byKey(const ValueKey('transaction-save-new-category')),
-    );
-    await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Add'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Income').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose category'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add New Category'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('transaction-new-category-name')),
+        'Consulting',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('transaction-save-new-category')),
+      );
+      await tester.pumpAndSettle();
 
-    final incomeCategory = dataStore.categories.singleWhere(
-      (category) => category.name == 'Consulting',
-    );
-    expect(incomeCategory.kind, v2_category.CategoryKind.income);
-    expect(find.text('Consulting'), findsOneWidget);
+      final incomeCategory = dataStore.categories.singleWhere(
+        (category) => category.name == 'Consulting',
+      );
+      expect(incomeCategory.kind, v2_category.CategoryKind.income);
+      expect(find.text('Consulting'), findsOneWidget);
 
-    await tester.tap(find.text('Cancel').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Add'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Expense'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose category'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Add New Category'));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('transaction-new-category-name')),
-      'Work Lunches',
-    );
-    await tester.tap(
-      find.byKey(const ValueKey('transaction-new-category-parent')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Dining').last);
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('transaction-save-new-category')),
-    );
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Add'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Expense'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose category'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add New Category'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('transaction-new-category-name')),
+        'Work Lunches',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('transaction-save-new-category')),
+      );
+      await tester.pumpAndSettle();
 
-    final subcategory = dataStore.categories.singleWhere(
-      (category) => category.name == 'Work Lunches',
-    );
-    expect(subcategory.kind, v2_category.CategoryKind.expense);
-    expect(
-      dataStore.categoryById(subcategory.parentCategoryId!).name,
-      'Dining',
-    );
-    expect(find.text('Work Lunches'), findsOneWidget);
-  });
+      final expenseCategory = dataStore.categories.singleWhere(
+        (category) => category.name == 'Work Lunches',
+      );
+      expect(expenseCategory.kind, v2_category.CategoryKind.expense);
+      expect(expenseCategory.parentCategoryId, isNull);
+      expect(find.text('Work Lunches'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'transaction category creation validates and cancel returns to picker',
@@ -1209,18 +1573,12 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Enter a category name.'), findsOneWidget);
-      expect(find.text('Add category'), findsOneWidget);
+      expect(find.text('Add Category'), findsOneWidget);
 
-      final addDialog = find.widgetWithText(AlertDialog, 'Add category');
-      await tester.tap(
-        find.descendant(
-          of: addDialog,
-          matching: find.widgetWithText(TextButton, 'Cancel'),
-        ),
-      );
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Cancel').last);
       await tester.pumpAndSettle();
-      expect(find.text('Choose category'), findsWidgets);
-      expect(find.text('Add New Category'), findsOneWidget);
+      expect(find.text('Choose Category'), findsOneWidget);
+      expect(find.text('Add Category'), findsNothing);
       expect(find.text('Add Transaction'), findsOneWidget);
     },
   );
@@ -1301,7 +1659,7 @@ void main() {
       find.text('The category could not be saved. Please try again.'),
       findsOneWidget,
     );
-    expect(find.text('Add category'), findsOneWidget);
+    expect(find.text('Add Category'), findsOneWidget);
     expect(
       dataStore.categories.any((category) => category.name == 'Cannot Persist'),
       isFalse,
@@ -1349,6 +1707,187 @@ void main() {
       expect(find.text('Deleted Hidden'), findsNothing);
     },
   );
+
+  testWidgets(
+    'transaction category picker shows hierarchy selection and fixed add action',
+    (tester) async {
+      final legacyStore = FinanceStore.seeded();
+      final migrated = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final hierarchy = [
+        v2_category.CategoryRecord(
+          id: 'picker-parent',
+          name: 'Home Costs',
+          kind: v2_category.CategoryKind.expense,
+          sync: v2_sync.SyncMetadata.fresh(),
+        ),
+        v2_category.CategoryRecord(
+          id: 'picker-child',
+          name: 'Repairs',
+          kind: v2_category.CategoryKind.expense,
+          parentCategoryId: 'picker-parent',
+          sync: v2_sync.SyncMetadata.fresh(),
+        ),
+      ];
+      final dataStore = FinanceDataStore(
+        dataSet: migrated.copyWith(
+          categories: [...migrated.categories, ...hierarchy],
+        ),
+      );
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+      await tester.tap(find.byTooltip('Add'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Expense'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose category'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Choose Category'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('category-picker-add-new')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('category-picker-hierarchy-picker-child')),
+        findsOneWidget,
+      );
+      expect(find.text('Repairs'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('category-picker-toggle-picker-parent')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Repairs'), findsNothing);
+      expect(find.text('1 subcategory'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('category-picker-toggle-picker-parent')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Repairs'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('category-picker-row-picker-child')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Repairs'), findsOneWidget);
+
+      await tester.tap(find.text('Repairs'));
+      await tester.pumpAndSettle();
+      final selectedRow = find.byKey(
+        const ValueKey('category-picker-row-picker-child'),
+      );
+      expect(
+        find.descendant(
+          of: selectedRow,
+          matching: find.byIcon(Icons.check_rounded),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('transaction category picker filters transaction type', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: migrated);
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose category'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('category-picker-row-dining')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('category-picker-row-income')),
+      findsNothing,
+    );
+
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Income').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose category'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('category-picker-row-income')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('category-picker-row-dining')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('transaction category picker keeps add action in empty state', (
+    tester,
+  ) async {
+    final emptyLegacyStore = FinanceStore.seeded();
+    emptyLegacyStore.categories.clear();
+    final emptyDataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        emptyLegacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: emptyLegacyStore, dataStore: emptyDataStore),
+    );
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose category'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('category-picker-empty')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('category-picker-add-new')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('transaction category picker remains readable in dark mode', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        preferences: migrated.preferences.copyWith(
+          appearanceMode: AppearanceMode.dark,
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose category'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Choose Category'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('category-picker-row-dining')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('add transaction dialog saves entered date', (tester) async {
     final legacyStore = FinanceStore.seeded();
@@ -1683,6 +2222,75 @@ void main() {
     expect(find.text(r'$297.00'), findsWidgets);
   });
 
+  testWidgets('new transfer can also create one future schedule', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Transfer'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('transfer-from-account')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Checking').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('transfer-to-checking')));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byType(BottomSheet).last,
+        matching: find.text('Checking'),
+      ),
+      findsNothing,
+    );
+    await tester.tap(find.text('Cash').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('transfer-payee')),
+      'Weekly settlement',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('transfer-amount')),
+      '4000',
+    );
+    final toggle = find.byKey(const ValueKey('transfer-schedule-toggle'));
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('transfer-schedule-controls')),
+      findsOneWidget,
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    final transfer = dataStore.transactions.singleWhere(
+      (item) => item.payee == 'Weekly settlement',
+    );
+    final schedule = dataStore.scheduledTransactions.singleWhere(
+      (item) => item.payee == 'Weekly settlement',
+    );
+    expect(transfer.transferAccountId, 'cash');
+    expect(transfer.scheduledTransactionId, schedule.id);
+    expect(schedule.type, v2_transaction.TransactionType.transfer);
+    expect(schedule.accountId, 'checking');
+    expect(schedule.transferAccountId, 'cash');
+    expect(schedule.nextDate.isAfter(DateTime.now()), isTrue);
+  });
+
   testWidgets('floating add scheduled transaction creates v2 schedule', (
     tester,
   ) async {
@@ -1788,6 +2396,85 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Rent'), findsOneWidget);
+  });
+
+  testWidgets('scheduled add defaults to the selected future calendar date', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final selectedDate = DateTime(today.year, today.month + 1, 7);
+
+    await tester.pumpWidget(MoneyTallyApp());
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Next month'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(
+        ValueKey(
+          'scheduled-calendar-day-${selectedDate.year}-${selectedDate.month}-${selectedDate.day}',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create Scheduled Transaction'), findsOneWidget);
+    expect(find.text(fullMonthDateLabel(selectedDate)), findsOneWidget);
+  });
+
+  testWidgets('scheduled date and time pickers use polished theme', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MoneyTallyApp());
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Scheduled Transaction'));
+    await tester.pumpAndSettle();
+
+    final dateRow = find.byKey(const ValueKey('scheduled-next-date'));
+    await tester.ensureVisible(dateRow);
+    await tester.tap(dateRow);
+    await tester.pumpAndSettle();
+
+    final dateTheme = Theme.of(
+      tester.element(find.byType(CalendarDatePicker)),
+    ).datePickerTheme;
+    expect(dateTheme.backgroundColor, Colors.white);
+    expect(
+      dateTheme.dayBackgroundColor!.resolve({WidgetState.selected}),
+      AppTheme.accent,
+    );
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+
+    final timeRow = find.byKey(const ValueKey('scheduled-alert-time'));
+    await tester.ensureVisible(timeRow);
+    await tester.tap(timeRow);
+    await tester.pumpAndSettle();
+
+    final timeTheme = Theme.of(
+      tester.element(find.byType(TimePickerDialog)),
+    ).timePickerTheme;
+    expect(timeTheme.backgroundColor, Colors.white);
+    expect(timeTheme.dialHandColor, AppTheme.accent);
+    expect(
+      WidgetStateProperty.resolveAs<Color?>(timeTheme.hourMinuteColor, {
+        WidgetState.selected,
+      }),
+      AppTheme.accent.withValues(alpha: 0.14),
+    );
   });
 
   testWidgets('scheduled income uses polished fields and saves', (
@@ -2869,24 +3556,17 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add New Category'));
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<TextField>(
-            find.byKey(const ValueKey('scheduled-new-category-name')),
-          )
-          .decoration
-          ?.focusedBorder,
-      InputBorder.none,
-    );
     await tester.enterText(
-      find.byKey(const ValueKey('scheduled-new-category-name')),
+      find.byKey(const ValueKey('transaction-new-category-name')),
       'Scheduled Bills',
     );
-    await tester.tap(find.byKey(const ValueKey('scheduled-add-category')));
-    await tester.pump();
+    await tester.tap(
+      find.byKey(const ValueKey('transaction-save-new-category')),
+    );
+    await tester.pumpAndSettle();
 
     expect(
-      find.byKey(const ValueKey('scheduled-new-category-name')),
+      find.byKey(const ValueKey('transaction-new-category-name')),
       findsNothing,
     );
     expect(find.text('Scheduled Bills'), findsOneWidget);
@@ -2933,24 +3613,17 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add New Category'));
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<TextField>(
-            find.byKey(const ValueKey('mark-paid-new-category-name')),
-          )
-          .decoration
-          ?.focusedBorder,
-      InputBorder.none,
-    );
     await tester.enterText(
-      find.byKey(const ValueKey('mark-paid-new-category-name')),
+      find.byKey(const ValueKey('transaction-new-category-name')),
       'Payment Category',
     );
-    await tester.tap(find.byKey(const ValueKey('mark-paid-add-category')));
-    await tester.pump();
+    await tester.tap(
+      find.byKey(const ValueKey('transaction-save-new-category')),
+    );
+    await tester.pumpAndSettle();
 
     expect(
-      find.byKey(const ValueKey('mark-paid-new-category-name')),
+      find.byKey(const ValueKey('transaction-new-category-name')),
       findsNothing,
     );
     expect(find.text('Payment Category'), findsOneWidget);
@@ -3969,7 +4642,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('category-row-dining')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit category'), findsOneWidget);
+    expect(find.text('Edit Category'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -4290,7 +4963,175 @@ void main() {
     expect(find.text('Manage budgets'), findsOneWidget);
     expect(find.text('More'), findsOneWidget);
     expect(find.widgetWithText(ListTile, 'Reports'), findsOneWidget);
-    expect(find.text('Data Ownership'), findsOneWidget);
+    expect(find.text('Data Management'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'Export CSV'), findsOneWidget);
+  });
+
+  testWidgets('settings preference rows update and persist stored values', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    const repository = LocalFinanceDataSetRepository(
+      storageKey: 'polished_settings_preferences_test',
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        preferences: migrated.preferences.copyWith(notificationsEnabled: true),
+      ),
+      localRepository: repository,
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(ListTile, 'Launch screen'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(ListTile, 'Appearance'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dark').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(ListTile, 'Floating add button'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Left').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(ListTile, 'Default transaction type'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Income').last);
+    await tester.pumpAndSettle();
+
+    expect(dataStore.preferences.launchScreen, LaunchScreen.ledger);
+    expect(dataStore.preferences.appearanceMode, AppearanceMode.dark);
+    expect(
+      dataStore.preferences.floatingAddButtonPosition,
+      FloatingAddButtonPosition.left,
+    );
+    expect(
+      dataStore.preferences.defaultTransactionType,
+      DefaultTransactionType.income,
+    );
+    expect(dataStore.preferences.notificationsEnabled, isTrue);
+    expect(find.text('Your data is stored securely'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    final reloaded = await FinanceDataStore.load(localRepository: repository);
+    expect(reloaded.preferences.launchScreen, LaunchScreen.ledger);
+    expect(reloaded.preferences.appearanceMode, AppearanceMode.dark);
+    expect(
+      reloaded.preferences.floatingAddButtonPosition,
+      FloatingAddButtonPosition.left,
+    );
+    expect(
+      reloaded.preferences.defaultTransactionType,
+      DefaultTransactionType.income,
+    );
+    expect(reloaded.preferences.notificationsEnabled, isTrue);
+  });
+
+  testWidgets('settings money format rows update and persist', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    const repository = LocalFinanceDataSetRepository(
+      storageKey: 'polished_settings_money_test',
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated,
+      localRepository: repository,
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('USD — US Dollar'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ListTile, 'Currency'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('EUR — Euro').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(ListTile, 'Decimal places'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('0').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(ListTile, 'Thousands separator'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Period').last);
+    await tester.pumpAndSettle();
+
+    expect(dataStore.preferences.currency.currencyCode, 'EUR');
+    expect(dataStore.preferences.currency.decimalPlaces, 0);
+    expect(dataStore.preferences.currency.thousandsSeparator, '.');
+    final reloaded = await FinanceDataStore.load(localRepository: repository);
+    expect(reloaded.preferences.currency.currencyCode, 'EUR');
+    expect(reloaded.preferences.currency.decimalPlaces, 0);
+    expect(reloaded.preferences.currency.thousandsSeparator, '.');
+  });
+
+  testWidgets('settings cloud sync rows preserve callbacks and status', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    var syncCount = 0;
+    var signOutCount = 0;
+    await tester.pumpWidget(
+      FinanceStoreScope(
+        store: legacyStore,
+        child: FinanceDataStoreScope(
+          store: dataStore,
+          child: MaterialApp(
+            home: FinanceHome(
+              syncLabel: 'Synced',
+              lastSuccessfulSyncLabel: 'Today at 8:39 AM',
+              onSyncNow: () async => syncCount += 1,
+              onSignOut: () => signOutCount += 1,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Your data is securely synced'), findsOneWidget);
+    expect(find.text('Today at 8:39 AM'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ListTile, 'Sync now'));
+    await tester.pumpAndSettle();
+    expect(syncCount, 1);
+    await tester.tap(find.widgetWithText(ListTile, 'Sign out'));
+    await tester.pumpAndSettle();
+    expect(signOutCount, 1);
   });
 
   testWidgets('mobile settings more card opens reports', (tester) async {

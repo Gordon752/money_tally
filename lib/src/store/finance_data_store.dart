@@ -735,6 +735,43 @@ class FinanceDataStore extends ChangeNotifier {
     await refreshScheduledNotificationBadge();
   }
 
+  Future<void> saveTransactionAndSchedule({
+    required TransactionRecord transaction,
+    required ScheduledTransactionRecord scheduledTransaction,
+  }) async {
+    _validateTransaction(transaction);
+    final previousDataSet = _dataSet;
+    ScheduledTransactionRecord? notificationAdjusted;
+    try {
+      notificationAdjusted = await _applyScheduledNotificationState(
+        scheduledTransaction,
+      );
+      _dataSet = _dataSet.copyWith(
+        transactions: _upsert(transactions, transaction, (item) => item.id),
+        scheduledTransactions: _upsert(
+          scheduledTransactions,
+          notificationAdjusted,
+          (item) => item.id,
+        ),
+      );
+      await _commit(
+        transaction: transaction,
+        scheduledTransaction: notificationAdjusted,
+      );
+      await refreshScheduledNotificationBadge();
+    } catch (_) {
+      _dataSet = previousDataSet;
+      if (notificationAdjusted != null &&
+          notificationAdjusted.scheduledNotificationIds.isNotEmpty) {
+        await notificationScheduler.cancelScheduledTransaction(
+          notificationAdjusted,
+        );
+      }
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<void> savePreferences(UserPreferences preferences) async {
     final notificationsChanged =
         _dataSet.preferences.notificationsEnabled !=

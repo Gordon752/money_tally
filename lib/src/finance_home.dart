@@ -46,6 +46,7 @@ class _FinanceHomeState extends State<FinanceHome> {
 
   var selected = FinanceSection.dashboard;
   String? ledgerAccountFilterId;
+  DateTime? _selectedFutureScheduledDate;
   var _appliedLaunchPreference = false;
   var _isScrolling = false;
   Timer? _scrollSettleTimer;
@@ -136,6 +137,10 @@ class _FinanceHomeState extends State<FinanceHome> {
                           section: selected,
                           initialAccountId: selected == FinanceSection.ledger
                               ? ledgerAccountFilterId
+                              : null,
+                          initialScheduledDate:
+                              selected == FinanceSection.scheduled
+                              ? _selectedFutureScheduledDate
                               : null,
                         ),
                         child: const Icon(Icons.add),
@@ -298,7 +303,22 @@ class _FinanceHomeState extends State<FinanceHome> {
                   initialAccountFilterId: ledgerAccountFilterId,
                 ),
                 FinanceSection.budgets => const BudgetsView(),
-                FinanceSection.scheduled => const ScheduledView(),
+                FinanceSection.scheduled => ScheduledView(
+                  onSelectedDateChanged: (date) {
+                    final now = DateTime.now();
+                    final today = DateTime(now.year, now.month, now.day);
+                    final selectedDay = DateTime(
+                      date.year,
+                      date.month,
+                      date.day,
+                    );
+                    setState(() {
+                      _selectedFutureScheduledDate = selectedDay.isAfter(today)
+                          ? selectedDay
+                          : null;
+                    });
+                  },
+                ),
                 FinanceSection.reports => const ReportsView(),
                 FinanceSection.categories => const CategoriesView(),
                 FinanceSection.settings => SettingsView(
@@ -704,24 +724,22 @@ class TransactionFormLabel extends StatelessWidget {
 }
 
 class TransactionFormIcon extends StatelessWidget {
-  const TransactionFormIcon(this.icon, {super.key});
+  const TransactionFormIcon(this.icon, {this.color, super.key});
 
   final IconData icon;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
+    final resolvedColor = color ?? AppTheme.accent;
     return Container(
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: AppTheme.accent.withValues(alpha: 0.07),
+        color: resolvedColor.withValues(alpha: 0.08),
         shape: BoxShape.circle,
       ),
-      child: Icon(
-        icon,
-        color: AppTheme.accent.withValues(alpha: 0.9),
-        size: 21,
-      ),
+      child: Icon(icon, color: resolvedColor.withValues(alpha: 0.9), size: 21),
     );
   }
 }
@@ -914,6 +932,7 @@ class TransactionFormActions extends StatelessWidget {
     this.canSave = true,
     this.saveLabel = 'Save',
     this.isSaving = false,
+    this.saveKey,
     super.key,
   });
 
@@ -922,6 +941,7 @@ class TransactionFormActions extends StatelessWidget {
   final bool canSave;
   final String saveLabel;
   final bool isSaving;
+  final Key? saveKey;
 
   @override
   Widget build(BuildContext context) {
@@ -941,6 +961,7 @@ class TransactionFormActions extends StatelessWidget {
           child: SizedBox(
             height: 48,
             child: FilledButton(
+              key: saveKey,
               onPressed: canSave && !isSaving ? onSave : null,
               child: isSaving
                   ? const SizedBox.square(
@@ -3044,171 +3065,99 @@ Future<void> showTransactionDetails(
       : transaction.type == TransactionType.income
       ? AppTheme.accent
       : null;
-  final detailBackground = Theme.of(context).brightness == Brightness.dark
-      ? AppColors.panelDark
-      : AppTheme.panel;
 
   final action = await showDialog<String>(
     context: context,
-    builder: (dialogContext) => Dialog(
-      insetPadding: const EdgeInsets.all(AppSpacing.lg),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.card),
+    builder: (dialogContext) => TransactionSheetFrame(
+      title: 'Transaction Details',
+      actions: ScheduledTransactionDetailActions(
+        onClose: () => Navigator.pop(dialogContext),
+        onEdit: canEdit ? () => Navigator.pop(dialogContext, 'edit') : null,
+        onMarkPaid: null,
       ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Transaction details',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: AppTheme.muted,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: AppTheme.accent.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(AppRadii.control),
-                      ),
-                      child: Icon(
-                        transactionDetailIcon(transaction.type),
-                        color: AppTheme.accent,
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            transaction.payee,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.w900),
-                          ),
-                          const SizedBox(height: AppSpacing.xxs),
-                          Text(
-                            '${transactionTypeLabel(transaction.type)} • ${dateInput(transaction.date)}',
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: AppTheme.muted),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  decoration: BoxDecoration(
-                    color: detailBackground,
-                    borderRadius: BorderRadius.circular(AppRadii.card),
-                    border: Border.all(
-                      color: Theme.of(context).dividerColor.withValues(
-                        alpha: Theme.of(context).brightness == Brightness.dark
-                            ? 0.35
-                            : 0.55,
-                      ),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Amount',
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: AppTheme.muted,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
-                        money(signedAmount, dataStore.preferences.currency),
-                        style: AppTextStyles.money(
-                          context,
-                          fontSize: 34,
-                          color: amountColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TransactionDetailRow(
-                  label: 'Account',
-                  value: accountsById[transaction.accountId]?.name ?? 'Unknown',
-                ),
-                if (transaction.transferAccountId != null)
-                  TransactionDetailRow(
-                    label: 'Transfer to',
-                    value:
-                        accountsById[transaction.transferAccountId]?.name ??
-                        'Unknown',
-                  ),
-                if (transaction.categoryId != null)
-                  TransactionDetailRow(
-                    label: 'Category',
-                    value:
-                        categoriesById[transaction.categoryId]?.name ??
-                        'Unknown',
-                  ),
-                if (transaction.note.trim().isNotEmpty)
-                  TransactionDetailRow(label: 'Note', value: transaction.note),
-                if (transaction.splitLines.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  Text(
-                    'Splits',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: AppTheme.muted,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  for (final split in transaction.splitLines)
-                    TransactionDetailRow(
-                      label:
-                          categoriesById[split.categoryId]?.name ?? 'Category',
-                      value: money(
-                        split.amountMinor,
-                        dataStore.preferences.currency,
-                      ),
-                    ),
-                ],
-                const SizedBox(height: AppSpacing.lg),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(dialogContext),
-                      child: const Text('Close'),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    FilledButton.icon(
-                      onPressed: canEdit
-                          ? () => Navigator.pop(dialogContext, 'edit')
-                          : null,
-                      icon: const Icon(Icons.edit_outlined),
-                      label: const Text('Edit'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ScheduledTransactionDetailRow(
+            rowKey: const ValueKey('transaction-detail-payee'),
+            icon: transaction.type == TransactionType.transfer
+                ? Icons.short_text_outlined
+                : Icons.person_outline,
+            label: transaction.type == TransactionType.transfer
+                ? 'Description'
+                : 'Payee',
+            value: transaction.payee.trim().isEmpty
+                ? 'Not provided'
+                : transaction.payee,
           ),
-        ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: transactionDetailIcon(transaction.type),
+            label: 'Type',
+            value: transactionTypeLabel(transaction.type),
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: Icons.attach_money,
+            label: 'Amount',
+            value: money(signedAmount, dataStore.preferences.currency),
+            valueColor: amountColor,
+            tabularFigures: true,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: Icons.calendar_today_outlined,
+            label: 'Date',
+            value: fullMonthDateLabel(transaction.date),
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: v2AccountIcon(
+              accountsById[transaction.accountId]?.type ??
+                  v2_account.AccountType.otherBanking,
+            ),
+            label: transaction.type == TransactionType.transfer
+                ? 'From Account'
+                : 'Account',
+            value: accountsById[transaction.accountId]?.name ?? 'Unavailable',
+          ),
+          if (transaction.transferAccountId != null) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: Icons.account_balance_wallet_outlined,
+              label: 'To Account',
+              value:
+                  accountsById[transaction.transferAccountId]?.name ??
+                  'Unavailable',
+            ),
+          ],
+          if (transaction.categoryId != null) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: Icons.sell_outlined,
+              label: 'Category',
+              value: categoriesById[transaction.categoryId]?.name ?? 'Unknown',
+            ),
+          ],
+          if (transaction.note.trim().isNotEmpty) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: Icons.notes_outlined,
+              label: 'Notes',
+              value: transaction.note,
+            ),
+          ],
+          for (final split in transaction.splitLines) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: Icons.call_split_outlined,
+              label: categoriesById[split.categoryId]?.name ?? 'Split category',
+              value: money(split.amountMinor, dataStore.preferences.currency),
+              tabularFigures: true,
+            ),
+          ],
+        ],
       ),
     ),
   );
@@ -3228,59 +3177,6 @@ IconData transactionDetailIcon(TransactionType type) {
     TransactionType.transfer => Icons.swap_horiz,
     TransactionType.adjustment => Icons.tune_outlined,
   };
-}
-
-class TransactionDetailRow extends StatelessWidget {
-  const TransactionDetailRow({
-    required this.label,
-    required this.value,
-    super.key,
-  });
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: Theme.of(context).dividerColor.withValues(alpha: 0.45),
-          ),
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 104,
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: AppTheme.muted,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                fontFeatures: label == 'Amount'
-                    ? const [AppTextStyles.tabularFigures]
-                    : null,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 Future<void> duplicateTransaction(
@@ -3507,30 +3403,19 @@ Future<void> makeTransactionScheduled(
   TransactionRecord transaction,
 ) async {
   final dataStore = FinanceDataStoreScope.read(context);
-  final schedule = v2_scheduled.ScheduledTransactionRecord(
-    id: 'sched_${DateTime.now().microsecondsSinceEpoch}',
-    type: transaction.type,
-    accountId: transaction.accountId,
-    transferAccountId: transaction.type == TransactionType.transfer
-        ? transaction.transferAccountId
-        : null,
-    categoryId: transaction.type == TransactionType.transfer
-        ? null
-        : transaction.categoryId,
-    payee: transaction.payee,
-    note: transaction.note,
-    amountMinor: transaction.amountMinor.abs(),
-    nextDate: firstMonthlyDateAfter(transaction.date, DateTime.now()),
-    frequency: v2_scheduled.RecurrenceFrequency.monthly,
-    sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
-  );
-  await dataStore.saveScheduledTransaction(schedule);
-  await dataStore.saveTransaction(
-    transaction.copyWith(scheduledTransactionId: schedule.id),
-  );
-  if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('Scheduled ${transaction.payee} monthly')),
+  final linkedSchedule = transaction.scheduledTransactionId == null
+      ? null
+      : dataStore.scheduledTransactions
+            .where(
+              (item) =>
+                  item.id == transaction.scheduledTransactionId &&
+                  !item.isDeleted,
+            )
+            .firstOrNull;
+  await showScheduledTransactionDialog(
+    context,
+    existing: linkedSchedule,
+    sourceTransaction: linkedSchedule == null ? transaction : null,
   );
 }
 
@@ -3557,7 +3442,9 @@ class BudgetsView extends StatelessWidget {
 }
 
 class ScheduledView extends StatefulWidget {
-  const ScheduledView({super.key});
+  const ScheduledView({this.onSelectedDateChanged, super.key});
+
+  final ValueChanged<DateTime>? onSelectedDateChanged;
 
   @override
   State<ScheduledView> createState() => _ScheduledViewState();
@@ -3602,6 +3489,7 @@ class _ScheduledViewState extends State<ScheduledView> {
       _selectedDate = date;
       _visibleMonth = DateTime(date.year, date.month);
     });
+    widget.onSelectedDateChanged?.call(date);
     _scrollToDate(date);
   }
 
@@ -4587,258 +4475,261 @@ class SettingsView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AppCard(
+        SettingsSectionCard(
           title: 'Cloud Sync',
-          child: Column(
-            children: [
-              SettingsActionRow(
-                icon: syncLabel == 'Sync issue'
-                    ? Icons.cloud_off_outlined
-                    : Icons.cloud_done_outlined,
-                title: 'Status',
-                trailingText: syncLabel,
-                onTap: onSyncNow == null ? null : () => onSyncNow!.call(),
-              ),
-              SettingsActionRow(
-                icon: Icons.schedule_outlined,
-                title: 'Last successful sync',
-                trailingText:
-                    lastSuccessfulSyncLabel ??
-                    (syncLabel == 'Synced' ? 'This session' : 'Not available'),
-                onTap: null,
-              ),
-              if (onSyncNow != null)
-                SettingsActionRow(
-                  icon: Icons.sync_outlined,
-                  title: 'Sync now',
-                  trailingText: 'Refresh',
-                  onTap: () => onSyncNow!.call(),
-                ),
-              if (onSignOut != null)
-                SettingsActionRow(
-                  icon: Icons.logout_outlined,
-                  title: 'Sign out',
-                  trailingText: 'Sign out',
-                  onTap: onSignOut,
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        AppCard(
-          title: 'App Preferences',
-          child: Column(
-            children: [
-              SettingsDropdown<LaunchScreen>(
-                label: 'Launch screen',
-                value: preferences.launchScreen,
-                values: LaunchScreen.values,
-                labelOf: launchScreenLabel,
-                onChanged: (value) => store.savePreferences(
-                  preferences.copyWith(launchScreen: value),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SettingsDropdown<AppearanceMode>(
-                label: 'Appearance',
-                value: preferences.appearanceMode,
-                values: AppearanceMode.values,
-                labelOf: appearanceModeLabel,
-                onChanged: (value) => store.savePreferences(
-                  preferences.copyWith(appearanceMode: value),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SettingsDropdown<FloatingAddButtonPosition>(
-                label: 'Floating add button',
-                value: preferences.floatingAddButtonPosition,
-                values: FloatingAddButtonPosition.values,
-                labelOf: floatingAddButtonPositionLabel,
-                onChanged: (value) => store.savePreferences(
-                  preferences.copyWith(floatingAddButtonPosition: value),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SettingsDropdown<DefaultTransactionType>(
-                label: 'Default transaction type',
-                value: preferences.defaultTransactionType,
-                values: DefaultTransactionType.values,
-                labelOf: defaultTransactionTypeLabel,
-                onChanged: (value) => store.savePreferences(
-                  preferences.copyWith(defaultTransactionType: value),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        AppCard(
-          title: 'Money Format',
-          child: Column(
-            children: [
-              SettingsDropdown<CurrencyFormatSettings>(
-                label: 'Currency',
-                value: _currencyFor(preferences.currency.currencyCode),
-                values: _currencyOptions,
-                labelOf: (value) => value.currencyCode,
-                onChanged: (value) => store.savePreferences(
-                  preferences.copyWith(
-                    currency: value.copyWith(
-                      decimalPlaces: preferences.currency.decimalPlaces,
-                      thousandsSeparator:
-                          preferences.currency.thousandsSeparator,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SettingsActionRow(
-                icon: Icons.edit_outlined,
-                title: 'Custom currency',
-                trailingText:
-                    '${preferences.currency.currencyCode} ${preferences.currency.symbol}',
-                onTap: () => showCustomCurrencyDialog(context),
-              ),
-              const SizedBox(height: 12),
-              SettingsDropdown<int>(
-                label: 'Decimal places',
-                value: preferences.currency.decimalPlaces,
-                values: const [0, 2],
-                labelOf: (value) => '$value',
-                onChanged: (value) => store.savePreferences(
-                  preferences.copyWith(
-                    currency: preferences.currency.copyWith(
-                      decimalPlaces: value,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SettingsDropdown<String>(
-                label: 'Thousands separator',
-                value: preferences.currency.thousandsSeparator,
-                values: const [',', '.', ' ', ''],
-                labelOf: thousandsSeparatorLabel,
-                onChanged: (value) => store.savePreferences(
-                  preferences.copyWith(
-                    currency: preferences.currency.copyWith(
-                      thousandsSeparator: value,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        AppCard(
-          title: 'Notifications',
-          child: SettingsSwitch(
-            label: 'Scheduled transaction alerts',
-            value: preferences.notificationsEnabled,
-            onChanged: (value) => store.savePreferences(
-              preferences.copyWith(notificationsEnabled: value),
+          children: [
+            SettingsActionRow(
+              icon: syncLabel == 'Sync issue'
+                  ? Icons.cloud_off_outlined
+                  : Icons.cloud_done_outlined,
+              title: 'Status',
+              subtitle: switch (syncLabel) {
+                'Synced' => 'Your data is securely synced',
+                'Syncing' => 'Your data is syncing',
+                'Sync issue' => 'Cloud sync needs attention',
+                'Offline' => 'You are currently offline',
+                _ => 'Your data is stored securely',
+              },
+              trailingText: syncLabel,
+              showStatusPill: true,
+              onTap: onSyncNow == null ? null : () => onSyncNow!.call(),
             ),
-          ),
+            SettingsActionRow(
+              icon: Icons.schedule_outlined,
+              title: 'Last successful sync',
+              subtitle:
+                  lastSuccessfulSyncLabel ??
+                  (syncLabel == 'Synced' ? 'This session' : 'Not available'),
+              showDivider: onSyncNow != null || onSignOut != null,
+            ),
+            if (onSyncNow != null)
+              SettingsActionRow(
+                icon: Icons.sync_outlined,
+                title: 'Sync now',
+                subtitle: 'Refresh your data',
+                showDivider: onSignOut != null,
+                onTap: () => onSyncNow!.call(),
+              ),
+            if (onSignOut != null)
+              SettingsActionRow(
+                icon: Icons.logout_outlined,
+                title: 'Sign out',
+                subtitle: 'Sign out of your account',
+                destructive: true,
+                showDivider: false,
+                onTap: onSignOut,
+              ),
+          ],
         ),
         const SizedBox(height: 16),
-        AppCard(
-          title: 'Manage',
-          child: Column(
-            children: [
-              SettingsActionRow(
-                icon: Icons.account_balance_wallet_outlined,
-                title: 'Manage accounts',
-                trailingText: 'Open',
-                onTap: () => onSelectSection?.call(FinanceSection.accounts),
+        SettingsSectionCard(
+          title: 'App Preferences',
+          children: [
+            SettingsDropdown<LaunchScreen>(
+              icon: Icons.home_outlined,
+              label: 'Launch screen',
+              value: preferences.launchScreen,
+              values: LaunchScreen.values,
+              labelOf: launchScreenLabel,
+              onChanged: (value) => store.savePreferences(
+                preferences.copyWith(launchScreen: value),
               ),
-              SettingsActionRow(
-                icon: Icons.sell_outlined,
-                title: 'Manage categories',
-                trailingText: 'Open',
-                onTap: () => onSelectSection?.call(FinanceSection.categories),
+            ),
+            SettingsDropdown<AppearanceMode>(
+              icon: Icons.contrast_outlined,
+              label: 'Appearance',
+              value: preferences.appearanceMode,
+              values: AppearanceMode.values,
+              labelOf: appearanceModeLabel,
+              onChanged: (value) => store.savePreferences(
+                preferences.copyWith(appearanceMode: value),
               ),
-              SettingsActionRow(
-                icon: Icons.person_outline,
-                title: 'Manage payees',
-                trailingText: 'Open',
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (context) => const PayeesManagementScreen(),
-                    ),
-                  );
-                },
+            ),
+            SettingsDropdown<FloatingAddButtonPosition>(
+              icon: Icons.add_circle_outline,
+              label: 'Floating add button',
+              value: preferences.floatingAddButtonPosition,
+              values: FloatingAddButtonPosition.values,
+              labelOf: floatingAddButtonPositionLabel,
+              onChanged: (value) => store.savePreferences(
+                preferences.copyWith(floatingAddButtonPosition: value),
               ),
-              SettingsActionRow(
-                icon: Icons.pie_chart_outline,
-                title: 'Manage budgets',
-                trailingText: 'Open',
-                onTap: () => onSelectSection?.call(FinanceSection.budgets),
+            ),
+            SettingsDropdown<DefaultTransactionType>(
+              icon: Icons.receipt_long_outlined,
+              label: 'Default transaction type',
+              showDivider: false,
+              value: preferences.defaultTransactionType,
+              values: DefaultTransactionType.values,
+              labelOf: defaultTransactionTypeLabel,
+              onChanged: (value) => store.savePreferences(
+                preferences.copyWith(defaultTransactionType: value),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
         const SizedBox(height: 16),
-        AppCard(
-          title: 'More',
-          child: Column(
-            children: [
-              SettingsActionRow(
-                icon: Icons.insights_outlined,
-                title: 'Reports',
-                trailingText: 'Open',
-                onTap: () => onSelectSection?.call(FinanceSection.reports),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        AppCard(
-          title: 'Data Management',
-          child: SettingsActionRow(
-            icon: Icons.history_toggle_off_outlined,
-            title: 'Reset Scheduled History',
-            trailingText: 'Reset',
-            onTap: () => showResetScheduledHistorySheet(context, store),
-          ),
-        ),
-        const SizedBox(height: 16),
-        AppCard(
-          title: 'Data Ownership',
-          child: Column(
-            children: [
-              SettingsActionRow(
-                icon: Icons.file_download_outlined,
-                title: 'Export CSV',
-                trailingText: 'Copy',
-                onTap: () => copyExportToClipboard(
-                  context,
-                  title: 'CSV export copied',
-                  payload: const BackupCodec().encodeTransactionsCsv(
-                    store.dataSet,
+        SettingsSectionCard(
+          title: 'Money Format',
+          children: [
+            SettingsDropdown<CurrencyFormatSettings>(
+              icon: Icons.currency_exchange_outlined,
+              label: 'Currency',
+              value: _currencyFor(preferences.currency.currencyCode),
+              values: _currencyOptions,
+              labelOf: (value) => currencySettingsLabel(value.currencyCode),
+              onChanged: (value) => store.savePreferences(
+                preferences.copyWith(
+                  currency: value.copyWith(
+                    decimalPlaces: preferences.currency.decimalPlaces,
+                    thousandsSeparator: preferences.currency.thousandsSeparator,
                   ),
                 ),
               ),
-              SettingsActionRow(
-                icon: Icons.data_object_outlined,
-                title: 'Export JSON',
-                trailingText: 'Copy',
-                onTap: () => copyExportToClipboard(
-                  context,
-                  title: 'JSON backup copied',
-                  payload: const BackupCodec().encodeJson(store.dataSet),
+            ),
+            SettingsActionRow(
+              icon: Icons.edit_outlined,
+              title: 'Custom currency',
+              subtitle:
+                  '${preferences.currency.currencyCode} ${preferences.currency.symbol}',
+              onTap: () => showCustomCurrencyDialog(context),
+            ),
+            SettingsDropdown<int>(
+              icon: Icons.numbers_outlined,
+              label: 'Decimal places',
+              value: preferences.currency.decimalPlaces,
+              values: const [0, 2],
+              labelOf: (value) => '$value',
+              onChanged: (value) => store.savePreferences(
+                preferences.copyWith(
+                  currency: preferences.currency.copyWith(decimalPlaces: value),
                 ),
               ),
-              SettingsActionRow(
-                icon: Icons.restore_outlined,
-                title: 'Backup and restore',
-                trailingText: 'Restore JSON',
-                onTap: () => restoreJsonBackupFromClipboard(context),
+            ),
+            SettingsDropdown<String>(
+              icon: Icons.format_list_numbered_outlined,
+              label: 'Thousands separator',
+              showDivider: false,
+              value: preferences.currency.thousandsSeparator,
+              values: const [',', '.', ' ', ''],
+              labelOf: thousandsSeparatorLabel,
+              onChanged: (value) => store.savePreferences(
+                preferences.copyWith(
+                  currency: preferences.currency.copyWith(
+                    thousandsSeparator: value,
+                  ),
+                ),
               ),
-            ],
-          ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        SettingsSectionCard(
+          title: 'Notifications',
+          children: [
+            SettingsSwitch(
+              icon: Icons.notifications_outlined,
+              label: 'Scheduled transaction alerts',
+              subtitle: 'Receive reminders for scheduled transactions',
+              value: preferences.notificationsEnabled,
+              onChanged: (value) => store.savePreferences(
+                preferences.copyWith(notificationsEnabled: value),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        SettingsSectionCard(
+          title: 'Manage',
+          children: [
+            SettingsActionRow(
+              icon: Icons.account_balance_wallet_outlined,
+              title: 'Manage accounts',
+              subtitle: 'Accounts, balances, and account groups',
+              onTap: () => onSelectSection?.call(FinanceSection.accounts),
+            ),
+            SettingsActionRow(
+              icon: Icons.sell_outlined,
+              title: 'Manage categories',
+              subtitle: 'Expense and income categories',
+              onTap: () => onSelectSection?.call(FinanceSection.categories),
+            ),
+            SettingsActionRow(
+              icon: Icons.person_outline,
+              title: 'Manage payees',
+              subtitle: 'Active and archived payees',
+              onTap: () {
+                HapticFeedback.selectionClick();
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (context) => const PayeesManagementScreen(),
+                  ),
+                );
+              },
+            ),
+            SettingsActionRow(
+              icon: Icons.pie_chart_outline,
+              title: 'Manage budgets',
+              subtitle: 'Budget amounts and categories',
+              showDivider: false,
+              onTap: () => onSelectSection?.call(FinanceSection.budgets),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        SettingsSectionCard(
+          title: 'More',
+          children: [
+            SettingsActionRow(
+              icon: Icons.insights_outlined,
+              title: 'Reports',
+              subtitle: 'Review spending and category trends',
+              showDivider: false,
+              onTap: () => onSelectSection?.call(FinanceSection.reports),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        SettingsSectionCard(
+          title: 'Data Management',
+          children: [
+            SettingsActionRow(
+              icon: Icons.history_toggle_off_outlined,
+              title: 'Reset Scheduled History',
+              subtitle: 'Clear paid and skipped occurrence history',
+              destructive: true,
+              onTap: () => showResetScheduledHistorySheet(context, store),
+            ),
+            SettingsActionRow(
+              icon: Icons.file_download_outlined,
+              title: 'Export CSV',
+              subtitle: 'Copy ledger transactions as CSV',
+              onTap: () => copyExportToClipboard(
+                context,
+                title: 'CSV export copied',
+                payload: const BackupCodec().encodeTransactionsCsv(
+                  store.dataSet,
+                ),
+              ),
+            ),
+            SettingsActionRow(
+              icon: Icons.data_object_outlined,
+              title: 'Export JSON',
+              subtitle: 'Copy a complete JSON backup',
+              onTap: () => copyExportToClipboard(
+                context,
+                title: 'JSON backup copied',
+                payload: const BackupCodec().encodeJson(store.dataSet),
+              ),
+            ),
+            SettingsActionRow(
+              icon: Icons.restore_outlined,
+              title: 'Backup and restore',
+              subtitle: 'Restore a JSON backup from the clipboard',
+              showDivider: false,
+              onTap: () => restoreJsonBackupFromClipboard(context),
+            ),
+          ],
         ),
       ],
     );
@@ -5470,40 +5361,78 @@ Future<void> showCustomCurrencyDialog(BuildContext context) async {
   final symbol = TextEditingController(text: preferences.currency.symbol);
   final result = await showDialog<({String currencyCode, String symbol})>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('Custom currency'),
-      content: SizedBox(
-        width: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: code,
-              autofocus: true,
-              textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(labelText: 'Currency code'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: symbol,
-              decoration: const InputDecoration(labelText: 'Symbol'),
-            ),
-          ],
-        ),
+    builder: (dialogContext) => TransactionSheetFrame(
+      title: 'Custom Currency',
+      actions: TransactionFormActions(
+        onCancel: () => Navigator.pop(dialogContext),
+        onSave: () => Navigator.pop(dialogContext, (
+          currencyCode: code.text.trim().toUpperCase(),
+          symbol: symbol.text,
+        )),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(dialogContext, (
-            currencyCode: code.text.trim().toUpperCase(),
-            symbol: symbol.text,
-          )),
-          child: const Text('Save'),
-        ),
-      ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const TransactionFormLabel('Currency code'),
+          Row(
+            children: [
+              const TransactionFormIcon(Icons.text_fields_outlined),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('custom-currency-code'),
+                  controller: code,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.characters,
+                  textInputAction: TextInputAction.next,
+                  onTapOutside: (_) =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: const InputDecoration(
+                    hintText: 'Currency code',
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  style: Theme.of(dialogContext).textTheme.titleMedium,
+                ),
+              ),
+            ],
+          ),
+          const TransactionFormDivider(),
+          const TransactionFormLabel('Symbol'),
+          Row(
+            children: [
+              const TransactionFormIcon(Icons.attach_money_outlined),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('custom-currency-symbol'),
+                  controller: symbol,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => Navigator.pop(dialogContext, (
+                    currencyCode: code.text.trim().toUpperCase(),
+                    symbol: symbol.text,
+                  )),
+                  onTapOutside: (_) =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: const InputDecoration(
+                    hintText: 'Symbol',
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  style: Theme.of(dialogContext).textTheme.titleMedium,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     ),
   );
 
@@ -5707,34 +5636,47 @@ class ReportMetricRow extends StatelessWidget {
 
 class SettingsDropdown<T> extends StatelessWidget {
   const SettingsDropdown({
+    required this.icon,
     required this.label,
     required this.value,
     required this.values,
     required this.labelOf,
     required this.onChanged,
+    this.showDivider = true,
     super.key,
   });
 
+  final IconData icon;
   final String label;
   final T value;
   final List<T> values;
   final String Function(T value) labelOf;
   final ValueChanged<T> onChanged;
+  final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
-    return DropdownButtonFormField<T>(
-      initialValue: value,
-      decoration: InputDecoration(labelText: label),
-      borderRadius: BorderRadius.circular(8),
-      items: [
-        for (final item in values)
-          DropdownMenuItem<T>(value: item, child: Text(labelOf(item))),
-      ],
-      onChanged: (value) {
-        if (value != null) {
-          onChanged(value);
-        }
+    return SettingsActionRow(
+      key: ValueKey('settings-preference-$label'),
+      icon: icon,
+      title: label,
+      subtitle: labelOf(value),
+      showDivider: showDivider,
+      onTap: () async {
+        final selected = await showPolishedChoicePicker<T>(
+          context,
+          title: label,
+          selected: value,
+          choices: [
+            for (final item in values)
+              PolishedChoice(
+                value: item,
+                label: labelOf(item),
+                leading: Icon(icon),
+              ),
+          ],
+        );
+        if (selected != null) onChanged(selected);
       },
     );
   }
@@ -5742,21 +5684,37 @@ class SettingsDropdown<T> extends StatelessWidget {
 
 class SettingsSwitch extends StatelessWidget {
   const SettingsSwitch({
+    required this.icon,
     required this.label,
+    this.subtitle,
     required this.value,
     required this.onChanged,
     super.key,
   });
 
+  final IconData icon;
   final String label;
+  final String? subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
     return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: 2,
+      ),
+      secondary: SettingsRowIcon(icon: icon),
       title: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+      subtitle: subtitle == null
+          ? null
+          : Text(
+              subtitle!,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
       value: value,
       activeThumbColor: AppTheme.accent,
       onChanged: onChanged,
@@ -5768,27 +5726,175 @@ class SettingsActionRow extends StatelessWidget {
   const SettingsActionRow({
     required this.icon,
     required this.title,
-    required this.trailingText,
+    this.subtitle,
+    this.trailingText,
+    this.showStatusPill = false,
+    this.showDivider = true,
+    this.destructive = false,
     this.onTap,
     super.key,
   });
 
   final IconData icon;
   final String title;
-  final String trailingText;
+  final String? subtitle;
+  final String? trailingText;
+  final bool showStatusPill;
+  final bool showDivider;
+  final bool destructive;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: AppTheme.accent),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
-      trailing: Text(
-        trailingText,
-        style: const TextStyle(color: AppTheme.muted),
+    final theme = Theme.of(context);
+    final foreground = destructive ? theme.colorScheme.error : null;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: showDivider
+            ? Border(
+                bottom: BorderSide(
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.45,
+                  ),
+                ),
+              )
+            : null,
       ),
-      onTap: onTap,
+      child: ListTile(
+        minTileHeight: 66,
+        contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+        leading: SettingsRowIcon(
+          icon: icon,
+          color: destructive ? theme.colorScheme.error : AppTheme.accent,
+        ),
+        title: Text(
+          title,
+          style: TextStyle(fontWeight: FontWeight.w800, color: foreground),
+        ),
+        subtitle: subtitle == null
+            ? null
+            : Text(
+                subtitle!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.2,
+                ),
+              ),
+        trailing: showStatusPill && trailingText != null
+            ? Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.accent.withValues(alpha: 0.11),
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                ),
+                child: Text(
+                  trailingText!,
+                  style: const TextStyle(
+                    color: AppTheme.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              )
+            : onTap != null
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (trailingText != null) ...[
+                    Text(
+                      trailingText!,
+                      style: TextStyle(
+                        color: destructive
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: destructive
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              )
+            : trailingText == null
+            ? null
+            : Text(
+                trailingText!,
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+              ),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+class SettingsRowIcon extends StatelessWidget {
+  const SettingsRowIcon({required this.icon, this.color, super.key});
+
+  final IconData icon;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveColor = color ?? AppTheme.accent;
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: effectiveColor.withValues(alpha: 0.09),
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Icon(icon, color: effectiveColor, size: 21),
+    );
+  }
+}
+
+class SettingsSectionCard extends StatelessWidget {
+  const SettingsSectionCard({
+    required this.title,
+    required this.children,
+    super.key,
+  });
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: Theme.of(context).colorScheme.surface,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.xs,
+            ),
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0,
+              ),
+            ),
+          ),
+          ...children,
+        ],
+      ),
     );
   }
 }
@@ -6453,83 +6559,141 @@ Future<void> showBudgetDialog(
       >(
         context: context,
         builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            alignment: Alignment.topCenter,
-            insetPadding: transactionDialogInsetPadding(context),
-            actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
-            title: Text(budget == null ? 'Add budget' : 'Edit budget'),
-            content: SizedBox(
-              width: 420,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DialogFieldGroup(
-                      label: 'Name',
-                      child: TextField(
-                        controller: name,
-                        decoration: dialogFieldDecoration(),
-                        textCapitalization: TextCapitalization.words,
-                        textInputAction: TextInputAction.next,
-                        autofocus: true,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DialogFieldGroup(
-                      label: 'Budget amount',
-                      child: AmountEntryField(
-                        initialMinor: amountMinor,
-                        currency: dataStore.preferences.currency,
-                        labelText: null,
-                        onChanged: (value) => amountMinor = value,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Categories',
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
+          builder: (context, setDialogState) {
+            final theme = Theme.of(context);
+            final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
+              fontSize: 17,
+              fontWeight: FontWeight.w400,
+              letterSpacing: 0,
+              height: 1.15,
+            );
+            final fieldHintStyle = fieldValueStyle?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            );
+            const borderlessDecoration = InputDecoration(
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(vertical: 8),
+            );
+
+            void saveBudgetResult() {
+              Navigator.pop(context, (
+                name: name.text.trim(),
+                amountMinor: amountMinor.abs(),
+                categoryIds: selectedCategoryIds.toList(),
+              ));
+            }
+
+            return TransactionSheetFrame(
+              title: budget == null ? 'Add Budget' : 'Edit Budget',
+              actions: TransactionFormActions(
+                onCancel: () => Navigator.pop(context),
+                onSave: saveBudgetResult,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const TransactionFormLabel('Name'),
+                  Row(
+                    children: [
+                      const TransactionFormIcon(Icons.pie_chart_outline),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          controller: name,
+                          decoration: borderlessDecoration.copyWith(
+                            hintText: 'Budget name',
+                            hintStyle: fieldHintStyle,
+                          ),
+                          textCapitalization: TextCapitalization.words,
+                          textInputAction: TextInputAction.next,
+                          style: fieldValueStyle,
+                          autofocus: true,
                         ),
                       ),
+                    ],
+                  ),
+                  const TransactionFormDivider(),
+                  const TransactionFormLabel('Budget amount'),
+                  Row(
+                    children: [
+                      const TransactionFormIcon(Icons.attach_money),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: AmountEntryField(
+                          fieldKey: const ValueKey('budget-amount'),
+                          initialMinor: amountMinor,
+                          currency: dataStore.preferences.currency,
+                          labelText: null,
+                          keyboardType: TextInputType.number,
+                          decoration: borderlessDecoration,
+                          textStyle: fieldValueStyle,
+                          onChanged: (value) => amountMinor = value,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const TransactionFormDivider(),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1, bottom: 2),
+                    child: Text(
+                      'Categories',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: AppTheme.accent,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0,
+                      ),
                     ),
-                    const SizedBox(height: 4),
-                    for (final category in categories)
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        visualDensity: VisualDensity.compact,
-                        title: Text(category.name),
-                        value: selectedCategoryIds.contains(category.id),
-                        activeColor: AppTheme.accent,
-                        onChanged: (value) => setDialogState(() {
-                          if (value ?? false) {
-                            selectedCategoryIds.add(category.id);
-                          } else {
-                            selectedCategoryIds.remove(category.id);
-                          }
-                        }),
+                  ),
+                  Text(
+                    'Choose the expense categories included in this budget.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  for (var index = 0; index < categories.length; index++) ...[
+                    CheckboxListTile(
+                      key: ValueKey('budget-category-${categories[index].id}'),
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      visualDensity: const VisualDensity(vertical: -1),
+                      secondary: TransactionFormIcon(
+                        categoryIcon(categories[index]),
+                        color: categories[index].colorValue == null
+                            ? null
+                            : Color(categories[index].colorValue!),
+                      ),
+                      title: Text(
+                        categories[index].name,
+                        style: fieldValueStyle,
+                      ),
+                      value: selectedCategoryIds.contains(categories[index].id),
+                      activeColor: AppTheme.accent,
+                      onChanged: (value) => setDialogState(() {
+                        if (value ?? false) {
+                          selectedCategoryIds.add(categories[index].id);
+                        } else {
+                          selectedCategoryIds.remove(categories[index].id);
+                        }
+                      }),
+                    ),
+                    if (index != categories.length - 1)
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.38,
+                        ),
                       ),
                   ],
-                ),
+                ],
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, (
-                  name: name.text.trim(),
-                  amountMinor: amountMinor.abs(),
-                  categoryIds: selectedCategoryIds.toList(),
-                )),
-                child: const Text('Save'),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       );
 
@@ -6918,102 +7082,223 @@ Future<void> showEditAccountDialog(
       >(
         context: context,
         builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            title: const Text('Edit account'),
-            content: SizedBox(
-              width: 420,
+          builder: (context, setDialogState) {
+            final theme = Theme.of(context);
+            final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
+              fontSize: 17,
+              fontWeight: FontWeight.w400,
+              letterSpacing: 0,
+              height: 1.15,
+            );
+            final fieldHintStyle = fieldValueStyle?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            );
+            const borderlessDecoration = InputDecoration(
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(vertical: 8),
+            );
+
+            void saveAccountResult() {
+              Navigator.pop(context, (
+                name: name.text.trim().isEmpty
+                    ? account.name
+                    : name.text.trim(),
+                type: type,
+                creditLimitMinor: type == v2_account.AccountType.creditCard
+                    ? optionalPositiveMinor(creditLimitMinor)
+                    : null,
+                originalLoanAmountMinor: type == v2_account.AccountType.loan
+                    ? optionalPositiveMinor(originalLoanAmountMinor)
+                    : null,
+                includeInGroupBalance: includeInGroupBalance,
+                includeInNetWorth: includeInNetWorth,
+              ));
+            }
+
+            return TransactionSheetFrame(
+              title: 'Edit Account',
+              actions: TransactionFormActions(
+                onCancel: () => Navigator.pop(context),
+                onSave: saveAccountResult,
+              ),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  DialogFieldGroup(
-                    label: 'Name',
-                    child: TextField(
-                      controller: name,
-                      decoration: dialogFieldDecoration(),
-                      textCapitalization: TextCapitalization.words,
-                      autofocus: true,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DialogFieldGroup(
-                    label: 'Type',
-                    child: DropdownButtonFormField<v2_account.AccountType>(
-                      initialValue: type,
-                      decoration: dialogFieldDecoration(),
-                      items: [
-                        for (final item in v2_account.AccountType.values)
-                          DropdownMenuItem(
-                            value: item,
-                            child: Text(v2AccountTypeLabel(item)),
+                  const TransactionFormLabel('Name'),
+                  Row(
+                    children: [
+                      const TransactionFormIcon(
+                        Icons.account_balance_wallet_outlined,
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          controller: name,
+                          decoration: borderlessDecoration.copyWith(
+                            hintText: 'Account name',
+                            hintStyle: fieldHintStyle,
                           ),
-                      ],
-                      onChanged: (value) =>
-                          setDialogState(() => type = value ?? type),
+                          textCapitalization: TextCapitalization.words,
+                          textInputAction: TextInputAction.done,
+                          style: fieldValueStyle,
+                          autofocus: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const TransactionFormDivider(),
+                  const TransactionFormLabel('Type'),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(AppRadii.control),
+                    onTap: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      final selectedType = await showV2AccountTypePicker(
+                        context,
+                        selected: type,
+                      );
+                      if (selectedType != null) {
+                        setDialogState(() => type = selectedType);
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Row(
+                        children: [
+                          TransactionFormIcon(v2AccountIcon(type)),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: Text(
+                              v2AccountTypeLabel(type),
+                              style: fieldValueStyle,
+                            ),
+                          ),
+                          const Icon(Icons.keyboard_arrow_down, size: 28),
+                        ],
+                      ),
                     ),
                   ),
-                  if (type == v2_account.AccountType.creditCard) ...[
-                    const SizedBox(height: 12),
-                    AmountEntryField(
-                      fieldKey: const ValueKey('account-credit-limit'),
-                      initialMinor: creditLimitMinor,
-                      currency: dataStore.preferences.currency,
-                      labelText: 'Credit limit',
-                      onChanged: (value) => creditLimitMinor = value.abs(),
+                  AnimatedSwitcher(
+                    duration: MediaQuery.of(context).disableAnimations
+                        ? Duration.zero
+                        : const Duration(milliseconds: 165),
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: SizeTransition(
+                        sizeFactor: animation,
+                        alignment: Alignment.topCenter,
+                        child: child,
+                      ),
                     ),
-                  ],
-                  if (type == v2_account.AccountType.loan) ...[
-                    const SizedBox(height: 12),
-                    AmountEntryField(
-                      fieldKey: const ValueKey('account-original-loan-amount'),
-                      initialMinor: originalLoanAmountMinor,
-                      currency: dataStore.preferences.currency,
-                      labelText: 'Original loan amount',
-                      onChanged: (value) =>
-                          originalLoanAmountMinor = value.abs(),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  SwitchListTile(
+                    child: type == v2_account.AccountType.creditCard
+                        ? Column(
+                            key: const ValueKey('credit-limit-field'),
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const TransactionFormDivider(),
+                              const TransactionFormLabel('Credit limit'),
+                              Row(
+                                children: [
+                                  const TransactionFormIcon(
+                                    Icons.credit_card_outlined,
+                                  ),
+                                  const SizedBox(width: AppSpacing.md),
+                                  Expanded(
+                                    child: AmountEntryField(
+                                      fieldKey: const ValueKey(
+                                        'account-credit-limit',
+                                      ),
+                                      initialMinor: creditLimitMinor,
+                                      currency: dataStore.preferences.currency,
+                                      labelText: null,
+                                      keyboardType: TextInputType.number,
+                                      decoration: borderlessDecoration,
+                                      textStyle: fieldValueStyle,
+                                      onChanged: (value) =>
+                                          creditLimitMinor = value.abs(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          )
+                        : type == v2_account.AccountType.loan
+                        ? Column(
+                            key: const ValueKey('loan-amount-field'),
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const TransactionFormDivider(),
+                              const TransactionFormLabel(
+                                'Original loan amount',
+                              ),
+                              Row(
+                                children: [
+                                  const TransactionFormIcon(
+                                    Icons.request_quote_outlined,
+                                  ),
+                                  const SizedBox(width: AppSpacing.md),
+                                  Expanded(
+                                    child: AmountEntryField(
+                                      fieldKey: const ValueKey(
+                                        'account-original-loan-amount',
+                                      ),
+                                      initialMinor: originalLoanAmountMinor,
+                                      currency: dataStore.preferences.currency,
+                                      labelText: null,
+                                      keyboardType: TextInputType.number,
+                                      decoration: borderlessDecoration,
+                                      textStyle: fieldValueStyle,
+                                      onChanged: (value) =>
+                                          originalLoanAmountMinor = value.abs(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          )
+                        : const SizedBox.shrink(
+                            key: ValueKey('no-account-extra-field'),
+                          ),
+                  ),
+                  const TransactionFormDivider(),
+                  const TransactionFormLabel('Balance options'),
+                  SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Include in group balance'),
+                    secondary: const TransactionFormIcon(
+                      Icons.account_balance_outlined,
+                    ),
+                    title: Text(
+                      'Include in group balance',
+                      style: fieldValueStyle,
+                    ),
                     value: includeInGroupBalance,
                     onChanged: (value) =>
                         setDialogState(() => includeInGroupBalance = value),
                   ),
-                  SwitchListTile(
+                  Divider(
+                    height: 1,
+                    indent: 56,
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.38,
+                    ),
+                  ),
+                  SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Include in net worth'),
+                    secondary: const TransactionFormIcon(
+                      Icons.pie_chart_outline,
+                    ),
+                    title: Text('Include in net worth', style: fieldValueStyle),
                     value: includeInNetWorth,
                     onChanged: (value) =>
                         setDialogState(() => includeInNetWorth = value),
                   ),
                 ],
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, (
-                  name: name.text.trim().isEmpty
-                      ? account.name
-                      : name.text.trim(),
-                  type: type,
-                  creditLimitMinor: type == v2_account.AccountType.creditCard
-                      ? optionalPositiveMinor(creditLimitMinor)
-                      : null,
-                  originalLoanAmountMinor: type == v2_account.AccountType.loan
-                      ? optionalPositiveMinor(originalLoanAmountMinor)
-                      : null,
-                  includeInGroupBalance: includeInGroupBalance,
-                  includeInNetWorth: includeInNetWorth,
-                )),
-                child: const Text('Save'),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       );
 
@@ -7036,6 +7321,7 @@ Future<void> showFloatingAddMenu(
   BuildContext context, {
   FinanceSection? section,
   String? initialAccountId,
+  DateTime? initialScheduledDate,
 }) async {
   final isScheduled = section == FinanceSection.scheduled;
   final orderedActions = isScheduled
@@ -7126,6 +7412,7 @@ Future<void> showFloatingAddMenu(
         await showScheduledTransactionDialog(
           context,
           initialType: TransactionType.expense,
+          initialDate: initialScheduledDate,
         );
       } else {
         await showTransactionDialog(
@@ -7139,6 +7426,7 @@ Future<void> showFloatingAddMenu(
         await showScheduledTransactionDialog(
           context,
           initialType: TransactionType.income,
+          initialDate: initialScheduledDate,
         );
       } else {
         await showTransactionDialog(
@@ -7156,6 +7444,7 @@ Future<void> showFloatingAddMenu(
         await showScheduledTransactionDialog(
           context,
           initialType: TransactionType.transfer,
+          initialDate: initialScheduledDate,
         );
       } else {
         await showTransferDialog(
@@ -7166,7 +7455,10 @@ Future<void> showFloatingAddMenu(
     case 'budget':
       await showBudgetDialog(context);
     case 'scheduled':
-      await showScheduledTransactionDialog(context);
+      await showScheduledTransactionDialog(
+        context,
+        initialDate: initialScheduledDate,
+      );
   }
 }
 
@@ -7525,6 +7817,8 @@ Future<void> showTransferDialog(
   BuildContext context, {
   String? initialFromAccountId,
   TransactionRecord? transfer,
+  bool initialScheduleFutureOccurrences = false,
+  FutureScheduleDraft? initialFutureSchedule,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final accounts = dataStore.accounts
@@ -7542,6 +7836,14 @@ Future<void> showTransferDialog(
     text: dateInput(transfer?.date ?? DateTime.now()),
   );
   final note = TextEditingController(text: transfer?.note ?? '');
+  final futureSchedule =
+      initialFutureSchedule ??
+      FutureScheduleDraft(
+        firstDate: firstMonthlyDateAfter(
+          transfer?.date ?? DateTime.now(),
+          DateTime.now(),
+        ),
+      );
   var amountMinor = transfer?.amountMinor.abs() ?? 0;
   var fromAccountId =
       accounts.any(
@@ -7555,7 +7857,19 @@ Future<void> showTransferDialog(
           transfer?.transferAccountId != fromAccountId
       ? transfer!.transferAccountId!
       : '';
+  final linkedSchedule = transfer?.scheduledTransactionId == null
+      ? null
+      : dataStore.scheduledTransactions
+            .where(
+              (item) =>
+                  item.id == transfer!.scheduledTransactionId &&
+                  !item.isDeleted,
+            )
+            .firstOrNull;
   TransactionType? switchToType;
+  var editLinkedSchedule = false;
+  var scheduleFutureOccurrences =
+      linkedSchedule == null && initialScheduleFutureOccurrences;
 
   final result =
       await showDialog<
@@ -7566,6 +7880,11 @@ Future<void> showTransferDialog(
           DateTime date,
           String note,
           int amountMinor,
+          bool scheduleFutureOccurrences,
+          DateTime firstScheduledDate,
+          int scheduledTimeMinutes,
+          v2_scheduled.RecurrenceFrequency scheduledFrequency,
+          v2_scheduled.AlertPreference scheduledAlertPreference,
         })
       >(
         context: context,
@@ -7603,7 +7922,12 @@ Future<void> showTransferDialog(
                 fromAccountId.isNotEmpty &&
                 toAccountId.isNotEmpty &&
                 fromAccountId != toAccountId &&
-                amountMinor.abs() > 0;
+                amountMinor.abs() > 0 &&
+                (!scheduleFutureOccurrences ||
+                    isValidFutureScheduleDate(
+                      futureSchedule.parsedFirstDate(DateTime.now()),
+                      parseDateInput(date.text, DateTime.now()),
+                    ));
 
             Widget accountSubtitle(v2_account.AccountRecord account) {
               return Text(
@@ -7678,6 +8002,13 @@ Future<void> showTransferDialog(
                 date: parseDateInput(date.text, DateTime.now()),
                 note: note.text.trim(),
                 amountMinor: amountMinor.abs(),
+                scheduleFutureOccurrences: scheduleFutureOccurrences,
+                firstScheduledDate: futureSchedule.parsedFirstDate(
+                  DateTime.now(),
+                ),
+                scheduledTimeMinutes: futureSchedule.timeMinutes,
+                scheduledFrequency: futureSchedule.frequency,
+                scheduledAlertPreference: futureSchedule.alertPreference,
               ));
             }
 
@@ -7932,6 +8263,86 @@ Future<void> showTransferDialog(
                       ),
                     ],
                   ),
+                  if (linkedSchedule == null) ...[
+                    const TransactionFormDivider(),
+                    InkWell(
+                      key: const ValueKey('transfer-schedule-toggle'),
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      onTap: () => setDialogState(
+                        () => scheduleFutureOccurrences =
+                            !scheduleFutureOccurrences,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            const TransactionFormIcon(
+                              Icons.event_repeat_outlined,
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Text(
+                                'Schedule future occurrences',
+                                style: fieldValueStyle,
+                              ),
+                            ),
+                            Switch.adaptive(
+                              value: scheduleFutureOccurrences,
+                              onChanged: (value) => setDialogState(
+                                () => scheduleFutureOccurrences = value,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (scheduleFutureOccurrences) ...[
+                      const TransactionFormDivider(),
+                      InlineFutureScheduleSection(
+                        draft: futureSchedule,
+                        keyPrefix: 'transfer-schedule',
+                        onChanged: () => setDialogState(() {}),
+                      ),
+                    ],
+                  ] else ...[
+                    const TransactionFormDivider(),
+                    InkWell(
+                      key: const ValueKey('transfer-edit-future-schedule'),
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      onTap: () {
+                        editLinkedSchedule = true;
+                        Navigator.pop(context);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            const TransactionFormIcon(
+                              Icons.event_repeat_outlined,
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Edit future schedule',
+                                    style: fieldValueStyle,
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'Date, time, frequency, and reminder',
+                                    style: mutedStyle,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             );
@@ -7939,26 +8350,133 @@ Future<void> showTransferDialog(
         ),
       );
 
+  if (editLinkedSchedule && linkedSchedule != null && context.mounted) {
+    await showScheduledTransactionDialog(context, existing: linkedSchedule);
+    return;
+  }
   if (switchToType != null && context.mounted) {
     await showTransactionDialog(
       context,
       initialIsExpense: switchToType == TransactionType.expense,
       initialAccountId: fromAccountId,
       transaction: transfer,
+      initialScheduleFutureOccurrences: scheduleFutureOccurrences,
+      initialFutureSchedule: futureSchedule,
     );
     return;
   }
   if (result == null) return;
   HapticFeedback.mediumImpact();
   if (transfer == null) {
-    await dataStore.addTransfer(
-      fromAccountId: result.fromAccountId,
-      toAccountId: result.toAccountId,
+    if (result.scheduleFutureOccurrences) {
+      final scheduleId = 'sched_${DateTime.now().microsecondsSinceEpoch}';
+      final transactionRecord = TransactionRecord(
+        id: 'txn_${DateTime.now().microsecondsSinceEpoch}',
+        type: TransactionType.transfer,
+        accountId: result.fromAccountId,
+        transferAccountId: result.toAccountId,
+        date: result.date,
+        payee: result.payee,
+        amountMinor: result.amountMinor,
+        note: result.note,
+        scheduledTransactionId: scheduleId,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+      );
+      final schedule = v2_scheduled.ScheduledTransactionRecord(
+        id: scheduleId,
+        type: TransactionType.transfer,
+        accountId: result.fromAccountId,
+        transferAccountId: result.toAccountId,
+        payee: result.payee,
+        note: result.note,
+        amountMinor: result.amountMinor,
+        nextDate: result.firstScheduledDate,
+        frequency: result.scheduledFrequency,
+        alertPreference: result.scheduledAlertPreference,
+        customAlertTimeMinutes: result.scheduledTimeMinutes,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+      );
+      try {
+        if (schedule.hasAlert && !dataStore.preferences.notificationsEnabled) {
+          await dataStore.savePreferences(
+            dataStore.preferences.copyWith(notificationsEnabled: true),
+          );
+        }
+        await dataStore.saveTransactionAndSchedule(
+          transaction: transactionRecord,
+          scheduledTransaction: schedule,
+        );
+      } catch (_) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'The transfer and schedule could not be saved. Please try again.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+    } else {
+      await dataStore.addTransfer(
+        fromAccountId: result.fromAccountId,
+        toAccountId: result.toAccountId,
+        date: result.date,
+        payee: result.payee,
+        amountMinor: result.amountMinor,
+        note: result.note,
+      );
+    }
+  } else if (result.scheduleFutureOccurrences) {
+    final scheduleId = 'sched_${DateTime.now().microsecondsSinceEpoch}';
+    final transactionRecord = transfer.copyWith(
+      type: TransactionType.transfer,
+      accountId: result.fromAccountId,
+      transferAccountId: result.toAccountId,
       date: result.date,
       payee: result.payee,
       amountMinor: result.amountMinor,
       note: result.note,
+      scheduledTransactionId: scheduleId,
+      clearCategory: true,
     );
+    final schedule = v2_scheduled.ScheduledTransactionRecord(
+      id: scheduleId,
+      type: TransactionType.transfer,
+      accountId: result.fromAccountId,
+      transferAccountId: result.toAccountId,
+      payee: result.payee,
+      note: result.note,
+      amountMinor: result.amountMinor,
+      nextDate: result.firstScheduledDate,
+      frequency: result.scheduledFrequency,
+      alertPreference: result.scheduledAlertPreference,
+      customAlertTimeMinutes: result.scheduledTimeMinutes,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+    );
+    try {
+      if (schedule.hasAlert && !dataStore.preferences.notificationsEnabled) {
+        await dataStore.savePreferences(
+          dataStore.preferences.copyWith(notificationsEnabled: true),
+        );
+      }
+      await dataStore.saveTransactionAndSchedule(
+        transaction: transactionRecord,
+        scheduledTransaction: schedule,
+      );
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The transfer and schedule could not be saved. Please try again.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
   } else {
     await dataStore.saveTransaction(
       transfer.copyWith(
@@ -7984,6 +8502,8 @@ Future<bool> showScheduledTransactionDialog(
   BuildContext context, {
   v2_scheduled.ScheduledTransactionRecord? existing,
   TransactionType? initialType,
+  TransactionRecord? sourceTransaction,
+  DateTime? initialDate,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final isEditing = existing != null;
@@ -8003,11 +8523,21 @@ Future<bool> showScheduledTransactionDialog(
   }
 
   final payeeOptions = savedPayees(dataStore);
-  final payee = TextEditingController(text: existing?.payee ?? '');
-  final note = TextEditingController(text: existing?.note ?? '');
-  var amountMinor = existing?.amountMinor ?? 0;
+  final payee = TextEditingController(
+    text: existing?.payee ?? sourceTransaction?.payee ?? '',
+  );
+  final note = TextEditingController(
+    text: existing?.note ?? sourceTransaction?.note ?? '',
+  );
+  var amountMinor =
+      existing?.amountMinor ?? sourceTransaction?.amountMinor.abs() ?? 0;
   final nextDate = TextEditingController(
-    text: dateInput(existing?.nextDate ?? DateTime.now()),
+    text: dateInput(
+      existing?.nextDate ??
+          (sourceTransaction == null
+              ? initialDate ?? DateTime.now()
+              : firstMonthlyDateAfter(sourceTransaction.date, DateTime.now())),
+    ),
   );
   final customAlertTime = TextEditingController(
     text: alertTimeInput(existing?.customAlertTimeMinutes ?? 9 * 60),
@@ -8015,15 +8545,22 @@ Future<bool> showScheduledTransactionDialog(
   final newCategoryName = TextEditingController();
   final newCategoryFocusNode = FocusNode();
   var isCreatingCategory = false;
-  var type = existing?.type ?? initialType ?? TransactionType.expense;
-  var accountId = accounts.any((account) => account.id == existing?.accountId)
-      ? existing!.accountId
+  var type =
+      existing?.type ??
+      sourceTransaction?.type ??
+      initialType ??
+      TransactionType.expense;
+  final initialAccountId = existing?.accountId ?? sourceTransaction?.accountId;
+  var accountId = accounts.any((account) => account.id == initialAccountId)
+      ? initialAccountId!
       : '';
+  final initialTransferAccountId =
+      existing?.transferAccountId ?? sourceTransaction?.transferAccountId;
   var transferAccountId =
-      accounts.any((account) => account.id == existing?.transferAccountId)
-      ? existing?.transferAccountId
+      accounts.any((account) => account.id == initialTransferAccountId)
+      ? initialTransferAccountId
       : null;
-  var categoryId = existing?.categoryId;
+  var categoryId = existing?.categoryId ?? sourceTransaction?.categoryId;
   var frequency =
       existing?.frequency ?? v2_scheduled.RecurrenceFrequency.monthly;
   var alertPreference =
@@ -8258,10 +8795,10 @@ Future<bool> showScheduledTransactionDialog(
                 nextDate: parseDateInput(nextDate.text, DateTime.now()),
                 frequency: frequency,
                 alertPreference: alertPreference,
-                customAlertTimeMinutes:
-                    alertPreference == v2_scheduled.AlertPreference.custom
-                    ? parseAlertTimeMinutes(customAlertTime.text, 9 * 60)
-                    : null,
+                customAlertTimeMinutes: parseAlertTimeMinutes(
+                  customAlertTime.text,
+                  9 * 60,
+                ),
                 repeatAlertUntilResolved:
                     alertPreference != v2_scheduled.AlertPreference.none &&
                     repeatAlertUntilResolved,
@@ -8520,25 +9057,13 @@ Future<bool> showScheduledTransactionDialog(
                         value: selectedCategory?.name ?? 'Choose category',
                         onTap: () async {
                           FocusManager.instance.primaryFocus?.unfocus();
-                          final selectedId =
-                              await showTransactionCategoryPicker(
-                                context,
-                                categories: categories,
-                                selectedCategoryId: categoryId ?? '',
-                              );
+                          final selectedId = await showTransactionCategoryFlow(
+                            context,
+                            dataStore: dataStore,
+                            isExpense: type == TransactionType.expense,
+                            selectedCategoryId: categoryId ?? '',
+                          );
                           if (selectedId == null || !context.mounted) return;
-                          if (selectedId == newCategoryDropdownValue) {
-                            setDialogState(() {
-                              isCreatingCategory = true;
-                              newCategoryName.clear();
-                            });
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (newCategoryFocusNode.canRequestFocus) {
-                                newCategoryFocusNode.requestFocus();
-                              }
-                            });
-                            return;
-                          }
                           setDialogState(() => categoryId = selectedId);
                         },
                       ),
@@ -8603,6 +9128,41 @@ Future<bool> showScheduledTransactionDialog(
                     },
                   ),
                   const TransactionFormDivider(),
+                  const TransactionFormLabel('Time'),
+                  choiceRow(
+                    rowKey: const ValueKey('scheduled-alert-time'),
+                    icon: Icons.schedule_outlined,
+                    value: customAlertTime.text,
+                    onTap: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      final minutes = parseAlertTimeMinutes(
+                        customAlertTime.text,
+                        9 * 60,
+                      );
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay(
+                          hour: minutes ~/ 60,
+                          minute: minutes % 60,
+                        ),
+                        initialEntryMode: TimePickerEntryMode.dial,
+                        builder: (context, child) => polishedPickerBuilder(
+                          context,
+                          child,
+                          forceTwelveHourTime: true,
+                        ),
+                      );
+                      if (picked != null) {
+                        setDialogState(
+                          () => customAlertTime.text = alertTimeInput(
+                            picked.hour * 60 + picked.minute,
+                          ),
+                        );
+                      }
+                      FocusManager.instance.primaryFocus?.unfocus();
+                    },
+                  ),
+                  const TransactionFormDivider(),
                   const TransactionFormLabel('Reminder'),
                   choiceRow(
                     rowKey: const ValueKey('scheduled-alert'),
@@ -8639,45 +9199,6 @@ Future<bool> showScheduledTransactionDialog(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (alertPreference ==
-                            v2_scheduled.AlertPreference.custom) ...[
-                          const TransactionFormDivider(),
-                          const TransactionFormLabel('Time'),
-                          choiceRow(
-                            rowKey: const ValueKey('scheduled-alert-time'),
-                            icon: Icons.schedule_outlined,
-                            value: customAlertTime.text,
-                            onTap: () async {
-                              FocusManager.instance.primaryFocus?.unfocus();
-                              final minutes = parseAlertTimeMinutes(
-                                customAlertTime.text,
-                                9 * 60,
-                              );
-                              final picked = await showTimePicker(
-                                context: context,
-                                initialTime: TimeOfDay(
-                                  hour: minutes ~/ 60,
-                                  minute: minutes % 60,
-                                ),
-                                initialEntryMode: TimePickerEntryMode.dial,
-                                builder: (context, child) => MediaQuery(
-                                  data: MediaQuery.of(
-                                    context,
-                                  ).copyWith(alwaysUse24HourFormat: false),
-                                  child: child!,
-                                ),
-                              );
-                              if (picked != null) {
-                                setDialogState(
-                                  () => customAlertTime.text = alertTimeInput(
-                                    picked.hour * 60 + picked.minute,
-                                  ),
-                                );
-                              }
-                              FocusManager.instance.primaryFocus?.unfocus();
-                            },
-                          ),
-                        ],
                         if (alertPreference !=
                             v2_scheduled.AlertPreference.none) ...[
                           const TransactionFormDivider(),
@@ -8813,7 +9334,16 @@ Future<bool> showScheduledTransactionDialog(
           clearCustomAlertTime: result.customAlertTimeMinutes == null,
           clearLastReminderScheduledAt: true,
         );
-  await dataStore.saveScheduledTransaction(scheduledTransaction);
+  if (sourceTransaction == null) {
+    await dataStore.saveScheduledTransaction(scheduledTransaction);
+  } else {
+    await dataStore.saveTransactionAndSchedule(
+      transaction: sourceTransaction.copyWith(
+        scheduledTransactionId: scheduledTransaction.id,
+      ),
+      scheduledTransaction: scheduledTransaction,
+    );
+  }
   return true;
 }
 
@@ -9054,6 +9584,7 @@ class ScheduledTransactionDetailRow extends StatelessWidget {
     required this.value,
     this.rowKey,
     this.tabularFigures = false,
+    this.valueColor,
     super.key,
   });
 
@@ -9062,6 +9593,7 @@ class ScheduledTransactionDetailRow extends StatelessWidget {
   final String label;
   final String value;
   final bool tabularFigures;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
@@ -9088,6 +9620,7 @@ class ScheduledTransactionDetailRow extends StatelessWidget {
               Text(
                 value,
                 style: theme.textTheme.titleMedium?.copyWith(
+                  color: valueColor,
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0,
@@ -9910,28 +10443,13 @@ Future<void> markScheduledTransactionPaid(
                     value: category?.name ?? 'Category required',
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
-                      final categories = scheduledCategoriesForType(
-                        dataStore,
-                        item.type,
-                      );
-                      final selectedId = await showTransactionCategoryPicker(
+                      final selectedId = await showTransactionCategoryFlow(
                         dialogContext,
-                        categories: categories,
+                        dataStore: dataStore,
+                        isExpense: item.type == TransactionType.expense,
                         selectedCategoryId: selectedCategoryId ?? '',
                       );
                       if (selectedId == null || !dialogContext.mounted) return;
-                      if (selectedId == newCategoryDropdownValue) {
-                        setDialogState(() {
-                          isCreatingCategory = true;
-                          newCategoryName.clear();
-                        });
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (newCategoryFocusNode.canRequestFocus) {
-                            newCategoryFocusNode.requestFocus();
-                          }
-                        });
-                        return;
-                      }
                       setDialogState(() => selectedCategoryId = selectedId);
                     },
                   ),
@@ -10296,6 +10814,8 @@ Future<void> showTransactionDialog(
   String? initialAccountId,
   TransactionRecord? transaction,
   bool initialSplitMode = false,
+  bool initialScheduleFutureOccurrences = false,
+  FutureScheduleDraft? initialFutureSchedule,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final activeAccounts = dataStore.activeAccountsInDisplayOrder;
@@ -10306,6 +10826,16 @@ Future<void> showTransactionDialog(
   final date = TextEditingController(
     text: dateInput(transaction?.date ?? DateTime.now()),
   );
+  final newCategoryName = TextEditingController();
+  final newCategoryFocusNode = FocusNode();
+  final futureSchedule =
+      initialFutureSchedule ??
+      FutureScheduleDraft(
+        firstDate: firstMonthlyDateAfter(
+          transaction?.date ?? DateTime.now(),
+          DateTime.now(),
+        ),
+      );
   var amountMinor = transaction?.amountMinor.abs() ?? 0;
   var accountId =
       activeAccounts.any(
@@ -10339,6 +10869,22 @@ Future<void> showTransactionDialog(
     categoryId = splitDrafts.first.categoryId;
   }
   var switchToTransfer = false;
+  var isCreatingCategory = false;
+  var isSavingCategory = false;
+  String? newCategoryError;
+  int? newCategorySplitIndex;
+  final linkedSchedule = transaction?.scheduledTransactionId == null
+      ? null
+      : dataStore.scheduledTransactions
+            .where(
+              (item) =>
+                  item.id == transaction!.scheduledTransactionId &&
+                  !item.isDeleted,
+            )
+            .firstOrNull;
+  var editLinkedSchedule = false;
+  var scheduleFutureOccurrences =
+      linkedSchedule == null && initialScheduleFutureOccurrences;
 
   final result =
       await showDialog<
@@ -10351,6 +10897,11 @@ Future<void> showTransactionDialog(
           int amountMinor,
           bool isExpense,
           List<TransactionSplitLine> splitLines,
+          bool scheduleFutureOccurrences,
+          DateTime firstScheduledDate,
+          int scheduledTimeMinutes,
+          v2_scheduled.RecurrenceFrequency scheduledFrequency,
+          v2_scheduled.AlertPreference scheduledAlertPreference,
         })
       >(
         context: context,
@@ -10469,9 +11020,15 @@ Future<void> showTransactionDialog(
             final splitIsBalanced =
                 !isSplitMode || (splitRowsComplete && remainingMinor == 0);
             final canSaveTransaction =
+                !isCreatingCategory &&
                 accountId.isNotEmpty &&
                 absoluteAmountMinor > 0 &&
-                (isSplitMode ? splitIsBalanced : categoryId.isNotEmpty);
+                (isSplitMode ? splitIsBalanced : categoryId.isNotEmpty) &&
+                (!scheduleFutureOccurrences ||
+                    isValidFutureScheduleDate(
+                      futureSchedule.parsedFirstDate(DateTime.now()),
+                      parseDateInput(date.text, DateTime.now()),
+                    ));
 
             List<TransactionSplitLine> buildSplitLines() {
               if (!isSplitMode) return const [];
@@ -10486,6 +11043,165 @@ Future<void> showTransactionDialog(
                     note: splitDrafts[index].note.text.trim(),
                   ),
               ];
+            }
+
+            void cancelInlineCategoryCreation() {
+              FocusManager.instance.primaryFocus?.unfocus();
+              setDialogState(() {
+                isCreatingCategory = false;
+                isSavingCategory = false;
+                newCategoryError = null;
+                newCategorySplitIndex = null;
+                newCategoryName.clear();
+              });
+            }
+
+            Future<void> createInlineCategory() async {
+              if (isSavingCategory) return;
+              final name = newCategoryName.text.trim();
+              if (name.isEmpty) {
+                setDialogState(
+                  () => newCategoryError = 'Enter a category name.',
+                );
+                return;
+              }
+              final kind = isExpense
+                  ? v2_category.CategoryKind.expense
+                  : v2_category.CategoryKind.income;
+              final duplicateExists = dataStore.categories.any(
+                (category) =>
+                    category.isVisible &&
+                    category.kind == kind &&
+                    category.name.trim().toLowerCase() == name.toLowerCase(),
+              );
+              if (duplicateExists) {
+                setDialogState(
+                  () => newCategoryError =
+                      'A category with this name already exists.',
+                );
+                return;
+              }
+
+              FocusManager.instance.primaryFocus?.unfocus();
+              setDialogState(() {
+                isSavingCategory = true;
+                newCategoryError = null;
+              });
+              final createdId = 'cat_${DateTime.now().microsecondsSinceEpoch}';
+              try {
+                await dataStore.saveCategoryLocalFirst(
+                  v2_category.CategoryRecord(
+                    id: createdId,
+                    name: name,
+                    kind: kind,
+                    sync: v2_sync.SyncMetadata.fresh(
+                      deviceId: dataStore.deviceId,
+                    ),
+                  ),
+                );
+                if (!context.mounted) return;
+                HapticFeedback.mediumImpact();
+                setDialogState(() {
+                  final splitIndex = newCategorySplitIndex;
+                  if (splitIndex != null && splitIndex < splitDrafts.length) {
+                    splitDrafts[splitIndex].categoryId = createdId;
+                    if (splitIndex == 0) categoryId = createdId;
+                  } else {
+                    categoryId = createdId;
+                  }
+                  isCreatingCategory = false;
+                  isSavingCategory = false;
+                  newCategoryError = null;
+                  newCategorySplitIndex = null;
+                  newCategoryName.clear();
+                });
+              } catch (_) {
+                if (!context.mounted) return;
+                setDialogState(() {
+                  isSavingCategory = false;
+                  newCategoryError =
+                      'The category could not be saved. Please try again.';
+                });
+              }
+            }
+
+            Widget inlineCategoryCreationRow() {
+              return Column(
+                key: const ValueKey('transaction-new-category'),
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const TransactionFormLabel('New Category'),
+                  Row(
+                    children: [
+                      const TransactionFormIcon(Icons.sell_outlined),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          key: const ValueKey('transaction-new-category-name'),
+                          controller: newCategoryName,
+                          focusNode: newCategoryFocusNode,
+                          autofocus: true,
+                          enabled: !isSavingCategory,
+                          textCapitalization: TextCapitalization.words,
+                          textInputAction: TextInputAction.done,
+                          onChanged: (_) {
+                            if (newCategoryError != null) {
+                              setDialogState(() => newCategoryError = null);
+                            }
+                          },
+                          onSubmitted: (_) => createInlineCategory(),
+                          decoration: InputDecoration(
+                            hintText: 'Category name',
+                            hintStyle: fieldHintStyle,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            disabledBorder: InputBorder.none,
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: AppSpacing.sm,
+                            ),
+                          ),
+                          style: fieldValueStyle,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: isSavingCategory
+                            ? null
+                            : cancelInlineCategoryCreation,
+                        child: const Text('Cancel'),
+                      ),
+                      IconButton(
+                        key: const ValueKey('transaction-save-new-category'),
+                        tooltip: 'Add category',
+                        onPressed: isSavingCategory
+                            ? null
+                            : createInlineCategory,
+                        icon: isSavingCategory
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.check),
+                      ),
+                    ],
+                  ),
+                  if (newCategoryError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 56, top: 2),
+                      child: Text(
+                        newCategoryError!,
+                        key: const ValueKey('transaction-new-category-error'),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.error,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              );
             }
 
             Future<void> chooseSplitCategory(int index) async {
@@ -10518,6 +11234,13 @@ Future<void> showTransactionDialog(
                 amountMinor: amountMinor.abs(),
                 isExpense: isExpense,
                 splitLines: buildSplitLines(),
+                scheduleFutureOccurrences: scheduleFutureOccurrences,
+                firstScheduledDate: futureSchedule.parsedFirstDate(
+                  DateTime.now(),
+                ),
+                scheduledTimeMinutes: futureSchedule.timeMinutes,
+                scheduledFrequency: futureSchedule.frequency,
+                scheduledAlertPreference: futureSchedule.alertPreference,
               ));
             }
 
@@ -10906,6 +11629,11 @@ Future<void> showTransactionDialog(
                             isSplitMode = false;
                             splitDrafts.clear();
                             firstSplitAutoRemainder = true;
+                            isCreatingCategory = false;
+                            isSavingCategory = false;
+                            newCategoryError = null;
+                            newCategorySplitIndex = null;
+                            newCategoryName.clear();
                           });
                         },
                       ),
@@ -11007,40 +11735,53 @@ Future<void> showTransactionDialog(
                   ),
                   const TransactionFormDivider(),
                   if (isSplitMode)
-                    splitAllocationSection()
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        splitAllocationSection(),
+                        if (isCreatingCategory) ...[
+                          const SizedBox(height: AppSpacing.sm),
+                          inlineCategoryCreationRow(),
+                        ],
+                      ],
+                    )
                   else
                     Column(
                       key: const ValueKey('transaction-category-field'),
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const TransactionFormLabel('Category'),
-                        selectableRow(
-                          icon: selectedCategory == null
-                              ? Icons.sell_outlined
-                              : categoryIcon(selectedCategory),
-                          placeholder: selectedCategory == null
-                              ? 'Choose category'
-                              : null,
-                          valueStyle: fieldValueStyle,
-                          title: Text(
-                            selectedCategory?.name ?? 'Choose category',
+                        if (isCreatingCategory)
+                          inlineCategoryCreationRow()
+                        else ...[
+                          const TransactionFormLabel('Category'),
+                          selectableRow(
+                            icon: selectedCategory == null
+                                ? Icons.sell_outlined
+                                : categoryIcon(selectedCategory),
+                            placeholder: selectedCategory == null
+                                ? 'Choose category'
+                                : null,
+                            valueStyle: fieldValueStyle,
+                            title: Text(
+                              selectedCategory?.name ?? 'Choose category',
+                            ),
+                            onTap: () async {
+                              FocusManager.instance.primaryFocus?.unfocus();
+                              final selectedCategoryId =
+                                  await showTransactionCategoryFlow(
+                                    context,
+                                    dataStore: dataStore,
+                                    isExpense: isExpense,
+                                    selectedCategoryId: categoryId,
+                                  );
+                              if (selectedCategoryId == null) return;
+                              setDialogState(
+                                () => categoryId = selectedCategoryId,
+                              );
+                            },
                           ),
-                          onTap: () async {
-                            FocusManager.instance.primaryFocus?.unfocus();
-                            final selectedCategoryId =
-                                await showTransactionCategoryFlow(
-                                  context,
-                                  dataStore: dataStore,
-                                  isExpense: isExpense,
-                                  selectedCategoryId: categoryId,
-                                );
-                            if (selectedCategoryId == null) return;
-                            setDialogState(
-                              () => categoryId = selectedCategoryId,
-                            );
-                          },
-                        ),
-                        if (selectedCategory != null)
+                        ],
+                        if (selectedCategory != null && !isCreatingCategory)
                           Padding(
                             padding: const EdgeInsets.only(left: 56, top: 2),
                             child: Align(
@@ -11150,6 +11891,88 @@ Future<void> showTransactionDialog(
                       ),
                     ],
                   ),
+                  if (linkedSchedule == null) ...[
+                    const TransactionFormDivider(),
+                    InkWell(
+                      key: const ValueKey('transaction-schedule-toggle'),
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      onTap: () => setDialogState(
+                        () => scheduleFutureOccurrences =
+                            !scheduleFutureOccurrences,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            const TransactionFormIcon(
+                              Icons.event_repeat_outlined,
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Text(
+                                'Schedule future occurrences',
+                                style: fieldValueStyle,
+                              ),
+                            ),
+                            Switch.adaptive(
+                              value: scheduleFutureOccurrences,
+                              onChanged: (value) => setDialogState(
+                                () => scheduleFutureOccurrences = value,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (scheduleFutureOccurrences) ...[
+                      const TransactionFormDivider(),
+                      InlineFutureScheduleSection(
+                        draft: futureSchedule,
+                        keyPrefix: 'transaction-schedule',
+                        onChanged: () => setDialogState(() {}),
+                      ),
+                    ],
+                  ] else ...[
+                    const TransactionFormDivider(),
+                    InkWell(
+                      key: const ValueKey('transaction-edit-future-schedule'),
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      onTap: () {
+                        editLinkedSchedule = true;
+                        Navigator.pop(context);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            const TransactionFormIcon(
+                              Icons.event_repeat_outlined,
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Edit future schedule',
+                                    style: fieldValueStyle,
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'Date, time, frequency, and reminder',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             );
@@ -11160,18 +11983,77 @@ Future<void> showTransactionDialog(
   for (final draft in splitDrafts) {
     draft.note.dispose();
   }
+  if (editLinkedSchedule && linkedSchedule != null && context.mounted) {
+    await showScheduledTransactionDialog(context, existing: linkedSchedule);
+    return;
+  }
   if (switchToTransfer && context.mounted) {
     await showTransferDialog(
       context,
       initialFromAccountId: accountId,
       transfer: transaction,
+      initialScheduleFutureOccurrences: scheduleFutureOccurrences,
+      initialFutureSchedule: futureSchedule,
     );
     return;
   }
   if (result == null) return;
   HapticFeedback.mediumImpact();
   if (transaction == null) {
-    if (result.isExpense) {
+    if (result.scheduleFutureOccurrences) {
+      final scheduleId = 'sched_${DateTime.now().microsecondsSinceEpoch}';
+      final transactionRecord = TransactionRecord(
+        id: 'txn_${DateTime.now().microsecondsSinceEpoch}',
+        type: result.isExpense
+            ? TransactionType.expense
+            : TransactionType.income,
+        accountId: result.accountId,
+        categoryId: result.categoryId,
+        date: result.date,
+        payee: result.payee,
+        amountMinor: result.amountMinor,
+        note: result.note,
+        splitLines: result.splitLines,
+        scheduledTransactionId: scheduleId,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+      );
+      final schedule = v2_scheduled.ScheduledTransactionRecord(
+        id: scheduleId,
+        type: transactionRecord.type,
+        accountId: result.accountId,
+        categoryId: result.categoryId,
+        payee: result.payee,
+        note: result.note,
+        amountMinor: result.amountMinor,
+        nextDate: result.firstScheduledDate,
+        frequency: result.scheduledFrequency,
+        alertPreference: result.scheduledAlertPreference,
+        customAlertTimeMinutes: result.scheduledTimeMinutes,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+      );
+      try {
+        if (schedule.hasAlert && !dataStore.preferences.notificationsEnabled) {
+          await dataStore.savePreferences(
+            dataStore.preferences.copyWith(notificationsEnabled: true),
+          );
+        }
+        await dataStore.saveTransactionAndSchedule(
+          transaction: transactionRecord,
+          scheduledTransaction: schedule,
+        );
+      } catch (_) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'The transaction and schedule could not be saved. Please try again.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+    } else if (result.isExpense) {
       await dataStore.addExpense(
         accountId: result.accountId,
         categoryId: result.categoryId,
@@ -11191,6 +12073,56 @@ Future<void> showTransactionDialog(
         note: result.note,
         splitLines: result.splitLines,
       );
+    }
+  } else if (result.scheduleFutureOccurrences) {
+    final scheduleId = 'sched_${DateTime.now().microsecondsSinceEpoch}';
+    final transactionRecord = transaction.copyWith(
+      type: result.isExpense ? TransactionType.expense : TransactionType.income,
+      accountId: result.accountId,
+      categoryId: result.categoryId,
+      date: result.date,
+      payee: result.payee,
+      note: result.note,
+      amountMinor: result.amountMinor,
+      splitLines: result.splitLines,
+      scheduledTransactionId: scheduleId,
+      clearTransferAccount: true,
+    );
+    final schedule = v2_scheduled.ScheduledTransactionRecord(
+      id: scheduleId,
+      type: transactionRecord.type,
+      accountId: result.accountId,
+      categoryId: result.categoryId,
+      payee: result.payee,
+      note: result.note,
+      amountMinor: result.amountMinor,
+      nextDate: result.firstScheduledDate,
+      frequency: result.scheduledFrequency,
+      alertPreference: result.scheduledAlertPreference,
+      customAlertTimeMinutes: result.scheduledTimeMinutes,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+    );
+    try {
+      if (schedule.hasAlert && !dataStore.preferences.notificationsEnabled) {
+        await dataStore.savePreferences(
+          dataStore.preferences.copyWith(notificationsEnabled: true),
+        );
+      }
+      await dataStore.saveTransactionAndSchedule(
+        transaction: transactionRecord,
+        scheduledTransaction: schedule,
+      );
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The transaction and schedule could not be saved. Please try again.',
+            ),
+          ),
+        );
+      }
+      return;
     }
   } else {
     await dataStore.saveTransaction(
@@ -11271,131 +12203,239 @@ Future<String?> showCategoryDialog(
                 ? parentCategoryId
                 : null;
             parentCategoryId = parentDropdownValue;
+            final theme = Theme.of(context);
+            final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
+              fontSize: 17,
+              fontWeight: FontWeight.w400,
+              letterSpacing: 0,
+              height: 1.15,
+            );
+            final fieldHintStyle = fieldValueStyle?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            );
+            const borderlessDecoration = InputDecoration(
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(vertical: 8),
+            );
+            final selectedParent = parentOptions
+                .where((item) => item.id == parentDropdownValue)
+                .firstOrNull;
+            final selectedIcon = v2_category.curatedCategoryIcons
+                .where((item) => item.sfSymbolName == iconName)
+                .firstOrNull;
+            final selectedColor = categoryColorOptions
+                .where((item) => item.value == colorValue)
+                .firstOrNull;
 
-            return AlertDialog(
-              alignment: Alignment.topCenter,
-              insetPadding: transactionDialogInsetPadding(context),
-              actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
-              title: Text(
-                existingCategory == null ? 'Add category' : 'Edit category',
-              ),
-              content: SizedBox(
-                width: 420,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+            Widget choiceRow({
+              required IconData icon,
+              required String value,
+              required VoidCallback onTap,
+              Color? iconColor,
+            }) {
+              return InkWell(
+                borderRadius: BorderRadius.circular(AppRadii.control),
+                onTap: onTap,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
                     children: [
-                      DialogFieldGroup(
-                        label: 'Category name',
+                      TransactionFormIcon(icon, color: iconColor),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(child: Text(value, style: fieldValueStyle)),
+                      const Icon(Icons.keyboard_arrow_down, size: 28),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            void saveCategoryResult() {
+              Navigator.pop(context, (
+                name: name.text.trim(),
+                kind: kind,
+                parentCategoryId: parentCategoryId,
+                iconName: iconName,
+                colorValue: colorValue,
+              ));
+            }
+
+            return TransactionSheetFrame(
+              title: existingCategory == null
+                  ? 'Add Category'
+                  : 'Edit Category',
+              actions: TransactionFormActions(
+                onCancel: () => Navigator.pop(context),
+                onSave: saveCategoryResult,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const TransactionFormLabel('Category name'),
+                  Row(
+                    children: [
+                      const TransactionFormIcon(Icons.sell_outlined),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
                         child: TextField(
                           controller: name,
                           textCapitalization: TextCapitalization.words,
-                          decoration: dialogFieldDecoration(),
+                          textInputAction: TextInputAction.done,
+                          decoration: borderlessDecoration.copyWith(
+                            hintText: 'Category name',
+                            hintStyle: fieldHintStyle,
+                          ),
+                          style: fieldValueStyle,
                           autofocus: true,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DialogFieldGroup(
-                        label: 'Type',
-                        child:
-                            DropdownButtonFormField<v2_category.CategoryKind>(
-                              initialValue: kind,
-                              decoration: dialogFieldDecoration(),
-                              items: [
-                                for (final item
-                                    in v2_category.CategoryKind.values)
-                                  if (item != v2_category.CategoryKind.system)
-                                    DropdownMenuItem(
-                                      value: item,
-                                      child: Text(categoryKindLabel(item.name)),
-                                    ),
-                              ],
-                              onChanged: (value) => setDialogState(() {
-                                kind = value ?? kind;
-                                parentCategoryId = null;
-                              }),
-                            ),
-                      ),
-                      const SizedBox(height: 12),
-                      DialogFieldGroup(
-                        label: 'Parent category',
-                        child: DropdownButtonFormField<String?>(
-                          initialValue: parentDropdownValue,
-                          decoration: dialogFieldDecoration(),
-                          items: [
-                            const DropdownMenuItem<String?>(
-                              child: Text('None'),
-                            ),
-                            for (final item in parentOptions)
-                              DropdownMenuItem<String?>(
-                                value: item.id,
-                                child: Text(item.name),
-                              ),
-                          ],
-                          onChanged: (value) =>
-                              setDialogState(() => parentCategoryId = value),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DialogFieldGroup(
-                        label: 'Icon',
-                        child: DropdownButtonFormField<String?>(
-                          initialValue: iconName,
-                          decoration: dialogFieldDecoration(),
-                          items: [
-                            const DropdownMenuItem<String?>(
-                              child: Text('No icon'),
-                            ),
-                            for (final item in v2_category.curatedCategoryIcons)
-                              DropdownMenuItem<String?>(
-                                value: item.sfSymbolName,
-                                child: Text(item.label),
-                              ),
-                          ],
-                          onChanged: (value) =>
-                              setDialogState(() => iconName = value),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DialogFieldGroup(
-                        label: 'Color',
-                        child: DropdownButtonFormField<int?>(
-                          initialValue: colorValue,
-                          decoration: dialogFieldDecoration(),
-                          items: [
-                            const DropdownMenuItem<int?>(
-                              child: Text('Default'),
-                            ),
-                            for (final item in categoryColorOptions)
-                              DropdownMenuItem<int?>(
-                                value: item.value,
-                                child: Text(item.label),
-                              ),
-                          ],
-                          onChanged: (value) =>
-                              setDialogState(() => colorValue = value),
                         ),
                       ),
                     ],
                   ),
-                ),
+                  const TransactionFormDivider(),
+                  const TransactionFormLabel('Type'),
+                  choiceRow(
+                    icon: categoryKindIcon(kind.name),
+                    value: categoryKindLabel(kind.name),
+                    onTap: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      final selected = await showPolishedChoicePicker(
+                        context,
+                        title: 'Category type',
+                        selected: kind,
+                        choices: [
+                          for (final item in v2_category.CategoryKind.values)
+                            if (item != v2_category.CategoryKind.system)
+                              PolishedChoice(
+                                value: item,
+                                label: categoryKindLabel(item.name),
+                                leading: Icon(categoryKindIcon(item.name)),
+                              ),
+                        ],
+                      );
+                      if (selected != null) {
+                        setDialogState(() {
+                          kind = selected;
+                          parentCategoryId = null;
+                        });
+                      }
+                    },
+                  ),
+                  const TransactionFormDivider(),
+                  const TransactionFormLabel('Parent category'),
+                  choiceRow(
+                    icon: Icons.account_tree_outlined,
+                    value: selectedParent?.name ?? 'None',
+                    onTap: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      final selected = await showPolishedChoicePicker(
+                        context,
+                        title: 'Parent category',
+                        selected: parentDropdownValue ?? noCategoryChoice,
+                        choices: [
+                          const PolishedChoice(
+                            value: noCategoryChoice,
+                            label: 'None',
+                            leading: Icon(Icons.remove_circle_outline),
+                          ),
+                          for (final item in parentOptions)
+                            PolishedChoice(
+                              value: item.id,
+                              label: item.name,
+                              leading: Icon(categoryIcon(item)),
+                            ),
+                        ],
+                      );
+                      if (selected != null) {
+                        setDialogState(
+                          () => parentCategoryId = selected == noCategoryChoice
+                              ? null
+                              : selected,
+                        );
+                      }
+                    },
+                  ),
+                  const TransactionFormDivider(),
+                  const TransactionFormLabel('Icon'),
+                  choiceRow(
+                    icon: categoryIconForName(iconName, kind),
+                    value: selectedIcon?.label ?? 'No icon',
+                    onTap: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      final selected = await showPolishedChoicePicker(
+                        context,
+                        title: 'Category icon',
+                        selected: iconName ?? noCategoryChoice,
+                        choices: [
+                          const PolishedChoice(
+                            value: noCategoryChoice,
+                            label: 'No icon',
+                            leading: Icon(Icons.hide_source_outlined),
+                          ),
+                          for (final item in v2_category.curatedCategoryIcons)
+                            PolishedChoice(
+                              value: item.sfSymbolName,
+                              label: item.label,
+                              leading: Icon(
+                                categoryIconForName(item.sfSymbolName, kind),
+                              ),
+                            ),
+                        ],
+                      );
+                      if (selected != null) {
+                        setDialogState(
+                          () => iconName = selected == noCategoryChoice
+                              ? null
+                              : selected,
+                        );
+                      }
+                    },
+                  ),
+                  const TransactionFormDivider(),
+                  const TransactionFormLabel('Color'),
+                  choiceRow(
+                    icon: Icons.palette_outlined,
+                    iconColor: colorValue == null
+                        ? AppTheme.accent
+                        : Color(colorValue!),
+                    value: selectedColor?.label ?? 'Default',
+                    onTap: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      final selected = await showPolishedChoicePicker(
+                        context,
+                        title: 'Category color',
+                        selected: colorValue ?? noCategoryColorChoice,
+                        choices: [
+                          const PolishedChoice(
+                            value: noCategoryColorChoice,
+                            label: 'Default',
+                            leading: Icon(Icons.format_color_reset_outlined),
+                          ),
+                          for (final item in categoryColorOptions)
+                            PolishedChoice(
+                              value: item.value,
+                              label: item.label,
+                              leading: Icon(
+                                Icons.circle,
+                                color: Color(item.value),
+                              ),
+                            ),
+                        ],
+                      );
+                      if (selected != null) {
+                        setDialogState(
+                          () => colorValue = selected == noCategoryColorChoice
+                              ? null
+                              : selected,
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, (
-                    name: name.text.trim(),
-                    kind: kind,
-                    parentCategoryId: parentCategoryId,
-                    iconName: iconName,
-                    colorValue: colorValue,
-                  )),
-                  child: const Text('Save'),
-                ),
-              ],
             );
           },
         ),
@@ -11451,6 +12491,83 @@ Future<String?> showCategoryDialog(
     ),
   );
   return existingCategory.id;
+}
+
+const noCategoryChoice = '__none__';
+const noCategoryColorChoice = -1;
+
+class PolishedChoice<T> {
+  const PolishedChoice({
+    required this.value,
+    required this.label,
+    this.leading,
+  });
+
+  final T value;
+  final String label;
+  final Widget? leading;
+}
+
+Future<T?> showPolishedChoicePicker<T>(
+  BuildContext context, {
+  required String title,
+  required T selected,
+  required List<PolishedChoice<T>> choices,
+}) {
+  return showModalBottomSheet<T>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheetContext) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.72,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                0,
+                AppSpacing.lg,
+                AppSpacing.xs,
+              ),
+              child: Text(
+                title,
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              ),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final choice in choices)
+                    ListTile(
+                      leading: choice.leading == null
+                          ? null
+                          : IconTheme.merge(
+                              data: const IconThemeData(color: AppTheme.accent),
+                              child: choice.leading!,
+                            ),
+                      title: Text(choice.label),
+                      trailing: choice.value == selected
+                          ? const Icon(Icons.check, color: AppTheme.accent)
+                          : null,
+                      onTap: () => Navigator.pop(sheetContext, choice.value),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 Future<void> showCategoryActions(
@@ -11648,7 +12765,11 @@ List<v2_category.CategoryRecord> visibleCategoriesInDisplayOrder(
 }
 
 IconData categoryIcon(v2_category.CategoryRecord category) {
-  return switch (category.iconName) {
+  return categoryIconForName(category.iconName, category.kind);
+}
+
+IconData categoryIconForName(String? iconName, v2_category.CategoryKind kind) {
+  return switch (iconName) {
     'fork.knife' => Icons.restaurant_outlined,
     'cart' => Icons.shopping_cart_outlined,
     'car' => Icons.directions_car_outlined,
@@ -11661,7 +12782,7 @@ IconData categoryIcon(v2_category.CategoryRecord category) {
     'shield' => Icons.shield_outlined,
     'wrench.adjustable' => Icons.build_outlined,
     'tag' => Icons.sell_outlined,
-    _ => categoryKindIcon(category.kind.name),
+    _ => categoryKindIcon(kind.name),
   };
 }
 
@@ -11798,7 +12919,6 @@ String defaultTransactionTypeLabel(DefaultTransactionType type) {
   };
 }
 
-const newCategoryDropdownValue = '__new_category__';
 const newPayeeSuggestionValue = '__create_new_payee__';
 
 class PayeeAutocompleteField extends StatefulWidget {
@@ -12424,6 +13544,200 @@ String alertTimeInput(int minutesAfterMidnight) {
   return '$hours12:${minutes.toString().padLeft(2, '0')} $period';
 }
 
+class FutureScheduleDraft {
+  FutureScheduleDraft({
+    required DateTime firstDate,
+    this.frequency = v2_scheduled.RecurrenceFrequency.monthly,
+    this.alertPreference = v2_scheduled.AlertPreference.none,
+    int timeMinutes = 9 * 60,
+  }) : firstDate = TextEditingController(text: dateInput(firstDate)),
+       time = TextEditingController(text: alertTimeInput(timeMinutes));
+
+  final TextEditingController firstDate;
+  final TextEditingController time;
+  v2_scheduled.RecurrenceFrequency frequency;
+  v2_scheduled.AlertPreference alertPreference;
+
+  DateTime parsedFirstDate(DateTime fallback) =>
+      parseDateInput(firstDate.text, fallback);
+
+  int get timeMinutes => parseAlertTimeMinutes(time.text, 9 * 60);
+}
+
+bool isValidFutureScheduleDate(DateTime date, DateTime transactionDate) {
+  final today = DateTime.now();
+  final earliest =
+      DateTime(
+        transactionDate.year,
+        transactionDate.month,
+        transactionDate.day,
+      ).isAfter(DateTime(today.year, today.month, today.day))
+      ? DateTime(
+          transactionDate.year,
+          transactionDate.month,
+          transactionDate.day,
+        )
+      : DateTime(today.year, today.month, today.day);
+  final candidate = DateTime(date.year, date.month, date.day);
+  return candidate.isAfter(earliest);
+}
+
+class InlineFutureScheduleSection extends StatelessWidget {
+  const InlineFutureScheduleSection({
+    required this.draft,
+    required this.onChanged,
+    required this.keyPrefix,
+    super.key,
+  });
+
+  final FutureScheduleDraft draft;
+  final VoidCallback onChanged;
+  final String keyPrefix;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final rowValueStyle = theme.textTheme.titleMedium?.copyWith(
+      fontSize: 17,
+      fontWeight: FontWeight.w400,
+      letterSpacing: 0,
+      height: 1.15,
+    );
+
+    Widget row({
+      required String keyName,
+      required IconData icon,
+      required String value,
+      required VoidCallback onTap,
+    }) {
+      return InkWell(
+        key: ValueKey('$keyPrefix-$keyName'),
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(
+            children: [
+              TransactionFormIcon(icon),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(child: Text(value, style: rowValueStyle)),
+              const Icon(Icons.keyboard_arrow_down, size: 28),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      key: ValueKey('$keyPrefix-controls'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1, bottom: 8),
+          child: Text(
+            'Schedule',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: AppTheme.accent,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0,
+            ),
+          ),
+        ),
+        const TransactionFormLabel('First scheduled date'),
+        row(
+          keyName: 'first-date',
+          icon: Icons.calendar_today_outlined,
+          value: fullMonthDateLabel(draft.parsedFirstDate(DateTime.now())),
+          onTap: () async {
+            FocusManager.instance.primaryFocus?.unfocus();
+            final picked = await pickDateForField(
+              context,
+              draft.parsedFirstDate(DateTime.now()),
+            );
+            if (picked != null) {
+              draft.firstDate.text = dateInput(picked);
+              onChanged();
+            }
+            FocusManager.instance.primaryFocus?.unfocus();
+          },
+        ),
+        const TransactionFormDivider(),
+        const TransactionFormLabel('Time'),
+        row(
+          keyName: 'time',
+          icon: Icons.schedule_outlined,
+          value: draft.time.text,
+          onTap: () async {
+            FocusManager.instance.primaryFocus?.unfocus();
+            final minutes = draft.timeMinutes;
+            final picked = await showTimePicker(
+              context: context,
+              initialTime: TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60),
+              initialEntryMode: TimePickerEntryMode.dial,
+              builder: (context, child) => polishedPickerBuilder(
+                context,
+                child,
+                forceTwelveHourTime: true,
+              ),
+            );
+            if (picked != null) {
+              draft.time.text = alertTimeInput(
+                picked.hour * 60 + picked.minute,
+              );
+              onChanged();
+            }
+            FocusManager.instance.primaryFocus?.unfocus();
+          },
+        ),
+        const TransactionFormDivider(),
+        const TransactionFormLabel('Frequency'),
+        row(
+          keyName: 'frequency',
+          icon: Icons.repeat,
+          value: recurrenceFrequencyLabel(draft.frequency),
+          onTap: () async {
+            FocusManager.instance.primaryFocus?.unfocus();
+            final selected = await showScheduledChoicePicker(
+              context,
+              title: 'Frequency',
+              values: v2_scheduled.RecurrenceFrequency.values,
+              selected: draft.frequency,
+              label: recurrenceFrequencyLabel,
+            );
+            if (selected != null) {
+              draft.frequency = selected;
+              onChanged();
+            }
+          },
+        ),
+        const TransactionFormDivider(),
+        const TransactionFormLabel('Reminder'),
+        row(
+          keyName: 'alert',
+          icon: draft.alertPreference == v2_scheduled.AlertPreference.none
+              ? Icons.notifications_none_outlined
+              : Icons.notifications_active_outlined,
+          value: alertPreferenceLabel(draft.alertPreference),
+          onTap: () async {
+            FocusManager.instance.primaryFocus?.unfocus();
+            final selected = await showScheduledChoicePicker(
+              context,
+              title: 'Reminder',
+              values: v2_scheduled.AlertPreference.values,
+              selected: draft.alertPreference,
+              label: alertPreferenceLabel,
+            );
+            if (selected != null) {
+              draft.alertPreference = selected;
+              onChanged();
+            }
+          },
+        ),
+      ],
+    );
+  }
+}
+
 int parseAlertTimeMinutes(String value, int fallback) {
   final trimmed = value.trim();
   final amPmMatch = RegExp(
@@ -12559,6 +13873,19 @@ int? parseOptionalCents(String value) {
   return (parsed * 100).round();
 }
 
+String currencySettingsLabel(String code) {
+  return switch (code) {
+    'USD' => 'USD — US Dollar',
+    'PHP' => 'PHP — Philippine Peso',
+    'EUR' => 'EUR — Euro',
+    'GBP' => 'GBP — British Pound',
+    'CAD' => 'CAD — Canadian Dollar',
+    'AUD' => 'AUD — Australian Dollar',
+    'JPY' => 'JPY — Japanese Yen',
+    _ => code,
+  };
+}
+
 Future<AccountType?> showAccountTypePicker(
   BuildContext context, {
   required AccountType selected,
@@ -12591,6 +13918,50 @@ Future<AccountType?> showAccountTypePicker(
             ListTile(
               leading: Icon(accountIcon(type), color: AppTheme.accent),
               title: Text(accountTypeLabel(type)),
+              trailing: type == selected
+                  ? const Icon(Icons.check, color: AppTheme.accent)
+                  : null,
+              onTap: () => Navigator.pop(sheetContext, type),
+            ),
+          const SizedBox(height: AppSpacing.xs),
+        ],
+      ),
+    ),
+  );
+}
+
+Future<v2_account.AccountType?> showV2AccountTypePicker(
+  BuildContext context, {
+  required v2_account.AccountType selected,
+}) {
+  return showModalBottomSheet<v2_account.AccountType>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              0,
+              AppSpacing.md,
+              AppSpacing.xs,
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Account type',
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ),
+          for (final type in v2_account.AccountType.values)
+            ListTile(
+              leading: Icon(v2AccountIcon(type), color: AppTheme.accent),
+              title: Text(v2AccountTypeLabel(type)),
               trailing: type == selected
                   ? const Icon(Icons.check, color: AppTheme.accent)
                   : null,
@@ -12670,15 +14041,17 @@ Future<String?> showTransactionCategoryFlow(
       ? v2_category.CategoryKind.expense
       : v2_category.CategoryKind.income;
   var currentSelection = selectedCategoryId;
+  final collapsedCategoryIds = <String>{};
 
   while (context.mounted) {
-    final selection = await showTransactionCategoryPicker(
+    final selection = await _showTransactionCategoryPickerSheet(
       context,
       categories: categoriesForTransactionKind(dataStore, isExpense),
       selectedCategoryId: currentSelection,
+      collapsedCategoryIds: collapsedCategoryIds,
     );
     if (!context.mounted || selection == null) return null;
-    if (selection != newCategoryDropdownValue) return selection;
+    if (selection.categoryId != null) return selection.categoryId;
 
     final createdId = await showTransactionCategoryCreationDialog(
       context,
@@ -12794,126 +14167,229 @@ Future<String?> showTransactionCategoryCreationDialog(
           }
         }
 
-        return AlertDialog(
-          alignment: Alignment.topCenter,
-          insetPadding: transactionDialogInsetPadding(dialogContext),
-          actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
-          title: const Text('Add category'),
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+        final theme = Theme.of(dialogContext);
+        final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
+          fontSize: 17,
+          fontWeight: FontWeight.w400,
+          letterSpacing: 0,
+          height: 1.15,
+        );
+        final fieldHintStyle = fieldValueStyle?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        );
+        const borderlessDecoration = InputDecoration(
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          disabledBorder: InputBorder.none,
+          isDense: true,
+          contentPadding: EdgeInsets.symmetric(vertical: 8),
+        );
+        final selectedParent = parentOptions
+            .where((item) => item.id == selectedParentId)
+            .firstOrNull;
+        final selectedIcon = v2_category.curatedCategoryIcons
+            .where((item) => item.sfSymbolName == iconName)
+            .firstOrNull;
+        final selectedColor = categoryColorOptions
+            .where((item) => item.value == colorValue)
+            .firstOrNull;
+
+        Widget valueRow({
+          required IconData icon,
+          required String value,
+          VoidCallback? onTap,
+          Color? iconColor,
+          Key? key,
+        }) {
+          final child = Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(
+              children: [
+                TransactionFormIcon(icon, color: iconColor),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(child: Text(value, style: fieldValueStyle)),
+                if (onTap != null)
+                  const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
+              ],
+            ),
+          );
+          if (onTap == null) return KeyedSubtree(key: key, child: child);
+          return InkWell(
+            key: key,
+            borderRadius: BorderRadius.circular(AppRadii.control),
+            onTap: isSaving ? null : onTap,
+            child: child,
+          );
+        }
+
+        return TransactionSheetFrame(
+          title: 'Add Category',
+          actions: TransactionFormActions(
+            onCancel: () => Navigator.pop(dialogContext),
+            onSave: saveCategory,
+            isSaving: isSaving,
+            saveKey: const ValueKey('transaction-save-new-category'),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const TransactionFormLabel('Category name'),
+              Row(
                 children: [
-                  DialogFieldGroup(
-                    label: 'Category name',
+                  const TransactionFormIcon(Icons.sell_outlined),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
                     child: TextField(
                       key: const ValueKey('transaction-new-category-name'),
                       autofocus: true,
                       enabled: !isSaving,
                       textCapitalization: TextCapitalization.words,
                       textInputAction: TextInputAction.done,
-                      onChanged: (value) => categoryName = value,
+                      onChanged: (value) {
+                        categoryName = value;
+                        if (validationError != null) {
+                          setDialogState(() => validationError = null);
+                        }
+                      },
                       onSubmitted: (_) => saveCategory(),
-                      decoration: dialogFieldDecoration(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DialogFieldGroup(
-                    label: 'Type',
-                    child: InputDecorator(
-                      decoration: dialogFieldDecoration(),
-                      child: Text(categoryKindLabel(kind.name)),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DialogFieldGroup(
-                    label: 'Parent category',
-                    child: DropdownButtonFormField<String?>(
-                      key: const ValueKey('transaction-new-category-parent'),
-                      initialValue: selectedParentId,
-                      decoration: dialogFieldDecoration(),
-                      items: [
-                        const DropdownMenuItem<String?>(child: Text('None')),
-                        for (final category in parentOptions)
-                          DropdownMenuItem<String?>(
-                            value: category.id,
-                            child: Text(category.name),
-                          ),
-                      ],
-                      onChanged: isSaving
-                          ? null
-                          : (value) =>
-                                setDialogState(() => parentCategoryId = value),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DialogFieldGroup(
-                    label: 'Icon',
-                    child: DropdownButtonFormField<String?>(
-                      initialValue: iconName,
-                      decoration: dialogFieldDecoration(),
-                      items: [
-                        const DropdownMenuItem<String?>(child: Text('No icon')),
-                        for (final item in v2_category.curatedCategoryIcons)
-                          DropdownMenuItem<String?>(
-                            value: item.sfSymbolName,
-                            child: Text(item.label),
-                          ),
-                      ],
-                      onChanged: isSaving
-                          ? null
-                          : (value) => setDialogState(() => iconName = value),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DialogFieldGroup(
-                    label: 'Color',
-                    child: DropdownButtonFormField<int?>(
-                      initialValue: colorValue,
-                      decoration: dialogFieldDecoration(),
-                      items: [
-                        const DropdownMenuItem<int?>(child: Text('Default')),
-                        for (final item in categoryColorOptions)
-                          DropdownMenuItem<int?>(
-                            value: item.value,
-                            child: Text(item.label),
-                          ),
-                      ],
-                      onChanged: isSaving
-                          ? null
-                          : (value) => setDialogState(() => colorValue = value),
-                    ),
-                  ),
-                  if (validationError != null) ...[
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        validationError!,
-                        key: const ValueKey('transaction-new-category-error'),
-                        style: TextStyle(
-                          color: Theme.of(dialogContext).colorScheme.error,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      decoration: borderlessDecoration.copyWith(
+                        hintText: 'Category name',
+                        hintStyle: fieldHintStyle,
                       ),
+                      style: fieldValueStyle,
                     ),
-                  ],
+                  ),
                 ],
               ),
-            ),
+              const TransactionFormDivider(),
+              const TransactionFormLabel('Type'),
+              valueRow(
+                icon: categoryKindIcon(kind.name),
+                value: categoryKindLabel(kind.name),
+              ),
+              const TransactionFormDivider(),
+              const TransactionFormLabel('Parent category'),
+              valueRow(
+                key: const ValueKey('transaction-new-category-parent'),
+                icon: Icons.account_tree_outlined,
+                value: selectedParent?.name ?? 'None',
+                onTap: () async {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  final selected = await showPolishedChoicePicker<String>(
+                    dialogContext,
+                    title: 'Parent category',
+                    selected: selectedParentId ?? noCategoryChoice,
+                    choices: [
+                      const PolishedChoice(
+                        value: noCategoryChoice,
+                        label: 'None',
+                        leading: Icon(Icons.remove_circle_outline),
+                      ),
+                      for (final item in parentOptions)
+                        PolishedChoice(
+                          value: item.id,
+                          label: item.name,
+                          leading: Icon(categoryIcon(item)),
+                        ),
+                    ],
+                  );
+                  if (selected != null && dialogContext.mounted) {
+                    setDialogState(
+                      () => parentCategoryId = selected == noCategoryChoice
+                          ? null
+                          : selected,
+                    );
+                  }
+                },
+              ),
+              const TransactionFormDivider(),
+              const TransactionFormLabel('Icon'),
+              valueRow(
+                icon: categoryIconForName(iconName, kind),
+                value: selectedIcon?.label ?? 'No icon',
+                onTap: () async {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  final selected = await showPolishedChoicePicker<String>(
+                    dialogContext,
+                    title: 'Category icon',
+                    selected: iconName ?? noCategoryChoice,
+                    choices: [
+                      const PolishedChoice(
+                        value: noCategoryChoice,
+                        label: 'No icon',
+                        leading: Icon(Icons.hide_source_outlined),
+                      ),
+                      for (final item in v2_category.curatedCategoryIcons)
+                        PolishedChoice(
+                          value: item.sfSymbolName,
+                          label: item.label,
+                          leading: Icon(
+                            categoryIconForName(item.sfSymbolName, kind),
+                          ),
+                        ),
+                    ],
+                  );
+                  if (selected != null && dialogContext.mounted) {
+                    setDialogState(
+                      () => iconName = selected == noCategoryChoice
+                          ? null
+                          : selected,
+                    );
+                  }
+                },
+              ),
+              const TransactionFormDivider(),
+              const TransactionFormLabel('Color'),
+              valueRow(
+                icon: Icons.palette_outlined,
+                iconColor: colorValue == null
+                    ? AppTheme.accent
+                    : Color(colorValue!),
+                value: selectedColor?.label ?? 'Default',
+                onTap: () async {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  final selected = await showPolishedChoicePicker<int>(
+                    dialogContext,
+                    title: 'Category color',
+                    selected: colorValue ?? noCategoryColorChoice,
+                    choices: [
+                      const PolishedChoice(
+                        value: noCategoryColorChoice,
+                        label: 'Default',
+                        leading: Icon(Icons.format_color_reset_outlined),
+                      ),
+                      for (final item in categoryColorOptions)
+                        PolishedChoice(
+                          value: item.value,
+                          label: item.label,
+                          leading: Icon(Icons.circle, color: Color(item.value)),
+                        ),
+                    ],
+                  );
+                  if (selected != null && dialogContext.mounted) {
+                    setDialogState(
+                      () => colorValue = selected == noCategoryColorChoice
+                          ? null
+                          : selected,
+                    );
+                  }
+                },
+              ),
+              if (validationError != null) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  validationError!,
+                  key: const ValueKey('transaction-new-category-error'),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              key: const ValueKey('transaction-save-new-category'),
-              onPressed: isSaving ? null : saveCategory,
-              child: Text(isSaving ? 'Saving...' : 'Save'),
-            ),
-          ],
         );
       },
     ),
@@ -12921,25 +14397,194 @@ Future<String?> showTransactionCategoryCreationDialog(
   return createdId;
 }
 
-Future<String?> showTransactionCategoryPicker(
+class _TransactionCategoryPickerResult {
+  const _TransactionCategoryPickerResult.category(this.categoryId);
+
+  const _TransactionCategoryPickerResult.addNew() : categoryId = null;
+
+  final String? categoryId;
+}
+
+Future<_TransactionCategoryPickerResult?> _showTransactionCategoryPickerSheet(
   BuildContext context, {
   required List<v2_category.CategoryRecord> categories,
   required String selectedCategoryId,
+  required Set<String> collapsedCategoryIds,
 }) async {
-  final collapsedCategoryIds = <String>{};
   final categoriesById = {
     for (final category in categories) category.id: category,
   };
-  final result = await showModalBottomSheet<String>(
+  final result = await showModalBottomSheet<_TransactionCategoryPickerResult>(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
+    backgroundColor: Theme.of(context).colorScheme.surface,
+    clipBehavior: Clip.antiAlias,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+    ),
     builder: (sheetContext) => StatefulBuilder(
       builder: (sheetContext, setSheetState) {
+        final theme = Theme.of(sheetContext);
+        final colorScheme = theme.colorScheme;
         final visibleCategories = visibleCategoriesInDisplayOrder(
           categories,
           collapsedCategoryIds,
         );
+        final childCounts = <String, int>{};
+        for (final category in categories) {
+          final parentId = category.parentCategoryId;
+          if (parentId != null) {
+            childCounts[parentId] = (childCounts[parentId] ?? 0) + 1;
+          }
+        }
+        final dividerColor = colorScheme.outlineVariant.withValues(alpha: 0.42);
+
+        Widget categoryRow(v2_category.CategoryRecord category, int index) {
+          final depth = categoryDepth(category, categoriesById);
+          final childCount = childCounts[category.id] ?? 0;
+          final hasChildren = childCount > 0;
+          final isExpanded = !collapsedCategoryIds.contains(category.id);
+          final isSelected = category.id == selectedCategoryId;
+          final parent = categoriesById[category.parentCategoryId];
+          final isChild = depth > 0;
+          final iconColor = category.colorValue == null
+              ? AppTheme.accent
+              : Color(category.colorValue!);
+
+          return Semantics(
+            selected: isSelected,
+            button: true,
+            label: isChild
+                ? '${category.name}, subcategory of ${parent?.name ?? 'category'}'
+                : category.name,
+            child: InkWell(
+              key: ValueKey('category-picker-row-${category.id}'),
+              onTap: () => Navigator.pop(
+                sheetContext,
+                _TransactionCategoryPickerResult.category(category.id),
+              ),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 58),
+                decoration: BoxDecoration(
+                  border: index == visibleCategories.length - 1
+                      ? null
+                      : Border(bottom: BorderSide(color: dividerColor)),
+                ),
+                padding: EdgeInsets.only(
+                  left: AppSpacing.lg + (isChild ? 30 : 0),
+                  right: AppSpacing.sm,
+                  top: 7,
+                  bottom: 7,
+                ),
+                child: Row(
+                  children: [
+                    if (isChild)
+                      Container(
+                        key: ValueKey(
+                          'category-picker-hierarchy-${category.id}',
+                        ),
+                        width: 12,
+                        height: 34,
+                        margin: const EdgeInsets.only(right: AppSpacing.xs),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(color: dividerColor, width: 1.5),
+                            bottom: BorderSide(color: dividerColor, width: 1.5),
+                          ),
+                          borderRadius: const BorderRadius.only(
+                            bottomLeft: Radius.circular(7),
+                          ),
+                        ),
+                      ),
+                    Container(
+                      width: isChild ? 34 : 40,
+                      height: isChild ? 34 : 40,
+                      decoration: BoxDecoration(
+                        color: iconColor.withValues(
+                          alpha: isChild ? 0.07 : 0.09,
+                        ),
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        categoryIcon(category),
+                        size: isChild ? 18 : 21,
+                        color: iconColor.withValues(alpha: isChild ? 0.78 : 1),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            category.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              fontWeight: isChild
+                                  ? FontWeight.w500
+                                  : FontWeight.w700,
+                            ),
+                          ),
+                          if (isChild || hasChildren)
+                            Text(
+                              isChild
+                                  ? parent?.name ??
+                                        categoryKindLabel(category.kind.name)
+                                  : '$childCount ${childCount == 1 ? 'subcategory' : 'subcategories'}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (isSelected)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Icon(
+                          Icons.check_rounded,
+                          color: AppTheme.accent,
+                          size: 23,
+                        ),
+                      ),
+                    if (hasChildren)
+                      IconButton(
+                        key: ValueKey('category-picker-toggle-${category.id}'),
+                        tooltip: isExpanded
+                            ? 'Collapse ${category.name}'
+                            : 'Expand ${category.name}',
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          setSheetState(() {
+                            if (isExpanded) {
+                              collapsedCategoryIds.add(category.id);
+                            } else {
+                              collapsedCategoryIds.remove(category.id);
+                            }
+                          });
+                        },
+                        icon: AnimatedRotation(
+                          turns: isExpanded ? 0.25 : 0,
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOutCubic,
+                          child: const Icon(Icons.chevron_right_rounded),
+                        ),
+                      )
+                    else
+                      const SizedBox(width: 8),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
         return AnimatedPadding(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
@@ -12948,103 +14593,76 @@ Future<String?> showTransactionCategoryPicker(
           ),
           child: SafeArea(
             child: SizedBox(
-              height: MediaQuery.sizeOf(sheetContext).height * 0.68,
+              height: MediaQuery.sizeOf(sheetContext).height * 0.72,
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.md,
-                      0,
-                      AppSpacing.md,
+                      AppSpacing.lg,
                       AppSpacing.xs,
+                      AppSpacing.lg,
+                      AppSpacing.sm,
                     ),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Choose category',
-                        style: Theme.of(sheetContext).textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w900),
+                    child: Text(
+                      'Choose Category',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
                       ),
                     ),
                   ),
                   Expanded(
-                    child: ListView.builder(
-                      itemCount: visibleCategories.length,
-                      itemBuilder: (context, index) {
-                        final category = visibleCategories[index];
-                        final depth = categoryDepth(category, categoriesById);
-                        final hasChildren = categories.any(
-                          (candidate) =>
-                              candidate.parentCategoryId == category.id,
-                        );
-                        final isExpanded = !collapsedCategoryIds.contains(
-                          category.id,
-                        );
-                        return Padding(
-                          padding: EdgeInsets.only(left: depth * 18.0),
-                          child: ListTile(
-                            dense: true,
-                            leading: Icon(
-                              categoryIcon(category),
-                              color: AppTheme.accent,
+                    child: visibleCategories.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No categories yet',
+                              key: const ValueKey('category-picker-empty'),
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                            title: Text(category.name),
-                            subtitle: depth == 0
-                                ? null
-                                : Text(
-                                    categoriesById[category.parentCategoryId]
-                                            ?.name ??
-                                        '',
-                                  ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (category.id == selectedCategoryId)
-                                  const Icon(
-                                    Icons.check,
-                                    color: AppTheme.accent,
-                                  ),
-                                if (hasChildren)
-                                  IconButton(
-                                    tooltip: isExpanded
-                                        ? 'Collapse ${category.name}'
-                                        : 'Expand ${category.name}',
-                                    onPressed: () {
-                                      HapticFeedback.selectionClick();
-                                      setSheetState(() {
-                                        if (isExpanded) {
-                                          collapsedCategoryIds.add(category.id);
-                                        } else {
-                                          collapsedCategoryIds.remove(
-                                            category.id,
-                                          );
-                                        }
-                                      });
-                                    },
-                                    icon: AnimatedRotation(
-                                      turns: isExpanded ? 0.25 : 0,
-                                      duration: const Duration(
-                                        milliseconds: 180,
-                                      ),
-                                      curve: Curves.easeOutCubic,
-                                      child: const Icon(Icons.chevron_right),
-                                    ),
-                                  ),
-                              ],
+                          )
+                        : ListView.builder(
+                            key: const ValueKey('category-picker-list'),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
                             ),
-                            onTap: () =>
-                                Navigator.pop(sheetContext, category.id),
+                            itemCount: visibleCategories.length,
+                            itemBuilder: (context, index) =>
+                                categoryRow(visibleCategories[index], index),
                           ),
-                        );
-                      },
-                    ),
                   ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.add, color: AppTheme.accent),
-                    title: const Text('Add New Category'),
-                    onTap: () =>
-                        Navigator.pop(sheetContext, newCategoryDropdownValue),
+                  Divider(height: 1, thickness: 1, color: dividerColor),
+                  InkWell(
+                    key: const ValueKey('category-picker-add-new'),
+                    onTap: () => Navigator.pop(
+                      sheetContext,
+                      const _TransactionCategoryPickerResult.addNew(),
+                    ),
+                    child: const Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        AppSpacing.lg,
+                        AppSpacing.md,
+                        AppSpacing.lg,
+                        AppSpacing.md,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.add_rounded, color: AppTheme.accent),
+                          SizedBox(width: AppSpacing.sm),
+                          Text(
+                            'Add New Category',
+                            style: TextStyle(
+                              color: AppTheme.accent,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -13134,7 +14752,137 @@ Future<DateTime?> pickDateForField(BuildContext context, DateTime initialDate) {
     initialDate: initialDate,
     firstDate: DateTime(1970),
     lastDate: DateTime(2100),
+    builder: (context, child) => polishedPickerBuilder(context, child),
   );
+}
+
+Widget polishedPickerBuilder(
+  BuildContext context,
+  Widget? child, {
+  bool forceTwelveHourTime = false,
+}) {
+  final baseTheme = Theme.of(context);
+  final isDark = baseTheme.brightness == Brightness.dark;
+  final panel = isDark ? AppColors.panelDark : Colors.white;
+  final subtleSurface = isDark ? AppColors.pageDark : AppTheme.page;
+  final line = isDark ? AppColors.lineDark : AppTheme.line;
+  final onSurface = baseTheme.colorScheme.onSurface;
+  final muted = baseTheme.colorScheme.onSurfaceVariant;
+  final actionStyle = TextButton.styleFrom(
+    foregroundColor: AppTheme.accent,
+    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+  );
+  final selectedBackground = WidgetStateColor.resolveWith(
+    (states) => states.contains(WidgetState.selected)
+        ? AppTheme.accent
+        : Colors.transparent,
+  );
+  final selectedForeground = WidgetStateColor.resolveWith((states) {
+    if (states.contains(WidgetState.disabled)) {
+      return onSurface.withValues(alpha: 0.34);
+    }
+    return states.contains(WidgetState.selected) ? Colors.white : onSurface;
+  });
+  final selectedSoftBackground = WidgetStateColor.resolveWith(
+    (states) => states.contains(WidgetState.selected)
+        ? AppTheme.accent.withValues(alpha: isDark ? 0.28 : 0.14)
+        : subtleSurface,
+  );
+  final selectedSoftForeground = WidgetStateColor.resolveWith(
+    (states) => states.contains(WidgetState.selected)
+        ? (isDark ? Colors.white : AppTheme.accentStrong)
+        : muted,
+  );
+  final pickerTheme = baseTheme.copyWith(
+    colorScheme: baseTheme.colorScheme.copyWith(
+      primary: AppTheme.accent,
+      onPrimary: Colors.white,
+      surface: panel,
+      surfaceContainerHigh: panel,
+      surfaceContainerHighest: subtleSurface,
+      outline: line,
+      outlineVariant: line,
+    ),
+    datePickerTheme: DatePickerThemeData(
+      backgroundColor: panel,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      headerBackgroundColor: panel,
+      headerForegroundColor: onSurface,
+      headerHeadlineStyle: baseTheme.textTheme.headlineSmall?.copyWith(
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0,
+      ),
+      headerHelpStyle: baseTheme.textTheme.titleSmall?.copyWith(
+        color: muted,
+        fontWeight: FontWeight.w700,
+      ),
+      weekdayStyle: baseTheme.textTheme.labelMedium?.copyWith(
+        color: muted,
+        fontWeight: FontWeight.w800,
+      ),
+      dayStyle: baseTheme.textTheme.bodyLarge?.copyWith(
+        fontWeight: FontWeight.w500,
+      ),
+      dayBackgroundColor: selectedBackground,
+      dayForegroundColor: selectedForeground,
+      dayOverlayColor: WidgetStatePropertyAll(
+        AppTheme.accent.withValues(alpha: 0.1),
+      ),
+      todayForegroundColor: WidgetStateColor.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? Colors.white
+            : AppTheme.accent,
+      ),
+      todayBorder: const BorderSide(color: AppTheme.accent, width: 1.2),
+      yearBackgroundColor: selectedBackground,
+      yearForegroundColor: selectedForeground,
+      dividerColor: line.withValues(alpha: 0.72),
+      subHeaderForegroundColor: muted,
+      cancelButtonStyle: actionStyle,
+      confirmButtonStyle: actionStyle,
+    ),
+    timePickerTheme: TimePickerThemeData(
+      backgroundColor: panel,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      helpTextStyle: baseTheme.textTheme.titleSmall?.copyWith(
+        color: muted,
+        fontWeight: FontWeight.w700,
+      ),
+      hourMinuteColor: selectedSoftBackground,
+      hourMinuteTextColor: selectedSoftForeground,
+      hourMinuteShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.control),
+      ),
+      hourMinuteTextStyle: baseTheme.textTheme.displaySmall?.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0,
+      ),
+      dayPeriodColor: selectedSoftBackground,
+      dayPeriodTextColor: selectedSoftForeground,
+      dayPeriodBorderSide: BorderSide(color: line),
+      dayPeriodShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.control),
+      ),
+      dialBackgroundColor: subtleSurface,
+      dialHandColor: AppTheme.accent,
+      dialTextColor: selectedForeground,
+      entryModeIconColor: AppTheme.accent,
+      cancelButtonStyle: actionStyle,
+      confirmButtonStyle: actionStyle,
+    ),
+  );
+
+  Widget themedChild = Theme(data: pickerTheme, child: child!);
+  if (forceTwelveHourTime) {
+    themedChild = MediaQuery(
+      data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
+      child: themedChild,
+    );
+  }
+  return themedChild;
 }
 
 int scheduledDueCount(
