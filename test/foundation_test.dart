@@ -616,6 +616,34 @@ void main() {
     ]);
   });
 
+  test(
+    'local-first category survives sync attach and notifies listeners',
+    () async {
+      final remote = FakeRecordRepository(dataSet: _dataSet());
+      final store = FinanceDataStore(dataSet: _dataSet());
+      var notifications = 0;
+      store.addListener(() => notifications += 1);
+      final category = CategoryRecord(
+        id: 'new-local-category',
+        name: 'New Local Category',
+        kind: CategoryKind.expense,
+        sync: SyncMetadata.fresh(now: DateTime(2026, 7, 21)),
+      );
+
+      await store.saveCategoryLocalFirst(category);
+      expect(notifications, 1);
+      expect(store.categoryById(category.id), category);
+
+      await store.attachRemoteSync(remoteRepository: remote, userId: 'user-1');
+
+      expect(store.categoryById(category.id).name, 'New Local Category');
+      expect(
+        remote.savedCategories.any((saved) => saved.id == category.id),
+        isTrue,
+      );
+    },
+  );
+
   test('store treats remote tombstones as existing sync data', () async {
     final deletedChecking = _dataSet().accounts
         .firstWhere((account) => account.id == 'checking')
@@ -968,6 +996,265 @@ void main() {
     );
     expect(scheduler.badgeCounts.last, 0);
   });
+
+  test(
+    'actionable schedules exclude resolved, deleted, and orphaned items',
+    () {
+      final today = DateTime(2026, 7, 21);
+      final nextDate = DateTime(2026, 8, 21);
+      final paidOnce =
+          _scheduledTransaction(id: 'paid-once', nextDate: nextDate).copyWith(
+            frequency: RecurrenceFrequency.once,
+            occurrences: [
+              ScheduledOccurrenceRecord(
+                scheduledDate: nextDate,
+                plannedAmountMinor: 90000,
+                status: ScheduledOccurrenceStatus.paid,
+              ),
+            ],
+          );
+      final skippedOnce =
+          _scheduledTransaction(
+            id: 'skipped-once',
+            nextDate: nextDate,
+          ).copyWith(
+            frequency: RecurrenceFrequency.once,
+            occurrences: [
+              ScheduledOccurrenceRecord(
+                scheduledDate: nextDate,
+                plannedAmountMinor: 90000,
+                status: ScheduledOccurrenceStatus.skipped,
+              ),
+            ],
+          );
+      final deleted = _scheduledTransaction(id: 'deleted', nextDate: nextDate)
+          .copyWith(
+            sync: SyncMetadata.fresh(
+              now: DateTime(2026, 7, 1),
+            ).deleted(deviceId: 'test'),
+          );
+      final orphan = _scheduledTransaction(
+        id: 'orphan',
+        nextDate: nextDate,
+      ).copyWith(accountId: 'missing');
+      final orphanedTransfer =
+          _scheduledTransaction(
+            id: 'orphaned-transfer',
+            nextDate: nextDate,
+          ).copyWith(
+            type: TransactionType.transfer,
+            transferAccountId: 'missing-destination',
+            clearCategory: true,
+          );
+      final staleRecurring =
+          _scheduledTransaction(
+            id: 'stale-recurring',
+            nextDate: nextDate,
+          ).copyWith(
+            occurrences: [
+              ScheduledOccurrenceRecord(
+                scheduledDate: nextDate,
+                plannedAmountMinor: 90000,
+                status: ScheduledOccurrenceStatus.paid,
+              ),
+            ],
+          );
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          scheduledTransactions: [
+            paidOnce,
+            skippedOnce,
+            deleted,
+            orphan,
+            orphanedTransfer,
+            staleRecurring,
+          ],
+        ),
+      );
+
+      final actionable = store.actionableScheduledTransactions(now: today);
+
+      expect(actionable, hasLength(1));
+      expect(actionable.single.id, 'stale-recurring');
+      expect(actionable.single.nextDate, DateTime(2026, 9, 21));
+    },
+  );
+
+  test(
+    'reset scheduled history persists, syncs, and preserves schedules and ledger',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      const localRepository = LocalFinanceDataSetRepository(
+        storageKey: 'scheduled_history_reset_test',
+      );
+      final scheduler = RecordingNotificationScheduler(idsToReturn: [71]);
+      final occurrenceDate = DateTime(2026, 8, 21);
+      final activeSchedule =
+          _scheduledTransaction(
+            id: 'active',
+            nextDate: occurrenceDate,
+          ).copyWith(
+            scheduledNotificationIds: const [42],
+            occurrences: [
+              ScheduledOccurrenceRecord(
+                scheduledDate: occurrenceDate,
+                plannedAmountMinor: 25000,
+                status: ScheduledOccurrenceStatus.paid,
+                actualAmountMinor: 90000,
+                actualPaymentDate: DateTime(2026, 8, 22),
+                transactionId: 'generated',
+              ),
+              ScheduledOccurrenceRecord(
+                scheduledDate: DateTime(2026, 7, 21),
+                plannedAmountMinor: 25000,
+                status: ScheduledOccurrenceStatus.skipped,
+              ),
+            ],
+          );
+      final generated = TransactionRecord(
+        id: 'generated',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        date: DateTime(2026, 8, 22),
+        payee: 'Paid occurrence',
+        amountMinor: 90000,
+        scheduledTransactionId: activeSchedule.id,
+        scheduledOccurrenceDate: occurrenceDate,
+        scheduledPlannedAmountMinor: 25000,
+        sync: SyncMetadata.fresh(now: DateTime(2026, 8, 22)),
+      );
+      final manual = TransactionRecord(
+        id: 'manual',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        date: DateTime(2026, 8, 23),
+        payee: 'Manual purchase',
+        amountMinor: 1234,
+        sync: SyncMetadata.fresh(now: DateTime(2026, 8, 23)),
+      );
+      final before = _dataSet().copyWith(
+        preferences: const UserPreferences(notificationsEnabled: true),
+        transactions: [generated, manual],
+        scheduledTransactions: [activeSchedule],
+      );
+      final remote = FakeRecordRepository(dataSet: before);
+      final store = FinanceDataStore(
+        dataSet: before,
+        localRepository: localRepository,
+        remoteRepository: remote,
+        notificationScheduler: scheduler,
+        userId: 'user',
+      );
+
+      await store.resetScheduledHistory(now: DateTime(2026, 8, 22));
+
+      final resetSchedule = store.scheduledTransactions.single;
+      expect(resetSchedule.occurrences, isEmpty);
+      expect(resetSchedule.nextDate, DateTime(2026, 9, 21));
+      expect(resetSchedule.lastAction, ScheduledAction.none);
+      expect(resetSchedule.amountMinor, activeSchedule.amountMinor);
+      expect(resetSchedule.frequency, activeSchedule.frequency);
+      expect(resetSchedule.accountId, activeSchedule.accountId);
+      expect(resetSchedule.categoryId, activeSchedule.categoryId);
+      expect(resetSchedule.payee, activeSchedule.payee);
+      expect(store.transactions, hasLength(2));
+      expect(
+        store.transactions.singleWhere((item) => item.id == 'manual'),
+        manual,
+      );
+      final retainedGenerated = store.transactions.singleWhere(
+        (item) => item.id == 'generated',
+      );
+      expect(retainedGenerated.amountMinor, 90000);
+      expect(retainedGenerated.scheduledTransactionId, isNull);
+      expect(retainedGenerated.scheduledOccurrenceDate, isNull);
+      expect(retainedGenerated.scheduledPlannedAmountMinor, isNull);
+      expect(scheduler.cancelledIds, contains('active'));
+      expect(scheduler.scheduledIds, contains('active'));
+      expect(remote.savedScheduled.single.occurrences, isEmpty);
+      expect(remote.savedTransactions.single.scheduledTransactionId, isNull);
+
+      final reloaded = await FinanceDataStore.load(
+        localRepository: localRepository,
+      );
+      expect(reloaded.scheduledTransactions.single.occurrences, isEmpty);
+      expect(reloaded.transactions, hasLength(2));
+
+      remote.remoteDataSet = before;
+      await store.attachRemoteSync(remoteRepository: remote, userId: 'user');
+      expect(store.scheduledTransactions.single.occurrences, isEmpty);
+      expect(
+        store.transactions
+            .singleWhere((item) => item.id == 'generated')
+            .scheduledTransactionId,
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'deleting a source account immediately removes its actionable schedule',
+    () async {
+      final scheduler = RecordingNotificationScheduler();
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          preferences: const UserPreferences(notificationsEnabled: true),
+          scheduledTransactions: [
+            _scheduledTransaction(
+              id: 'future',
+              nextDate: DateTime(2026, 8, 21),
+            ).copyWith(scheduledNotificationIds: const [42]),
+          ],
+        ),
+        notificationScheduler: scheduler,
+      );
+      expect(
+        store.actionableScheduledTransactions(now: DateTime(2026, 7, 21)),
+        hasLength(1),
+      );
+
+      await store.deleteAccount('checking');
+
+      expect(
+        store.actionableScheduledTransactions(now: DateTime(2026, 7, 21)),
+        isEmpty,
+      );
+      expect(scheduler.cancelledIds, contains('future'));
+    },
+  );
+
+  test(
+    'sync-deleting a schedule immediately removes it from actionable data',
+    () async {
+      final schedule = _scheduledTransaction(
+        id: 'future',
+        nextDate: DateTime(2026, 8, 21),
+      );
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(scheduledTransactions: [schedule]),
+      );
+      var notifications = 0;
+      store.addListener(() => notifications += 1);
+      expect(
+        store.actionableScheduledTransactions(now: DateTime(2026, 7, 21)),
+        hasLength(1),
+      );
+
+      await store.saveScheduledTransaction(
+        schedule.copyWith(
+          sync: schedule.sync.deleted(deviceId: store.deviceId),
+        ),
+      );
+
+      expect(
+        store.actionableScheduledTransactions(now: DateTime(2026, 7, 21)),
+        isEmpty,
+      );
+      expect(notifications, greaterThan(0));
+    },
+  );
 }
 
 class RecordingNotificationScheduler implements NotificationScheduler {

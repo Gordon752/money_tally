@@ -971,9 +971,7 @@ class DashboardView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
-    final scheduled = [...store.scheduledTransactions]
-      ..removeWhere((item) => item.isDeleted)
-      ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
+    final scheduled = store.actionableScheduledTransactions();
     final incomeThisMonth = store.incomeThisMonthMinor();
     final expensesThisMonth = store.expensesThisMonthMinor();
     final currency = store.preferences.currency;
@@ -3619,22 +3617,40 @@ class _ScheduledViewState extends State<ScheduledView> {
       amountMinor: occurrence.plannedAmountMinor,
       sync: item.sync,
     );
-    final isCurrentOccurrence =
-        occurrence.isPending &&
-        !item.isDeleted &&
-        isSameCalendarDay(occurrence.scheduledDate, item.nextDate);
+    final isPendingOccurrence = occurrence.isPending && !item.isDeleted;
     final row = ScheduledTransactionRow(
       key: ValueKey('scheduled-row-${item.id}-$dateKey'),
       scheduledTransaction: displayItem,
       currency: currency,
-      onTap: isCurrentOccurrence
-          ? () => showScheduledTransactionDetails(context, item)
-          : null,
-      onLongPress: isCurrentOccurrence
-          ? () => showScheduledTransactionActions(context, item)
-          : null,
+      onTap: () => showScheduledTransactionDetails(
+        context,
+        item,
+        scheduledDate: occurrence.scheduledDate,
+        plannedAmountMinor: occurrence.plannedAmountMinor,
+        occurrenceRecord: occurrence.record,
+      ),
+      onLongPress: () {
+        if (!occurrence.isPending) {
+          unawaited(
+            showCompletedScheduledOccurrenceActions(
+              context,
+              item,
+              occurrence.record!,
+            ),
+          );
+          return;
+        }
+        unawaited(
+          showScheduledTransactionActions(
+            context,
+            item,
+            scheduledDate: occurrence.scheduledDate,
+            plannedAmountMinor: occurrence.plannedAmountMinor,
+          ),
+        );
+      },
     );
-    if (!isCurrentOccurrence) return row;
+    if (!isPendingOccurrence) return row;
     return Dismissible(
       key: ValueKey('scheduled-swipe-${item.id}-$dateKey'),
       direction: DismissDirection.horizontal,
@@ -3658,6 +3674,8 @@ class _ScheduledViewState extends State<ScheduledView> {
         await showScheduledTransactionActions(
           context,
           item,
+          scheduledDate: occurrence.scheduledDate,
+          plannedAmountMinor: occurrence.plannedAmountMinor,
           allowedActions: direction == DismissDirection.startToEnd
               ? const {'edit'}
               : const {'skip', 'delete'},
@@ -3676,9 +3694,22 @@ class _ScheduledViewState extends State<ScheduledView> {
       allScheduled,
       _visibleMonth,
     );
-    final groupedOccurrences = scheduledOccurrencesByDate(monthOccurrences);
+    final visibleMonthOccurrences = monthOccurrences
+        .where(
+          (occurrence) =>
+              occurrence.isPending &&
+              store.hasActionableScheduledAccounts(occurrence.transaction),
+        )
+        .toList(growable: false);
+    final groupedOccurrences = scheduledOccurrencesByDate(
+      visibleMonthOccurrences,
+    );
     final monthSummary = scheduledMonthSummary(
-      monthOccurrences,
+      monthOccurrences.where(
+        (occurrence) =>
+            !occurrence.isPending ||
+            store.hasActionableScheduledAccounts(occurrence.transaction),
+      ),
       store.transactions,
     );
     return AppCard(
@@ -3689,7 +3720,7 @@ class _ScheduledViewState extends State<ScheduledView> {
           children: [
             ScheduledCalendarPreview(
               month: _visibleMonth,
-              occurrences: monthOccurrences,
+              occurrences: visibleMonthOccurrences,
               summary: monthSummary,
               currency: store.preferences.currency,
               isCollapsed: _calendarCollapsed,
@@ -3730,7 +3761,7 @@ class _ScheduledViewState extends State<ScheduledView> {
               child: Column(
                 key: ValueKey('${_visibleMonth.year}-${_visibleMonth.month}'),
                 children: [
-                  if (monthOccurrences.isEmpty)
+                  if (visibleMonthOccurrences.isEmpty)
                     ListTile(
                       leading: const Icon(
                         Icons.event_busy_outlined,
@@ -4765,6 +4796,16 @@ class SettingsView extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         AppCard(
+          title: 'Data Management',
+          child: SettingsActionRow(
+            icon: Icons.history_toggle_off_outlined,
+            title: 'Reset Scheduled History',
+            trailingText: 'Reset',
+            onTap: () => showResetScheduledHistorySheet(context, store),
+          ),
+        ),
+        const SizedBox(height: 16),
+        AppCard(
           title: 'Data Ownership',
           child: Column(
             children: [
@@ -4807,6 +4848,94 @@ class SettingsView extends StatelessWidget {
     return _currencyOptions.firstWhere(
       (option) => option.currencyCode == code,
       orElse: () => _currencyOptions.first,
+    );
+  }
+}
+
+Future<void> showResetScheduledHistorySheet(
+  BuildContext context,
+  FinanceDataStore dataStore,
+) async {
+  final shouldReset = await showModalBottomSheet<bool>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheetContext) => SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          0,
+          AppSpacing.lg,
+          AppSpacing.lg,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Reset Scheduled History?',
+              style: Theme.of(
+                sheetContext,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'This removes paid and skipped scheduled-occurrence history '
+              'and resets Scheduled calendar summaries. Active recurring '
+              'schedules and ledger transactions will remain.',
+              style: Theme.of(sheetContext).textTheme.bodyLarge?.copyWith(
+                color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: OutlinedButton(
+                      key: const ValueKey('cancel-scheduled-history-reset'),
+                      onPressed: () => Navigator.pop(sheetContext, false),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: FilledButton(
+                      key: const ValueKey('confirm-scheduled-history-reset'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.danger,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () => Navigator.pop(sheetContext, true),
+                      child: const Text('Reset History'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+  if (shouldReset != true || !context.mounted) return;
+
+  try {
+    await dataStore.resetScheduledHistory();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Scheduled history reset')));
+  } on Exception catch (error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Could not reset scheduled history: $error')),
     );
   }
 }
@@ -5751,9 +5880,7 @@ class UpcomingPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final currency = store.preferences.currency;
-    final scheduled = [...store.scheduledTransactions]
-      ..removeWhere((item) => item.isDeleted)
-      ..sort((a, b) => a.nextDate.compareTo(b.nextDate));
+    final scheduled = store.actionableScheduledTransactions();
     final dueCount = store.scheduledDueOrOverdueCount();
     return AppCard(
       title: 'Scheduled',
@@ -7853,7 +7980,7 @@ Future<void> showTransferDialog(
   );
 }
 
-Future<void> showScheduledTransactionDialog(
+Future<bool> showScheduledTransactionDialog(
   BuildContext context, {
   v2_scheduled.ScheduledTransactionRecord? existing,
   TransactionType? initialType,
@@ -7872,7 +7999,7 @@ Future<void> showScheduledTransactionDialog(
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Add an account before scheduling')),
     );
-    return;
+    return false;
   }
 
   final payeeOptions = savedPayees(dataStore);
@@ -7885,6 +8012,9 @@ Future<void> showScheduledTransactionDialog(
   final customAlertTime = TextEditingController(
     text: alertTimeInput(existing?.customAlertTimeMinutes ?? 9 * 60),
   );
+  final newCategoryName = TextEditingController();
+  final newCategoryFocusNode = FocusNode();
+  var isCreatingCategory = false;
   var type = existing?.type ?? initialType ?? TransactionType.expense;
   var accountId = accounts.any((account) => account.id == existing?.accountId)
       ? existing!.accountId
@@ -7962,6 +8092,8 @@ Future<void> showScheduledTransactionDialog(
                 selectedAccount != null &&
                 amountMinor.abs() > 0 &&
                 nextDate.text.trim().isNotEmpty &&
+                (type == TransactionType.transfer ||
+                    selectedCategory != null) &&
                 (type != TransactionType.transfer ||
                     (selectedDestination != null &&
                         selectedDestination.id != selectedAccount.id));
@@ -8085,6 +8217,25 @@ Future<void> showScheduledTransactionDialog(
                     transferAccountId = null;
                   }
                 }
+              });
+            }
+
+            Future<void> createScheduledCategory() async {
+              final name = newCategoryName.text.trim();
+              if (name.isEmpty) return;
+              final createdId = await createBasicCategory(
+                dataStore,
+                name: name,
+                kind: type == TransactionType.income
+                    ? v2_category.CategoryKind.income
+                    : v2_category.CategoryKind.expense,
+              );
+              if (!context.mounted) return;
+              FocusManager.instance.primaryFocus?.unfocus();
+              setDialogState(() {
+                categoryId = createdId;
+                isCreatingCategory = false;
+                newCategoryName.clear();
               });
             }
 
@@ -8286,6 +8437,7 @@ Future<void> showScheduledTransactionDialog(
                         const SizedBox(width: AppSpacing.md),
                         Expanded(
                           child: PayeeAutocompleteField(
+                            dataStore: dataStore,
                             fieldKey: const ValueKey('scheduled-payee'),
                             controller: payee,
                             options: payeeOptions,
@@ -8310,25 +8462,87 @@ Future<void> showScheduledTransactionDialog(
                       ],
                     ),
                     const TransactionFormDivider(),
-                    const TransactionFormLabel('Category'),
-                    choiceRow(
-                      rowKey: const ValueKey('scheduled-category'),
-                      icon: selectedCategory == null
-                          ? Icons.sell_outlined
-                          : categoryIcon(selectedCategory),
-                      value: selectedCategory?.name ?? 'Choose category',
-                      onTap: () async {
-                        FocusManager.instance.primaryFocus?.unfocus();
-                        final selectedId = await showTransactionCategoryPicker(
-                          context,
-                          categories: categories,
-                          selectedCategoryId: categoryId ?? '',
-                        );
-                        if (selectedId != null) {
+                    if (isCreatingCategory) ...[
+                      const TransactionFormLabel('New Category'),
+                      Row(
+                        key: const ValueKey('scheduled-new-category'),
+                        children: [
+                          const TransactionFormIcon(Icons.sell_outlined),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: TextField(
+                              key: const ValueKey(
+                                'scheduled-new-category-name',
+                              ),
+                              controller: newCategoryName,
+                              focusNode: newCategoryFocusNode,
+                              autofocus: true,
+                              textCapitalization: TextCapitalization.words,
+                              textInputAction: TextInputAction.done,
+                              onSubmitted: (_) => createScheduledCategory(),
+                              decoration: InputDecoration(
+                                hintText: 'Category name',
+                                hintStyle: fieldHintStyle,
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                disabledBorder: InputBorder.none,
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: AppSpacing.sm,
+                                ),
+                              ),
+                              style: fieldValueStyle,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => setDialogState(() {
+                              isCreatingCategory = false;
+                              newCategoryName.clear();
+                            }),
+                            child: const Text('Cancel'),
+                          ),
+                          IconButton(
+                            key: const ValueKey('scheduled-add-category'),
+                            tooltip: 'Add category',
+                            onPressed: createScheduledCategory,
+                            icon: const Icon(Icons.check),
+                          ),
+                        ],
+                      ),
+                    ] else ...[
+                      const TransactionFormLabel('Category'),
+                      choiceRow(
+                        rowKey: const ValueKey('scheduled-category'),
+                        icon: selectedCategory == null
+                            ? Icons.sell_outlined
+                            : categoryIcon(selectedCategory),
+                        value: selectedCategory?.name ?? 'Choose category',
+                        onTap: () async {
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          final selectedId =
+                              await showTransactionCategoryPicker(
+                                context,
+                                categories: categories,
+                                selectedCategoryId: categoryId ?? '',
+                              );
+                          if (selectedId == null || !context.mounted) return;
+                          if (selectedId == newCategoryDropdownValue) {
+                            setDialogState(() {
+                              isCreatingCategory = true;
+                              newCategoryName.clear();
+                            });
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (newCategoryFocusNode.canRequestFocus) {
+                                newCategoryFocusNode.requestFocus();
+                              }
+                            });
+                            return;
+                          }
                           setDialogState(() => categoryId = selectedId);
-                        }
-                      },
-                    ),
+                        },
+                      ),
+                    ],
                   ],
                   const TransactionFormDivider(),
                   Padding(
@@ -8543,15 +8757,15 @@ Future<void> showScheduledTransactionDialog(
         ),
       );
 
-  if (result == null) return;
+  if (result == null) return false;
   HapticFeedback.mediumImpact();
   if (result.type == TransactionType.transfer &&
       result.transferAccountId == null) {
-    if (!context.mounted) return;
+    if (!context.mounted) return false;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Choose a destination account')),
     );
-    return;
+    return false;
   }
 
   if (result.alertPreference != v2_scheduled.AlertPreference.none &&
@@ -8600,6 +8814,7 @@ Future<void> showScheduledTransactionDialog(
           clearLastReminderScheduledAt: true,
         );
   await dataStore.saveScheduledTransaction(scheduledTransaction);
+  return true;
 }
 
 Future<T?> showScheduledChoicePicker<T>(
@@ -8661,9 +8876,14 @@ Future<T?> showScheduledChoicePicker<T>(
 
 Future<void> showScheduledTransactionDetails(
   BuildContext context,
-  v2_scheduled.ScheduledTransactionRecord item,
-) async {
+  v2_scheduled.ScheduledTransactionRecord item, {
+  DateTime? scheduledDate,
+  int? plannedAmountMinor,
+  v2_scheduled.ScheduledOccurrenceRecord? occurrenceRecord,
+}) async {
   final dataStore = FinanceDataStoreScope.read(context);
+  final occurrenceDate = scheduledDate ?? item.nextDate;
+  final occurrenceAmount = plannedAmountMinor ?? item.amountMinor;
   String accountName(String? id) {
     for (final account in dataStore.accounts) {
       if (account.id == id) return account.name;
@@ -8684,8 +8904,15 @@ Future<void> showScheduledTransactionDetails(
       title: 'Scheduled Transaction',
       actions: ScheduledTransactionDetailActions(
         onClose: () => Navigator.pop(dialogContext),
-        onEdit: () => Navigator.pop(dialogContext, 'edit'),
-        onMarkPaid: () => Navigator.pop(dialogContext, 'paid'),
+        onEdit: occurrenceRecord != null || item.isDeleted
+            ? null
+            : () => Navigator.pop(dialogContext, 'edit'),
+        onMarkPaid: occurrenceRecord == null && !item.isDeleted
+            ? () => Navigator.pop(dialogContext, 'paid')
+            : occurrenceRecord != null
+            ? () => Navigator.pop(dialogContext, 'occurrenceActions')
+            : null,
+        primaryLabel: occurrenceRecord == null ? 'Mark as Paid' : 'Actions',
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -8711,15 +8938,31 @@ Future<void> showScheduledTransactionDetails(
           ScheduledTransactionDetailRow(
             icon: Icons.attach_money,
             label: 'Scheduled amount',
-            value: money(item.amountMinor, dataStore.preferences.currency),
+            value: money(occurrenceAmount, dataStore.preferences.currency),
             tabularFigures: true,
           ),
           const TransactionFormDivider(),
           ScheduledTransactionDetailRow(
             icon: Icons.calendar_today_outlined,
             label: 'Next date',
-            value: fullMonthDateLabel(item.nextDate),
+            value: fullMonthDateLabel(occurrenceDate),
           ),
+          if (occurrenceRecord != null) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon:
+                  occurrenceRecord.status ==
+                      v2_scheduled.ScheduledOccurrenceStatus.paid
+                  ? Icons.check_circle_outline
+                  : Icons.skip_next_outlined,
+              label: 'Status',
+              value:
+                  occurrenceRecord.status ==
+                      v2_scheduled.ScheduledOccurrenceStatus.paid
+                  ? 'Paid'
+                  : 'Skipped',
+            ),
+          ],
           const TransactionFormDivider(),
           ScheduledTransactionDetailRow(
             icon: Icons.repeat,
@@ -8776,9 +9019,31 @@ Future<void> showScheduledTransactionDetails(
     ),
   );
   if (action == 'edit' && context.mounted) {
-    await showScheduledTransactionDialog(context, existing: item);
+    final editDate = occurrenceRecord == null ? occurrenceDate : item.nextDate;
+    final editAmount = occurrenceRecord == null
+        ? occurrenceAmount
+        : item.amountMinor;
+    await editScheduledTransactionFromOccurrence(
+      context,
+      item,
+      scheduledDate: editDate,
+      plannedAmountMinor: editAmount,
+    );
   } else if (action == 'paid' && context.mounted) {
-    await markScheduledTransactionPaid(context, item);
+    await markScheduledTransactionPaid(
+      context,
+      item,
+      scheduledDate: occurrenceDate,
+      plannedAmountMinor: occurrenceAmount,
+    );
+  } else if (action == 'occurrenceActions' &&
+      occurrenceRecord != null &&
+      context.mounted) {
+    await showCompletedScheduledOccurrenceActions(
+      context,
+      item,
+      occurrenceRecord,
+    );
   }
 }
 
@@ -8844,12 +9109,14 @@ class ScheduledTransactionDetailActions extends StatelessWidget {
     required this.onClose,
     required this.onEdit,
     required this.onMarkPaid,
+    this.primaryLabel = 'Mark as Paid',
     super.key,
   });
 
   final VoidCallback onClose;
-  final VoidCallback onEdit;
-  final VoidCallback onMarkPaid;
+  final VoidCallback? onEdit;
+  final VoidCallback? onMarkPaid;
+  final String primaryLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -8864,35 +9131,246 @@ class ScheduledTransactionDetailActions extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: SizedBox(
-            height: 48,
-            child: OutlinedButton(onPressed: onEdit, child: const Text('Edit')),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          flex: 2,
-          child: SizedBox(
-            height: 48,
-            child: FilledButton(
-              key: const ValueKey('scheduled-detail-mark-paid'),
-              onPressed: onMarkPaid,
-              child: const Text('Mark as Paid'),
+        if (onEdit != null) ...[
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: SizedBox(
+              height: 48,
+              child: OutlinedButton(
+                onPressed: onEdit,
+                child: const Text('Edit'),
+              ),
             ),
           ),
-        ),
+        ],
+        if (onMarkPaid != null) ...[
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            flex: 2,
+            child: SizedBox(
+              height: 48,
+              child: FilledButton(
+                key: const ValueKey('scheduled-detail-mark-paid'),
+                onPressed: onMarkPaid,
+                child: Text(primaryLabel),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
+TransactionRecord? transactionForScheduledOccurrence(
+  FinanceDataStore dataStore,
+  v2_scheduled.ScheduledTransactionRecord item,
+  v2_scheduled.ScheduledOccurrenceRecord occurrence,
+) {
+  if (occurrence.transactionId != null) {
+    final byId = dataStore.transactions
+        .where(
+          (transaction) =>
+              transaction.id == occurrence.transactionId &&
+              !transaction.isDeleted,
+        )
+        .firstOrNull;
+    if (byId != null) return byId;
+  }
+  return dataStore.transactions
+      .where(
+        (transaction) =>
+            !transaction.isDeleted &&
+            transaction.scheduledTransactionId == item.id &&
+            transaction.scheduledOccurrenceDate != null &&
+            isSameCalendarDay(
+              transaction.scheduledOccurrenceDate!,
+              occurrence.scheduledDate,
+            ),
+      )
+      .firstOrNull;
+}
+
+Future<void> showCompletedScheduledOccurrenceActions(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+  v2_scheduled.ScheduledOccurrenceRecord occurrence,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final transaction = transactionForScheduledOccurrence(
+    dataStore,
+    item,
+    occurrence,
+  );
+  final canRestore =
+      item.isDeleted &&
+      nextScheduledDate(item.copyWith(nextDate: occurrence.scheduledDate)) !=
+          null;
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (transaction != null)
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit payment'),
+              onTap: () => Navigator.pop(sheetContext, 'editPayment'),
+            ),
+          if (!item.isDeleted)
+            ListTile(
+              leading: const Icon(Icons.event_repeat_outlined),
+              title: const Text('Edit future schedule'),
+              onTap: () => Navigator.pop(sheetContext, 'editFuture'),
+            ),
+          if (canRestore)
+            ListTile(
+              leading: const Icon(Icons.restore_outlined),
+              title: const Text('Restore future schedule'),
+              onTap: () => Navigator.pop(sheetContext, 'restoreFuture'),
+            ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Delete occurrence'),
+            subtitle: Text(
+              transaction == null
+                  ? 'Remove this scheduled history entry'
+                  : 'Also removes its ledger transaction',
+            ),
+            textColor: AppTheme.rose,
+            iconColor: AppTheme.rose,
+            onTap: () => Navigator.pop(sheetContext, 'deleteOccurrence'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (!context.mounted || action == null) return;
+  switch (action) {
+    case 'editPayment':
+      if (transaction == null) return;
+      if (transaction.type == TransactionType.transfer) {
+        await showTransferDialog(context, transfer: transaction);
+      } else {
+        await showTransactionDialog(context, transaction: transaction);
+      }
+    case 'editFuture':
+      await editScheduledTransactionFromOccurrence(
+        context,
+        item,
+        scheduledDate: item.nextDate,
+        plannedAmountMinor: item.amountMinor,
+      );
+    case 'restoreFuture':
+      await restoreScheduledTransactionAfterOccurrence(
+        context,
+        item,
+        occurrence,
+      );
+    case 'deleteOccurrence':
+      await deleteCompletedScheduledOccurrence(
+        context,
+        item,
+        occurrence,
+        transaction,
+      );
+  }
+}
+
+Future<void> restoreScheduledTransactionAfterOccurrence(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+  v2_scheduled.ScheduledOccurrenceRecord occurrence,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final nextDate = nextDateForScheduledFrequency(
+    occurrence.scheduledDate,
+    item.frequency,
+  );
+  if (nextDate == null) return;
+  await showScheduledTransactionDialog(
+    context,
+    existing: v2_scheduled.ScheduledTransactionRecord(
+      id: 'sched_${DateTime.now().microsecondsSinceEpoch}',
+      type: item.type,
+      accountId: item.accountId,
+      transferAccountId: item.transferAccountId,
+      categoryId: item.categoryId,
+      payee: item.payee,
+      note: item.note,
+      amountMinor: item.amountMinor,
+      nextDate: nextDate,
+      frequency: item.frequency,
+      endDate: item.endDate != null && !item.endDate!.isBefore(nextDate)
+          ? item.endDate
+          : null,
+      alertPreference: item.alertPreference,
+      customAlertTimeMinutes: item.customAlertTimeMinutes,
+      repeatAlertUntilResolved: item.repeatAlertUntilResolved,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+    ),
+  );
+}
+
+Future<void> deleteCompletedScheduledOccurrence(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+  v2_scheduled.ScheduledOccurrenceRecord occurrence,
+  TransactionRecord? transaction,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete occurrence?'),
+      content: Text(
+        transaction == null
+            ? 'This removes the selected scheduled history entry.'
+            : 'This removes the selected scheduled history entry and its ledger transaction.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext, true),
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.rose),
+          child: const Text('Delete'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+  final dataStore = FinanceDataStoreScope.read(context);
+  if (transaction != null) await deleteTransaction(context, transaction);
+  await dataStore.saveScheduledTransaction(
+    item.copyWith(
+      occurrences: item.occurrences
+          .where(
+            (existing) =>
+                !isSameCalendarDay(
+                  existing.scheduledDate,
+                  occurrence.scheduledDate,
+                ) ||
+                existing.status != occurrence.status,
+          )
+          .toList(growable: false),
+      sync: item.sync.touched(deviceId: dataStore.deviceId),
+    ),
+  );
+}
+
 Future<void> showScheduledTransactionActions(
   BuildContext context,
   v2_scheduled.ScheduledTransactionRecord item, {
+  DateTime? scheduledDate,
+  int? plannedAmountMinor,
   Set<String>? allowedActions,
 }) async {
+  final occurrenceDate = scheduledDate ?? item.nextDate;
+  final occurrenceAmount = plannedAmountMinor ?? item.amountMinor;
   bool allows(String action) =>
       allowedActions == null || allowedActions.contains(action);
   final action = await showModalBottomSheet<String>(
@@ -8942,28 +9420,111 @@ Future<void> showScheduledTransactionActions(
   if (!context.mounted || action == null) return;
   switch (action) {
     case 'paid':
-      await markScheduledTransactionPaid(context, item);
+      await markScheduledTransactionPaid(
+        context,
+        item,
+        scheduledDate: occurrenceDate,
+        plannedAmountMinor: occurrenceAmount,
+      );
     case 'skip':
-      await skipScheduledTransactionOnce(context, item);
+      await skipScheduledTransactionOnce(
+        context,
+        item,
+        scheduledDate: occurrenceDate,
+        plannedAmountMinor: occurrenceAmount,
+      );
     case 'edit':
-      await showScheduledTransactionDialog(context, existing: item);
+      await editScheduledTransactionFromOccurrence(
+        context,
+        item,
+        scheduledDate: occurrenceDate,
+        plannedAmountMinor: occurrenceAmount,
+      );
     case 'duplicate':
-      await duplicateScheduledTransaction(context, item);
+      await duplicateScheduledTransaction(
+        context,
+        item.copyWith(
+          nextDate: occurrenceDate,
+          amountMinor: occurrenceAmount,
+          sync: item.sync,
+        ),
+      );
     case 'delete':
-      await deleteScheduledTransaction(context, item);
+      await deleteScheduledTransaction(context, item, fromDate: occurrenceDate);
   }
+}
+
+Future<void> editScheduledTransactionFromOccurrence(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item, {
+  required DateTime scheduledDate,
+  required int plannedAmountMinor,
+}) async {
+  if (isSameCalendarDay(scheduledDate, item.nextDate)) {
+    await showScheduledTransactionDialog(
+      context,
+      existing: item.copyWith(amountMinor: plannedAmountMinor, sync: item.sync),
+    );
+    return;
+  }
+
+  final dataStore = FinanceDataStoreScope.read(context);
+  final futureItem = v2_scheduled.ScheduledTransactionRecord(
+    id: '${item.id}_from_${calendarDateKey(scheduledDate)}_${DateTime.now().microsecondsSinceEpoch}',
+    type: item.type,
+    accountId: item.accountId,
+    transferAccountId: item.transferAccountId,
+    categoryId: item.categoryId,
+    payee: item.payee,
+    note: item.note,
+    amountMinor: plannedAmountMinor,
+    nextDate: scheduledDate,
+    frequency: item.frequency,
+    endDate: item.endDate,
+    alertPreference: item.alertPreference,
+    customAlertTimeMinutes: item.customAlertTimeMinutes,
+    repeatAlertUntilResolved: item.repeatAlertUntilResolved,
+    sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+  );
+  final saved = await showScheduledTransactionDialog(
+    context,
+    existing: futureItem,
+  );
+  if (!saved) return;
+
+  final cutoff = DateTime(
+    scheduledDate.year,
+    scheduledDate.month,
+    scheduledDate.day,
+  ).subtract(const Duration(days: 1));
+  await dataStore.saveScheduledTransaction(
+    item.copyWith(
+      endDate: cutoff,
+      scheduledNotificationIds: const [],
+      sync: item.sync.touched(deviceId: dataStore.deviceId),
+      clearLastReminderScheduledAt: true,
+    ),
+  );
 }
 
 Future<void> markScheduledTransactionPaid(
   BuildContext context,
-  v2_scheduled.ScheduledTransactionRecord item,
-) async {
+  v2_scheduled.ScheduledTransactionRecord item, {
+  DateTime? scheduledDate,
+  int? plannedAmountMinor,
+}) async {
   final dataStore = FinanceDataStoreScope.read(context);
-  final actualAmount = item.amountMinor.abs();
+  final occurrenceDate = scheduledDate ?? item.nextDate;
+  final occurrenceAmount = plannedAmountMinor ?? item.amountMinor;
+  final actualAmount = occurrenceAmount.abs();
   var actualAmountMinor = actualAmount;
   final paymentDate = TextEditingController(text: dateInput(DateTime.now()));
   final payee = TextEditingController(text: item.payee);
   final note = TextEditingController(text: item.note);
+  final newCategoryName = TextEditingController();
+  final newCategoryFocusNode = FocusNode();
+  var selectedCategoryId = item.categoryId;
+  var isCreatingCategory = false;
   var isSubmitting = false;
   String? errorMessage;
 
@@ -8985,7 +9546,7 @@ Future<void> markScheduledTransactionPaid(
         final theme = Theme.of(dialogContext);
         final sourceAccount = accountById(item.accountId);
         final destinationAccount = accountById(item.transferAccountId);
-        final category = categoryById(item.categoryId);
+        final category = categoryById(selectedCategoryId);
         final isTransfer = item.type == TransactionType.transfer;
         final canConfirm =
             actualAmountMinor.abs() > 0 &&
@@ -9010,9 +9571,9 @@ Future<void> markScheduledTransactionPaid(
           required String value,
           String? secondary,
           bool tabular = false,
+          VoidCallback? onTap,
         }) {
-          return Row(
-            key: rowKey,
+          final content = Row(
             children: [
               TransactionFormIcon(icon),
               const SizedBox(width: AppSpacing.md),
@@ -9048,6 +9609,21 @@ Future<void> markScheduledTransactionPaid(
               ),
             ],
           );
+          if (onTap == null) return KeyedSubtree(key: rowKey, child: content);
+          return InkWell(
+            key: rowKey,
+            borderRadius: BorderRadius.circular(AppRadii.control),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                children: [
+                  Expanded(child: content),
+                  const Icon(Icons.keyboard_arrow_down, size: 28),
+                ],
+              ),
+            ),
+          );
         }
 
         Future<void> confirmPayment() async {
@@ -9058,9 +9634,17 @@ Future<void> markScheduledTransactionPaid(
             errorMessage = null;
           });
           try {
+            final paymentItem = isTransfer
+                ? item
+                : item.copyWith(
+                    categoryId: selectedCategoryId,
+                    sync: item.sync,
+                  );
             await completeScheduledTransactionPayment(
               dataStore,
-              item,
+              paymentItem,
+              scheduledDate: occurrenceDate,
+              plannedAmountMinor: occurrenceAmount,
               actualAmountMinor: actualAmountMinor.abs(),
               paymentDate: parseDateInput(paymentDate.text, DateTime.now()),
               payee: payee.text.trim().isEmpty
@@ -9077,6 +9661,25 @@ Future<void> markScheduledTransactionPaid(
                   'The payment could not be saved. Please try again.';
             });
           }
+        }
+
+        Future<void> createPaymentCategory() async {
+          final name = newCategoryName.text.trim();
+          if (name.isEmpty) return;
+          final createdId = await createBasicCategory(
+            dataStore,
+            name: name,
+            kind: item.type == TransactionType.income
+                ? v2_category.CategoryKind.income
+                : v2_category.CategoryKind.expense,
+          );
+          if (!dialogContext.mounted) return;
+          FocusManager.instance.primaryFocus?.unfocus();
+          setDialogState(() {
+            selectedCategoryId = createdId;
+            isCreatingCategory = false;
+            newCategoryName.clear();
+          });
         }
 
         return TransactionSheetFrame(
@@ -9097,7 +9700,7 @@ Future<void> markScheduledTransactionPaid(
                 rowKey: const ValueKey('mark-paid-scheduled-amount'),
                 icon: Icons.event_note_outlined,
                 value: money(
-                  item.amountMinor.abs(),
+                  occurrenceAmount.abs(),
                   dataStore.preferences.currency,
                 ),
                 secondary: 'Planned for this occurrence',
@@ -9251,14 +9854,88 @@ Future<void> markScheduledTransactionPaid(
               ),
               if (!isTransfer) ...[
                 const TransactionFormDivider(),
-                const TransactionFormLabel('Category'),
-                readOnlyRow(
-                  rowKey: const ValueKey('mark-paid-category'),
-                  icon: category == null
-                      ? Icons.sell_outlined
-                      : categoryIcon(category),
-                  value: category?.name ?? 'Category required',
-                ),
+                if (isCreatingCategory) ...[
+                  const TransactionFormLabel('New Category'),
+                  Row(
+                    key: const ValueKey('mark-paid-new-category'),
+                    children: [
+                      const TransactionFormIcon(Icons.sell_outlined),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          key: const ValueKey('mark-paid-new-category-name'),
+                          controller: newCategoryName,
+                          focusNode: newCategoryFocusNode,
+                          autofocus: true,
+                          textCapitalization: TextCapitalization.words,
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) => createPaymentCategory(),
+                          decoration: InputDecoration(
+                            hintText: 'Category name',
+                            hintStyle: fieldHintStyle,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            disabledBorder: InputBorder.none,
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: AppSpacing.sm,
+                            ),
+                          ),
+                          style: fieldValueStyle,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => setDialogState(() {
+                          isCreatingCategory = false;
+                          newCategoryName.clear();
+                        }),
+                        child: const Text('Cancel'),
+                      ),
+                      IconButton(
+                        key: const ValueKey('mark-paid-add-category'),
+                        tooltip: 'Add category',
+                        onPressed: createPaymentCategory,
+                        icon: const Icon(Icons.check),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  const TransactionFormLabel('Category'),
+                  readOnlyRow(
+                    rowKey: const ValueKey('mark-paid-category'),
+                    icon: category == null
+                        ? Icons.sell_outlined
+                        : categoryIcon(category),
+                    value: category?.name ?? 'Category required',
+                    onTap: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      final categories = scheduledCategoriesForType(
+                        dataStore,
+                        item.type,
+                      );
+                      final selectedId = await showTransactionCategoryPicker(
+                        dialogContext,
+                        categories: categories,
+                        selectedCategoryId: selectedCategoryId ?? '',
+                      );
+                      if (selectedId == null || !dialogContext.mounted) return;
+                      if (selectedId == newCategoryDropdownValue) {
+                        setDialogState(() {
+                          isCreatingCategory = true;
+                          newCategoryName.clear();
+                        });
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (newCategoryFocusNode.canRequestFocus) {
+                            newCategoryFocusNode.requestFocus();
+                          }
+                        });
+                        return;
+                      }
+                      setDialogState(() => selectedCategoryId = selectedId);
+                    },
+                  ),
+                ],
               ],
               const TransactionFormDivider(),
               const TransactionFormLabel('Notes'),
@@ -9312,11 +9989,15 @@ Future<void> markScheduledTransactionPaid(
 Future<TransactionRecord> completeScheduledTransactionPayment(
   FinanceDataStore dataStore,
   v2_scheduled.ScheduledTransactionRecord item, {
+  DateTime? scheduledDate,
+  int? plannedAmountMinor,
   required int actualAmountMinor,
   required DateTime paymentDate,
   required String payee,
   required String note,
 }) async {
+  final occurrenceDate = scheduledDate ?? item.nextDate;
+  final occurrenceAmount = plannedAmountMinor ?? item.amountMinor;
   final existingTransaction = dataStore.transactions
       .where(
         (transaction) =>
@@ -9325,7 +10006,7 @@ Future<TransactionRecord> completeScheduledTransactionPayment(
             transaction.scheduledOccurrenceDate != null &&
             isSameCalendarDay(
               transaction.scheduledOccurrenceDate!,
-              item.nextDate,
+              occurrenceDate,
             ),
       )
       .firstOrNull;
@@ -9334,20 +10015,22 @@ Future<TransactionRecord> completeScheduledTransactionPayment(
       await _createScheduledOccurrenceTransaction(
         dataStore,
         item,
+        scheduledDate: occurrenceDate,
+        plannedAmountMinor: occurrenceAmount,
         actualAmountMinor: actualAmountMinor,
         paymentDate: paymentDate,
         payee: payee,
         note: note,
       );
   final occurrence = v2_scheduled.ScheduledOccurrenceRecord(
-    scheduledDate: item.nextDate,
-    plannedAmountMinor: item.amountMinor.abs(),
+    scheduledDate: occurrenceDate,
+    plannedAmountMinor: occurrenceAmount.abs(),
     status: v2_scheduled.ScheduledOccurrenceStatus.paid,
     actualAmountMinor: transaction.amountMinor.abs(),
     actualPaymentDate: transaction.date,
     transactionId: transaction.id,
   );
-  await advanceOrCloseScheduledTransaction(
+  await recordScheduledOccurrence(
     dataStore,
     item,
     v2_scheduled.ScheduledAction.paid,
@@ -9359,6 +10042,8 @@ Future<TransactionRecord> completeScheduledTransactionPayment(
 Future<TransactionRecord> _createScheduledOccurrenceTransaction(
   FinanceDataStore dataStore,
   v2_scheduled.ScheduledTransactionRecord item, {
+  required DateTime scheduledDate,
+  required int plannedAmountMinor,
   required int actualAmountMinor,
   required DateTime paymentDate,
   required String payee,
@@ -9377,8 +10062,8 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         amountMinor: actualAmountMinor,
         note: note,
         scheduledTransactionId: item.id,
-        scheduledOccurrenceDate: item.nextDate,
-        scheduledPlannedAmountMinor: item.amountMinor.abs(),
+        scheduledOccurrenceDate: scheduledDate,
+        scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
       );
     case TransactionType.income:
       if (item.categoryId == null) {
@@ -9392,8 +10077,8 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         amountMinor: actualAmountMinor,
         note: note,
         scheduledTransactionId: item.id,
-        scheduledOccurrenceDate: item.nextDate,
-        scheduledPlannedAmountMinor: item.amountMinor.abs(),
+        scheduledOccurrenceDate: scheduledDate,
+        scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
       );
     case TransactionType.transfer:
       if (item.transferAccountId == null ||
@@ -9408,8 +10093,8 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         amountMinor: actualAmountMinor,
         note: note,
         scheduledTransactionId: item.id,
-        scheduledOccurrenceDate: item.nextDate,
-        scheduledPlannedAmountMinor: item.amountMinor.abs(),
+        scheduledOccurrenceDate: scheduledDate,
+        scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
       );
     case TransactionType.adjustment:
       throw StateError('Adjustments cannot be scheduled');
@@ -9418,16 +10103,20 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
 
 Future<void> skipScheduledTransactionOnce(
   BuildContext context,
-  v2_scheduled.ScheduledTransactionRecord item,
-) async {
+  v2_scheduled.ScheduledTransactionRecord item, {
+  DateTime? scheduledDate,
+  int? plannedAmountMinor,
+}) async {
   final dataStore = FinanceDataStoreScope.read(context);
-  await advanceOrCloseScheduledTransaction(
+  final occurrenceDate = scheduledDate ?? item.nextDate;
+  final occurrenceAmount = plannedAmountMinor ?? item.amountMinor;
+  await recordScheduledOccurrence(
     dataStore,
     item,
     v2_scheduled.ScheduledAction.skipped,
     occurrence: v2_scheduled.ScheduledOccurrenceRecord(
-      scheduledDate: item.nextDate,
-      plannedAmountMinor: item.amountMinor.abs(),
+      scheduledDate: occurrenceDate,
+      plannedAmountMinor: occurrenceAmount.abs(),
       status: v2_scheduled.ScheduledOccurrenceStatus.skipped,
     ),
   );
@@ -9463,11 +10152,64 @@ Future<void> duplicateScheduledTransaction(
 
 Future<void> deleteScheduledTransaction(
   BuildContext context,
-  v2_scheduled.ScheduledTransactionRecord item,
-) async {
+  v2_scheduled.ScheduledTransactionRecord item, {
+  DateTime? fromDate,
+}) async {
   final dataStore = FinanceDataStoreScope.read(context);
+  if (fromDate != null && fromDate.isAfter(item.nextDate)) {
+    final cutoff = DateTime(
+      fromDate.year,
+      fromDate.month,
+      fromDate.day,
+    ).subtract(const Duration(days: 1));
+    final existingEndDate = item.endDate;
+    await dataStore.saveScheduledTransaction(
+      item.copyWith(
+        endDate: existingEndDate != null && existingEndDate.isBefore(cutoff)
+            ? existingEndDate
+            : cutoff,
+        scheduledNotificationIds: const [],
+        sync: item.sync.touched(deviceId: dataStore.deviceId),
+        clearLastReminderScheduledAt: true,
+      ),
+    );
+    return;
+  }
   await dataStore.saveScheduledTransaction(
     item.copyWith(sync: item.sync.deleted(deviceId: dataStore.deviceId)),
+  );
+}
+
+Future<void> recordScheduledOccurrence(
+  FinanceDataStore dataStore,
+  v2_scheduled.ScheduledTransactionRecord item,
+  v2_scheduled.ScheduledAction action, {
+  required v2_scheduled.ScheduledOccurrenceRecord occurrence,
+}) async {
+  if (isSameCalendarDay(occurrence.scheduledDate, item.nextDate)) {
+    await advanceOrCloseScheduledTransaction(
+      dataStore,
+      item,
+      action,
+      occurrence: occurrence,
+    );
+    return;
+  }
+
+  final occurrences = [...item.occurrences];
+  if (!occurrences.any(
+    (existing) =>
+        isSameCalendarDay(existing.scheduledDate, occurrence.scheduledDate),
+  )) {
+    occurrences.add(occurrence);
+  }
+  await dataStore.saveScheduledTransaction(
+    item.copyWith(
+      occurrences: occurrences,
+      scheduledNotificationIds: const [],
+      sync: item.sync.touched(deviceId: dataStore.deviceId),
+      clearLastReminderScheduledAt: true,
+    ),
   );
 }
 
@@ -9556,7 +10298,6 @@ Future<void> showTransactionDialog(
   bool initialSplitMode = false,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
-  final legacyStore = FinanceStoreScope.read(context);
   final activeAccounts = dataStore.activeAccountsInDisplayOrder;
   if (activeAccounts.isEmpty) return;
   final payeeOptions = savedPayees(dataStore);
@@ -9582,7 +10323,6 @@ Future<void> showTransactionDialog(
   var isSplitMode =
       initialSplitMode || (transaction?.splitLines.isNotEmpty ?? false);
   var firstSplitAutoRemainder = transaction?.splitLines.isEmpty ?? true;
-  int? categoryCreatorSplitIndex;
   final splitDrafts =
       transaction?.splitLines
           .map(
@@ -9599,9 +10339,6 @@ Future<void> showTransactionDialog(
     categoryId = splitDrafts.first.categoryId;
   }
   var switchToTransfer = false;
-  var isCreatingCategory = false;
-  final newCategoryName = TextEditingController();
-  final newCategoryFocusNode = FocusNode();
 
   final result =
       await showDialog<
@@ -9751,67 +10488,15 @@ Future<void> showTransactionDialog(
               ];
             }
 
-            Future<void> createInlineCategory() async {
-              final name = newCategoryName.text.trim();
-              if (name.isEmpty) return;
-              final kind = isExpense
-                  ? v2_category.CategoryKind.expense
-                  : v2_category.CategoryKind.income;
-              final legacyCategory = legacyStore.addCategory(
-                name,
-                kind: legacyCategoryKindFor(kind),
-              );
-              final newId =
-                  legacyCategory?.id ??
-                  'cat_${DateTime.now().microsecondsSinceEpoch}';
-              await dataStore.saveCategory(
-                v2_category.CategoryRecord(
-                  id: newId,
-                  name: name,
-                  kind: kind,
-                  sync: v2_sync.SyncMetadata.fresh(
-                    deviceId: dataStore.deviceId,
-                  ),
-                ),
-              );
-              if (!context.mounted) return;
-              final splitIndex = categoryCreatorSplitIndex;
-              setDialogState(() {
-                if (splitIndex != null &&
-                    splitIndex >= 0 &&
-                    splitIndex < splitDrafts.length) {
-                  splitDrafts[splitIndex].categoryId = newId;
-                  if (splitIndex == 0) categoryId = newId;
-                } else {
-                  categoryId = newId;
-                }
-                categoryCreatorSplitIndex = null;
-                isCreatingCategory = false;
-                newCategoryName.clear();
-              });
-            }
-
             Future<void> chooseSplitCategory(int index) async {
               FocusManager.instance.primaryFocus?.unfocus();
-              final selectedCategoryId = await showTransactionCategoryPicker(
+              final selectedCategoryId = await showTransactionCategoryFlow(
                 context,
-                categories: categoryOptions,
+                dataStore: dataStore,
+                isExpense: isExpense,
                 selectedCategoryId: splitDrafts[index].categoryId,
               );
               if (selectedCategoryId == null) return;
-              if (selectedCategoryId == newCategoryDropdownValue) {
-                setDialogState(() {
-                  isCreatingCategory = true;
-                  categoryCreatorSplitIndex = index;
-                  newCategoryName.clear();
-                });
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (newCategoryFocusNode.canRequestFocus) {
-                    newCategoryFocusNode.requestFocus();
-                  }
-                });
-                return;
-              }
               setDialogState(() {
                 splitDrafts[index].categoryId = selectedCategoryId;
                 if (index == 0) categoryId = selectedCategoryId;
@@ -9971,9 +10656,6 @@ Future<void> showTransactionDialog(
                           isSplitMode = false;
                           splitDrafts.clear();
                           firstSplitAutoRemainder = true;
-                          categoryCreatorSplitIndex = null;
-                          isCreatingCategory = false;
-                          newCategoryName.clear();
                         }),
                         child: const Text('Single Category'),
                       ),
@@ -10224,9 +10906,6 @@ Future<void> showTransactionDialog(
                             isSplitMode = false;
                             splitDrafts.clear();
                             firstSplitAutoRemainder = true;
-                            categoryCreatorSplitIndex = null;
-                            isCreatingCategory = false;
-                            newCategoryName.clear();
                           });
                         },
                       ),
@@ -10302,6 +10981,7 @@ Future<void> showTransactionDialog(
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: PayeeAutocompleteField(
+                          dataStore: dataStore,
                           fieldKey: const ValueKey('transaction-payee'),
                           controller: payee,
                           options: payeeOptions,
@@ -10326,158 +11006,68 @@ Future<void> showTransactionDialog(
                     ],
                   ),
                   const TransactionFormDivider(),
-                  AnimatedSwitcher(
-                    duration: MediaQuery.of(context).disableAnimations
-                        ? Duration.zero
-                        : const Duration(milliseconds: 165),
-                    transitionBuilder: (child, animation) => FadeTransition(
-                      opacity: animation,
-                      child: SizeTransition(
-                        sizeFactor: animation,
-                        alignment: Alignment.topCenter,
-                        child: child,
-                      ),
-                    ),
-                    child: isCreatingCategory
-                        ? Column(
-                            key: const ValueKey('inline-category-creator'),
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const TransactionFormLabel('New Category'),
-                              Row(
-                                children: [
-                                  const TransactionFormIcon(
-                                    Icons.sell_outlined,
-                                  ),
-                                  const SizedBox(width: AppSpacing.md),
-                                  Expanded(
-                                    child: TextField(
-                                      key: const ValueKey(
-                                        'new-transaction-category-name',
-                                      ),
-                                      controller: newCategoryName,
-                                      focusNode: newCategoryFocusNode,
-                                      textCapitalization:
-                                          TextCapitalization.words,
-                                      decoration: InputDecoration(
-                                        hintText: 'Category name',
-                                        hintStyle: fieldHintStyle,
-                                        border: InputBorder.none,
-                                        enabledBorder: InputBorder.none,
-                                        focusedBorder: InputBorder.none,
-                                        disabledBorder: InputBorder.none,
-                                        isDense: true,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              vertical: AppSpacing.sm,
-                                            ),
-                                      ),
-                                      style: fieldValueStyle,
-                                      onSubmitted: (_) async {
-                                        await createInlineCategory();
-                                      },
-                                    ),
-                                  ),
-                                  TextButton(
-                                    onPressed: () => setDialogState(() {
-                                      isCreatingCategory = false;
-                                      categoryCreatorSplitIndex = null;
-                                      newCategoryName.clear();
-                                    }),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Save category',
-                                    onPressed: createInlineCategory,
-                                    icon: const Icon(Icons.check),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          )
-                        : isSplitMode
-                        ? splitAllocationSection()
-                        : Column(
-                            key: const ValueKey('transaction-category-field'),
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const TransactionFormLabel('Category'),
-                              selectableRow(
-                                icon: selectedCategory == null
-                                    ? Icons.sell_outlined
-                                    : categoryIcon(selectedCategory),
-                                placeholder: selectedCategory == null
-                                    ? 'Choose category'
-                                    : null,
-                                valueStyle: fieldValueStyle,
-                                title: Text(
-                                  selectedCategory?.name ?? 'Choose category',
-                                ),
-                                onTap: () async {
-                                  FocusManager.instance.primaryFocus?.unfocus();
-                                  final selectedCategoryId =
-                                      await showTransactionCategoryPicker(
-                                        context,
-                                        categories: categoryOptions,
-                                        selectedCategoryId: categoryId,
-                                      );
-                                  if (selectedCategoryId == null) return;
-                                  if (selectedCategoryId ==
-                                      newCategoryDropdownValue) {
-                                    setDialogState(() {
-                                      isCreatingCategory = true;
-                                      categoryCreatorSplitIndex = null;
-                                      newCategoryName.clear();
-                                    });
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback((_) {
-                                          if (newCategoryFocusNode
-                                              .canRequestFocus) {
-                                            newCategoryFocusNode.requestFocus();
-                                          }
-                                        });
-                                    return;
-                                  }
-                                  setDialogState(
-                                    () => categoryId = selectedCategoryId,
-                                  );
-                                },
-                              ),
-                              if (selectedCategory != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    left: 56,
-                                    top: 2,
-                                  ),
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: TextButton.icon(
-                                      style: TextButton.styleFrom(
-                                        visualDensity: VisualDensity.compact,
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                        minimumSize: const Size(0, 30),
-                                        padding: EdgeInsets.zero,
-                                      ),
-                                      onPressed: () => setDialogState(() {
-                                        isSplitMode = true;
-                                        splitDrafts.clear();
-                                        firstSplitAutoRemainder = true;
-                                        ensureSplitDrafts();
-                                      }),
-                                      icon: const Icon(
-                                        Icons.call_split,
-                                        size: 15,
-                                      ),
-                                      label: const Text(
-                                        'Split this category allocation',
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
+                  if (isSplitMode)
+                    splitAllocationSection()
+                  else
+                    Column(
+                      key: const ValueKey('transaction-category-field'),
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const TransactionFormLabel('Category'),
+                        selectableRow(
+                          icon: selectedCategory == null
+                              ? Icons.sell_outlined
+                              : categoryIcon(selectedCategory),
+                          placeholder: selectedCategory == null
+                              ? 'Choose category'
+                              : null,
+                          valueStyle: fieldValueStyle,
+                          title: Text(
+                            selectedCategory?.name ?? 'Choose category',
                           ),
-                  ),
+                          onTap: () async {
+                            FocusManager.instance.primaryFocus?.unfocus();
+                            final selectedCategoryId =
+                                await showTransactionCategoryFlow(
+                                  context,
+                                  dataStore: dataStore,
+                                  isExpense: isExpense,
+                                  selectedCategoryId: categoryId,
+                                );
+                            if (selectedCategoryId == null) return;
+                            setDialogState(
+                              () => categoryId = selectedCategoryId,
+                            );
+                          },
+                        ),
+                        if (selectedCategory != null)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 56, top: 2),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  minimumSize: const Size(0, 30),
+                                  padding: EdgeInsets.zero,
+                                ),
+                                onPressed: () => setDialogState(() {
+                                  isSplitMode = true;
+                                  splitDrafts.clear();
+                                  firstSplitAutoRemainder = true;
+                                  ensureSplitDrafts();
+                                }),
+                                icon: const Icon(Icons.call_split, size: 15),
+                                label: const Text(
+                                  'Split this category allocation',
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   const TransactionFormDivider(),
                   const TransactionFormLabel('Date'),
                   InkWell(
@@ -10570,9 +11160,6 @@ Future<void> showTransactionDialog(
   for (final draft in splitDrafts) {
     draft.note.dispose();
   }
-  newCategoryName.dispose();
-  newCategoryFocusNode.dispose();
-
   if (switchToTransfer && context.mounted) {
     await showTransferDialog(
       context,
@@ -11216,6 +11803,7 @@ const newPayeeSuggestionValue = '__create_new_payee__';
 
 class PayeeAutocompleteField extends StatefulWidget {
   const PayeeAutocompleteField({
+    required this.dataStore,
     required this.controller,
     required this.options,
     required this.fieldKey,
@@ -11230,6 +11818,7 @@ class PayeeAutocompleteField extends StatefulWidget {
     super.key,
   });
 
+  final FinanceDataStore dataStore;
   final TextEditingController controller;
   final List<String> options;
   final Key fieldKey;
@@ -11671,7 +12260,7 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
 
   void _rememberPayee(String name) {
     if (name.isEmpty) return;
-    final store = FinanceDataStoreScope.read(context);
+    final store = widget.dataStore;
     final saved = [...store.preferences.savedPayeeNames]
       ..removeWhere((item) => item.toLowerCase() == name.toLowerCase())
       ..insert(0, name);
@@ -12071,16 +12660,277 @@ Future<String?> showTransactionAccountPicker(
   );
 }
 
+Future<String?> showTransactionCategoryFlow(
+  BuildContext context, {
+  required FinanceDataStore dataStore,
+  required bool isExpense,
+  required String selectedCategoryId,
+}) async {
+  final kind = isExpense
+      ? v2_category.CategoryKind.expense
+      : v2_category.CategoryKind.income;
+  var currentSelection = selectedCategoryId;
+
+  while (context.mounted) {
+    final selection = await showTransactionCategoryPicker(
+      context,
+      categories: categoriesForTransactionKind(dataStore, isExpense),
+      selectedCategoryId: currentSelection,
+    );
+    if (!context.mounted || selection == null) return null;
+    if (selection != newCategoryDropdownValue) return selection;
+
+    final createdId = await showTransactionCategoryCreationDialog(
+      context,
+      dataStore: dataStore,
+      kind: kind,
+    );
+    if (!context.mounted) return null;
+    if (createdId == null) {
+      // Add Category was cancelled. Reopen the picker from the live store so
+      // the transaction form stays intact and the user can choose again.
+      continue;
+    }
+
+    final createdCategory = dataStore.categories
+        .where(
+          (category) =>
+              category.id == createdId &&
+              category.kind == kind &&
+              category.isVisible,
+        )
+        .firstOrNull;
+    if (createdCategory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The category was saved but is not available for this transaction.',
+          ),
+        ),
+      );
+      continue;
+    }
+    currentSelection = createdCategory.id;
+    return currentSelection;
+  }
+  return null;
+}
+
+Future<String?> showTransactionCategoryCreationDialog(
+  BuildContext context, {
+  required FinanceDataStore dataStore,
+  required v2_category.CategoryKind kind,
+}) async {
+  var categoryName = '';
+  String? parentCategoryId;
+  String? iconName;
+  int? colorValue;
+  var isSaving = false;
+  String? validationError;
+
+  final createdId = await showDialog<String>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        final parentOptions = dataStore.categories
+            .where((category) => category.isVisible && category.kind == kind)
+            .toList(growable: false);
+        final selectedParentId =
+            parentOptions.any((category) => category.id == parentCategoryId)
+            ? parentCategoryId
+            : null;
+        parentCategoryId = selectedParentId;
+
+        Future<void> saveCategory() async {
+          if (isSaving) return;
+          final trimmedName = categoryName.trim();
+          if (trimmedName.isEmpty) {
+            setDialogState(() => validationError = 'Enter a category name.');
+            return;
+          }
+          final duplicateExists = dataStore.categories.any(
+            (category) =>
+                category.isVisible &&
+                category.kind == kind &&
+                category.name.trim().toLowerCase() == trimmedName.toLowerCase(),
+          );
+          if (duplicateExists) {
+            setDialogState(
+              () =>
+                  validationError = 'A category with this name already exists.',
+            );
+            return;
+          }
+
+          FocusManager.instance.primaryFocus?.unfocus();
+          setDialogState(() {
+            isSaving = true;
+            validationError = null;
+          });
+          final categoryId = 'cat_${DateTime.now().microsecondsSinceEpoch}';
+          try {
+            await dataStore.saveCategoryLocalFirst(
+              v2_category.CategoryRecord(
+                id: categoryId,
+                name: trimmedName,
+                kind: kind,
+                parentCategoryId: parentCategoryId,
+                iconName: iconName,
+                colorValue: colorValue,
+                sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+              ),
+            );
+            if (!dialogContext.mounted) return;
+            HapticFeedback.mediumImpact();
+            Navigator.pop(dialogContext, categoryId);
+          } catch (error) {
+            if (!dialogContext.mounted) return;
+            setDialogState(() {
+              isSaving = false;
+              validationError =
+                  'The category could not be saved. Please try again.';
+            });
+          }
+        }
+
+        return AlertDialog(
+          alignment: Alignment.topCenter,
+          insetPadding: transactionDialogInsetPadding(dialogContext),
+          actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+          title: const Text('Add category'),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DialogFieldGroup(
+                    label: 'Category name',
+                    child: TextField(
+                      key: const ValueKey('transaction-new-category-name'),
+                      autofocus: true,
+                      enabled: !isSaving,
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.done,
+                      onChanged: (value) => categoryName = value,
+                      onSubmitted: (_) => saveCategory(),
+                      decoration: dialogFieldDecoration(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DialogFieldGroup(
+                    label: 'Type',
+                    child: InputDecorator(
+                      decoration: dialogFieldDecoration(),
+                      child: Text(categoryKindLabel(kind.name)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DialogFieldGroup(
+                    label: 'Parent category',
+                    child: DropdownButtonFormField<String?>(
+                      key: const ValueKey('transaction-new-category-parent'),
+                      initialValue: selectedParentId,
+                      decoration: dialogFieldDecoration(),
+                      items: [
+                        const DropdownMenuItem<String?>(child: Text('None')),
+                        for (final category in parentOptions)
+                          DropdownMenuItem<String?>(
+                            value: category.id,
+                            child: Text(category.name),
+                          ),
+                      ],
+                      onChanged: isSaving
+                          ? null
+                          : (value) =>
+                                setDialogState(() => parentCategoryId = value),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DialogFieldGroup(
+                    label: 'Icon',
+                    child: DropdownButtonFormField<String?>(
+                      initialValue: iconName,
+                      decoration: dialogFieldDecoration(),
+                      items: [
+                        const DropdownMenuItem<String?>(child: Text('No icon')),
+                        for (final item in v2_category.curatedCategoryIcons)
+                          DropdownMenuItem<String?>(
+                            value: item.sfSymbolName,
+                            child: Text(item.label),
+                          ),
+                      ],
+                      onChanged: isSaving
+                          ? null
+                          : (value) => setDialogState(() => iconName = value),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DialogFieldGroup(
+                    label: 'Color',
+                    child: DropdownButtonFormField<int?>(
+                      initialValue: colorValue,
+                      decoration: dialogFieldDecoration(),
+                      items: [
+                        const DropdownMenuItem<int?>(child: Text('Default')),
+                        for (final item in categoryColorOptions)
+                          DropdownMenuItem<int?>(
+                            value: item.value,
+                            child: Text(item.label),
+                          ),
+                      ],
+                      onChanged: isSaving
+                          ? null
+                          : (value) => setDialogState(() => colorValue = value),
+                    ),
+                  ),
+                  if (validationError != null) ...[
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        validationError!,
+                        key: const ValueKey('transaction-new-category-error'),
+                        style: TextStyle(
+                          color: Theme.of(dialogContext).colorScheme.error,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const ValueKey('transaction-save-new-category'),
+              onPressed: isSaving ? null : saveCategory,
+              child: Text(isSaving ? 'Saving...' : 'Save'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+  return createdId;
+}
+
 Future<String?> showTransactionCategoryPicker(
   BuildContext context, {
   required List<v2_category.CategoryRecord> categories,
   required String selectedCategoryId,
-}) {
+}) async {
   final collapsedCategoryIds = <String>{};
   final categoriesById = {
     for (final category in categories) category.id: category,
   };
-  return showModalBottomSheet<String>(
+  final result = await showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
@@ -12090,107 +12940,138 @@ Future<String?> showTransactionCategoryPicker(
           categories,
           collapsedCategoryIds,
         );
-        return SafeArea(
-          child: SizedBox(
-            height: MediaQuery.sizeOf(sheetContext).height * 0.68,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.md,
-                    0,
-                    AppSpacing.md,
-                    AppSpacing.xs,
-                  ),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Choose category',
-                      style: Theme.of(sheetContext).textTheme.titleLarge
-                          ?.copyWith(fontWeight: FontWeight.w900),
+        return AnimatedPadding(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+          ),
+          child: SafeArea(
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.68,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      0,
+                      AppSpacing.md,
+                      AppSpacing.xs,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Choose category',
+                        style: Theme.of(sheetContext).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
                     ),
                   ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: visibleCategories.length,
-                    itemBuilder: (context, index) {
-                      final category = visibleCategories[index];
-                      final depth = categoryDepth(category, categoriesById);
-                      final hasChildren = categories.any(
-                        (candidate) =>
-                            candidate.parentCategoryId == category.id,
-                      );
-                      final isExpanded = !collapsedCategoryIds.contains(
-                        category.id,
-                      );
-                      return Padding(
-                        padding: EdgeInsets.only(left: depth * 18.0),
-                        child: ListTile(
-                          dense: true,
-                          leading: Icon(
-                            categoryIcon(category),
-                            color: AppTheme.accent,
-                          ),
-                          title: Text(category.name),
-                          subtitle: depth == 0
-                              ? null
-                              : Text(
-                                  categoriesById[category.parentCategoryId]
-                                          ?.name ??
-                                      '',
-                                ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (category.id == selectedCategoryId)
-                                const Icon(Icons.check, color: AppTheme.accent),
-                              if (hasChildren)
-                                IconButton(
-                                  tooltip: isExpanded
-                                      ? 'Collapse ${category.name}'
-                                      : 'Expand ${category.name}',
-                                  onPressed: () {
-                                    HapticFeedback.selectionClick();
-                                    setSheetState(() {
-                                      if (isExpanded) {
-                                        collapsedCategoryIds.add(category.id);
-                                      } else {
-                                        collapsedCategoryIds.remove(
-                                          category.id,
-                                        );
-                                      }
-                                    });
-                                  },
-                                  icon: AnimatedRotation(
-                                    turns: isExpanded ? 0.25 : 0,
-                                    duration: const Duration(milliseconds: 180),
-                                    curve: Curves.easeOutCubic,
-                                    child: const Icon(Icons.chevron_right),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: visibleCategories.length,
+                      itemBuilder: (context, index) {
+                        final category = visibleCategories[index];
+                        final depth = categoryDepth(category, categoriesById);
+                        final hasChildren = categories.any(
+                          (candidate) =>
+                              candidate.parentCategoryId == category.id,
+                        );
+                        final isExpanded = !collapsedCategoryIds.contains(
+                          category.id,
+                        );
+                        return Padding(
+                          padding: EdgeInsets.only(left: depth * 18.0),
+                          child: ListTile(
+                            dense: true,
+                            leading: Icon(
+                              categoryIcon(category),
+                              color: AppTheme.accent,
+                            ),
+                            title: Text(category.name),
+                            subtitle: depth == 0
+                                ? null
+                                : Text(
+                                    categoriesById[category.parentCategoryId]
+                                            ?.name ??
+                                        '',
                                   ),
-                                ),
-                            ],
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (category.id == selectedCategoryId)
+                                  const Icon(
+                                    Icons.check,
+                                    color: AppTheme.accent,
+                                  ),
+                                if (hasChildren)
+                                  IconButton(
+                                    tooltip: isExpanded
+                                        ? 'Collapse ${category.name}'
+                                        : 'Expand ${category.name}',
+                                    onPressed: () {
+                                      HapticFeedback.selectionClick();
+                                      setSheetState(() {
+                                        if (isExpanded) {
+                                          collapsedCategoryIds.add(category.id);
+                                        } else {
+                                          collapsedCategoryIds.remove(
+                                            category.id,
+                                          );
+                                        }
+                                      });
+                                    },
+                                    icon: AnimatedRotation(
+                                      turns: isExpanded ? 0.25 : 0,
+                                      duration: const Duration(
+                                        milliseconds: 180,
+                                      ),
+                                      curve: Curves.easeOutCubic,
+                                      child: const Icon(Icons.chevron_right),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            onTap: () =>
+                                Navigator.pop(sheetContext, category.id),
                           ),
-                          onTap: () => Navigator.pop(sheetContext, category.id),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.add, color: AppTheme.accent),
-                  title: const Text('New category...'),
-                  onTap: () =>
-                      Navigator.pop(sheetContext, newCategoryDropdownValue),
-                ),
-              ],
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.add, color: AppTheme.accent),
+                    title: const Text('Add New Category'),
+                    onTap: () =>
+                        Navigator.pop(sheetContext, newCategoryDropdownValue),
+                  ),
+                ],
+              ),
             ),
           ),
         );
       },
     ),
   );
+  return result;
+}
+
+Future<String> createBasicCategory(
+  FinanceDataStore dataStore, {
+  required String name,
+  required v2_category.CategoryKind kind,
+}) async {
+  final categoryId = 'cat_${DateTime.now().microsecondsSinceEpoch}';
+  final category = v2_category.CategoryRecord(
+    id: categoryId,
+    name: name,
+    kind: kind,
+    sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+  );
+  await dataStore.saveCategoryLocalFirst(category);
+  HapticFeedback.mediumImpact();
+  return categoryId;
 }
 
 int? optionalPositiveMinor(int value) => value > 0 ? value : null;

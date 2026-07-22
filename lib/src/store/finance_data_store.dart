@@ -312,6 +312,145 @@ class FinanceDataStore extends ChangeNotifier {
         .length;
   }
 
+  bool hasActionableScheduledAccounts(
+    ScheduledTransactionRecord scheduledTransaction,
+  ) {
+    final sourceExists = accounts.any(
+      (account) =>
+          account.id == scheduledTransaction.accountId && account.isVisible,
+    );
+    if (!sourceExists) return false;
+    if (scheduledTransaction.type != TransactionType.transfer) return true;
+    final destinationId = scheduledTransaction.transferAccountId;
+    return destinationId != null &&
+        destinationId != scheduledTransaction.accountId &&
+        accounts.any(
+          (account) => account.id == destinationId && account.isVisible,
+        );
+  }
+
+  DateTime? nextActionableScheduledDate(
+    ScheduledTransactionRecord scheduledTransaction, {
+    DateTime? now,
+  }) {
+    if (scheduledTransaction.isDeleted ||
+        scheduledTransaction.lastAction != ScheduledAction.none ||
+        !hasActionableScheduledAccounts(scheduledTransaction)) {
+      return null;
+    }
+    return firstUnresolvedScheduledDate(
+      scheduledTransaction,
+      today: now ?? DateTime.now(),
+    );
+  }
+
+  List<ScheduledTransactionRecord> actionableScheduledTransactions({
+    DateTime? now,
+  }) {
+    final result = <ScheduledTransactionRecord>[];
+    for (final scheduledTransaction in scheduledTransactions) {
+      final actionableDate = nextActionableScheduledDate(
+        scheduledTransaction,
+        now: now,
+      );
+      if (actionableDate == null) continue;
+      result.add(
+        isSameScheduledDay(actionableDate, scheduledTransaction.nextDate)
+            ? scheduledTransaction
+            : scheduledTransaction.copyWith(
+                nextDate: actionableDate,
+                sync: scheduledTransaction.sync,
+              ),
+      );
+    }
+    result.sort((left, right) => left.nextDate.compareTo(right.nextDate));
+    return result;
+  }
+
+  Future<void> resetScheduledHistory({DateTime? now}) async {
+    final anchor = now ?? DateTime.now();
+    final updatedSchedules = <ScheduledTransactionRecord>[];
+    for (final scheduledTransaction in scheduledTransactions) {
+      var nextDate = scheduledTransaction.nextDate;
+      var lastAction = scheduledTransaction.lastAction;
+      if (!scheduledTransaction.isDeleted &&
+          scheduledTransaction.frequency != RecurrenceFrequency.once) {
+        nextDate =
+            firstUnresolvedScheduledDate(scheduledTransaction, today: anchor) ??
+            nextDate;
+        lastAction = ScheduledAction.none;
+      }
+      final resetSync = _touchAfterCurrent(scheduledTransaction.sync);
+      var reset = scheduledTransaction.copyWith(
+        nextDate: nextDate,
+        lastAction: lastAction,
+        occurrences: const [],
+        scheduledNotificationIds: const [],
+        sync: resetSync,
+        clearLastReminderScheduledAt: true,
+      );
+      reset = await _applyScheduledNotificationState(reset);
+      reset = reset.copyWith(sync: resetSync);
+      updatedSchedules.add(reset);
+    }
+
+    final updatedTransactions = <TransactionRecord>[];
+    final linkageClearedTransactions = <TransactionRecord>[];
+    for (final transaction in transactions) {
+      if (transaction.scheduledTransactionId == null &&
+          transaction.scheduledOccurrenceDate == null &&
+          transaction.scheduledPlannedAmountMinor == null) {
+        updatedTransactions.add(transaction);
+        continue;
+      }
+      final reset = transaction.copyWith(
+        clearScheduledTransaction: true,
+        sync: _touchAfterCurrent(transaction.sync),
+      );
+      updatedTransactions.add(reset);
+      linkageClearedTransactions.add(reset);
+    }
+
+    _dataSet = _dataSet.copyWith(
+      scheduledTransactions: updatedSchedules,
+      transactions: updatedTransactions,
+    );
+    notifyListeners();
+    await localRepository?.save(_dataSet);
+
+    final remote = remoteRepository;
+    final currentUserId = userId;
+    if (remote != null && currentUserId != null) {
+      try {
+        for (final scheduledTransaction in updatedSchedules) {
+          await remote.saveScheduledTransaction(
+            userId: currentUserId,
+            scheduledTransaction: scheduledTransaction,
+          );
+        }
+        for (final transaction in linkageClearedTransactions) {
+          await remote.saveTransaction(
+            userId: currentUserId,
+            transaction: transaction,
+          );
+        }
+      } on Exception catch (error) {
+        debugPrint(
+          'Remote scheduled-history reset failed; local reset retained: $error',
+        );
+      }
+    }
+    await refreshScheduledNotificationBadge(now: anchor);
+  }
+
+  SyncMetadata _touchAfterCurrent(SyncMetadata sync) {
+    final currentTime = DateTime.now().toUtc();
+    final timestamp = currentTime.isAfter(sync.updatedAt)
+        ? currentTime
+        : sync.updatedAt.add(const Duration(microseconds: 1));
+    return sync.touched(now: timestamp, deviceId: deviceId);
+  }
+
   int _totalThisMonth({required TransactionType type, DateTime? now}) {
     final anchor = now ?? DateTime.now();
     final periodStart = DateTime(anchor.year, anchor.month);
@@ -463,6 +602,7 @@ class FinanceDataStore extends ChangeNotifier {
   Future<void> archiveAccount(String accountId) async {
     final account = accountById(accountId).copyWith(isArchived: true);
     await saveAccount(account);
+    await refreshScheduledNotifications();
   }
 
   Future<void> deleteAccount(String accountId) async {
@@ -472,6 +612,7 @@ class FinanceDataStore extends ChangeNotifier {
       sync: existing.sync.deleted(deviceId: deviceId),
     );
     await saveAccount(account);
+    await refreshScheduledNotifications();
   }
 
   Future<void> moveAccountWithinGroup({
@@ -515,6 +656,33 @@ class FinanceDataStore extends ChangeNotifier {
     final updated = _upsert(categories, category, (item) => item.id);
     _dataSet = _dataSet.copyWith(categories: updated);
     await _commit(category: category);
+  }
+
+  Future<void> saveCategoryLocalFirst(CategoryRecord category) async {
+    final previousDataSet = _dataSet;
+    final updated = _upsert(categories, category, (item) => item.id);
+    _dataSet = _dataSet.copyWith(categories: updated);
+    notifyListeners();
+    try {
+      await localRepository?.save(_dataSet);
+    } catch (_) {
+      _dataSet = previousDataSet;
+      notifyListeners();
+      rethrow;
+    }
+
+    final remote = remoteRepository;
+    final currentUserId = userId;
+    if (remote == null || currentUserId == null) return;
+    unawaited(
+      remote.saveCategory(userId: currentUserId, category: category).catchError(
+        (Object error) {
+          debugPrint(
+            'Remote category save failed; local change retained: $error',
+          );
+        },
+      ),
+    );
   }
 
   Future<void> archiveCategory(String categoryId) async {
@@ -616,6 +784,7 @@ class FinanceDataStore extends ChangeNotifier {
     final shouldSchedule =
         preferences.notificationsEnabled &&
         !scheduledTransaction.isDeleted &&
+        hasActionableScheduledAccounts(scheduledTransaction) &&
         scheduledTransaction.hasAlert &&
         scheduledTransaction.lastAction == ScheduledAction.none;
     if (!shouldSchedule) {
@@ -949,6 +1118,65 @@ int compareAccountDisplayOrder(
   if (sortComparison != 0) return sortComparison;
   return a.name.toLowerCase().compareTo(b.name.toLowerCase());
 }
+
+DateTime? firstUnresolvedScheduledDate(
+  ScheduledTransactionRecord scheduledTransaction, {
+  required DateTime today,
+}) {
+  final day = DateTime(today.year, today.month, today.day);
+  final resolvedDates = scheduledTransaction.occurrences
+      .map((occurrence) => scheduledDayKey(occurrence.scheduledDate))
+      .toSet();
+  var candidate = DateTime(
+    scheduledTransaction.nextDate.year,
+    scheduledTransaction.nextDate.month,
+    scheduledTransaction.nextDate.day,
+  );
+
+  // The cap is defensive for malformed legacy records. Monthly records can
+  // still advance for centuries without locking the UI.
+  for (var iteration = 0; iteration < 12000; iteration += 1) {
+    final endDate = scheduledTransaction.endDate;
+    if (endDate != null && candidate.isAfter(endDate)) return null;
+    if (!candidate.isBefore(day) &&
+        !resolvedDates.contains(scheduledDayKey(candidate))) {
+      return candidate;
+    }
+    final next = nextScheduledRecurrenceDate(
+      candidate,
+      scheduledTransaction.frequency,
+    );
+    if (next == null || !next.isAfter(candidate)) return null;
+    candidate = next;
+  }
+  return null;
+}
+
+DateTime? nextScheduledRecurrenceDate(
+  DateTime date,
+  RecurrenceFrequency frequency,
+) {
+  return switch (frequency) {
+    RecurrenceFrequency.once => null,
+    RecurrenceFrequency.weekly => date.add(const Duration(days: 7)),
+    RecurrenceFrequency.biweekly => date.add(const Duration(days: 14)),
+    RecurrenceFrequency.monthly => DateTime(
+      date.year,
+      date.month + 1,
+      date.day,
+    ),
+    RecurrenceFrequency.yearly => DateTime(date.year + 1, date.month, date.day),
+  };
+}
+
+bool isSameScheduledDay(DateTime left, DateTime right) {
+  return left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
+}
+
+String scheduledDayKey(DateTime date) =>
+    '${date.year}-${date.month}-${date.day}';
 
 bool isScheduledDueOrOverdue(
   ScheduledTransactionRecord scheduledTransaction,
