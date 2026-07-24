@@ -15,6 +15,7 @@ import 'package:money_tally/src/domain/scheduled_transaction.dart'
 import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
 import 'package:money_tally/src/domain/transaction.dart' as v2_transaction;
 import 'package:money_tally/src/domain/user_preferences.dart';
+import 'package:money_tally/src/export/export_file_service.dart';
 import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
 import 'package:money_tally/src/notifications/notification_scheduler.dart';
 import 'package:money_tally/src/persistence/backup_codec.dart';
@@ -35,6 +36,52 @@ Future<void> collapseScheduledCalendar(WidgetTester tester) async {
   if (collapse.evaluate().isEmpty) return;
   await tester.tap(collapse);
   await tester.pumpAndSettle();
+}
+
+typedef RecordedExportShare = ({
+  String content,
+  String fileName,
+  String mimeType,
+  String shareTitle,
+  Rect sharePositionOrigin,
+});
+
+class RecordingExportFileService extends ExportFileService {
+  RecordingExportFileService({this.holdFirstShare = false, this.failure});
+
+  final bool holdFirstShare;
+  final Object? failure;
+  final recordedShares = <RecordedExportShare>[];
+  final firstShare = Completer<ExportedFile>();
+
+  @override
+  Future<ExportedFile> shareTextFile({
+    required String content,
+    required String fileName,
+    required String mimeType,
+    required String shareTitle,
+    required Rect sharePositionOrigin,
+  }) {
+    final error = failure;
+    if (error != null) return Future.error(error);
+    recordedShares.add((
+      content: content,
+      fileName: fileName,
+      mimeType: mimeType,
+      shareTitle: shareTitle,
+      sharePositionOrigin: sharePositionOrigin,
+    ));
+    if (holdFirstShare && recordedShares.length == 1) {
+      return firstShare.future;
+    }
+    return Future.value(
+      ExportedFile(
+        path: '/temporary/$fileName',
+        fileName: fileName,
+        mimeType: mimeType,
+      ),
+    );
+  }
 }
 
 class TestNotificationScheduler implements NotificationScheduler {
@@ -5802,8 +5849,8 @@ void main() {
     await tester.tap(reports);
     await tester.pumpAndSettle();
 
-    expect(find.text('Monthly spending'), findsOneWidget);
-    expect(find.text('Category breakdown'), findsOneWidget);
+    expect(find.text('Spending by Category'), findsOneWidget);
+    expect(find.text('Monthly Trend'), findsOneWidget);
     expect(find.byTooltip('Add'), findsNothing);
   });
 
@@ -5917,7 +5964,9 @@ void main() {
     expect(find.text(r'MXN MX$ '), findsOneWidget);
   });
 
-  testWidgets('settings export rows copy data', (tester) async {
+  testWidgets('settings export action sheets preserve clipboard exports', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1200, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -5956,17 +6005,153 @@ void main() {
     await tester.ensureVisible(exportCsv);
     await tester.pumpAndSettle();
     await tester.tap(exportCsv);
-    await tester.pump();
-    expect(find.text('CSV export copied'), findsOneWidget);
-    expect(clipboardWrites.single, contains('transaction_id,split_line_id'));
-
-    final exportJson = find.widgetWithText(ListTile, 'Export JSON');
-    await tester.ensureVisible(exportJson);
     await tester.pumpAndSettle();
-    await tester.tap(exportJson);
+    expect(find.text('Share CSV File'), findsOneWidget);
+    expect(find.text('Copy CSV to Clipboard'), findsOneWidget);
+    await tester.tap(find.text('Copy CSV to Clipboard'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('CSV copied to clipboard'), findsOneWidget);
+    expect(clipboardWrites.single, contains('transaction_id,split_line_id'));
+    await tester.pump(const Duration(seconds: 4));
+
+    final exportBackup = find.widgetWithText(ListTile, 'Export Backup');
+    await tester.ensureVisible(exportBackup);
+    await tester.pumpAndSettle();
+    await tester.tap(exportBackup);
+    await tester.pumpAndSettle();
+    expect(find.text('Share Backup File'), findsOneWidget);
+    expect(find.text('Copy JSON to Clipboard'), findsOneWidget);
+    await tester.tap(find.text('Copy JSON to Clipboard'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     expect(clipboardWrites.length, 2);
     expect(clipboardWrites.last, contains('"accounts"'));
+    expect(find.text('Backup copied to clipboard'), findsOneWidget);
+  });
+
+  testWidgets('settings shares real export files with an anchored origin', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final exportFileService = RecordingExportFileService(holdFirstShare: true);
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FinanceDataStoreScope(
+          store: dataStore,
+          child: Scaffold(
+            body: SingleChildScrollView(
+              child: SettingsView(
+                exportFileService: exportFileService,
+                now: () => DateTime(2026, 7, 23, 22, 45),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final exportCsv = find.widgetWithText(ListTile, 'Export CSV');
+    await tester.ensureVisible(exportCsv);
+    await tester.tap(exportCsv);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Share CSV File'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(exportFileService.recordedShares, hasLength(1));
+    final csvShare = exportFileService.recordedShares.single;
+    expect(csvShare.fileName, 'money_tally_transactions_2026-07-23.csv');
+    expect(csvShare.mimeType, 'text/csv');
+    expect(csvShare.sharePositionOrigin.width, greaterThan(0));
+    expect(csvShare.sharePositionOrigin.height, greaterThan(0));
+    expect(csvShare.content, contains('transaction_id,split_line_id'));
+
+    await tester.tap(exportCsv);
+    await tester.pump();
+    expect(find.text('Share CSV File'), findsNothing);
+    expect(exportFileService.recordedShares, hasLength(1));
+
+    exportFileService.firstShare.complete(
+      const ExportedFile(
+        path: '/temporary/money_tally_transactions_2026-07-23.csv',
+        fileName: 'money_tally_transactions_2026-07-23.csv',
+        mimeType: 'text/csv',
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('Could not share CSV file'), findsNothing);
+
+    final exportBackup = find.widgetWithText(ListTile, 'Export Backup');
+    await tester.ensureVisible(exportBackup);
+    await tester.tap(exportBackup);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Share Backup File'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(exportFileService.recordedShares, hasLength(2));
+    final backupShare = exportFileService.recordedShares.last;
+    expect(backupShare.fileName, 'money_tally_backup_2026-07-23_2245.json');
+    expect(backupShare.mimeType, 'application/json');
+    expect(backupShare.content, contains('"accounts"'));
+    expect(
+      const BackupCodec().decodeJson(backupShare.content).accounts.length,
+      dataStore.dataSet.accounts.length,
+    );
+  });
+
+  testWidgets('settings reports temporary export creation failures', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    final exportFileService = RecordingExportFileService(
+      failure: StateError('Temporary directory unavailable'),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FinanceDataStoreScope(
+          store: dataStore,
+          child: Scaffold(
+            body: SingleChildScrollView(
+              child: SettingsView(exportFileService: exportFileService),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final exportBackup = find.widgetWithText(ListTile, 'Export Backup');
+    await tester.ensureVisible(exportBackup);
+    await tester.tap(exportBackup);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Share Backup File'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Could not share backup file'), findsOneWidget);
   });
 
   testWidgets('settings restores JSON backup from clipboard', (tester) async {
@@ -6080,8 +6265,8 @@ void main() {
     );
 
     expect(find.text('Reports'), findsWidgets);
-    expect(find.text('Income vs expenses'), findsOneWidget);
-    expect(find.text('Net worth history'), findsOneWidget);
+    expect(find.text('Spending by Category'), findsOneWidget);
+    expect(find.text('Monthly Trend'), findsOneWidget);
   });
 
   testWidgets('reports screen is reachable from wide navigation', (
@@ -6097,11 +6282,11 @@ void main() {
     await tester.tap(find.text('Reports').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Monthly spending'), findsOneWidget);
-    expect(find.text('Category breakdown'), findsOneWidget);
-    expect(find.text('Opening'), findsOneWidget);
-    expect(find.text('Ledger change'), findsOneWidget);
-    expect(find.text('Budget history'), findsOneWidget);
+    expect(find.text('Spending by Category'), findsOneWidget);
+    expect(find.text('Monthly Trend'), findsOneWidget);
+    expect(find.text('Income'), findsWidgets);
+    expect(find.text('Expenses'), findsWidgets);
+    expect(find.text('Net Cash Flow'), findsOneWidget);
     expect(find.text(r'$82.78'), findsWidgets);
     expect(find.text(r'$1,264.00'), findsWidgets);
     expect(find.text('Walmart'), findsWidgets);

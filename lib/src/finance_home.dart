@@ -4786,13 +4786,15 @@ class _CategoriesViewState extends State<CategoriesView> {
   }
 }
 
-class SettingsView extends StatelessWidget {
+class SettingsView extends StatefulWidget {
   const SettingsView({
     this.onSelectSection,
     this.syncLabel = 'Synced',
     this.lastSuccessfulSyncLabel,
     this.onSyncNow,
     this.onSignOut,
+    this.exportFileService,
+    this.now,
     super.key,
   });
 
@@ -4801,6 +4803,8 @@ class SettingsView extends StatelessWidget {
   final String? lastSuccessfulSyncLabel;
   final Future<void> Function()? onSyncNow;
   final VoidCallback? onSignOut;
+  final ExportFileService? exportFileService;
+  final DateTime Function()? now;
 
   static const _currencyOptions = [
     CurrencyFormatSettings(currencyCode: 'USD', symbol: r'$'),
@@ -4811,6 +4815,25 @@ class SettingsView extends StatelessWidget {
     CurrencyFormatSettings(currencyCode: 'AUD', symbol: r'A$'),
     CurrencyFormatSettings(currencyCode: 'JPY', symbol: 'JPY '),
   ];
+
+  @override
+  State<SettingsView> createState() => _SettingsViewState();
+
+  static CurrencyFormatSettings _currencyFor(String code) {
+    return _currencyOptions.firstWhere(
+      (option) => option.currencyCode == code,
+      orElse: () => _currencyOptions.first,
+    );
+  }
+}
+
+class _SettingsViewState extends State<SettingsView> {
+  ExportFileService? _defaultExportFileService;
+  _ExportKind? _sharingExport;
+
+  ExportFileService get _exportFileService =>
+      widget.exportFileService ??
+      (_defaultExportFileService ??= ExportFileService());
 
   @override
   Widget build(BuildContext context) {
@@ -4824,45 +4847,49 @@ class SettingsView extends StatelessWidget {
           title: 'Cloud Sync',
           children: [
             SettingsActionRow(
-              icon: syncLabel == 'Sync issue'
+              icon: widget.syncLabel == 'Sync issue'
                   ? Icons.cloud_off_outlined
                   : Icons.cloud_done_outlined,
               title: 'Status',
-              subtitle: switch (syncLabel) {
+              subtitle: switch (widget.syncLabel) {
                 'Synced' => 'Your data is securely synced',
                 'Syncing' => 'Your data is syncing',
                 'Sync issue' => 'Cloud sync needs attention',
                 'Offline' => 'You are currently offline',
                 _ => 'Your data is stored securely',
               },
-              trailingText: syncLabel,
+              trailingText: widget.syncLabel,
               showStatusPill: true,
-              onTap: onSyncNow == null ? null : () => onSyncNow!.call(),
+              onTap: widget.onSyncNow == null
+                  ? null
+                  : () => widget.onSyncNow!.call(),
             ),
             SettingsActionRow(
               icon: Icons.schedule_outlined,
               title: 'Last successful sync',
               subtitle:
-                  lastSuccessfulSyncLabel ??
-                  (syncLabel == 'Synced' ? 'This session' : 'Not available'),
-              showDivider: onSyncNow != null || onSignOut != null,
+                  widget.lastSuccessfulSyncLabel ??
+                  (widget.syncLabel == 'Synced'
+                      ? 'This session'
+                      : 'Not available'),
+              showDivider: widget.onSyncNow != null || widget.onSignOut != null,
             ),
-            if (onSyncNow != null)
+            if (widget.onSyncNow != null)
               SettingsActionRow(
                 icon: Icons.sync_outlined,
                 title: 'Sync now',
                 subtitle: 'Refresh your data',
-                showDivider: onSignOut != null,
-                onTap: () => onSyncNow!.call(),
+                showDivider: widget.onSignOut != null,
+                onTap: () => widget.onSyncNow!.call(),
               ),
-            if (onSignOut != null)
+            if (widget.onSignOut != null)
               SettingsActionRow(
                 icon: Icons.logout_outlined,
                 title: 'Sign out',
                 subtitle: 'Sign out of your account',
                 destructive: true,
                 showDivider: false,
-                onTap: onSignOut,
+                onTap: widget.onSignOut,
               ),
           ],
         ),
@@ -4920,8 +4947,10 @@ class SettingsView extends StatelessWidget {
             SettingsDropdown<CurrencyFormatSettings>(
               icon: Icons.currency_exchange_outlined,
               label: 'Currency',
-              value: _currencyFor(preferences.currency.currencyCode),
-              values: _currencyOptions,
+              value: SettingsView._currencyFor(
+                preferences.currency.currencyCode,
+              ),
+              values: SettingsView._currencyOptions,
               labelOf: (value) => currencySettingsLabel(value.currencyCode),
               onChanged: (value) => store.savePreferences(
                 preferences.copyWith(
@@ -4991,13 +5020,15 @@ class SettingsView extends StatelessWidget {
               icon: Icons.account_balance_wallet_outlined,
               title: 'Manage accounts',
               subtitle: 'Accounts, balances, and account groups',
-              onTap: () => onSelectSection?.call(FinanceSection.accounts),
+              onTap: () =>
+                  widget.onSelectSection?.call(FinanceSection.accounts),
             ),
             SettingsActionRow(
               icon: Icons.sell_outlined,
               title: 'Manage categories',
               subtitle: 'Expense and income categories',
-              onTap: () => onSelectSection?.call(FinanceSection.categories),
+              onTap: () =>
+                  widget.onSelectSection?.call(FinanceSection.categories),
             ),
             SettingsActionRow(
               icon: Icons.person_outline,
@@ -5017,7 +5048,7 @@ class SettingsView extends StatelessWidget {
               title: 'Manage budgets',
               subtitle: 'Budget amounts and categories',
               showDivider: false,
-              onTap: () => onSelectSection?.call(FinanceSection.budgets),
+              onTap: () => widget.onSelectSection?.call(FinanceSection.budgets),
             ),
           ],
         ),
@@ -5030,7 +5061,7 @@ class SettingsView extends StatelessWidget {
               title: 'Reports',
               subtitle: 'Review spending and category trends',
               showDivider: false,
-              onTap: () => onSelectSection?.call(FinanceSection.reports),
+              onTap: () => widget.onSelectSection?.call(FinanceSection.reports),
             ),
           ],
         ),
@@ -5045,26 +5076,28 @@ class SettingsView extends StatelessWidget {
               destructive: true,
               onTap: () => showResetScheduledHistorySheet(context, store),
             ),
-            SettingsActionRow(
-              icon: Icons.file_download_outlined,
-              title: 'Export CSV',
-              subtitle: 'Copy ledger transactions as CSV',
-              onTap: () => copyExportToClipboard(
-                context,
-                title: 'CSV export copied',
-                payload: const BackupCodec().encodeTransactionsCsv(
-                  store.dataSet,
-                ),
+            Builder(
+              builder: (rowContext) => SettingsActionRow(
+                icon: Icons.file_download_outlined,
+                title: 'Export CSV',
+                subtitle: 'Share or copy your transaction history',
+                trailingText: _sharingExport == _ExportKind.csv
+                    ? 'Sharing…'
+                    : null,
+                onTap: () =>
+                    _showExportActions(rowContext, kind: _ExportKind.csv),
               ),
             ),
-            SettingsActionRow(
-              icon: Icons.data_object_outlined,
-              title: 'Export JSON',
-              subtitle: 'Copy a complete JSON backup',
-              onTap: () => copyExportToClipboard(
-                context,
-                title: 'JSON backup copied',
-                payload: const BackupCodec().encodeJson(store.dataSet),
+            Builder(
+              builder: (rowContext) => SettingsActionRow(
+                icon: Icons.data_object_outlined,
+                title: 'Export Backup',
+                subtitle: 'Share or copy a complete Money Tally backup',
+                trailingText: _sharingExport == _ExportKind.backup
+                    ? 'Sharing…'
+                    : null,
+                onTap: () =>
+                    _showExportActions(rowContext, kind: _ExportKind.backup),
               ),
             ),
             SettingsActionRow(
@@ -5080,12 +5113,185 @@ class SettingsView extends StatelessWidget {
     );
   }
 
-  static CurrencyFormatSettings _currencyFor(String code) {
-    return _currencyOptions.firstWhere(
-      (option) => option.currencyCode == code,
-      orElse: () => _currencyOptions.first,
+  Future<void> _showExportActions(
+    BuildContext anchorContext, {
+    required _ExportKind kind,
+  }) async {
+    if (_sharingExport != null) return;
+
+    final sharePositionOrigin = exportSharePositionOrigin(anchorContext);
+    final action = await _showExportActionSheet(context, kind: kind);
+    if (!mounted || action == null) return;
+
+    final store = FinanceDataStoreScope.read(context);
+    final payload = switch (kind) {
+      _ExportKind.csv => const BackupCodec().encodeTransactionsCsv(
+        store.dataSet,
+      ),
+      _ExportKind.backup => const BackupCodec().encodeJson(store.dataSet),
+    };
+
+    if (action == _ExportAction.copy) {
+      await copyExportToClipboard(
+        context,
+        title: kind == _ExportKind.csv
+            ? 'CSV copied to clipboard'
+            : 'Backup copied to clipboard',
+        payload: payload,
+      );
+      return;
+    }
+
+    setState(() => _sharingExport = kind);
+    final createdAt = widget.now?.call() ?? DateTime.now();
+    try {
+      await _exportFileService.shareTextFile(
+        content: payload,
+        fileName: kind == _ExportKind.csv
+            ? csvExportFileName(createdAt)
+            : backupExportFileName(createdAt),
+        mimeType: kind == _ExportKind.csv ? 'text/csv' : 'application/json',
+        shareTitle: kind == _ExportKind.csv
+            ? 'Money Tally transactions'
+            : 'Money Tally backup',
+        sharePositionOrigin: sharePositionOrigin,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            kind == _ExportKind.csv
+                ? 'Could not share CSV file'
+                : 'Could not share backup file',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sharingExport = null);
+    }
+  }
+}
+
+enum _ExportKind { csv, backup }
+
+enum _ExportAction { share, copy }
+
+Future<_ExportAction?> _showExportActionSheet(
+  BuildContext context, {
+  required _ExportKind kind,
+}) {
+  final isCsv = kind == _ExportKind.csv;
+  return showModalBottomSheet<_ExportAction>(
+    context: context,
+    showDragHandle: true,
+    useSafeArea: true,
+    builder: (sheetContext) => Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        0,
+        AppSpacing.lg,
+        AppSpacing.lg,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            isCsv ? 'Export CSV' : 'Export Backup',
+            style: Theme.of(
+              sheetContext,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _ExportActionTile(
+            key: const ValueKey('export-share-file'),
+            icon: Icons.ios_share_outlined,
+            title: isCsv ? 'Share CSV File' : 'Share Backup File',
+            subtitle: isCsv
+                ? 'Create a CSV file and open the phone’s share sheet'
+                : 'Create a Money Tally backup file and open the phone’s '
+                      'share sheet',
+            onTap: () => Navigator.of(sheetContext).pop(_ExportAction.share),
+          ),
+          Divider(
+            height: 1,
+            indent: 56,
+            color: Theme.of(
+              sheetContext,
+            ).colorScheme.outlineVariant.withValues(alpha: 0.45),
+          ),
+          _ExportActionTile(
+            key: const ValueKey('export-copy-clipboard'),
+            icon: Icons.content_copy_outlined,
+            title: isCsv ? 'Copy CSV to Clipboard' : 'Copy JSON to Clipboard',
+            subtitle: isCsv
+                ? 'Copy the raw CSV text'
+                : 'Copy the raw backup text',
+            onTap: () => Navigator.of(sheetContext).pop(_ExportAction.copy),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          OutlinedButton(
+            key: const ValueKey('export-cancel'),
+            onPressed: () => Navigator.of(sheetContext).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _ExportActionTile extends StatelessWidget {
+  const _ExportActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      minTileHeight: 72,
+      contentPadding: EdgeInsets.zero,
+      leading: SettingsRowIcon(icon: icon),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          height: 1.25,
+        ),
+      ),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: onTap,
     );
   }
+}
+
+Rect exportSharePositionOrigin(BuildContext context) {
+  final renderObject = context.findRenderObject();
+  if (renderObject is RenderBox &&
+      renderObject.attached &&
+      renderObject.hasSize &&
+      renderObject.size.width > 0 &&
+      renderObject.size.height > 0) {
+    return renderObject.localToGlobal(Offset.zero) & renderObject.size;
+  }
+
+  final screenSize = MediaQuery.maybeSizeOf(context) ?? const Size(1, 1);
+  return Rect.fromCenter(
+    center: Offset(screenSize.width / 2, screenSize.height / 2),
+    width: 1,
+    height: 1,
+  );
 }
 
 Future<void> showResetScheduledHistorySheet(
@@ -5798,185 +6004,804 @@ Future<void> showCustomCurrencyDialog(BuildContext context) async {
   );
 }
 
-class ReportsView extends StatelessWidget {
-  const ReportsView({super.key});
+class ReportsView extends StatefulWidget {
+  const ReportsView({this.now, super.key});
+
+  final DateTime Function()? now;
+
+  @override
+  State<ReportsView> createState() => _ReportsViewState();
+}
+
+class _ReportsViewState extends State<ReportsView> {
+  var _range = ReportDateRange.thisMonth;
+  String? _selectedCategoryId;
+  List<TransactionRecord>? _cachedTransactions;
+  List<v2_category.CategoryRecord>? _cachedCategories;
+  ReportDateRange? _cachedRange;
+  DateTime? _cachedDay;
+  ReportSnapshot? _cachedSnapshot;
+
+  DateTime get _now => widget.now?.call() ?? DateTime.now();
+
+  ReportSnapshot _reportFor(FinanceDataStore store) {
+    final now = _now;
+    final day = DateTime(now.year, now.month, now.day);
+    if (identical(_cachedTransactions, store.transactions) &&
+        identical(_cachedCategories, store.categories) &&
+        _cachedRange == _range &&
+        _cachedDay == day &&
+        _cachedSnapshot != null) {
+      return _cachedSnapshot!;
+    }
+    final snapshot = const MoneyReportCalculator().calculate(
+      transactions: store.transactions,
+      categories: store.categories,
+      range: _range,
+      now: now,
+    );
+    _cachedTransactions = store.transactions;
+    _cachedCategories = store.categories;
+    _cachedRange = _range;
+    _cachedDay = day;
+    _cachedSnapshot = snapshot;
+    return snapshot;
+  }
+
+  Future<void> _chooseRange() async {
+    final selected = await showPolishedChoicePicker<ReportDateRange>(
+      context,
+      title: 'Date Range',
+      selected: _range,
+      choices: [
+        for (final range in ReportDateRange.values)
+          PolishedChoice(
+            value: range,
+            label: range.label,
+            leading: const Icon(Icons.date_range_outlined),
+          ),
+      ],
+    );
+    if (selected == null || selected == _range || !mounted) return;
+    setState(() {
+      _range = selected;
+      _selectedCategoryId = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
+    final report = _reportFor(store);
     final currency = store.preferences.currency;
-    final now = DateTime.now();
-    final income = store.incomeThisMonthMinor(now: now);
-    final expenses = store.expensesThisMonthMinor(now: now);
-    final categoryTotals = spendingByCategoryThisMonth(store, now: now);
-    final categoriesById = {
-      for (final category in store.categories) category.id: category,
-    };
-    final budgets = store.budgets.where((budget) => budget.isVisible);
+    final colors = reportCategoryColors(context);
 
     return Column(
       children: [
-        ResponsiveGrid(
-          minTileWidth: 320,
-          children: [
-            AppCard(
-              title: 'Monthly spending',
-              child: Column(
+        Card(
+          child: InkWell(
+            key: const ValueKey('reports-date-range'),
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            onTap: _chooseRange,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              child: Row(
                 children: [
-                  ReportMetricRow(
-                    icon: Icons.calendar_month_outlined,
-                    label: 'Expenses',
-                    value: money(expenses, currency),
+                  const TransactionFormIcon(Icons.calendar_month_outlined),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Date range',
+                          style: Theme.of(context).textTheme.labelMedium
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          report.period.label,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                      ],
+                    ),
                   ),
-                  ReportMetricRow(
-                    icon: Icons.compare_arrows_outlined,
-                    label: 'Income',
-                    value: money(income, currency),
-                  ),
+                  const Icon(Icons.keyboard_arrow_down),
                 ],
               ),
             ),
-            AppCard(
-              title: 'Income vs expenses',
-              child: Column(
-                children: [
-                  ReportMetricRow(
-                    icon: Icons.add_circle_outline,
-                    label: 'Income',
-                    value: money(income, currency),
-                  ),
-                  ReportMetricRow(
-                    icon: Icons.remove_circle_outline,
-                    label: 'Expenses',
-                    value: money(expenses, currency),
-                    isWarning: expenses > income,
-                  ),
-                ],
-              ),
-            ),
-            AppCard(
-              title: 'Cash flow',
-              child: ReportMetricRow(
-                icon: Icons.waterfall_chart_outlined,
-                label: 'This month',
-                value: money(income - expenses, currency),
-                isWarning: income - expenses < 0,
-              ),
-            ),
-            AppCard(
-              title: 'Net worth history',
-              child: Column(
-                children: [
-                  ReportMetricRow(
-                    icon: Icons.flag_outlined,
-                    label: 'Opening',
-                    value: money(store.openingNetWorthMinor, currency),
-                  ),
-                  ReportMetricRow(
-                    icon: Icons.timeline_outlined,
-                    label: 'Ledger change',
-                    value: money(store.netWorthLedgerChangeMinor, currency),
-                    isWarning: store.netWorthLedgerChangeMinor < 0,
-                  ),
-                  ReportMetricRow(
-                    icon: Icons.show_chart_outlined,
-                    label: 'Current',
-                    value: money(store.netWorthMinor, currency),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        AppCard(
-          title: 'Category breakdown',
-          child: Column(
-            children: [
-              if (categoryTotals.isEmpty)
-                const ReportMetricRow(
-                  icon: Icons.pie_chart_outline,
-                  label: 'No spending this month',
-                  value: '',
-                ),
-              for (final entry in sortedCategoryTotals(categoryTotals).take(6))
-                ReportMetricRow(
-                  icon: categoryIconForId(entry.key, categoriesById),
-                  label: categoriesById[entry.key]?.name ?? 'Uncategorized',
-                  value: money(entry.value, currency),
-                ),
-            ],
           ),
         ),
-        const SizedBox(height: 16),
-        AppCard(
-          title: 'Budget history',
-          child: Column(
-            children: [
-              if (budgets.isEmpty)
-                const ReportMetricRow(
-                  icon: Icons.ssid_chart_outlined,
-                  label: 'No active budgets',
-                  value: '',
+        const SizedBox(height: AppSpacing.sm),
+        ReportSummaryCard(report: report, currency: currency),
+        const SizedBox(height: AppSpacing.sm),
+        ReportSectionCard(
+          title: 'Spending by Category',
+          child: report.hasExpenses
+              ? CategorySpendingReport(
+                  totals: report.categoryTotals,
+                  totalExpensesMinor: report.expensesMinor,
+                  currency: currency,
+                  colors: colors,
+                  selectedCategoryId: _selectedCategoryId,
+                  onSelected: (categoryId) {
+                    setState(() {
+                      _selectedCategoryId = _selectedCategoryId == categoryId
+                          ? null
+                          : categoryId;
+                    });
+                  },
+                )
+              : const ReportEmptyState(
+                  icon: Icons.donut_large_outlined,
+                  message: 'No expense data for this period',
                 ),
-              for (final budget in budgets.take(6))
-                ReportMetricRow(
-                  icon: Icons.ssid_chart_outlined,
-                  label: budget.name,
-                  value:
-                      '${money(store.spentThisMonthForBudget(budget, now: now), currency)} / ${money(budget.amountMinor, currency)}',
-                  isWarning: budget.isOverBudget(
-                    store.spentThisMonthForBudget(budget, now: now),
-                  ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        ReportSectionCard(
+          title: 'Monthly Trend',
+          child: report.hasTrendData
+              ? MonthlyTrendReport(
+                  totals: report.monthlyTotals,
+                  currency: currency,
+                )
+              : const ReportEmptyState(
+                  icon: Icons.bar_chart_outlined,
+                  message: 'No trend data yet',
                 ),
-            ],
-          ),
         ),
       ],
     );
   }
 }
 
-class ReportMetricRow extends StatelessWidget {
-  const ReportMetricRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.isWarning = false,
+class ReportSummaryCard extends StatelessWidget {
+  const ReportSummaryCard({
+    required this.report,
+    required this.currency,
     super.key,
   });
 
-  final IconData icon;
-  final String label;
-  final String value;
-  final bool isWarning;
+  final ReportSnapshot report;
+  final CurrencyFormatSettings currency;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+    final net = report.netCashFlowMinor;
+    return ReportSectionCard(
+      title: report.period.label,
       child: Row(
         children: [
-          Icon(icon, color: isWarning ? AppTheme.rose : AppTheme.accent),
-          const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w800),
+            child: ReportSummaryValue(
+              key: const ValueKey('report-summary-income'),
+              label: 'Income',
+              value: money(report.incomeMinor, currency),
+              color: AppTheme.accent,
             ),
           ),
-          if (value.isNotEmpty)
-            Text(
-              value,
-              style: TextStyle(
-                color: isWarning ? AppTheme.rose : AppTheme.ink,
-                fontWeight: FontWeight.w900,
-              ),
+          const ReportVerticalDivider(),
+          Expanded(
+            child: ReportSummaryValue(
+              key: const ValueKey('report-summary-expenses'),
+              label: 'Expenses',
+              value: money(report.expensesMinor, currency),
+              color: AppTheme.rose,
             ),
+          ),
+          const ReportVerticalDivider(),
+          Expanded(
+            child: ReportSummaryValue(
+              key: const ValueKey('report-summary-net'),
+              label: 'Net Cash Flow',
+              value: money(net, currency),
+              color: net < 0 ? AppTheme.rose : AppTheme.accent,
+            ),
+          ),
         ],
       ),
     );
   }
+}
+
+class ReportSummaryValue extends StatelessWidget {
+  const ReportSummaryValue({
+    required this.label,
+    required this.value,
+    required this.color,
+    super.key,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 2,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxs),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: AppTextStyles.money(context, fontSize: 17, color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ReportVerticalDivider extends StatelessWidget {
+  const ReportVerticalDivider({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 46,
+      color: Theme.of(context).dividerColor.withValues(alpha: 0.55),
+    );
+  }
+}
+
+class ReportSectionCard extends StatelessWidget {
+  const ReportSectionCard({
+    required this.title,
+    required this.child,
+    super.key,
+  });
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class CategorySpendingReport extends StatelessWidget {
+  const CategorySpendingReport({
+    required this.totals,
+    required this.totalExpensesMinor,
+    required this.currency,
+    required this.colors,
+    required this.selectedCategoryId,
+    required this.onSelected,
+    super.key,
+  });
+
+  final List<CategoryReportTotal> totals;
+  final int totalExpensesMinor;
+  final CurrencyFormatSettings currency;
+  final List<Color> colors;
+  final String? selectedCategoryId;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final chart = Semantics(
+      label:
+          'Spending by category donut chart. Total expenses ${money(totalExpensesMinor, currency)}.',
+      child: SizedBox(
+        key: const ValueKey('spending-category-donut'),
+        width: 190,
+        height: 190,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            PieChart(
+              PieChartData(
+                centerSpaceRadius: 57,
+                sectionsSpace: 2,
+                pieTouchData: PieTouchData(
+                  touchCallback: (event, response) {
+                    if (!event.isInterestedForInteractions ||
+                        response?.touchedSection == null) {
+                      return;
+                    }
+                    final index = response!.touchedSection!.touchedSectionIndex;
+                    if (index >= 0 && index < totals.length) {
+                      onSelected(totals[index].id);
+                    }
+                  },
+                ),
+                sections: [
+                  for (var index = 0; index < totals.length; index += 1)
+                    PieChartSectionData(
+                      value: totals[index].amountMinor.toDouble(),
+                      color: colors[index % colors.length],
+                      radius: selectedCategoryId == totals[index].id ? 36 : 31,
+                      showTitle: false,
+                      borderSide: selectedCategoryId == totals[index].id
+                          ? BorderSide(
+                              color: Theme.of(context).colorScheme.surface,
+                              width: 2,
+                            )
+                          : BorderSide.none,
+                    ),
+                ],
+              ),
+            ),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Expenses',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                FittedBox(
+                  child: Text(
+                    money(totalExpensesMinor, currency),
+                    style: AppTextStyles.money(context, fontSize: 18),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+    final ranking = Column(
+      children: [
+        for (var index = 0; index < totals.length; index += 1)
+          CategoryReportRow(
+            key: ValueKey('report-category-${totals[index].id}'),
+            total: totals[index],
+            color: colors[index % colors.length],
+            currency: currency,
+            selected: selectedCategoryId == totals[index].id,
+            onTap: () => onSelected(totals[index].id),
+            showDivider: index != totals.length - 1,
+          ),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 620) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: Center(child: chart)),
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(child: ranking),
+            ],
+          );
+        }
+        return Column(
+          children: [
+            chart,
+            const SizedBox(height: AppSpacing.sm),
+            ranking,
+          ],
+        );
+      },
+    );
+  }
+}
+
+class CategoryReportRow extends StatelessWidget {
+  const CategoryReportRow({
+    required this.total,
+    required this.color,
+    required this.currency,
+    required this.selected,
+    required this.onTap,
+    required this.showDivider,
+    super.key,
+  });
+
+  final CategoryReportTotal total;
+  final Color color;
+  final CurrencyFormatSettings currency;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool showDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    final percent = (total.percentage * 100).round();
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadii.control),
+      onTap: onTap,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.accent.withValues(alpha: 0.08)
+              : Colors.transparent,
+          border: showDivider
+              ? Border(
+                  bottom: BorderSide(
+                    color: Theme.of(
+                      context,
+                    ).dividerColor.withValues(alpha: 0.45),
+                  ),
+                )
+              : null,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 6),
+          child: Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  total.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                money(total.amountMinor, currency),
+                style: const TextStyle(
+                  fontFeatures: [AppTextStyles.tabularFigures],
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              SizedBox(
+                width: 42,
+                child: Text(
+                  '$percent%',
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontFeatures: const [AppTextStyles.tabularFigures],
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MonthlyTrendReport extends StatelessWidget {
+  const MonthlyTrendReport({
+    required this.totals,
+    required this.currency,
+    super.key,
+  });
+
+  final List<MonthlyReportTotal> totals;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxAmount = totals.fold<int>(
+      0,
+      (maximum, month) =>
+          max(maximum, max(month.incomeMinor, month.expensesMinor)),
+    );
+    final maxY = max(1, maxAmount).toDouble() / 100 * 1.18;
+    final chartWidth = max(
+      MediaQuery.sizeOf(context).width - 82,
+      totals.length * 52.0,
+    );
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            ReportLegendDot(color: AppTheme.accent, label: 'Income'),
+            SizedBox(width: AppSpacing.lg),
+            ReportLegendDot(color: AppTheme.rose, label: 'Expenses'),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Semantics(
+          label: monthlyTrendSemantics(totals, currency),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              key: const ValueKey('monthly-trend-chart'),
+              width: chartWidth,
+              height: 230,
+              child: BarChart(
+                BarChartData(
+                  minY: 0,
+                  maxY: maxY,
+                  alignment: BarChartAlignment.spaceAround,
+                  borderData: FlBorderData(show: false),
+                  gridData: FlGridData(
+                    drawVerticalLine: false,
+                    horizontalInterval: maxY / 4,
+                    getDrawingHorizontalLine: (_) => FlLine(
+                      color: Theme.of(
+                        context,
+                      ).dividerColor.withValues(alpha: 0.38),
+                      strokeWidth: 1,
+                    ),
+                  ),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 44,
+                        interval: maxY / 4,
+                        getTitlesWidget: (value, _) => Padding(
+                          padding: const EdgeInsets.only(right: 5),
+                          child: Text(
+                            compactMoneyAxis(value),
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 30,
+                        getTitlesWidget: (value, _) {
+                          final index = value.toInt();
+                          if (index < 0 || index >= totals.length) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 7),
+                            child: Text(
+                              reportMonthAbbreviation(totals[index].month),
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  barTouchData: BarTouchData(
+                    touchTooltipData: BarTouchTooltipData(
+                      getTooltipColor: (_) =>
+                          Theme.of(context).colorScheme.inverseSurface,
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        final month = totals[group.x];
+                        final label = rodIndex == 0 ? 'Income' : 'Expenses';
+                        final amount = rodIndex == 0
+                            ? month.incomeMinor
+                            : month.expensesMinor;
+                        return BarTooltipItem(
+                          '$label\n${money(amount, currency)}',
+                          TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onInverseSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  barGroups: [
+                    for (var index = 0; index < totals.length; index += 1)
+                      BarChartGroupData(
+                        x: index,
+                        barsSpace: 3,
+                        barRods: [
+                          BarChartRodData(
+                            toY: totals[index].incomeMinor / 100,
+                            width: 9,
+                            color: AppTheme.accent,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(3),
+                            ),
+                          ),
+                          BarChartRodData(
+                            toY: totals[index].expensesMinor / 100,
+                            width: 9,
+                            color: AppTheme.rose,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(3),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.xs,
+          alignment: WrapAlignment.center,
+          children: [
+            for (final month in totals)
+              Text(
+                '${reportMonthAbbreviation(month.month)} net ${money(month.netCashFlowMinor, currency)}',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: month.netCashFlowMinor < 0
+                      ? AppTheme.rose
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class ReportLegendDot extends StatelessWidget {
+  const ReportLegendDot({required this.color, required this.label, super.key});
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: Theme.of(
+            context,
+          ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ],
+    );
+  }
+}
+
+class ReportEmptyState extends StatelessWidget {
+  const ReportEmptyState({
+    required this.icon,
+    required this.message,
+    super.key,
+  });
+
+  final IconData icon;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+      child: Column(
+        children: [
+          Icon(icon, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+List<Color> reportCategoryColors(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return [
+    AppTheme.accent,
+    AppTheme.blue,
+    AppTheme.gold,
+    AppTheme.rose,
+    const Color(0xFF775AA8),
+    isDark ? const Color(0xFF75A184) : const Color(0xFF4F8F5F),
+  ];
+}
+
+String reportMonthAbbreviation(DateTime month) {
+  const labels = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return labels[month.month - 1];
+}
+
+String compactMoneyAxis(double value) {
+  if (value >= 1000000) {
+    return '${(value / 1000000).toStringAsFixed(value >= 10000000 ? 0 : 1)}M';
+  }
+  if (value >= 1000) {
+    return '${(value / 1000).toStringAsFixed(value >= 10000 ? 0 : 1)}K';
+  }
+  return value.round().toString();
+}
+
+String monthlyTrendSemantics(
+  List<MonthlyReportTotal> totals,
+  CurrencyFormatSettings currency,
+) {
+  return [
+    'Monthly income and expenses.',
+    for (final month in totals)
+      '${reportMonthAbbreviation(month.month)} ${month.month.year}: income ${money(month.incomeMinor, currency)}, expenses ${money(month.expensesMinor, currency)}, net ${money(month.netCashFlowMinor, currency)}.',
+  ].join(' ');
 }
 
 class SettingsDropdown<T> extends StatelessWidget {
@@ -13033,14 +13858,6 @@ IconData categoryIconForName(String? iconName, v2_category.CategoryKind kind) {
   };
 }
 
-IconData categoryIconForId(
-  String categoryId,
-  Map<String, v2_category.CategoryRecord> categoriesById,
-) {
-  final category = categoriesById[categoryId];
-  return category == null ? Icons.pie_chart_outline : categoryIcon(category);
-}
-
 String categorySubtitle(
   v2_category.CategoryRecord category,
   Map<String, v2_category.CategoryRecord> categoriesById,
@@ -13048,42 +13865,6 @@ String categorySubtitle(
   final kind = categoryKindLabel(category.kind.name);
   final parent = categoriesById[category.parentCategoryId];
   return parent == null ? kind : '$kind · ${parent.name}';
-}
-
-Map<String, int> spendingByCategoryThisMonth(
-  FinanceDataStore store, {
-  DateTime? now,
-}) {
-  final anchor = now ?? DateTime.now();
-  final periodStart = DateTime(anchor.year, anchor.month);
-  final periodEnd = DateTime(anchor.year, anchor.month + 1);
-  final totals = <String, int>{};
-  for (final transaction in store.transactions) {
-    if (transaction.isDeleted ||
-        transaction.type != TransactionType.expense ||
-        transaction.date.isBefore(periodStart) ||
-        !transaction.date.isBefore(periodEnd)) {
-      continue;
-    }
-    if (transaction.isSplit) {
-      for (final split in transaction.splitLines) {
-        totals[split.categoryId] =
-            (totals[split.categoryId] ?? 0) + split.amountMinor.abs();
-      }
-      continue;
-    }
-    final categoryId = transaction.categoryId ?? '';
-    totals[categoryId] =
-        (totals[categoryId] ?? 0) + transaction.amountMinor.abs();
-  }
-  return totals;
-}
-
-List<MapEntry<String, int>> sortedCategoryTotals(Map<String, int> totals) {
-  return totals.entries.toList()..sort((a, b) {
-    final amountComparison = b.value.compareTo(a.value);
-    return amountComparison == 0 ? a.key.compareTo(b.key) : amountComparison;
-  });
 }
 
 String categoryKindLabel(String kindName) {
