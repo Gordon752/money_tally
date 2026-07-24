@@ -24,6 +24,18 @@ void main() {
       categoryId: 'dining',
       payee: 'Card payment',
       amountMinor: 25000,
+      splitLines: const [
+        TransactionSplitLine(
+          id: 'split-dining',
+          categoryId: 'dining',
+          amountMinor: 15000,
+        ),
+        TransactionSplitLine(
+          id: 'split-other',
+          categoryId: 'other',
+          amountMinor: 10000,
+        ),
+      ],
       nextDate: DateTime(2026, 8, 1),
       frequency: RecurrenceFrequency.monthly,
       occurrences: [
@@ -60,6 +72,9 @@ void main() {
     );
 
     expect(restoredSchedule.occurrences, hasLength(1));
+    expect(restoredSchedule.splitLines, hasLength(2));
+    expect(restoredSchedule.splitTotalMinor, 25000);
+    expect(restoredSchedule.hasValidSplitTotal, isTrue);
     expect(restoredSchedule.occurrences.single.actualAmountMinor, 90000);
     expect(restoredSchedule.occurrences.single.plannedAmountMinor, 25000);
     expect(restoredTransaction.scheduledOccurrenceDate, DateTime(2026, 7, 1));
@@ -608,6 +623,96 @@ void main() {
       expect(store.scheduledTransactions, isEmpty);
     },
   );
+
+  test('scheduled splits persist locally and through record sync', () async {
+    SharedPreferences.setMockInitialValues({});
+    const localRepository = LocalFinanceDataSetRepository(
+      storageKey: 'scheduled_split_persistence_test',
+    );
+    final remote = FakeRecordRepository();
+    final store = FinanceDataStore(
+      dataSet: _dataSet(),
+      localRepository: localRepository,
+      remoteRepository: remote,
+      userId: 'split-user',
+    );
+    final schedule = ScheduledTransactionRecord(
+      id: 'scheduled-split',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      splitLines: const [
+        TransactionSplitLine(
+          id: 'scheduled-dining',
+          categoryId: 'dining',
+          amountMinor: 6000,
+        ),
+        TransactionSplitLine(
+          id: 'scheduled-snacks',
+          categoryId: 'snacks',
+          amountMinor: 4000,
+        ),
+      ],
+      payee: 'Split plan',
+      amountMinor: 10000,
+      nextDate: DateTime(2026, 8, 15),
+      frequency: RecurrenceFrequency.monthly,
+      sync: SyncMetadata.fresh(now: DateTime(2026, 7, 20)),
+    );
+
+    await store.saveScheduledTransaction(schedule);
+
+    expect(remote.savedScheduled, hasLength(1));
+    expect(
+      remote.savedScheduled.single.splitLines.map((line) => line.toJson()),
+      schedule.splitLines.map((line) => line.toJson()),
+    );
+    final reloaded = await FinanceDataStore.load(
+      localRepository: localRepository,
+    );
+    final persisted = reloaded.scheduledTransactions.singleWhere(
+      (item) => item.id == schedule.id,
+    );
+    expect(
+      persisted.splitLines.map((line) => line.toJson()),
+      schedule.splitLines.map((line) => line.toJson()),
+    );
+    expect(persisted.splitTotalMinor, 10000);
+    expect(persisted.hasValidSplitTotal, isTrue);
+  });
+
+  test('scheduled split validation rejects an unbalanced payload', () async {
+    final store = FinanceDataStore(dataSet: _dataSet());
+    final schedule = ScheduledTransactionRecord(
+      id: 'unbalanced-split',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      splitLines: const [
+        TransactionSplitLine(
+          id: 'scheduled-dining',
+          categoryId: 'dining',
+          amountMinor: 6000,
+        ),
+        TransactionSplitLine(
+          id: 'scheduled-snacks',
+          categoryId: 'snacks',
+          amountMinor: 3000,
+        ),
+      ],
+      payee: 'Unbalanced plan',
+      amountMinor: 10000,
+      nextDate: DateTime(2026, 8, 15),
+      frequency: RecurrenceFrequency.monthly,
+      sync: SyncMetadata.fresh(now: DateTime(2026, 7, 20)),
+    );
+
+    await expectLater(
+      store.saveScheduledTransaction(schedule),
+      throwsA(isA<FinanceDataValidationException>()),
+    );
+    expect(store.scheduledTransactions, isEmpty);
+  });
 
   test('store seeds empty per-record remote when sync attaches', () async {
     final remote = FakeRecordRepository(dataSet: _emptyDataSet());
@@ -1298,6 +1403,613 @@ void main() {
       expect(notifications, greaterThan(0));
     },
   );
+
+  test(
+    'undo scheduled overpayment restores planned occurrence and exact balance',
+    () async {
+      final occurrenceDate = DateTime(2026, 8, 21);
+      final paymentDate = DateTime(2026, 8, 15);
+      final occurrence = ScheduledOccurrenceRecord(
+        scheduledDate: occurrenceDate,
+        plannedAmountMinor: 10000,
+        status: ScheduledOccurrenceStatus.paid,
+        actualAmountMinor: 90000,
+        actualPaymentDate: paymentDate,
+        transactionId: 'generated-overpayment',
+      );
+      final schedule =
+          _scheduledTransaction(
+            id: 'scheduled-overpayment',
+            nextDate: DateTime(2026, 9, 21),
+          ).copyWith(
+            amountMinor: 10000,
+            occurrences: [occurrence],
+            scheduledNotificationIds: const [41],
+          );
+      final generated = TransactionRecord(
+        id: 'generated-overpayment',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        date: paymentDate,
+        payee: 'Planned bill',
+        amountMinor: 90000,
+        scheduledTransactionId: schedule.id,
+        scheduledOccurrenceDate: occurrenceDate,
+        scheduledPlannedAmountMinor: 10000,
+        sync: SyncMetadata.fresh(now: paymentDate),
+      );
+      final scheduler = RecordingNotificationScheduler(idsToReturn: const [42]);
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          transactions: [generated],
+          scheduledTransactions: [schedule],
+          preferences: const UserPreferences(notificationsEnabled: true),
+        ),
+        notificationScheduler: scheduler,
+      );
+
+      expect(store.scheduledPaymentUndoTarget(generated.id), isNotNull);
+      expect(store.balanceForAccount('checking'), 10000);
+
+      await store.undoScheduledPayment(generated.id, now: DateTime(2026, 8, 1));
+
+      final reversed = store.transactions.single;
+      final restored = store.scheduledTransactions.single;
+      expect(reversed.isDeleted, isTrue);
+      expect(store.balanceForAccount('checking'), 100000);
+      expect(restored.nextDate, occurrenceDate);
+      expect(restored.amountMinor, 10000);
+      expect(restored.occurrences, hasLength(1));
+      expect(
+        restored.occurrences.single.status,
+        ScheduledOccurrenceStatus.pending,
+      );
+      expect(restored.occurrences.single.plannedAmountMinor, 10000);
+      expect(restored.occurrences.single.actualAmountMinor, isNull);
+      expect(restored.occurrences.single.actualPaymentDate, isNull);
+      expect(restored.occurrences.single.transactionId, isNull);
+      expect(
+        store
+            .actionableScheduledTransactions(now: DateTime(2026, 8, 1))
+            .single
+            .nextDate,
+        occurrenceDate,
+      );
+      expect(scheduler.cancelledIds, contains(schedule.id));
+      expect(scheduler.scheduledIds, contains(schedule.id));
+      expect(store.scheduledPaymentUndoTarget(generated.id), isNull);
+      await expectLater(
+        store.undoScheduledPayment(generated.id, now: DateTime(2026, 8, 1)),
+        throwsA(isA<FinanceDataValidationException>()),
+      );
+    },
+  );
+
+  test('undo scheduled transfer reverses both account effects once', () async {
+    final occurrenceDate = DateTime(2026, 8, 21);
+    final occurrence = ScheduledOccurrenceRecord(
+      scheduledDate: occurrenceDate,
+      plannedAmountMinor: 25000,
+      status: ScheduledOccurrenceStatus.paid,
+      actualAmountMinor: 25000,
+      actualPaymentDate: occurrenceDate,
+      transactionId: 'generated-transfer',
+    );
+    final schedule = ScheduledTransactionRecord(
+      id: 'scheduled-transfer',
+      type: TransactionType.transfer,
+      accountId: 'checking',
+      transferAccountId: 'cash',
+      payee: 'Savings transfer',
+      amountMinor: 25000,
+      nextDate: DateTime(2026, 9, 21),
+      frequency: RecurrenceFrequency.monthly,
+      occurrences: [occurrence],
+      sync: SyncMetadata.fresh(now: DateTime(2026, 7, 21)),
+    );
+    final generated = TransactionRecord(
+      id: 'generated-transfer',
+      type: TransactionType.transfer,
+      accountId: 'checking',
+      transferAccountId: 'cash',
+      date: occurrenceDate,
+      payee: 'Savings transfer',
+      amountMinor: 25000,
+      scheduledTransactionId: schedule.id,
+      scheduledOccurrenceDate: occurrenceDate,
+      scheduledPlannedAmountMinor: 25000,
+      sync: SyncMetadata.fresh(now: occurrenceDate),
+    );
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        transactions: [generated],
+        scheduledTransactions: [schedule],
+      ),
+    );
+
+    expect(store.balanceForAccount('checking'), 75000);
+    expect(store.balanceForAccount('cash'), 35000);
+    await store.undoScheduledPayment(generated.id, now: DateTime(2026, 8, 1));
+    expect(store.balanceForAccount('checking'), 100000);
+    expect(store.balanceForAccount('cash'), 10000);
+    expect(store.transactions.single.isDeleted, isTrue);
+    expect(
+      store.scheduledTransactions.single.occurrences.single.status,
+      ScheduledOccurrenceStatus.pending,
+    );
+  });
+
+  test(
+    'undo scheduled split removes generated transaction without orphaning lines',
+    () async {
+      final occurrenceDate = DateTime(2026, 8, 21);
+      final occurrence = ScheduledOccurrenceRecord(
+        scheduledDate: occurrenceDate,
+        plannedAmountMinor: 10000,
+        status: ScheduledOccurrenceStatus.paid,
+        actualAmountMinor: 10000,
+        actualPaymentDate: occurrenceDate,
+        transactionId: 'generated-split',
+      );
+      final schedule =
+          _scheduledTransaction(
+            id: 'scheduled-split-undo',
+            nextDate: DateTime(2026, 9, 21),
+          ).copyWith(
+            amountMinor: 10000,
+            splitLines: const [
+              TransactionSplitLine(
+                id: 'planned-dining',
+                categoryId: 'dining',
+                amountMinor: 6000,
+              ),
+              TransactionSplitLine(
+                id: 'planned-snacks',
+                categoryId: 'snacks',
+                amountMinor: 4000,
+              ),
+            ],
+            occurrences: [occurrence],
+          );
+      final generated = TransactionRecord(
+        id: 'generated-split',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        date: occurrenceDate,
+        payee: 'Split bill',
+        amountMinor: 10000,
+        splitLines: const [
+          TransactionSplitLine(
+            id: 'actual-dining',
+            categoryId: 'dining',
+            amountMinor: 6000,
+          ),
+          TransactionSplitLine(
+            id: 'actual-snacks',
+            categoryId: 'snacks',
+            amountMinor: 4000,
+          ),
+        ],
+        scheduledTransactionId: schedule.id,
+        scheduledOccurrenceDate: occurrenceDate,
+        scheduledPlannedAmountMinor: 10000,
+        sync: SyncMetadata.fresh(now: occurrenceDate),
+      );
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          transactions: [generated],
+          scheduledTransactions: [schedule],
+        ),
+      );
+
+      await store.undoScheduledPayment(generated.id, now: DateTime(2026, 8, 1));
+
+      expect(store.transactions.where((item) => !item.isDeleted), isEmpty);
+      expect(store.transactions.single.splitLines, hasLength(2));
+      expect(store.scheduledTransactions.single.splitLines, hasLength(2));
+      expect(
+        store.scheduledTransactions.single.occurrences.single.status,
+        ScheduledOccurrenceStatus.pending,
+      );
+    },
+  );
+
+  test('undo fails atomically when a linked account is unavailable', () async {
+    final occurrenceDate = DateTime(2026, 8, 21);
+    final occurrence = ScheduledOccurrenceRecord(
+      scheduledDate: occurrenceDate,
+      plannedAmountMinor: 10000,
+      status: ScheduledOccurrenceStatus.paid,
+      actualAmountMinor: 10000,
+      actualPaymentDate: occurrenceDate,
+      transactionId: 'generated-orphan',
+    );
+    final schedule = _scheduledTransaction(
+      id: 'scheduled-orphan',
+      nextDate: DateTime(2026, 9, 21),
+    ).copyWith(amountMinor: 10000, occurrences: [occurrence]);
+    final generated = TransactionRecord(
+      id: 'generated-orphan',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      date: occurrenceDate,
+      payee: 'Orphaned payment',
+      amountMinor: 10000,
+      scheduledTransactionId: schedule.id,
+      scheduledOccurrenceDate: occurrenceDate,
+      scheduledPlannedAmountMinor: 10000,
+      sync: SyncMetadata.fresh(now: occurrenceDate),
+    );
+    final deletedChecking = _dataSet().accounts.first.copyWith(
+      isArchived: true,
+      sync: _dataSet().accounts.first.sync.deleted(),
+    );
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        accounts: [deletedChecking, _dataSet().accounts.last],
+        transactions: [generated],
+        scheduledTransactions: [schedule],
+      ),
+    );
+
+    await expectLater(
+      store.undoScheduledPayment(generated.id, now: DateTime(2026, 8, 1)),
+      throwsA(isA<FinanceDataValidationException>()),
+    );
+    expect(store.transactions.single.isDeleted, isFalse);
+    expect(
+      store.scheduledTransactions.single.occurrences.single.status,
+      ScheduledOccurrenceStatus.paid,
+    );
+  });
+
+  test('manual and incomplete links are never eligible for scheduled undo', () {
+    final manual = TransactionRecord(
+      id: 'manual',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      date: DateTime(2026, 8, 1),
+      payee: 'Manual',
+      amountMinor: 1000,
+      sync: SyncMetadata.fresh(now: DateTime(2026, 8, 1)),
+    );
+    final incomplete = TransactionRecord(
+      id: 'incomplete',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      date: DateTime(2026, 8, 1),
+      payee: 'Incomplete',
+      amountMinor: 1000,
+      scheduledTransactionId: 'missing-schedule',
+      scheduledOccurrenceDate: DateTime(2026, 8, 1),
+      scheduledPlannedAmountMinor: 1000,
+      sync: SyncMetadata.fresh(now: DateTime(2026, 8, 1)),
+    );
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(transactions: [manual, incomplete]),
+    );
+
+    expect(store.scheduledPaymentUndoTarget(manual.id), isNull);
+    expect(store.scheduledPaymentUndoTarget(incomplete.id), isNull);
+  });
+
+  test('editing a generated payment preserves its undo linkage', () async {
+    final occurrenceDate = DateTime(2026, 8, 21);
+    final occurrence = ScheduledOccurrenceRecord(
+      scheduledDate: occurrenceDate,
+      plannedAmountMinor: 10000,
+      status: ScheduledOccurrenceStatus.paid,
+      actualAmountMinor: 90000,
+      actualPaymentDate: DateTime(2026, 8, 15),
+      transactionId: 'generated-edited',
+    );
+    final schedule = _scheduledTransaction(
+      id: 'scheduled-edited',
+      nextDate: DateTime(2026, 9, 21),
+    ).copyWith(amountMinor: 10000, occurrences: [occurrence]);
+    final generated = TransactionRecord(
+      id: 'generated-edited',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      date: DateTime(2026, 8, 15),
+      payee: 'Edited payment',
+      amountMinor: 90000,
+      scheduledTransactionId: schedule.id,
+      scheduledOccurrenceDate: occurrenceDate,
+      scheduledPlannedAmountMinor: 10000,
+      sync: SyncMetadata.fresh(now: DateTime(2026, 8, 15)),
+    );
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        transactions: [generated],
+        scheduledTransactions: [schedule],
+      ),
+    );
+
+    await store.saveTransaction(generated.copyWith(amountMinor: 80000));
+
+    expect(store.scheduledPaymentUndoTarget(generated.id), isNotNull);
+    expect(store.balanceForAccount('checking'), 20000);
+    await store.undoScheduledPayment(generated.id, now: DateTime(2026, 8, 1));
+    expect(store.balanceForAccount('checking'), 100000);
+    expect(store.scheduledTransactions.single.amountMinor, 10000);
+  });
+
+  test(
+    'undoing an older occurrence preserves later completion and future alert',
+    () async {
+      final restoredDate = DateTime(2026, 7, 21);
+      final laterDate = DateTime(2026, 8, 21);
+      final restoredOccurrence = ScheduledOccurrenceRecord(
+        scheduledDate: restoredDate,
+        plannedAmountMinor: 10000,
+        status: ScheduledOccurrenceStatus.paid,
+        actualAmountMinor: 15000,
+        actualPaymentDate: DateTime(2026, 7, 20),
+        transactionId: 'generated-older',
+      );
+      final laterOccurrence = ScheduledOccurrenceRecord(
+        scheduledDate: laterDate,
+        plannedAmountMinor: 10000,
+        status: ScheduledOccurrenceStatus.paid,
+        actualAmountMinor: 10000,
+        actualPaymentDate: laterDate,
+        transactionId: 'generated-later',
+      );
+      final schedule =
+          _scheduledTransaction(
+            id: 'scheduled-history',
+            nextDate: DateTime(2026, 9, 21),
+          ).copyWith(
+            amountMinor: 10000,
+            occurrences: [restoredOccurrence, laterOccurrence],
+          );
+      final olderTransaction = TransactionRecord(
+        id: 'generated-older',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        date: DateTime(2026, 7, 20),
+        payee: 'Older payment',
+        amountMinor: 15000,
+        scheduledTransactionId: schedule.id,
+        scheduledOccurrenceDate: restoredDate,
+        scheduledPlannedAmountMinor: 10000,
+        sync: SyncMetadata.fresh(now: DateTime(2026, 7, 20)),
+      );
+      final laterTransaction = TransactionRecord(
+        id: 'generated-later',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        date: laterDate,
+        payee: 'Later payment',
+        amountMinor: 10000,
+        scheduledTransactionId: schedule.id,
+        scheduledOccurrenceDate: laterDate,
+        scheduledPlannedAmountMinor: 10000,
+        sync: SyncMetadata.fresh(now: laterDate),
+      );
+      final scheduler = RecordingNotificationScheduler(idsToReturn: const [88]);
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          transactions: [olderTransaction, laterTransaction],
+          scheduledTransactions: [schedule],
+          preferences: const UserPreferences(notificationsEnabled: true),
+        ),
+        notificationScheduler: scheduler,
+      );
+
+      await store.undoScheduledPayment(
+        olderTransaction.id,
+        now: DateTime(2026, 8, 25),
+      );
+
+      final restored = store.scheduledTransactions.single;
+      expect(restored.nextDate, DateTime(2026, 9, 21));
+      expect(
+        restored.occurrences
+            .singleWhere(
+              (item) => isSameScheduledDay(item.scheduledDate, restoredDate),
+            )
+            .status,
+        ScheduledOccurrenceStatus.pending,
+      );
+      expect(
+        restored.occurrences
+            .singleWhere(
+              (item) => isSameScheduledDay(item.scheduledDate, laterDate),
+            )
+            .status,
+        ScheduledOccurrenceStatus.paid,
+      );
+      expect(
+        store.transactions
+            .singleWhere((item) => item.id == laterTransaction.id)
+            .isDeleted,
+        isFalse,
+      );
+      expect(scheduler.scheduledIds, contains(schedule.id));
+    },
+  );
+
+  test(
+    'undo safely reopens an automatically closed one-time schedule',
+    () async {
+      final occurrenceDate = DateTime(2026, 8, 21);
+      final occurrence = ScheduledOccurrenceRecord(
+        scheduledDate: occurrenceDate,
+        plannedAmountMinor: 10000,
+        status: ScheduledOccurrenceStatus.paid,
+        actualAmountMinor: 10000,
+        actualPaymentDate: occurrenceDate,
+        transactionId: 'generated-once',
+      );
+      final schedule = ScheduledTransactionRecord(
+        id: 'scheduled-once',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        payee: 'One time',
+        amountMinor: 10000,
+        nextDate: occurrenceDate,
+        frequency: RecurrenceFrequency.once,
+        lastAction: ScheduledAction.paid,
+        occurrences: [occurrence],
+        sync: SyncMetadata.fresh(
+          now: DateTime(2026, 8, 1),
+        ).deleted(now: occurrenceDate),
+      );
+      final generated = TransactionRecord(
+        id: 'generated-once',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        date: occurrenceDate,
+        payee: 'One time',
+        amountMinor: 10000,
+        scheduledTransactionId: schedule.id,
+        scheduledOccurrenceDate: occurrenceDate,
+        scheduledPlannedAmountMinor: 10000,
+        sync: SyncMetadata.fresh(now: occurrenceDate),
+      );
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          transactions: [generated],
+          scheduledTransactions: [schedule],
+        ),
+      );
+
+      expect(store.scheduledPaymentUndoTarget(generated.id), isNotNull);
+      await store.undoScheduledPayment(generated.id, now: DateTime(2026, 8, 1));
+
+      final restored = store.scheduledTransactions.single;
+      expect(restored.isDeleted, isFalse);
+      expect(restored.lastAction, ScheduledAction.none);
+      expect(restored.nextDate, occurrenceDate);
+      expect(
+        restored.occurrences.single.status,
+        ScheduledOccurrenceStatus.pending,
+      );
+    },
+  );
+
+  test(
+    'undo persists its tombstone and pending occurrence locally and remotely',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      const localRepository = LocalFinanceDataSetRepository(
+        storageKey: 'undo_scheduled_payment_persistence_test',
+      );
+      final occurrenceDate = DateTime(2026, 8, 21);
+      final occurrence = ScheduledOccurrenceRecord(
+        scheduledDate: occurrenceDate,
+        plannedAmountMinor: 10000,
+        status: ScheduledOccurrenceStatus.paid,
+        actualAmountMinor: 10000,
+        actualPaymentDate: occurrenceDate,
+        transactionId: 'generated-persisted-undo',
+      );
+      final schedule = _scheduledTransaction(
+        id: 'scheduled-persisted-undo',
+        nextDate: DateTime(2026, 9, 21),
+      ).copyWith(amountMinor: 10000, occurrences: [occurrence]);
+      final generated = TransactionRecord(
+        id: 'generated-persisted-undo',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'dining',
+        date: occurrenceDate,
+        payee: 'Persisted undo',
+        amountMinor: 10000,
+        scheduledTransactionId: schedule.id,
+        scheduledOccurrenceDate: occurrenceDate,
+        scheduledPlannedAmountMinor: 10000,
+        sync: SyncMetadata.fresh(now: occurrenceDate),
+      );
+      final remote = FakeRecordRepository();
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          transactions: [generated],
+          scheduledTransactions: [schedule],
+        ),
+        localRepository: localRepository,
+        remoteRepository: remote,
+        userId: 'undo-user',
+      );
+
+      await store.undoScheduledPayment(generated.id, now: DateTime(2026, 8, 1));
+
+      expect(remote.savedTransactions.single.isDeleted, isTrue);
+      expect(
+        remote.savedScheduled.single.occurrences.single.status,
+        ScheduledOccurrenceStatus.pending,
+      );
+      final reloaded = await FinanceDataStore.load(
+        localRepository: localRepository,
+      );
+      expect(reloaded.transactions.single.isDeleted, isTrue);
+      expect(
+        reloaded.scheduledTransactions.single.occurrences.single.status,
+        ScheduledOccurrenceStatus.pending,
+      );
+      expect(reloaded.scheduledPaymentUndoTarget(generated.id), isNull);
+    },
+  );
+
+  test('undo rolls back both records when local persistence fails', () async {
+    final occurrenceDate = DateTime(2026, 8, 21);
+    final occurrence = ScheduledOccurrenceRecord(
+      scheduledDate: occurrenceDate,
+      plannedAmountMinor: 10000,
+      status: ScheduledOccurrenceStatus.paid,
+      actualAmountMinor: 10000,
+      actualPaymentDate: occurrenceDate,
+      transactionId: 'generated-failing-undo',
+    );
+    final schedule = _scheduledTransaction(
+      id: 'scheduled-failing-undo',
+      nextDate: DateTime(2026, 9, 21),
+    ).copyWith(amountMinor: 10000, occurrences: [occurrence]);
+    final generated = TransactionRecord(
+      id: 'generated-failing-undo',
+      type: TransactionType.expense,
+      accountId: 'checking',
+      categoryId: 'dining',
+      date: occurrenceDate,
+      payee: 'Failing undo',
+      amountMinor: 10000,
+      scheduledTransactionId: schedule.id,
+      scheduledOccurrenceDate: occurrenceDate,
+      scheduledPlannedAmountMinor: 10000,
+      sync: SyncMetadata.fresh(now: occurrenceDate),
+    );
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        transactions: [generated],
+        scheduledTransactions: [schedule],
+      ),
+      localRepository: const AlwaysFailingLocalRepository(),
+    );
+
+    await expectLater(
+      store.undoScheduledPayment(generated.id, now: DateTime(2026, 8, 1)),
+      throwsStateError,
+    );
+
+    expect(store.transactions.single.isDeleted, isFalse);
+    expect(
+      store.scheduledTransactions.single.occurrences.single.status,
+      ScheduledOccurrenceStatus.paid,
+    );
+    expect(store.balanceForAccount('checking'), 90000);
+  });
 }
 
 class RecordingNotificationScheduler implements NotificationScheduler {

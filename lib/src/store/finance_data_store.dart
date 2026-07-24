@@ -722,6 +722,7 @@ class FinanceDataStore extends ChangeNotifier {
   Future<void> saveScheduledTransaction(
     ScheduledTransactionRecord scheduledTransaction,
   ) async {
+    _validateScheduledTransaction(scheduledTransaction);
     final notificationAdjusted = await _applyScheduledNotificationState(
       scheduledTransaction,
     );
@@ -740,6 +741,7 @@ class FinanceDataStore extends ChangeNotifier {
     required ScheduledTransactionRecord scheduledTransaction,
   }) async {
     _validateTransaction(transaction);
+    _validateScheduledTransaction(scheduledTransaction);
     final previousDataSet = _dataSet;
     ScheduledTransactionRecord? notificationAdjusted;
     try {
@@ -770,6 +772,160 @@ class FinanceDataStore extends ChangeNotifier {
       notifyListeners();
       rethrow;
     }
+  }
+
+  ScheduledPaymentUndoTarget? scheduledPaymentUndoTarget(String transactionId) {
+    final transaction = transactions
+        .where((item) => item.id == transactionId && !item.isDeleted)
+        .firstOrNull;
+    if (transaction == null ||
+        transaction.scheduledTransactionId == null ||
+        transaction.scheduledOccurrenceDate == null ||
+        transaction.scheduledPlannedAmountMinor == null) {
+      return null;
+    }
+    final scheduledTransaction = scheduledTransactions
+        .where((item) => item.id == transaction.scheduledTransactionId)
+        .firstOrNull;
+    if (scheduledTransaction == null) return null;
+    final occurrence = scheduledTransaction.occurrences
+        .where(
+          (item) =>
+              item.status == ScheduledOccurrenceStatus.paid &&
+              item.transactionId == transaction.id &&
+              isSameScheduledDay(
+                item.scheduledDate,
+                transaction.scheduledOccurrenceDate!,
+              ),
+        )
+        .firstOrNull;
+    if (occurrence == null) return null;
+    final automaticallyClosed =
+        scheduledTransaction.isDeleted &&
+        scheduledTransaction.lastAction == ScheduledAction.paid;
+    if (scheduledTransaction.isDeleted && !automaticallyClosed) return null;
+    return ScheduledPaymentUndoTarget(
+      transaction: transaction,
+      scheduledTransaction: scheduledTransaction,
+      occurrence: occurrence,
+    );
+  }
+
+  Future<ScheduledPaymentUndoTarget> undoScheduledPayment(
+    String transactionId, {
+    DateTime? now,
+  }) async {
+    final target = scheduledPaymentUndoTarget(transactionId);
+    if (target == null) {
+      throw const FinanceDataValidationException(
+        'This scheduled payment can no longer be safely undone.',
+      );
+    }
+    final transaction = target.transaction;
+    final scheduledTransaction = target.scheduledTransaction;
+    final occurrence = target.occurrence;
+    if (!hasActionableScheduledAccounts(scheduledTransaction)) {
+      throw const FinanceDataValidationException(
+        'The related account is unavailable. Restore the account before undoing this payment.',
+      );
+    }
+
+    final anchor = now ?? DateTime.now();
+    final today = DateTime(anchor.year, anchor.month, anchor.day);
+    final occurrenceDay = DateTime(
+      occurrence.scheduledDate.year,
+      occurrence.scheduledDate.month,
+      occurrence.scheduledDate.day,
+    );
+    final wasAutomaticallyClosed =
+        scheduledTransaction.isDeleted &&
+        scheduledTransaction.lastAction == ScheduledAction.paid;
+    final shouldRestoreAsNext =
+        wasAutomaticallyClosed ||
+        (!occurrenceDay.isBefore(today) &&
+            occurrenceDay.isBefore(scheduledTransaction.nextDate));
+    final restoredOccurrence = ScheduledOccurrenceRecord(
+      scheduledDate: occurrence.scheduledDate,
+      plannedAmountMinor: occurrence.plannedAmountMinor,
+      status: ScheduledOccurrenceStatus.pending,
+    );
+    final restoredOccurrences = [
+      for (final existing in scheduledTransaction.occurrences)
+        if (existing.transactionId != transaction.id ||
+            !isSameScheduledDay(
+              existing.scheduledDate,
+              occurrence.scheduledDate,
+            ))
+          existing,
+      restoredOccurrence,
+    ];
+    final scheduleSync = scheduledTransaction.isDeleted
+        ? scheduledTransaction.sync.restored(deviceId: deviceId)
+        : scheduledTransaction.sync.touched(deviceId: deviceId);
+    var restoredSchedule = scheduledTransaction.copyWith(
+      nextDate: shouldRestoreAsNext
+          ? occurrence.scheduledDate
+          : scheduledTransaction.nextDate,
+      lastAction: ScheduledAction.none,
+      occurrences: restoredOccurrences,
+      scheduledNotificationIds: const [],
+      sync: scheduleSync,
+      clearLastReminderScheduledAt: true,
+    );
+    final reversedTransaction = transaction.copyWith(
+      sync: transaction.sync.deleted(deviceId: deviceId),
+    );
+    _validateTransaction(reversedTransaction);
+    _validateScheduledTransaction(restoredSchedule);
+
+    final previousDataSet = _dataSet;
+    ScheduledTransactionRecord? notificationAdjusted;
+    try {
+      notificationAdjusted = await _applyScheduledNotificationState(
+        restoredSchedule,
+      );
+      restoredSchedule = notificationAdjusted.copyWith(sync: scheduleSync);
+      _dataSet = _dataSet.copyWith(
+        transactions: _upsert(
+          transactions,
+          reversedTransaction,
+          (item) => item.id,
+        ),
+        scheduledTransactions: _upsert(
+          scheduledTransactions,
+          restoredSchedule,
+          (item) => item.id,
+        ),
+      );
+      await _commit(
+        transaction: reversedTransaction,
+        scheduledTransaction: restoredSchedule,
+      );
+      await refreshScheduledNotificationBadge(now: anchor);
+    } catch (_) {
+      _dataSet = previousDataSet;
+      if (notificationAdjusted != null &&
+          notificationAdjusted.scheduledNotificationIds.isNotEmpty) {
+        await notificationScheduler.cancelScheduledTransaction(
+          notificationAdjusted,
+        );
+      }
+      if (scheduledTransaction.scheduledNotificationIds.isNotEmpty) {
+        try {
+          await notificationScheduler.rescheduleScheduledTransaction(
+            scheduledTransaction,
+          );
+        } catch (error) {
+          debugPrint(
+            'Could not restore the prior scheduled notification after an '
+            'undo rollback: $error',
+          );
+        }
+      }
+      notifyListeners();
+      rethrow;
+    }
+    return target;
   }
 
   Future<void> savePreferences(UserPreferences preferences) async {
@@ -1037,6 +1193,74 @@ class FinanceDataStore extends ChangeNotifier {
     }
   }
 
+  void _validateScheduledTransaction(
+    ScheduledTransactionRecord scheduledTransaction,
+  ) {
+    if (scheduledTransaction.type == TransactionType.transfer) {
+      if (scheduledTransaction.splitLines.isNotEmpty) {
+        throw const FinanceDataValidationException(
+          'Transfers cannot contain category splits.',
+        );
+      }
+      return;
+    }
+    if (scheduledTransaction.type == TransactionType.adjustment) return;
+
+    final splitLines = scheduledTransaction.splitLines;
+    if (splitLines.isEmpty) {
+      // Legacy scheduled records may have no category or split payload. The
+      // polished editor repairs those records before a user saves them, while
+      // allowing unrelated actions such as delete, skip, and history reset to
+      // continue working without a broad migration.
+      return;
+    }
+
+    final categoryId = scheduledTransaction.categoryId;
+    if (categoryId == null || categoryId.isEmpty) {
+      throw const FinanceDataValidationException(
+        'Scheduled income and expense transactions require a category.',
+      );
+    }
+    final eligibleCategoryIds = categories
+        .where((category) => category.isVisible)
+        .map((category) => category.id)
+        .toSet();
+    if (!eligibleCategoryIds.contains(categoryId)) {
+      throw FinanceDataValidationException(
+        'Scheduled transaction category does not exist: $categoryId',
+      );
+    }
+
+    if (!scheduledTransaction.hasValidSplitTotal) {
+      throw FinanceDataValidationException(
+        'Scheduled split total ${scheduledTransaction.splitTotalMinor} does not match amount ${scheduledTransaction.amountMinor.abs()}.',
+      );
+    }
+    final categoryIds = <String>{};
+    for (final line in splitLines) {
+      if (line.amountMinor <= 0) {
+        throw const FinanceDataValidationException(
+          'Scheduled split amounts must be greater than zero.',
+        );
+      }
+      if (!eligibleCategoryIds.contains(line.categoryId)) {
+        throw FinanceDataValidationException(
+          'Scheduled split category does not exist: ${line.categoryId}',
+        );
+      }
+      if (!categoryIds.add(line.categoryId)) {
+        throw const FinanceDataValidationException(
+          'Scheduled split categories cannot be duplicated.',
+        );
+      }
+    }
+    if (splitLines.first.categoryId != categoryId) {
+      throw const FinanceDataValidationException(
+        'Scheduled primary category must match the first split.',
+      );
+    }
+  }
+
   Future<void> _commit({
     List<AccountRecord> accounts = const [],
     CategoryRecord? category,
@@ -1162,6 +1386,9 @@ DateTime? firstUnresolvedScheduledDate(
 }) {
   final day = DateTime(today.year, today.month, today.day);
   final resolvedDates = scheduledTransaction.occurrences
+      .where(
+        (occurrence) => occurrence.status != ScheduledOccurrenceStatus.pending,
+      )
       .map((occurrence) => scheduledDayKey(occurrence.scheduledDate))
       .toSet();
   var candidate = DateTime(
@@ -1230,6 +1457,18 @@ bool isScheduledDueOrOverdue(
     scheduledTransaction.nextDate.day,
   );
   return !dueDate.isAfter(today);
+}
+
+class ScheduledPaymentUndoTarget {
+  const ScheduledPaymentUndoTarget({
+    required this.transaction,
+    required this.scheduledTransaction,
+    required this.occurrence,
+  });
+
+  final TransactionRecord transaction;
+  final ScheduledTransactionRecord scheduledTransaction;
+  final ScheduledOccurrenceRecord occurrence;
 }
 
 FinanceDataSet mergeFinanceDataSetsPreferCurrent({

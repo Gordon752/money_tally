@@ -15,7 +15,7 @@ enum AlertPreference {
 
 enum ScheduledAction { none, paid, skipped }
 
-enum ScheduledOccurrenceStatus { paid, skipped }
+enum ScheduledOccurrenceStatus { pending, paid, skipped }
 
 class ScheduledOccurrenceRecord {
   const ScheduledOccurrenceRecord({
@@ -76,6 +76,7 @@ class ScheduledTransactionRecord {
     this.note = '',
     this.transferAccountId,
     this.categoryId,
+    this.splitLines = const [],
     this.endDate,
     this.alertPreference = AlertPreference.none,
     this.customAlertTimeMinutes,
@@ -91,6 +92,7 @@ class ScheduledTransactionRecord {
   final String accountId;
   final String? transferAccountId;
   final String? categoryId;
+  final List<TransactionSplitLine> splitLines;
   final String payee;
   final String note;
   final int amountMinor;
@@ -108,12 +110,22 @@ class ScheduledTransactionRecord {
 
   bool get hasAlert => alertPreference != AlertPreference.none;
   bool get isDeleted => sync.isDeleted;
+  bool get isSplit => splitLines.isNotEmpty;
+
+  int get splitTotalMinor {
+    return splitLines.fold(0, (total, line) => total + line.amountMinor);
+  }
+
+  bool get hasValidSplitTotal {
+    return !isSplit || splitTotalMinor == amountMinor.abs();
+  }
 
   ScheduledTransactionRecord copyWith({
     TransactionType? type,
     String? accountId,
     String? transferAccountId,
     String? categoryId,
+    List<TransactionSplitLine>? splitLines,
     String? payee,
     String? note,
     int? amountMinor,
@@ -142,6 +154,7 @@ class ScheduledTransactionRecord {
           ? null
           : transferAccountId ?? this.transferAccountId,
       categoryId: clearCategory ? null : categoryId ?? this.categoryId,
+      splitLines: splitLines ?? this.splitLines,
       payee: payee ?? this.payee,
       note: note ?? this.note,
       amountMinor: amountMinor ?? this.amountMinor,
@@ -172,6 +185,7 @@ class ScheduledTransactionRecord {
       'accountId': accountId,
       'transferAccountId': transferAccountId,
       'categoryId': categoryId,
+      'splitLines': splitLines.map((line) => line.toJson()).toList(),
       'payee': payee,
       'note': note,
       'amountMinor': amountMinor,
@@ -200,6 +214,9 @@ class ScheduledTransactionRecord {
       accountId: json['accountId'] as String,
       transferAccountId: json['transferAccountId'] as String?,
       categoryId: json['categoryId'] as String?,
+      splitLines: stringMapList(
+        json['splitLines'],
+      ).map(TransactionSplitLine.fromJson).toList(),
       payee: json['payee'] as String? ?? '',
       note: json['note'] as String? ?? '',
       amountMinor: json['amountMinor'] as int? ?? 0,

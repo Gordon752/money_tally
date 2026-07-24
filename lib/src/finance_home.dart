@@ -3024,11 +3024,7 @@ Future<void> showTransactionOptions(
     case 'duplicate':
       await duplicateTransaction(context, transaction);
     case 'split':
-      await showTransactionDialog(
-        context,
-        transaction: transaction,
-        initialSplitMode: true,
-      );
+      await showTransactionDialog(context, transaction: transaction);
     case 'schedule':
       await makeTransactionScheduled(context, transaction);
     case 'delete':
@@ -3054,6 +3050,7 @@ Future<void> showTransactionDetails(
       transaction.type == TransactionType.expense ||
       transaction.type == TransactionType.income ||
       transaction.type == TransactionType.transfer;
+  final undoTarget = dataStore.scheduledPaymentUndoTarget(transaction.id);
   final signedAmount = switch (transaction.type) {
     TransactionType.expense => -transaction.amountMinor.abs(),
     TransactionType.income => transaction.amountMinor.abs(),
@@ -3074,6 +3071,9 @@ Future<void> showTransactionDetails(
         onClose: () => Navigator.pop(dialogContext),
         onEdit: canEdit ? () => Navigator.pop(dialogContext, 'edit') : null,
         onMarkPaid: null,
+        onUndoScheduledPayment: undoTarget == null
+            ? null
+            : () => Navigator.pop(dialogContext, 'undoScheduledPayment'),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -3162,12 +3162,141 @@ Future<void> showTransactionDetails(
     ),
   );
 
-  if (!context.mounted || action != 'edit') return;
-  if (transaction.type == TransactionType.transfer) {
-    await showTransferDialog(context, transfer: transaction);
-  } else {
-    await showTransactionDialog(context, transaction: transaction);
+  if (!context.mounted) return;
+  if (action == 'edit') {
+    if (transaction.type == TransactionType.transfer) {
+      await showTransferDialog(context, transfer: transaction);
+    } else {
+      await showTransactionDialog(context, transaction: transaction);
+    }
+  } else if (action == 'undoScheduledPayment' && undoTarget != null) {
+    await showUndoScheduledPaymentConfirmation(
+      context,
+      transactionId: transaction.id,
+      target: undoTarget,
+    );
   }
+}
+
+Future<void> showUndoScheduledPaymentConfirmation(
+  BuildContext context, {
+  required String transactionId,
+  required ScheduledPaymentUndoTarget target,
+}) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  var isProcessing = false;
+  String? errorMessage;
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        Future<void> undoPayment() async {
+          if (isProcessing) return;
+          setDialogState(() {
+            isProcessing = true;
+            errorMessage = null;
+          });
+          try {
+            await dataStore.undoScheduledPayment(transactionId);
+            if (dialogContext.mounted) Navigator.pop(dialogContext);
+          } on FinanceDataValidationException catch (error) {
+            if (!dialogContext.mounted) return;
+            setDialogState(() {
+              isProcessing = false;
+              errorMessage = error.message;
+            });
+          } catch (error, stackTrace) {
+            debugPrint(
+              'Undo scheduled payment failed for transaction $transactionId: '
+              '$error\n$stackTrace',
+            );
+            if (!dialogContext.mounted) return;
+            setDialogState(() {
+              isProcessing = false;
+              errorMessage =
+                  'The scheduled payment could not be undone. Please try again.';
+            });
+          }
+        }
+
+        final plannedAmount = target.occurrence.plannedAmountMinor.abs();
+        final actualAmount = target.transaction.amountMinor.abs();
+        return TransactionSheetFrame(
+          title: 'Undo scheduled payment?',
+          actions: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: isProcessing
+                        ? null
+                        : () => Navigator.pop(dialogContext),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: FilledButton(
+                    key: const ValueKey('confirm-undo-scheduled-payment'),
+                    onPressed: isProcessing ? null : undoPayment,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.rose,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: Text(isProcessing ? 'Undoing…' : 'Undo Payment'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'This removes the generated ledger transaction, restores its '
+                'effect on the related account balance, and returns the '
+                'scheduled occurrence to unpaid status.',
+                style: Theme.of(dialogContext).textTheme.bodyLarge,
+              ),
+              if (plannedAmount != actualAmount) ...[
+                const SizedBox(height: AppSpacing.lg),
+                ScheduledTransactionDetailRow(
+                  icon: Icons.event_note_outlined,
+                  label: 'Planned amount',
+                  value: money(plannedAmount, dataStore.preferences.currency),
+                  tabularFigures: true,
+                ),
+                const TransactionFormDivider(),
+                ScheduledTransactionDetailRow(
+                  icon: Icons.receipt_long_outlined,
+                  label: 'Actual payment',
+                  value: money(actualAmount, dataStore.preferences.currency),
+                  tabularFigures: true,
+                ),
+              ],
+              if (errorMessage != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  errorMessage!,
+                  key: const ValueKey('undo-scheduled-payment-error'),
+                  style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(dialogContext).colorScheme.error,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    ),
+  );
 }
 
 IconData transactionDetailIcon(TransactionType type) {
@@ -3398,6 +3527,222 @@ class SplitLineDraft {
   final TextEditingController note;
 }
 
+class InlineSplitAllocationSection extends StatelessWidget {
+  const InlineSplitAllocationSection({
+    required this.keyPrefix,
+    required this.drafts,
+    required this.categories,
+    required this.currency,
+    required this.totalMinor,
+    required this.firstAutoRemainder,
+    required this.onChooseCategory,
+    required this.onAmountChanged,
+    required this.onAdd,
+    required this.onRemove,
+    this.quietWhenZero = false,
+    super.key,
+  });
+
+  final String keyPrefix;
+  final List<SplitLineDraft> drafts;
+  final List<v2_category.CategoryRecord> categories;
+  final CurrencyFormatSettings currency;
+  final int totalMinor;
+  final bool firstAutoRemainder;
+  final ValueChanged<int> onChooseCategory;
+  final void Function(int index, int amountMinor) onAmountChanged;
+  final VoidCallback onAdd;
+  final ValueChanged<int> onRemove;
+  final bool quietWhenZero;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final valueStyle = theme.textTheme.titleMedium?.copyWith(
+      fontSize: 17,
+      fontWeight: FontWeight.w400,
+      letterSpacing: 0,
+      height: 1.15,
+    );
+    final hintStyle = valueStyle?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final splitTotalMinor = drafts.fold<int>(
+      0,
+      (total, line) => total + line.amountMinor.abs(),
+    );
+    final remainingMinor = totalMinor.abs() - splitTotalMinor;
+    final isQuietZeroState = quietWhenZero && totalMinor == 0;
+    final footerLabelStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontWeight: FontWeight.w700,
+    );
+    TextStyle? splitValueStyle({bool danger = false}) =>
+        theme.textTheme.bodyMedium?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: danger ? AppColors.danger : theme.colorScheme.onSurface,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
+
+    return Column(
+      key: ValueKey('$keyPrefix-split-category-field'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(child: TransactionFormLabel('Split Categories')),
+          ],
+        ),
+        for (var index = 0; index < drafts.length; index++) ...[
+          if (index > 0)
+            Divider(
+              height: AppSpacing.md,
+              thickness: 1,
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.42),
+            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.drag_handle,
+                size: 19,
+                color: theme.colorScheme.onSurfaceVariant.withValues(
+                  alpha: 0.62,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: InkWell(
+                  key: ValueKey('$keyPrefix-split-category-$index'),
+                  borderRadius: BorderRadius.circular(AppRadii.control),
+                  onTap: () => onChooseCategory(index),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 7),
+                    child: Text(
+                      categories
+                              .where(
+                                (category) =>
+                                    category.id == drafts[index].categoryId,
+                              )
+                              .firstOrNull
+                              ?.name ??
+                          'Choose category',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          (categories.any(
+                            (category) =>
+                                category.id == drafts[index].categoryId,
+                          )
+                          ? valueStyle
+                          : hintStyle),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              SizedBox(
+                width: 118,
+                child: AmountEntryField(
+                  fieldKey: ValueKey(
+                    '$keyPrefix-split-amount-${drafts[index].id ?? index}-${index == 0 && firstAutoRemainder ? drafts[index].amountMinor : ''}',
+                  ),
+                  initialMinor: drafts[index].amountMinor.abs(),
+                  currency: currency,
+                  labelText: null,
+                  textAlign: TextAlign.right,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: 8,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  textStyle: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                  onChanged: (value) => onAmountChanged(index, value.abs()),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              IconButton(
+                key: ValueKey('$keyPrefix-remove-split-$index'),
+                visualDensity: VisualDensity.compact,
+                tooltip: index == 0
+                    ? 'First split keeps the remainder'
+                    : 'Remove split',
+                onPressed: index == 0 ? null : () => onRemove(index),
+                icon: Icon(
+                  Icons.remove_circle_outline,
+                  size: 20,
+                  color: index == 0
+                      ? theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.32,
+                        )
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ],
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: ValueKey('$keyPrefix-add-split'),
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: EdgeInsets.zero,
+            ),
+            onPressed: onAdd,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Add split'),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Row(
+          children: [
+            const Spacer(),
+            Text('Total', style: footerLabelStyle),
+            const SizedBox(width: AppSpacing.lg),
+            Text(
+              money(splitTotalMinor, currency),
+              style: isQuietZeroState ? footerLabelStyle : splitValueStyle(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Row(
+          children: [
+            const Spacer(),
+            Text('Remaining', style: footerLabelStyle),
+            const SizedBox(width: AppSpacing.lg),
+            Text(
+              isQuietZeroState
+                  ? money(0, currency)
+                  : remainingMinor == 0
+                  ? 'Balanced'
+                  : money(remainingMinor, currency),
+              key: ValueKey('$keyPrefix-split-remaining'),
+              style: isQuietZeroState
+                  ? footerLabelStyle
+                  : splitValueStyle(danger: remainingMinor != 0)?.copyWith(
+                      color: remainingMinor == 0
+                          ? AppTheme.accent
+                          : AppColors.danger,
+                    ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 Future<void> makeTransactionScheduled(
   BuildContext context,
   TransactionRecord transaction,
@@ -3515,7 +3860,7 @@ class _ScheduledViewState extends State<ScheduledView> {
         item,
         scheduledDate: occurrence.scheduledDate,
         plannedAmountMinor: occurrence.plannedAmountMinor,
-        occurrenceRecord: occurrence.record,
+        occurrenceRecord: occurrence.isPending ? null : occurrence.record,
       ),
       onLongPress: () {
         if (!occurrence.isPending) {
@@ -8542,9 +8887,6 @@ Future<bool> showScheduledTransactionDialog(
   final customAlertTime = TextEditingController(
     text: alertTimeInput(existing?.customAlertTimeMinutes ?? 9 * 60),
   );
-  final newCategoryName = TextEditingController();
-  final newCategoryFocusNode = FocusNode();
-  var isCreatingCategory = false;
   var type =
       existing?.type ??
       sourceTransaction?.type ??
@@ -8561,6 +8903,31 @@ Future<bool> showScheduledTransactionDialog(
       ? initialTransferAccountId
       : null;
   var categoryId = existing?.categoryId ?? sourceTransaction?.categoryId;
+  final initialSplitLines =
+      existing?.splitLines ?? sourceTransaction?.splitLines ?? const [];
+  final splitDrafts = initialSplitLines
+      .map(
+        (line) => SplitLineDraft(
+          id: line.id,
+          categoryId: line.categoryId,
+          amountMinor: line.amountMinor,
+          noteText: line.note,
+        ),
+      )
+      .toList();
+  if (splitDrafts.isEmpty && type != TransactionType.transfer) {
+    splitDrafts.add(
+      SplitLineDraft(
+        id: 'split_${DateTime.now().microsecondsSinceEpoch}_0',
+        categoryId: categoryId ?? '',
+        amountMinor: amountMinor.abs(),
+      ),
+    );
+  }
+  var firstSplitAutoRemainder =
+      existing == null &&
+      sourceTransaction == null &&
+      initialSplitLines.isEmpty;
   var frequency =
       existing?.frequency ?? v2_scheduled.RecurrenceFrequency.monthly;
   var alertPreference =
@@ -8577,6 +8944,7 @@ Future<bool> showScheduledTransactionDialog(
           String payee,
           String note,
           int amountMinor,
+          List<TransactionSplitLine> splitLines,
           DateTime nextDate,
           v2_scheduled.RecurrenceFrequency frequency,
           v2_scheduled.AlertPreference alertPreference,
@@ -8593,6 +8961,39 @@ Future<bool> showScheduledTransactionDialog(
                 !categories.any((category) => category.id == categoryId)) {
               categoryId = null;
             }
+            for (final draft in splitDrafts) {
+              if (!categories.any(
+                (category) => category.id == draft.categoryId,
+              )) {
+                draft.categoryId = '';
+              }
+            }
+            if (type != TransactionType.transfer && splitDrafts.isEmpty) {
+              splitDrafts.add(
+                SplitLineDraft(
+                  id: 'split_${DateTime.now().microsecondsSinceEpoch}_${splitDrafts.length}',
+                  categoryId: categoryId ?? '',
+                  amountMinor: amountMinor.abs(),
+                ),
+              );
+            }
+            if (type != TransactionType.transfer &&
+                firstSplitAutoRemainder &&
+                splitDrafts.isNotEmpty) {
+              final otherTotal = splitDrafts
+                  .skip(1)
+                  .fold<int>(
+                    0,
+                    (total, line) => total + line.amountMinor.abs(),
+                  );
+              final remainder = amountMinor.abs() - otherTotal;
+              splitDrafts.first.amountMinor = remainder > 0 ? remainder : 0;
+            }
+            if (type != TransactionType.transfer && splitDrafts.isNotEmpty) {
+              categoryId = splitDrafts.first.categoryId.isEmpty
+                  ? null
+                  : splitDrafts.first.categoryId;
+            }
             if (transferAccountId == accountId) {
               transferAccountId = null;
             }
@@ -8605,6 +9006,22 @@ Future<bool> showScheduledTransactionDialog(
             final selectedCategory = categories
                 .where((category) => category.id == categoryId)
                 .firstOrNull;
+            final splitTotalMinor = splitDrafts.fold<int>(
+              0,
+              (total, line) => total + line.amountMinor.abs(),
+            );
+            final splitCategoryIds = splitDrafts
+                .map((line) => line.categoryId)
+                .where((id) => id.isNotEmpty)
+                .toSet();
+            final splitRowsComplete =
+                splitDrafts.isNotEmpty &&
+                splitDrafts.every(
+                  (line) => line.categoryId.isNotEmpty && line.amountMinor > 0,
+                ) &&
+                splitCategoryIds.length == splitDrafts.length;
+            final splitIsBalanced =
+                splitRowsComplete && splitTotalMinor == amountMinor.abs();
             final mutedStyle = theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
               height: 1.18,
@@ -8630,7 +9047,7 @@ Future<bool> showScheduledTransactionDialog(
                 amountMinor.abs() > 0 &&
                 nextDate.text.trim().isNotEmpty &&
                 (type == TransactionType.transfer ||
-                    selectedCategory != null) &&
+                    (selectedCategory != null && splitIsBalanced)) &&
                 (type != TransactionType.transfer ||
                     (selectedDestination != null &&
                         selectedDestination.id != selectedAccount.id));
@@ -8757,23 +9174,46 @@ Future<bool> showScheduledTransactionDialog(
               });
             }
 
-            Future<void> createScheduledCategory() async {
-              final name = newCategoryName.text.trim();
-              if (name.isEmpty) return;
-              final createdId = await createBasicCategory(
-                dataStore,
-                name: name,
-                kind: type == TransactionType.income
-                    ? v2_category.CategoryKind.income
-                    : v2_category.CategoryKind.expense,
-              );
-              if (!context.mounted) return;
+            void recalculateScheduledRemainder() {
+              if (!firstSplitAutoRemainder || splitDrafts.isEmpty) return;
+              final otherTotal = splitDrafts
+                  .skip(1)
+                  .fold<int>(
+                    0,
+                    (total, line) => total + line.amountMinor.abs(),
+                  );
+              final remainder = amountMinor.abs() - otherTotal;
+              splitDrafts.first.amountMinor = remainder > 0 ? remainder : 0;
+            }
+
+            Future<void> chooseScheduledSplitCategory(int index) async {
               FocusManager.instance.primaryFocus?.unfocus();
+              final selectedId = await showTransactionCategoryFlow(
+                context,
+                dataStore: dataStore,
+                isExpense: type == TransactionType.expense,
+                selectedCategoryId: splitDrafts[index].categoryId,
+              );
+              if (selectedId == null || !context.mounted) return;
               setDialogState(() {
-                categoryId = createdId;
-                isCreatingCategory = false;
-                newCategoryName.clear();
+                splitDrafts[index].categoryId = selectedId;
+                if (index == 0) categoryId = selectedId;
               });
+            }
+
+            List<TransactionSplitLine> buildScheduledSplitLines() {
+              if (type == TransactionType.transfer) return const [];
+              return [
+                for (var index = 0; index < splitDrafts.length; index++)
+                  TransactionSplitLine(
+                    id:
+                        splitDrafts[index].id ??
+                        'split_${DateTime.now().microsecondsSinceEpoch}_$index',
+                    categoryId: splitDrafts[index].categoryId,
+                    amountMinor: splitDrafts[index].amountMinor.abs(),
+                    note: splitDrafts[index].note.text.trim(),
+                  ),
+              ];
             }
 
             void saveResult() {
@@ -8792,6 +9232,7 @@ Future<bool> showScheduledTransactionDialog(
                     : payee.text.trim(),
                 note: note.text.trim(),
                 amountMinor: amountMinor.abs(),
+                splitLines: buildScheduledSplitLines(),
                 nextDate: parseDateInput(nextDate.text, DateTime.now()),
                 frequency: frequency,
                 alertPreference: alertPreference,
@@ -8855,17 +9296,15 @@ Future<bool> showScheduledTransactionDialog(
                         onSelectionChanged: (values) => setDialogState(() {
                           final nextType = values.first;
                           if (nextType == type) return;
+                          final previousType = type;
                           type = nextType;
-                          final nextCategories = scheduledCategoriesForType(
-                            dataStore,
-                            type,
-                          );
                           if (type != TransactionType.transfer &&
-                              categoryId != null &&
-                              !nextCategories.any(
-                                (category) => category.id == categoryId,
-                              )) {
+                              previousType != TransactionType.transfer &&
+                              previousType != type) {
                             categoryId = null;
+                            for (final draft in splitDrafts) {
+                              draft.categoryId = '';
+                            }
                           }
                           if (type == TransactionType.transfer &&
                               transferAccountId == accountId) {
@@ -8913,8 +9352,10 @@ Future<bool> showScheduledTransactionDialog(
                             fontWeight: FontWeight.w600,
                             fontFeatures: [FontFeature.tabularFigures()],
                           ),
-                          onChanged: (value) =>
-                              setDialogState(() => amountMinor = value.abs()),
+                          onChanged: (value) => setDialogState(() {
+                            amountMinor = value.abs();
+                            recalculateScheduledRemainder();
+                          }),
                         ),
                       ),
                     ],
@@ -8999,75 +9440,45 @@ Future<bool> showScheduledTransactionDialog(
                       ],
                     ),
                     const TransactionFormDivider(),
-                    if (isCreatingCategory) ...[
-                      const TransactionFormLabel('New Category'),
-                      Row(
-                        key: const ValueKey('scheduled-new-category'),
-                        children: [
-                          const TransactionFormIcon(Icons.sell_outlined),
-                          const SizedBox(width: AppSpacing.md),
-                          Expanded(
-                            child: TextField(
-                              key: const ValueKey(
-                                'scheduled-new-category-name',
-                              ),
-                              controller: newCategoryName,
-                              focusNode: newCategoryFocusNode,
-                              autofocus: true,
-                              textCapitalization: TextCapitalization.words,
-                              textInputAction: TextInputAction.done,
-                              onSubmitted: (_) => createScheduledCategory(),
-                              decoration: InputDecoration(
-                                hintText: 'Category name',
-                                hintStyle: fieldHintStyle,
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                disabledBorder: InputBorder.none,
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: AppSpacing.sm,
-                                ),
-                              ),
-                              style: fieldValueStyle,
-                            ),
+                    InlineSplitAllocationSection(
+                      keyPrefix: 'scheduled',
+                      drafts: splitDrafts,
+                      categories: categories,
+                      currency: dataStore.preferences.currency,
+                      totalMinor: amountMinor.abs(),
+                      firstAutoRemainder: firstSplitAutoRemainder,
+                      onChooseCategory: chooseScheduledSplitCategory,
+                      onAmountChanged: (index, value) => setDialogState(() {
+                        splitDrafts[index].amountMinor = value.abs();
+                        if (index == 0) {
+                          firstSplitAutoRemainder = false;
+                        } else {
+                          recalculateScheduledRemainder();
+                        }
+                      }),
+                      onAdd: () => setDialogState(() {
+                        final currentTotal = splitDrafts.fold<int>(
+                          0,
+                          (total, line) => total + line.amountMinor.abs(),
+                        );
+                        final remainder = amountMinor.abs() - currentTotal;
+                        splitDrafts.add(
+                          SplitLineDraft(
+                            id: 'split_${DateTime.now().microsecondsSinceEpoch}_${splitDrafts.length}',
+                            categoryId: '',
+                            amountMinor: remainder > 0 ? remainder : 0,
                           ),
-                          TextButton(
-                            onPressed: () => setDialogState(() {
-                              isCreatingCategory = false;
-                              newCategoryName.clear();
-                            }),
-                            child: const Text('Cancel'),
-                          ),
-                          IconButton(
-                            key: const ValueKey('scheduled-add-category'),
-                            tooltip: 'Add category',
-                            onPressed: createScheduledCategory,
-                            icon: const Icon(Icons.check),
-                          ),
-                        ],
-                      ),
-                    ] else ...[
-                      const TransactionFormLabel('Category'),
-                      choiceRow(
-                        rowKey: const ValueKey('scheduled-category'),
-                        icon: selectedCategory == null
-                            ? Icons.sell_outlined
-                            : categoryIcon(selectedCategory),
-                        value: selectedCategory?.name ?? 'Choose category',
-                        onTap: () async {
-                          FocusManager.instance.primaryFocus?.unfocus();
-                          final selectedId = await showTransactionCategoryFlow(
-                            context,
-                            dataStore: dataStore,
-                            isExpense: type == TransactionType.expense,
-                            selectedCategoryId: categoryId ?? '',
-                          );
-                          if (selectedId == null || !context.mounted) return;
-                          setDialogState(() => categoryId = selectedId);
-                        },
-                      ),
-                    ],
+                        );
+                      }),
+                      onRemove: (index) => setDialogState(() {
+                        splitDrafts[index].note.dispose();
+                        splitDrafts.removeAt(index);
+                        recalculateScheduledRemainder();
+                        categoryId = splitDrafts.first.categoryId.isEmpty
+                            ? null
+                            : splitDrafts.first.categoryId;
+                      }),
+                    ),
                   ],
                   const TransactionFormDivider(),
                   Padding(
@@ -9278,6 +9689,9 @@ Future<bool> showScheduledTransactionDialog(
         ),
       );
 
+  for (final draft in splitDrafts) {
+    draft.note.dispose();
+  }
   if (result == null) return false;
   HapticFeedback.mediumImpact();
   if (result.type == TransactionType.transfer &&
@@ -9303,6 +9717,7 @@ Future<bool> showScheduledTransactionDialog(
           accountId: result.accountId,
           transferAccountId: result.transferAccountId,
           categoryId: result.categoryId,
+          splitLines: result.splitLines,
           payee: result.payee,
           note: result.note,
           amountMinor: result.amountMinor,
@@ -9318,6 +9733,7 @@ Future<bool> showScheduledTransactionDialog(
           accountId: result.accountId,
           transferAccountId: result.transferAccountId,
           categoryId: result.categoryId,
+          splitLines: result.splitLines,
           payee: result.payee,
           note: result.note,
           amountMinor: result.amountMinor,
@@ -9642,6 +10058,7 @@ class ScheduledTransactionDetailActions extends StatelessWidget {
     required this.onClose,
     required this.onEdit,
     required this.onMarkPaid,
+    this.onUndoScheduledPayment,
     this.primaryLabel = 'Mark as Paid',
     super.key,
   });
@@ -9649,44 +10066,67 @@ class ScheduledTransactionDetailActions extends StatelessWidget {
   final VoidCallback onClose;
   final VoidCallback? onEdit;
   final VoidCallback? onMarkPaid;
+  final VoidCallback? onUndoScheduledPayment;
   final String primaryLabel;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-          child: SizedBox(
-            height: 48,
-            child: OutlinedButton(
-              onPressed: onClose,
-              child: const Text('Close'),
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 48,
+                child: OutlinedButton(
+                  onPressed: onClose,
+                  child: const Text('Close'),
+                ),
+              ),
             ),
-          ),
+            if (onEdit != null) ...[
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: onEdit,
+                    child: const Text('Edit'),
+                  ),
+                ),
+              ),
+            ],
+            if (onMarkPaid != null) ...[
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                flex: 2,
+                child: SizedBox(
+                  height: 48,
+                  child: FilledButton(
+                    key: const ValueKey('scheduled-detail-mark-paid'),
+                    onPressed: onMarkPaid,
+                    child: Text(primaryLabel),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
-        if (onEdit != null) ...[
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: SizedBox(
-              height: 48,
-              child: OutlinedButton(
-                onPressed: onEdit,
-                child: const Text('Edit'),
+        if (onUndoScheduledPayment != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton.icon(
+              key: const ValueKey('undo-scheduled-payment'),
+              onPressed: onUndoScheduledPayment,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.rose,
+                side: BorderSide(color: AppTheme.rose.withValues(alpha: 0.5)),
               ),
-            ),
-          ),
-        ],
-        if (onMarkPaid != null) ...[
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            flex: 2,
-            child: SizedBox(
-              height: 48,
-              child: FilledButton(
-                key: const ValueKey('scheduled-detail-mark-paid'),
-                onPressed: onMarkPaid,
-                child: Text(primaryLabel),
-              ),
+              icon: const Icon(Icons.undo_outlined),
+              label: const Text('Undo Scheduled Payment'),
             ),
           ),
         ],
@@ -9831,6 +10271,7 @@ Future<void> restoreScheduledTransactionAfterOccurrence(
       accountId: item.accountId,
       transferAccountId: item.transferAccountId,
       categoryId: item.categoryId,
+      splitLines: item.splitLines,
       payee: item.payee,
       note: item.note,
       amountMinor: item.amountMinor,
@@ -10008,6 +10449,7 @@ Future<void> editScheduledTransactionFromOccurrence(
     accountId: item.accountId,
     transferAccountId: item.transferAccountId,
     categoryId: item.categoryId,
+    splitLines: item.splitLines,
     payee: item.payee,
     note: item.note,
     amountMinor: plannedAmountMinor,
@@ -10054,21 +10496,32 @@ Future<void> markScheduledTransactionPaid(
   final paymentDate = TextEditingController(text: dateInput(DateTime.now()));
   final payee = TextEditingController(text: item.payee);
   final note = TextEditingController(text: item.note);
-  final newCategoryName = TextEditingController();
-  final newCategoryFocusNode = FocusNode();
   var selectedCategoryId = item.categoryId;
-  var isCreatingCategory = false;
+  final paymentSplitDrafts = item.type == TransactionType.transfer
+      ? <SplitLineDraft>[]
+      : (item.splitLines.isNotEmpty
+            ? item.splitLines
+                  .map(
+                    (line) => SplitLineDraft(
+                      id: line.id,
+                      categoryId: line.categoryId,
+                      amountMinor: line.amountMinor,
+                      noteText: line.note,
+                    ),
+                  )
+                  .toList()
+            : <SplitLineDraft>[
+                SplitLineDraft(
+                  id: 'split_${DateTime.now().microsecondsSinceEpoch}_0',
+                  categoryId: item.categoryId ?? '',
+                  amountMinor: occurrenceAmount.abs(),
+                ),
+              ]);
   var isSubmitting = false;
   String? errorMessage;
 
   v2_account.AccountRecord? accountById(String? id) {
     return dataStore.accounts.where((account) => account.id == id).firstOrNull;
-  }
-
-  v2_category.CategoryRecord? categoryById(String? id) {
-    return dataStore.categories
-        .where((category) => category.id == id)
-        .firstOrNull;
   }
 
   await showDialog<void>(
@@ -10079,15 +10532,41 @@ Future<void> markScheduledTransactionPaid(
         final theme = Theme.of(dialogContext);
         final sourceAccount = accountById(item.accountId);
         final destinationAccount = accountById(item.transferAccountId);
-        final category = categoryById(selectedCategoryId);
         final isTransfer = item.type == TransactionType.transfer;
+        final categories = scheduledCategoriesForType(dataStore, item.type);
+        for (final draft in paymentSplitDrafts) {
+          if (!categories.any((category) => category.id == draft.categoryId)) {
+            draft.categoryId = '';
+          }
+        }
+        if (!isTransfer && paymentSplitDrafts.isNotEmpty) {
+          selectedCategoryId = paymentSplitDrafts.first.categoryId.isEmpty
+              ? null
+              : paymentSplitDrafts.first.categoryId;
+        }
+        final splitTotalMinor = paymentSplitDrafts.fold<int>(
+          0,
+          (total, line) => total + line.amountMinor.abs(),
+        );
+        final splitCategoryIds = paymentSplitDrafts
+            .map((line) => line.categoryId)
+            .where((id) => id.isNotEmpty)
+            .toSet();
+        final splitIsBalanced =
+            isTransfer ||
+            (paymentSplitDrafts.isNotEmpty &&
+                paymentSplitDrafts.every(
+                  (line) => line.categoryId.isNotEmpty && line.amountMinor > 0,
+                ) &&
+                splitCategoryIds.length == paymentSplitDrafts.length &&
+                splitTotalMinor == actualAmountMinor.abs());
         final canConfirm =
             actualAmountMinor.abs() > 0 &&
             sourceAccount != null &&
             (!isTransfer ||
                 (destinationAccount != null &&
                     destinationAccount.id != sourceAccount.id)) &&
-            (isTransfer || category != null);
+            splitIsBalanced;
         final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
           fontSize: 17,
           fontWeight: FontWeight.w400,
@@ -10159,6 +10638,36 @@ Future<void> markScheduledTransactionPaid(
           );
         }
 
+        Future<void> choosePaymentSplitCategory(int index) async {
+          FocusManager.instance.primaryFocus?.unfocus();
+          final selectedId = await showTransactionCategoryFlow(
+            dialogContext,
+            dataStore: dataStore,
+            isExpense: item.type == TransactionType.expense,
+            selectedCategoryId: paymentSplitDrafts[index].categoryId,
+          );
+          if (selectedId == null || !dialogContext.mounted) return;
+          setDialogState(() {
+            paymentSplitDrafts[index].categoryId = selectedId;
+            if (index == 0) selectedCategoryId = selectedId;
+          });
+        }
+
+        List<TransactionSplitLine> buildPaymentSplitLines() {
+          if (isTransfer) return const [];
+          return [
+            for (var index = 0; index < paymentSplitDrafts.length; index++)
+              TransactionSplitLine(
+                id:
+                    paymentSplitDrafts[index].id ??
+                    'split_${DateTime.now().microsecondsSinceEpoch}_$index',
+                categoryId: paymentSplitDrafts[index].categoryId,
+                amountMinor: paymentSplitDrafts[index].amountMinor.abs(),
+                note: paymentSplitDrafts[index].note.text.trim(),
+              ),
+          ];
+        }
+
         Future<void> confirmPayment() async {
           if (!canConfirm || isSubmitting) return;
           FocusManager.instance.primaryFocus?.unfocus();
@@ -10184,6 +10693,7 @@ Future<void> markScheduledTransactionPaid(
                   ? scheduledPayeeFallback(item.type)
                   : payee.text.trim(),
               note: note.text.trim(),
+              splitLines: buildPaymentSplitLines(),
             );
             if (dialogContext.mounted) Navigator.pop(dialogContext);
           } catch (_) {
@@ -10194,25 +10704,6 @@ Future<void> markScheduledTransactionPaid(
                   'The payment could not be saved. Please try again.';
             });
           }
-        }
-
-        Future<void> createPaymentCategory() async {
-          final name = newCategoryName.text.trim();
-          if (name.isEmpty) return;
-          final createdId = await createBasicCategory(
-            dataStore,
-            name: name,
-            kind: item.type == TransactionType.income
-                ? v2_category.CategoryKind.income
-                : v2_category.CategoryKind.expense,
-          );
-          if (!dialogContext.mounted) return;
-          FocusManager.instance.primaryFocus?.unfocus();
-          setDialogState(() {
-            selectedCategoryId = createdId;
-            isCreatingCategory = false;
-            newCategoryName.clear();
-          });
         }
 
         return TransactionSheetFrame(
@@ -10387,73 +10878,40 @@ Future<void> markScheduledTransactionPaid(
               ),
               if (!isTransfer) ...[
                 const TransactionFormDivider(),
-                if (isCreatingCategory) ...[
-                  const TransactionFormLabel('New Category'),
-                  Row(
-                    key: const ValueKey('mark-paid-new-category'),
-                    children: [
-                      const TransactionFormIcon(Icons.sell_outlined),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: TextField(
-                          key: const ValueKey('mark-paid-new-category-name'),
-                          controller: newCategoryName,
-                          focusNode: newCategoryFocusNode,
-                          autofocus: true,
-                          textCapitalization: TextCapitalization.words,
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => createPaymentCategory(),
-                          decoration: InputDecoration(
-                            hintText: 'Category name',
-                            hintStyle: fieldHintStyle,
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            disabledBorder: InputBorder.none,
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: AppSpacing.sm,
-                            ),
-                          ),
-                          style: fieldValueStyle,
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () => setDialogState(() {
-                          isCreatingCategory = false;
-                          newCategoryName.clear();
-                        }),
-                        child: const Text('Cancel'),
-                      ),
-                      IconButton(
-                        key: const ValueKey('mark-paid-add-category'),
-                        tooltip: 'Add category',
-                        onPressed: createPaymentCategory,
-                        icon: const Icon(Icons.check),
-                      ),
-                    ],
+                InlineSplitAllocationSection(
+                  keyPrefix: 'mark-paid',
+                  drafts: paymentSplitDrafts,
+                  categories: categories,
+                  currency: dataStore.preferences.currency,
+                  totalMinor: actualAmountMinor.abs(),
+                  firstAutoRemainder: false,
+                  onChooseCategory: choosePaymentSplitCategory,
+                  onAmountChanged: (index, value) => setDialogState(
+                    () => paymentSplitDrafts[index].amountMinor = value.abs(),
                   ),
-                ] else ...[
-                  const TransactionFormLabel('Category'),
-                  readOnlyRow(
-                    rowKey: const ValueKey('mark-paid-category'),
-                    icon: category == null
-                        ? Icons.sell_outlined
-                        : categoryIcon(category),
-                    value: category?.name ?? 'Category required',
-                    onTap: () async {
-                      FocusManager.instance.primaryFocus?.unfocus();
-                      final selectedId = await showTransactionCategoryFlow(
-                        dialogContext,
-                        dataStore: dataStore,
-                        isExpense: item.type == TransactionType.expense,
-                        selectedCategoryId: selectedCategoryId ?? '',
-                      );
-                      if (selectedId == null || !dialogContext.mounted) return;
-                      setDialogState(() => selectedCategoryId = selectedId);
-                    },
-                  ),
-                ],
+                  onAdd: () => setDialogState(() {
+                    final currentTotal = paymentSplitDrafts.fold<int>(
+                      0,
+                      (total, line) => total + line.amountMinor.abs(),
+                    );
+                    final remainder = actualAmountMinor.abs() - currentTotal;
+                    paymentSplitDrafts.add(
+                      SplitLineDraft(
+                        id: 'split_${DateTime.now().microsecondsSinceEpoch}_${paymentSplitDrafts.length}',
+                        categoryId: '',
+                        amountMinor: remainder > 0 ? remainder : 0,
+                      ),
+                    );
+                  }),
+                  onRemove: (index) => setDialogState(() {
+                    paymentSplitDrafts[index].note.dispose();
+                    paymentSplitDrafts.removeAt(index);
+                    selectedCategoryId =
+                        paymentSplitDrafts.first.categoryId.isEmpty
+                        ? null
+                        : paymentSplitDrafts.first.categoryId;
+                  }),
+                ),
               ],
               const TransactionFormDivider(),
               const TransactionFormLabel('Notes'),
@@ -10502,6 +10960,9 @@ Future<void> markScheduledTransactionPaid(
       },
     ),
   );
+  for (final draft in paymentSplitDrafts) {
+    draft.note.dispose();
+  }
 }
 
 Future<TransactionRecord> completeScheduledTransactionPayment(
@@ -10513,6 +10974,7 @@ Future<TransactionRecord> completeScheduledTransactionPayment(
   required DateTime paymentDate,
   required String payee,
   required String note,
+  List<TransactionSplitLine> splitLines = const [],
 }) async {
   final occurrenceDate = scheduledDate ?? item.nextDate;
   final occurrenceAmount = plannedAmountMinor ?? item.amountMinor;
@@ -10539,6 +11001,7 @@ Future<TransactionRecord> completeScheduledTransactionPayment(
         paymentDate: paymentDate,
         payee: payee,
         note: note,
+        splitLines: splitLines,
       );
   final occurrence = v2_scheduled.ScheduledOccurrenceRecord(
     scheduledDate: occurrenceDate,
@@ -10566,6 +11029,7 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
   required DateTime paymentDate,
   required String payee,
   required String note,
+  required List<TransactionSplitLine> splitLines,
 }) async {
   switch (item.type) {
     case TransactionType.expense:
@@ -10579,6 +11043,7 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         payee: payee,
         amountMinor: actualAmountMinor,
         note: note,
+        splitLines: splitLines,
         scheduledTransactionId: item.id,
         scheduledOccurrenceDate: scheduledDate,
         scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
@@ -10594,6 +11059,7 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         payee: payee,
         amountMinor: actualAmountMinor,
         note: note,
+        splitLines: splitLines,
         scheduledTransactionId: item.id,
         scheduledOccurrenceDate: scheduledDate,
         scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
@@ -10652,6 +11118,7 @@ Future<void> duplicateScheduledTransaction(
       accountId: item.accountId,
       transferAccountId: item.transferAccountId,
       categoryId: item.categoryId,
+      splitLines: item.splitLines,
       payee: '${item.payee} copy',
       note: item.note,
       amountMinor: item.amountMinor,
@@ -10714,13 +11181,12 @@ Future<void> recordScheduledOccurrence(
     return;
   }
 
-  final occurrences = [...item.occurrences];
-  if (!occurrences.any(
-    (existing) =>
-        isSameCalendarDay(existing.scheduledDate, occurrence.scheduledDate),
-  )) {
-    occurrences.add(occurrence);
-  }
+  final occurrences = [
+    for (final existing in item.occurrences)
+      if (!isSameCalendarDay(existing.scheduledDate, occurrence.scheduledDate))
+        existing,
+    occurrence,
+  ];
   await dataStore.saveScheduledTransaction(
     item.copyWith(
       occurrences: occurrences,
@@ -10737,15 +11203,17 @@ Future<void> advanceOrCloseScheduledTransaction(
   v2_scheduled.ScheduledAction action, {
   v2_scheduled.ScheduledOccurrenceRecord? occurrence,
 }) async {
-  final occurrences = [...item.occurrences];
-  if (occurrence != null &&
-      !occurrences.any(
-        (existing) =>
-            existing.status == occurrence.status &&
-            isSameCalendarDay(existing.scheduledDate, occurrence.scheduledDate),
-      )) {
-    occurrences.add(occurrence);
-  }
+  final occurrences = occurrence == null
+      ? [...item.occurrences]
+      : [
+          for (final existing in item.occurrences)
+            if (!isSameCalendarDay(
+              existing.scheduledDate,
+              occurrence.scheduledDate,
+            ))
+              existing,
+          occurrence,
+        ];
   final nextDate = nextScheduledDate(item);
   if (nextDate == null || nextDate.isAfter(item.endDate ?? DateTime(9999))) {
     await dataStore.saveScheduledTransaction(
@@ -10813,7 +11281,6 @@ Future<void> showTransactionDialog(
   bool? initialIsExpense,
   String? initialAccountId,
   TransactionRecord? transaction,
-  bool initialSplitMode = false,
   bool initialScheduleFutureOccurrences = false,
   FutureScheduleDraft? initialFutureSchedule,
 }) async {
@@ -10850,8 +11317,6 @@ Future<void> showTransactionDialog(
       (transaction == null &&
           (initialIsExpense ?? isExpenseDefault(dataStore.preferences)));
   var categoryId = transaction?.categoryId ?? '';
-  var isSplitMode =
-      initialSplitMode || (transaction?.splitLines.isNotEmpty ?? false);
   var firstSplitAutoRemainder = transaction?.splitLines.isEmpty ?? true;
   final splitDrafts =
       transaction?.splitLines
@@ -10867,6 +11332,15 @@ Future<void> showTransactionDialog(
       <SplitLineDraft>[];
   if (categoryId.isEmpty && splitDrafts.isNotEmpty) {
     categoryId = splitDrafts.first.categoryId;
+  }
+  if (splitDrafts.isEmpty) {
+    splitDrafts.add(
+      SplitLineDraft(
+        id: 'split_${DateTime.now().microsecondsSinceEpoch}_0',
+        categoryId: categoryId,
+        amountMinor: amountMinor.abs(),
+      ),
+    );
   }
   var switchToTransfer = false;
   var isCreatingCategory = false;
@@ -10928,11 +11402,6 @@ Future<void> showTransactionDialog(
                 : activeAccounts.firstWhere(
                     (account) => account.id == accountId,
                   );
-            final selectedCategory = categoryId.isEmpty
-                ? null
-                : categoryOptions
-                      .where((category) => category.id == categoryId)
-                      .firstOrNull;
             final currentBalanceMinor = selectedAccount == null
                 ? 0
                 : dataStore.balanceForAccount(selectedAccount.id);
@@ -10968,7 +11437,7 @@ Future<void> showTransactionDialog(
                 'split_${DateTime.now().microsecondsSinceEpoch}_${splitDrafts.length}';
 
             void syncPrimaryCategoryFromSplit() {
-              if (isSplitMode && splitDrafts.isNotEmpty) {
+              if (splitDrafts.isNotEmpty) {
                 categoryId = splitDrafts.first.categoryId;
               }
             }
@@ -10986,9 +11455,7 @@ Future<void> showTransactionDialog(
             }
 
             void recalculateAutoRemainder() {
-              if (!isSplitMode ||
-                  !firstSplitAutoRemainder ||
-                  splitDrafts.isEmpty) {
+              if (!firstSplitAutoRemainder || splitDrafts.isEmpty) {
                 return;
               }
               final otherTotal = splitDrafts
@@ -11001,11 +11468,9 @@ Future<void> showTransactionDialog(
               splitDrafts.first.amountMinor = remainder > 0 ? remainder : 0;
             }
 
-            if (isSplitMode) {
-              ensureSplitDrafts();
-              recalculateAutoRemainder();
-              syncPrimaryCategoryFromSplit();
-            }
+            ensureSplitDrafts();
+            recalculateAutoRemainder();
+            syncPrimaryCategoryFromSplit();
 
             final splitTotalMinor = splitDrafts.fold<int>(
               0,
@@ -11016,14 +11481,19 @@ Future<void> showTransactionDialog(
                 splitDrafts.isNotEmpty &&
                 splitDrafts.every(
                   (line) => line.categoryId.isNotEmpty && line.amountMinor > 0,
-                );
-            final splitIsBalanced =
-                !isSplitMode || (splitRowsComplete && remainingMinor == 0);
+                ) &&
+                splitDrafts
+                        .map((line) => line.categoryId)
+                        .where((id) => id.isNotEmpty)
+                        .toSet()
+                        .length ==
+                    splitDrafts.length;
+            final splitIsBalanced = splitRowsComplete && remainingMinor == 0;
             final canSaveTransaction =
                 !isCreatingCategory &&
                 accountId.isNotEmpty &&
                 absoluteAmountMinor > 0 &&
-                (isSplitMode ? splitIsBalanced : categoryId.isNotEmpty) &&
+                splitIsBalanced &&
                 (!scheduleFutureOccurrences ||
                     isValidFutureScheduleDate(
                       futureSchedule.parsedFirstDate(DateTime.now()),
@@ -11031,7 +11501,6 @@ Future<void> showTransactionDialog(
                     ));
 
             List<TransactionSplitLine> buildSplitLines() {
-              if (!isSplitMode) return const [];
               return [
                 for (var index = 0; index < splitDrafts.length; index++)
                   TransactionSplitLine(
@@ -11220,6 +11689,25 @@ Future<void> showTransactionDialog(
             }
 
             void saveTransactionResult() {
+              recalculateAutoRemainder();
+              syncPrimaryCategoryFromSplit();
+              final currentCategoryIds = splitDrafts
+                  .map((line) => line.categoryId)
+                  .where((id) => id.isNotEmpty)
+                  .toSet();
+              final currentSplitTotal = splitDrafts.fold<int>(
+                0,
+                (total, line) => total + line.amountMinor.abs(),
+              );
+              final splitsAreValid =
+                  splitDrafts.isNotEmpty &&
+                  splitDrafts.every(
+                    (line) =>
+                        line.categoryId.isNotEmpty && line.amountMinor > 0,
+                  ) &&
+                  currentCategoryIds.length == splitDrafts.length &&
+                  currentSplitTotal == amountMinor.abs();
+              if (!splitsAreValid) return;
               Navigator.pop(context, (
                 accountId: accountId,
                 categoryId: categoryId,
@@ -11345,224 +11833,44 @@ Future<void> showTransactionDialog(
             }
 
             Widget splitAllocationSection() {
-              TextStyle? splitValueStyle({bool danger = false}) =>
-                  theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: danger
-                        ? AppColors.danger
-                        : theme.colorScheme.onSurface,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+              return InlineSplitAllocationSection(
+                keyPrefix: 'transaction',
+                drafts: splitDrafts,
+                categories: categoryOptions,
+                currency: dataStore.preferences.currency,
+                totalMinor: absoluteAmountMinor,
+                firstAutoRemainder: firstSplitAutoRemainder,
+                quietWhenZero: true,
+                onChooseCategory: chooseSplitCategory,
+                onAmountChanged: (index, value) => setDialogState(() {
+                  splitDrafts[index].amountMinor = value.abs();
+                  if (index == 0) {
+                    firstSplitAutoRemainder = false;
+                  } else {
+                    recalculateAutoRemainder();
+                  }
+                }),
+                onAdd: () => setDialogState(() {
+                  ensureSplitDrafts();
+                  final currentTotal = splitDrafts.fold<int>(
+                    0,
+                    (total, line) => total + line.amountMinor.abs(),
                   );
-
-              final footerLabelStyle = theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-              );
-
-              return Column(
-                key: const ValueKey('transaction-split-category-field'),
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: TransactionFormLabel('Split Categories'),
-                      ),
-                      TextButton(
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          minimumSize: const Size(0, 30),
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                        ),
-                        onPressed: () => setDialogState(() {
-                          isSplitMode = false;
-                          splitDrafts.clear();
-                          firstSplitAutoRemainder = true;
-                        }),
-                        child: const Text('Single Category'),
-                      ),
-                    ],
-                  ),
-                  for (var index = 0; index < splitDrafts.length; index++) ...[
-                    if (index > 0)
-                      Divider(
-                        height: AppSpacing.md,
-                        thickness: 1,
-                        color: theme.colorScheme.outlineVariant.withValues(
-                          alpha: 0.42,
-                        ),
-                      ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.drag_handle,
-                          size: 19,
-                          color: theme.colorScheme.onSurfaceVariant.withValues(
-                            alpha: 0.62,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(
-                              AppRadii.control,
-                            ),
-                            onTap: () => chooseSplitCategory(index),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 7),
-                              child: Text(
-                                categoryOptions
-                                        .where(
-                                          (category) =>
-                                              category.id ==
-                                              splitDrafts[index].categoryId,
-                                        )
-                                        .firstOrNull
-                                        ?.name ??
-                                    'Choose category',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style:
-                                    (categoryOptions.any(
-                                      (category) =>
-                                          category.id ==
-                                          splitDrafts[index].categoryId,
-                                    )
-                                    ? fieldValueStyle
-                                    : fieldHintStyle),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        SizedBox(
-                          width: 118,
-                          child: AmountEntryField(
-                            fieldKey: ValueKey(
-                              'transaction-split-amount-${splitDrafts[index].id ?? index}-${index == 0 && firstSplitAutoRemainder ? splitDrafts[index].amountMinor : ''}',
-                            ),
-                            initialMinor: splitDrafts[index].amountMinor.abs(),
-                            currency: dataStore.preferences.currency,
-                            labelText: null,
-                            textAlign: TextAlign.right,
-                            decoration: InputDecoration(
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: AppSpacing.sm,
-                                vertical: 8,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            textStyle: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
-                            onChanged: (value) {
-                              setDialogState(() {
-                                splitDrafts[index].amountMinor = value.abs();
-                                if (index == 0) {
-                                  firstSplitAutoRemainder = false;
-                                } else {
-                                  recalculateAutoRemainder();
-                                }
-                              });
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.xs),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          tooltip: index == 0
-                              ? 'First split keeps the remainder'
-                              : 'Remove split',
-                          onPressed: index == 0
-                              ? null
-                              : () => setDialogState(() {
-                                  splitDrafts.removeAt(index);
-                                  recalculateAutoRemainder();
-                                  syncPrimaryCategoryFromSplit();
-                                }),
-                          icon: Icon(
-                            Icons.remove_circle_outline,
-                            size: 20,
-                            color: index == 0
-                                ? theme.colorScheme.onSurfaceVariant.withValues(
-                                    alpha: 0.32,
-                                  )
-                                : theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
+                  final remainder = absoluteAmountMinor - currentTotal;
+                  splitDrafts.add(
+                    SplitLineDraft(
+                      id: newSplitId(),
+                      categoryId: '',
+                      amountMinor: remainder > 0 ? remainder : 0,
                     ),
-                  ],
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        padding: EdgeInsets.zero,
-                      ),
-                      onPressed: () => setDialogState(() {
-                        ensureSplitDrafts();
-                        final currentTotal = splitDrafts.fold<int>(
-                          0,
-                          (total, line) => total + line.amountMinor.abs(),
-                        );
-                        final remainder = absoluteAmountMinor - currentTotal;
-                        splitDrafts.add(
-                          SplitLineDraft(
-                            id: newSplitId(),
-                            categoryId: '',
-                            amountMinor: remainder > 0 ? remainder : 0,
-                          ),
-                        );
-                      }),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add split'),
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Row(
-                    children: [
-                      const Spacer(),
-                      Text('Total', style: footerLabelStyle),
-                      const SizedBox(width: AppSpacing.lg),
-                      Text(
-                        money(splitTotalMinor, dataStore.preferences.currency),
-                        style: splitValueStyle(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      const Spacer(),
-                      Text('Remaining', style: footerLabelStyle),
-                      const SizedBox(width: AppSpacing.lg),
-                      Text(
-                        remainingMinor == 0
-                            ? 'Balanced'
-                            : money(
-                                remainingMinor,
-                                dataStore.preferences.currency,
-                              ),
-                        style: splitValueStyle(danger: remainingMinor != 0)
-                            ?.copyWith(
-                              color: remainingMinor == 0
-                                  ? AppTheme.accent
-                                  : AppColors.danger,
-                            ),
-                      ),
-                    ],
-                  ),
-                ],
+                  );
+                }),
+                onRemove: (index) => setDialogState(() {
+                  splitDrafts[index].note.dispose();
+                  splitDrafts.removeAt(index);
+                  recalculateAutoRemainder();
+                  syncPrimaryCategoryFromSplit();
+                }),
               );
             }
 
@@ -11626,7 +11934,9 @@ Future<void> showTransactionDialog(
                           setDialogState(() {
                             isExpense = selectedType == TransactionType.expense;
                             categoryId = '';
-                            isSplitMode = false;
+                            for (final draft in splitDrafts) {
+                              draft.note.dispose();
+                            }
                             splitDrafts.clear();
                             firstSplitAutoRemainder = true;
                             isCreatingCategory = false;
@@ -11734,81 +12044,16 @@ Future<void> showTransactionDialog(
                     ],
                   ),
                   const TransactionFormDivider(),
-                  if (isSplitMode)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        splitAllocationSection(),
-                        if (isCreatingCategory) ...[
-                          const SizedBox(height: AppSpacing.sm),
-                          inlineCategoryCreationRow(),
-                        ],
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      splitAllocationSection(),
+                      if (isCreatingCategory) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        inlineCategoryCreationRow(),
                       ],
-                    )
-                  else
-                    Column(
-                      key: const ValueKey('transaction-category-field'),
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (isCreatingCategory)
-                          inlineCategoryCreationRow()
-                        else ...[
-                          const TransactionFormLabel('Category'),
-                          selectableRow(
-                            icon: selectedCategory == null
-                                ? Icons.sell_outlined
-                                : categoryIcon(selectedCategory),
-                            placeholder: selectedCategory == null
-                                ? 'Choose category'
-                                : null,
-                            valueStyle: fieldValueStyle,
-                            title: Text(
-                              selectedCategory?.name ?? 'Choose category',
-                            ),
-                            onTap: () async {
-                              FocusManager.instance.primaryFocus?.unfocus();
-                              final selectedCategoryId =
-                                  await showTransactionCategoryFlow(
-                                    context,
-                                    dataStore: dataStore,
-                                    isExpense: isExpense,
-                                    selectedCategoryId: categoryId,
-                                  );
-                              if (selectedCategoryId == null) return;
-                              setDialogState(
-                                () => categoryId = selectedCategoryId,
-                              );
-                            },
-                          ),
-                        ],
-                        if (selectedCategory != null && !isCreatingCategory)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 56, top: 2),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton.icon(
-                                style: TextButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                  minimumSize: const Size(0, 30),
-                                  padding: EdgeInsets.zero,
-                                ),
-                                onPressed: () => setDialogState(() {
-                                  isSplitMode = true;
-                                  splitDrafts.clear();
-                                  firstSplitAutoRemainder = true;
-                                  ensureSplitDrafts();
-                                }),
-                                icon: const Icon(Icons.call_split, size: 15),
-                                label: const Text(
-                                  'Split this category allocation',
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
+                    ],
+                  ),
                   const TransactionFormDivider(),
                   const TransactionFormLabel('Date'),
                   InkWell(
@@ -12022,6 +12267,7 @@ Future<void> showTransactionDialog(
         type: transactionRecord.type,
         accountId: result.accountId,
         categoryId: result.categoryId,
+        splitLines: result.splitLines,
         payee: result.payee,
         note: result.note,
         amountMinor: result.amountMinor,
@@ -12093,6 +12339,7 @@ Future<void> showTransactionDialog(
       type: transactionRecord.type,
       accountId: result.accountId,
       categoryId: result.categoryId,
+      splitLines: result.splitLines,
       payee: result.payee,
       note: result.note,
       amountMinor: result.amountMinor,
@@ -14971,7 +15218,9 @@ class ScheduledCalendarOccurrence {
       record?.status == v2_scheduled.ScheduledOccurrenceStatus.paid;
   bool get isSkipped =>
       record?.status == v2_scheduled.ScheduledOccurrenceStatus.skipped;
-  bool get isPending => record == null;
+  bool get isPending =>
+      record == null ||
+      record?.status == v2_scheduled.ScheduledOccurrenceStatus.pending;
 }
 
 class ScheduledMonthSummary {
