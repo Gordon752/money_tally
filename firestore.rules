@@ -30,6 +30,18 @@ service cloud.firestore {
       allow read, write: if ownsUserData(userId);
     }
 
+    match /users/{userId}/goals/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/goalContributions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/goalFundingEvents/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
     match /users/{userId}/preferences/{documentId} {
       allow read, write: if ownsUserData(userId);
     }

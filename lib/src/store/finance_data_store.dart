@@ -6,10 +6,13 @@ import '../domain/account.dart';
 import '../domain/budget.dart';
 import '../domain/category.dart';
 import '../domain/finance_data_set.dart';
+import '../domain/goal.dart';
+import '../domain/goal_funding.dart';
 import '../domain/scheduled_transaction.dart';
 import '../domain/sync_metadata.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
+import '../goals/goal_calculator.dart';
 import '../notifications/notification_scheduler.dart';
 import '../persistence/finance_record_repository.dart';
 import '../persistence/local_finance_data_set_repository.dart';
@@ -120,6 +123,11 @@ class FinanceDataStore extends ChangeNotifier {
   List<ScheduledTransactionRecord> get scheduledTransactions =>
       _dataSet.scheduledTransactions;
   List<BudgetRecord> get budgets => _dataSet.budgets;
+  List<GoalRecord> get goals => _dataSet.goals;
+  List<GoalContributionRecord> get goalContributions =>
+      _dataSet.goalContributions;
+  List<GoalFundingEventRecord> get goalFundingEvents =>
+      _dataSet.goalFundingEvents;
   UserPreferences get preferences => _dataSet.preferences;
 
   List<AccountRecord> get activeAccountsInDisplayOrder {
@@ -273,7 +281,23 @@ class FinanceDataStore extends ChangeNotifier {
         .fold(0, (total, balance) => total + balance);
   }
 
-  int get netWorthMinor => totalAssetsMinor + totalLiabilitiesMinor;
+  int get fundedGoalAssetsMinor {
+    final visibleGoalIds = {
+      for (final goal in goals)
+        if (!goal.isDeleted && !goal.requiresFundingMigration) goal.id,
+    };
+    return goalFundingEvents
+        .where((event) => event.isActive)
+        .expand((event) => event.allocations)
+        .where((allocation) => visibleGoalIds.contains(allocation.goalId))
+        .fold<int>(
+          0,
+          (total, allocation) => total + allocation.amountMinor.abs(),
+        );
+  }
+
+  int get netWorthMinor =>
+      totalAssetsMinor + totalLiabilitiesMinor + fundedGoalAssetsMinor;
 
   int get openingNetWorthMinor {
     return accounts
@@ -282,6 +306,81 @@ class FinanceDataStore extends ChangeNotifier {
   }
 
   int get netWorthLedgerChangeMinor => netWorthMinor - openingNetWorthMinor;
+
+  List<GoalRecord> get activeGoals {
+    return goals.where((goal) => goal.isActive).toList(growable: false);
+  }
+
+  List<GoalContributionRecord> activeContributionsForGoal(String goalId) {
+    return goalContributions
+        .where(
+          (contribution) =>
+              contribution.goalId == goalId && contribution.isActive,
+        )
+        .toList(growable: false);
+  }
+
+  int currentGoalAmountMinor(String goalId) {
+    final goal = goalById(goalId);
+    return const GoalCalculator().currentAmountMinor(
+      goal,
+      goalContributions,
+      goalFundingEvents,
+    );
+  }
+
+  GoalProgressMetrics goalMetrics(String goalId, {DateTime? now}) {
+    return const GoalCalculator().calculate(
+      goalById(goalId),
+      goalContributions,
+      fundingEvents: goalFundingEvents,
+      now: now,
+    );
+  }
+
+  int reservedForGoalsMinorForAccount(
+    String accountId, {
+    String? excludingGoalId,
+  }) {
+    final reservableGoals = {
+      for (final goal in goals)
+        if (!goal.isDeleted &&
+            !goal.reservationsReleased &&
+            goal.id != excludingGoalId)
+          goal.id: goal,
+    };
+    var reserved = 0;
+    for (final goal in reservableGoals.values) {
+      if (goal.fundingMethod == GoalFundingMethod.accountFunded &&
+          goal.requiresFundingMigration &&
+          goal.defaultFundingAccountId == accountId) {
+        reserved += goal.startingAmountMinor.abs();
+      }
+    }
+    for (final contribution in goalContributions) {
+      if (!contribution.isActive ||
+          contribution.goalId == excludingGoalId ||
+          contribution.fundingMethod != GoalFundingMethod.accountFunded ||
+          !contribution.isLegacyReservation ||
+          contribution.sourceAccountId != accountId ||
+          !reservableGoals.containsKey(contribution.goalId)) {
+        continue;
+      }
+      reserved += contribution.amountMinor.abs();
+    }
+    return reserved;
+  }
+
+  int availableAfterGoalsMinorForAccount(
+    String accountId, {
+    String? excludingGoalId,
+  }) {
+    return balanceForAccount(accountId) -
+        reservedForGoalsMinorForAccount(
+          accountId,
+          excludingGoalId: excludingGoalId,
+        );
+  }
 
   int get availableCashMinor {
     return accounts
@@ -587,6 +686,21 @@ class FinanceDataStore extends ChangeNotifier {
     for (final budget in budgets) {
       await remote.saveBudget(userId: currentUserId, budget: budget);
     }
+    for (final goal in goals) {
+      await remote.saveGoal(userId: currentUserId, goal: goal);
+    }
+    for (final contribution in goalContributions) {
+      await remote.saveGoalContribution(
+        userId: currentUserId,
+        contribution: contribution,
+      );
+    }
+    for (final fundingEvent in goalFundingEvents) {
+      await remote.saveGoalFundingEvent(
+        userId: currentUserId,
+        fundingEvent: fundingEvent,
+      );
+    }
     await remote.savePreferences(
       userId: currentUserId,
       preferences: preferences,
@@ -717,6 +831,708 @@ class FinanceDataStore extends ChangeNotifier {
       sync: existing.sync.deleted(deviceId: deviceId),
     );
     await saveBudget(budget);
+  }
+
+  GoalRecord goalById(String id) {
+    return goals.firstWhere((goal) => goal.id == id);
+  }
+
+  GoalContributionRecord goalContributionById(String id) {
+    return goalContributions.firstWhere(
+      (contribution) => contribution.id == id,
+    );
+  }
+
+  GoalFundingEventRecord goalFundingEventById(String id) {
+    return goalFundingEvents.firstWhere((event) => event.id == id);
+  }
+
+  List<GoalFundingEventRecord> activeFundingEventsForGoal(String goalId) {
+    return goalFundingEvents
+        .where(
+          (event) =>
+              event.isActive &&
+              event.allocations.any(
+                (allocation) => allocation.goalId == goalId,
+              ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> saveGoal(GoalRecord goal) async {
+    _validateGoal(goal);
+    final current = const GoalCalculator().currentAmountMinor(
+      goal,
+      goalContributions,
+      goalFundingEvents,
+    );
+    final adjusted = _goalWithDerivedLifecycleStatus(goal, current);
+    _dataSet = _dataSet.copyWith(
+      goals: _upsert(goals, adjusted, (item) => item.id),
+    );
+    await _commit(goal: adjusted);
+  }
+
+  Future<GoalRecord> createGoal({
+    required String name,
+    required int targetAmountMinor,
+    required int startingAmountMinor,
+    required DateTime? targetDate,
+    required GoalFundingMethod fundingMethod,
+    GoalType goalType = GoalType.reachTarget,
+    String? defaultFundingAccountId,
+    String description = '',
+    int accentColorValue = 0xFF367BF5,
+    DateTime? now,
+  }) async {
+    final anchor = now ?? DateTime.now();
+    final timestamp = anchor.toUtc();
+    final goalTargetDate = targetDate == null
+        ? null
+        : DateTime(targetDate.year, targetDate.month, targetDate.day);
+    final today = DateTime(anchor.year, anchor.month, anchor.day);
+    if (goalTargetDate != null &&
+        startingAmountMinor.abs() < targetAmountMinor.abs() &&
+        !goalTargetDate.isAfter(today)) {
+      throw FinanceDataValidationException(
+        goalType == GoalType.maintainBalance
+            ? 'Choose a future restore-by date for a reserve below its target.'
+            : 'Choose a future target date for an incomplete Goal.',
+      );
+    }
+    final isAccountFunded = fundingMethod == GoalFundingMethod.accountFunded;
+    final goal = GoalRecord(
+      id: _newId('goal'),
+      name: name.trim(),
+      description: description.trim(),
+      targetAmountMinor: targetAmountMinor.abs(),
+      startingAmountMinor: isAccountFunded ? 0 : startingAmountMinor.abs(),
+      targetDate: goalTargetDate,
+      status:
+          goalType == GoalType.reachTarget &&
+              startingAmountMinor.abs() >= targetAmountMinor.abs()
+          ? GoalStatus.completed
+          : GoalStatus.active,
+      fundingMethod: fundingMethod,
+      goalType: goalType,
+      defaultFundingAccountId: isAccountFunded ? defaultFundingAccountId : null,
+      accentColorValue: accentColorValue,
+      sync: SyncMetadata.fresh(now: timestamp, deviceId: deviceId),
+    );
+    _validateGoal(goal);
+    GoalFundingEventRecord? initialFunding;
+    if (isAccountFunded && startingAmountMinor.abs() > 0) {
+      final accountId = defaultFundingAccountId;
+      final account = accounts
+          .where((item) => item.id == accountId && item.isVisible)
+          .firstOrNull;
+      if (account == null) {
+        throw const FinanceDataValidationException(
+          'Choose an active funding account.',
+        );
+      }
+      if (startingAmountMinor.abs() > balanceForAccount(account.id)) {
+        throw FinanceDataValidationException(
+          '${account.name} does not have enough available balance.',
+        );
+      }
+      final eventId = _newId('goal_funding');
+      initialFunding = GoalFundingEventRecord(
+        id: eventId,
+        sourceAccountId: account.id,
+        totalAmountMinor: startingAmountMinor.abs(),
+        date: today,
+        note: 'Starting Goal balance',
+        allocations: [
+          GoalFundingAllocation(
+            id: _newId('goal_allocation'),
+            fundingEventId: eventId,
+            goalId: goal.id,
+            amountMinor: startingAmountMinor.abs(),
+            order: 0,
+          ),
+        ],
+        sync: SyncMetadata.fresh(now: timestamp, deviceId: deviceId),
+      );
+    }
+    final previousDataSet = _dataSet;
+    try {
+      _dataSet = _dataSet.copyWith(
+        goals: _upsert(goals, goal, (item) => item.id),
+        goalFundingEvents: initialFunding == null
+            ? goalFundingEvents
+            : _upsert(goalFundingEvents, initialFunding, (item) => item.id),
+      );
+      await _commit(
+        goal: goal,
+        goalFundingEvents: initialFunding == null ? const [] : [initialFunding],
+      );
+    } catch (_) {
+      _dataSet = previousDataSet;
+      notifyListeners();
+      rethrow;
+    }
+    return goalById(goal.id);
+  }
+
+  Future<GoalContributionRecord> addGoalContribution({
+    required String goalId,
+    required int amountMinor,
+    required DateTime date,
+    String? sourceAccountId,
+    String note = '',
+  }) async {
+    final goal = goalById(goalId);
+    if (!goal.isActive) {
+      throw const FinanceDataValidationException(
+        'Only active Goals can receive contributions.',
+      );
+    }
+    if (goal.fundingMethod != GoalFundingMethod.trackingOnly) {
+      throw const FinanceDataValidationException(
+        'Use Fund Goals for an account-funded Goal.',
+      );
+    }
+    final contribution = GoalContributionRecord(
+      id: _newId('goal_contribution'),
+      goalId: goalId,
+      amountMinor: amountMinor.abs(),
+      date: date,
+      sourceAccountId: null,
+      fundingMethod: goal.fundingMethod,
+      note: note.trim(),
+      sync: SyncMetadata.fresh(deviceId: deviceId),
+    );
+    _validateGoalContribution(contribution, goal);
+
+    final resultingAmount =
+        currentGoalAmountMinor(goalId) + contribution.amountMinor;
+    final updatedGoal = _goalWithDerivedLifecycleStatus(goal, resultingAmount);
+    final previousDataSet = _dataSet;
+    try {
+      _dataSet = _dataSet.copyWith(
+        goals: _upsert(goals, updatedGoal, (item) => item.id),
+        goalContributions: _upsert(
+          goalContributions,
+          contribution,
+          (item) => item.id,
+        ),
+      );
+      await _commit(
+        goal: identical(updatedGoal, goal) ? null : updatedGoal,
+        goalContribution: contribution,
+      );
+    } catch (_) {
+      _dataSet = previousDataSet;
+      notifyListeners();
+      rethrow;
+    }
+    return contribution;
+  }
+
+  Future<GoalFundingEventRecord> fundGoals({
+    required String sourceAccountId,
+    required int totalAmountMinor,
+    required DateTime date,
+    required List<GoalFundingAllocation> allocations,
+    String note = '',
+  }) async {
+    final account = accounts
+        .where((item) => item.id == sourceAccountId && item.isVisible)
+        .firstOrNull;
+    if (account == null) {
+      throw const FinanceDataValidationException(
+        'Choose an active source account.',
+      );
+    }
+    final amount = totalAmountMinor.abs();
+    if (amount <= 0) {
+      throw const FinanceDataValidationException(
+        'Funding amount must be greater than zero.',
+      );
+    }
+    if (amount > balanceForAccount(account.id)) {
+      throw FinanceDataValidationException(
+        '${account.name} does not have enough available balance.',
+      );
+    }
+    if (allocations.isEmpty) {
+      throw const FinanceDataValidationException(
+        'Add at least one Goal allocation.',
+      );
+    }
+    final goalIds = <String>{};
+    var allocationTotal = 0;
+    for (final allocation in allocations) {
+      if (allocation.amountMinor <= 0) {
+        throw const FinanceDataValidationException(
+          'Goal allocations must be greater than zero.',
+        );
+      }
+      if (!goalIds.add(allocation.goalId)) {
+        throw const FinanceDataValidationException(
+          'A Goal can only appear once in a funding event.',
+        );
+      }
+      final goal = goals
+          .where((item) => item.id == allocation.goalId && item.isActive)
+          .firstOrNull;
+      if (goal == null ||
+          goal.fundingMethod != GoalFundingMethod.accountFunded) {
+        throw const FinanceDataValidationException(
+          'Choose an active account-funded Goal.',
+        );
+      }
+      if (goal.requiresFundingMigration) {
+        throw FinanceDataValidationException(
+          '${goal.name} must convert its previous reservations first.',
+        );
+      }
+      allocationTotal += allocation.amountMinor;
+    }
+    if (allocationTotal != amount) {
+      throw const FinanceDataValidationException(
+        'Goal allocations must equal the total funding amount.',
+      );
+    }
+
+    final eventId = _newId('goal_funding');
+    final event = GoalFundingEventRecord(
+      id: eventId,
+      sourceAccountId: sourceAccountId,
+      totalAmountMinor: amount,
+      date: DateTime(date.year, date.month, date.day),
+      note: note.trim(),
+      allocations: [
+        for (var index = 0; index < allocations.length; index += 1)
+          GoalFundingAllocation(
+            id: allocations[index].id.isEmpty
+                ? _newId('goal_allocation')
+                : allocations[index].id,
+            fundingEventId: eventId,
+            goalId: allocations[index].goalId,
+            amountMinor: allocations[index].amountMinor.abs(),
+            order: index,
+          ),
+      ],
+      sync: SyncMetadata.fresh(deviceId: deviceId),
+    );
+    final allocationByGoalId = <String, int>{};
+    for (final allocation in event.allocations) {
+      allocationByGoalId.update(
+        allocation.goalId,
+        (value) => value + allocation.amountMinor,
+        ifAbsent: () => allocation.amountMinor,
+      );
+    }
+    final updatedGoals = <GoalRecord>[
+      for (final entry in allocationByGoalId.entries)
+        if (goalById(entry.key).goalType == GoalType.reachTarget &&
+            goalById(entry.key).status == GoalStatus.active &&
+            currentGoalAmountMinor(entry.key) + entry.value >=
+                goalById(entry.key).targetAmountMinor)
+          goalById(entry.key).copyWith(
+            status: GoalStatus.completed,
+            sync: _touchAfterCurrent(goalById(entry.key).sync),
+          ),
+    ];
+    final previousDataSet = _dataSet;
+    try {
+      var nextGoals = goals;
+      for (final goal in updatedGoals) {
+        nextGoals = _upsert(nextGoals, goal, (item) => item.id);
+      }
+      _dataSet = _dataSet.copyWith(
+        goals: nextGoals,
+        goalFundingEvents: _upsert(goalFundingEvents, event, (item) => item.id),
+      );
+      await _commit(goalRecords: updatedGoals, goalFundingEvents: [event]);
+    } catch (_) {
+      _dataSet = previousDataSet;
+      notifyListeners();
+      rethrow;
+    }
+    return event;
+  }
+
+  Future<GoalFundingEventRecord> undoGoalFunding(String eventId) async {
+    final event = goalFundingEvents
+        .where((item) => item.id == eventId && item.isActive)
+        .firstOrNull;
+    if (event == null) {
+      throw const FinanceDataValidationException(
+        'This Goal funding event has already been undone or is unavailable.',
+      );
+    }
+    final accountExists = accounts.any(
+      (account) => account.id == event.sourceAccountId && !account.isDeleted,
+    );
+    if (!accountExists) {
+      throw const FinanceDataValidationException(
+        'The source account is unavailable. Restore or reassign it before undoing this funding.',
+      );
+    }
+    final reversed = event.copyWith(
+      sync: _touchAfterCurrent(event.sync).deleted(deviceId: deviceId),
+    );
+    final affectedGoalIds = event.allocations
+        .map((allocation) => allocation.goalId)
+        .toSet();
+    final updatedGoals = <GoalRecord>[
+      for (final goalId in affectedGoalIds)
+        if (goals.where((goal) => goal.id == goalId).firstOrNull
+            case final goal?
+            when goal.goalType == GoalType.reachTarget &&
+                goal.status == GoalStatus.completed &&
+                currentGoalAmountMinor(goalId) -
+                        event.allocations
+                            .where((allocation) => allocation.goalId == goalId)
+                            .fold<int>(
+                              0,
+                              (total, allocation) =>
+                                  total + allocation.amountMinor,
+                            ) <
+                    goal.targetAmountMinor)
+          goal.copyWith(
+            status: GoalStatus.active,
+            sync: _touchAfterCurrent(goal.sync),
+          ),
+    ];
+    final previousDataSet = _dataSet;
+    try {
+      var nextGoals = goals;
+      for (final goal in updatedGoals) {
+        nextGoals = _upsert(nextGoals, goal, (item) => item.id);
+      }
+      _dataSet = _dataSet.copyWith(
+        goals: nextGoals,
+        goalFundingEvents: _upsert(
+          goalFundingEvents,
+          reversed,
+          (item) => item.id,
+        ),
+      );
+      await _commit(goalRecords: updatedGoals, goalFundingEvents: [reversed]);
+    } catch (_) {
+      _dataSet = previousDataSet;
+      notifyListeners();
+      rethrow;
+    }
+    return reversed;
+  }
+
+  Future<void> migrateLegacyGoalToAccountFunding(String goalId) async {
+    final goal = goalById(goalId);
+    if (!goal.requiresFundingMigration ||
+        goal.fundingMethod != GoalFundingMethod.accountFunded) {
+      return;
+    }
+    final amountsByAccount = <String, int>{};
+    final defaultAccountId = goal.defaultFundingAccountId;
+    if (goal.startingAmountMinor > 0) {
+      if (defaultAccountId == null) {
+        throw const FinanceDataValidationException(
+          'Choose a funding account before converting this Goal.',
+        );
+      }
+      amountsByAccount[defaultAccountId] = goal.startingAmountMinor.abs();
+    }
+    final legacyContributions = activeContributionsForGoal(
+      goal.id,
+    ).where((item) => item.isLegacyReservation).toList(growable: false);
+    for (final contribution in legacyContributions) {
+      final accountId = contribution.sourceAccountId ?? defaultAccountId;
+      if (accountId == null) {
+        throw const FinanceDataValidationException(
+          'A previous Goal contribution has no source account.',
+        );
+      }
+      amountsByAccount.update(
+        accountId,
+        (amount) => amount + contribution.amountMinor.abs(),
+        ifAbsent: () => contribution.amountMinor.abs(),
+      );
+    }
+    for (final entry in amountsByAccount.entries) {
+      final account = accounts
+          .where((item) => item.id == entry.key && item.isVisible)
+          .firstOrNull;
+      if (account == null) {
+        throw const FinanceDataValidationException(
+          'A linked funding account is unavailable.',
+        );
+      }
+      if (entry.value > balanceForAccount(account.id)) {
+        throw FinanceDataValidationException(
+          '${account.name} does not have enough balance to convert this Goal.',
+        );
+      }
+    }
+
+    final timestamp = DateTime.now().toUtc();
+    final events = <GoalFundingEventRecord>[];
+    for (final entry in amountsByAccount.entries) {
+      if (entry.value <= 0) continue;
+      final eventId = _newId('goal_funding_migration');
+      events.add(
+        GoalFundingEventRecord(
+          id: eventId,
+          sourceAccountId: entry.key,
+          totalAmountMinor: entry.value,
+          date: DateTime.now(),
+          note: 'Converted from previous Goal reservations',
+          allocations: [
+            GoalFundingAllocation(
+              id: _newId('goal_allocation'),
+              fundingEventId: eventId,
+              goalId: goal.id,
+              amountMinor: entry.value,
+              order: 0,
+            ),
+          ],
+          isMigrationEvent: true,
+          sync: SyncMetadata.fresh(now: timestamp, deviceId: deviceId),
+        ),
+      );
+    }
+    final tombstones = [
+      for (final contribution in legacyContributions)
+        contribution.copyWith(
+          sync: _touchAfterCurrent(
+            contribution.sync,
+          ).deleted(deviceId: deviceId),
+        ),
+    ];
+    final migratedGoal = goal.copyWith(
+      startingAmountMinor: 0,
+      requiresFundingMigration: false,
+      sync: _touchAfterCurrent(goal.sync),
+    );
+    final previousDataSet = _dataSet;
+    try {
+      var updatedContributions = goalContributions;
+      for (final tombstone in tombstones) {
+        updatedContributions = _upsert(
+          updatedContributions,
+          tombstone,
+          (item) => item.id,
+        );
+      }
+      var updatedEvents = goalFundingEvents;
+      for (final event in events) {
+        updatedEvents = _upsert(updatedEvents, event, (item) => item.id);
+      }
+      _dataSet = _dataSet.copyWith(
+        goals: _upsert(goals, migratedGoal, (item) => item.id),
+        goalContributions: updatedContributions,
+        goalFundingEvents: updatedEvents,
+      );
+      await _commit(
+        goal: migratedGoal,
+        goalContributions: tombstones,
+        goalFundingEvents: events,
+      );
+    } catch (_) {
+      _dataSet = previousDataSet;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> migrateLegacyGoalToTrackingOnly(String goalId) async {
+    final goal = goalById(goalId);
+    if (!goal.requiresFundingMigration) return;
+    final convertedContributions = [
+      for (final contribution in activeContributionsForGoal(goal.id))
+        if (contribution.isLegacyReservation)
+          contribution.copyWith(
+            fundingMethod: GoalFundingMethod.trackingOnly,
+            clearSourceAccount: true,
+            isLegacyReservation: false,
+            sync: _touchAfterCurrent(contribution.sync),
+          ),
+    ];
+    final migratedGoal = goal.copyWith(
+      fundingMethod: GoalFundingMethod.trackingOnly,
+      clearDefaultFundingAccount: true,
+      requiresFundingMigration: false,
+      sync: _touchAfterCurrent(goal.sync),
+    );
+    final previousDataSet = _dataSet;
+    try {
+      var updatedContributions = goalContributions;
+      for (final contribution in convertedContributions) {
+        updatedContributions = _upsert(
+          updatedContributions,
+          contribution,
+          (item) => item.id,
+        );
+      }
+      _dataSet = _dataSet.copyWith(
+        goals: _upsert(goals, migratedGoal, (item) => item.id),
+        goalContributions: updatedContributions,
+      );
+      await _commit(
+        goal: migratedGoal,
+        goalContributions: convertedContributions,
+      );
+    } catch (_) {
+      _dataSet = previousDataSet;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<GoalContributionRecord> undoGoalContribution(
+    String contributionId,
+  ) async {
+    final contribution = goalContributions
+        .where((item) => item.id == contributionId && item.isActive)
+        .firstOrNull;
+    if (contribution == null) {
+      throw const FinanceDataValidationException(
+        'This Goal contribution has already been undone or is unavailable.',
+      );
+    }
+    final goal = goals
+        .where((item) => item.id == contribution.goalId && !item.isDeleted)
+        .firstOrNull;
+    if (goal == null) {
+      throw const FinanceDataValidationException(
+        'The related Goal is unavailable.',
+      );
+    }
+    final reversed = contribution.copyWith(
+      sync: _touchAfterCurrent(contribution.sync).deleted(deviceId: deviceId),
+    );
+    final amountAfterUndo =
+        currentGoalAmountMinor(goal.id) - contribution.amountMinor.abs();
+    final updatedGoal = _goalWithDerivedLifecycleStatus(goal, amountAfterUndo);
+    final previousDataSet = _dataSet;
+    try {
+      _dataSet = _dataSet.copyWith(
+        goals: _upsert(goals, updatedGoal, (item) => item.id),
+        goalContributions: _upsert(
+          goalContributions,
+          reversed,
+          (item) => item.id,
+        ),
+      );
+      await _commit(
+        goal: identical(updatedGoal, goal) ? null : updatedGoal,
+        goalContribution: reversed,
+      );
+    } catch (_) {
+      _dataSet = previousDataSet;
+      notifyListeners();
+      rethrow;
+    }
+    return reversed;
+  }
+
+  Future<void> archiveGoal(String goalId) async {
+    final goal = goalById(goalId);
+    await saveGoal(
+      goal.copyWith(
+        status: GoalStatus.archived,
+        sync: _touchAfterCurrent(goal.sync),
+      ),
+    );
+  }
+
+  Future<void> markGoalComplete(String goalId) async {
+    final goal = goalById(goalId);
+    if (goal.goalType == GoalType.maintainBalance) {
+      throw const FinanceDataValidationException(
+        'Maintain a Balance Goals remain active while in use.',
+      );
+    }
+    await saveGoal(
+      goal.copyWith(
+        status: GoalStatus.completed,
+        sync: _touchAfterCurrent(goal.sync),
+      ),
+    );
+  }
+
+  Future<void> restoreArchivedGoal(String goalId) async {
+    final goal = goalById(goalId);
+    if (!goal.isArchived) return;
+    final status =
+        goal.goalType == GoalType.reachTarget &&
+            currentGoalAmountMinor(goal.id) >= goal.targetAmountMinor
+        ? GoalStatus.completed
+        : GoalStatus.active;
+    await saveGoal(
+      goal.copyWith(status: status, sync: _touchAfterCurrent(goal.sync)),
+    );
+  }
+
+  GoalRecord _goalWithDerivedLifecycleStatus(
+    GoalRecord goal,
+    int currentAmountMinor,
+  ) {
+    if (goal.status == GoalStatus.archived) return goal;
+    final derivedStatus =
+        goal.goalType == GoalType.reachTarget &&
+            currentAmountMinor >= goal.targetAmountMinor
+        ? GoalStatus.completed
+        : GoalStatus.active;
+    if (goal.status == derivedStatus) return goal;
+    return goal.copyWith(
+      status: derivedStatus,
+      sync: _touchAfterCurrent(goal.sync),
+    );
+  }
+
+  void _validateGoal(GoalRecord goal) {
+    if (goal.name.trim().isEmpty) {
+      throw const FinanceDataValidationException('Goal name is required.');
+    }
+    if (goal.targetAmountMinor <= 0) {
+      throw const FinanceDataValidationException(
+        'Goal target must be greater than zero.',
+      );
+    }
+    if (goal.startingAmountMinor < 0) {
+      throw const FinanceDataValidationException(
+        'Goal starting amount cannot be negative.',
+      );
+    }
+    if (goal.status != GoalStatus.archived &&
+        goal.fundingMethod == GoalFundingMethod.accountFunded) {
+      final accountId = goal.defaultFundingAccountId;
+      final account = accounts
+          .where((item) => item.id == accountId && item.isVisible)
+          .firstOrNull;
+      if (account == null) {
+        throw const FinanceDataValidationException(
+          'Choose an active funding account.',
+        );
+      }
+    }
+  }
+
+  void _validateGoalContribution(
+    GoalContributionRecord contribution,
+    GoalRecord goal,
+  ) {
+    if (contribution.amountMinor <= 0) {
+      throw const FinanceDataValidationException(
+        'Contribution amount must be greater than zero.',
+      );
+    }
+    if (contribution.fundingMethod != goal.fundingMethod) {
+      throw const FinanceDataValidationException(
+        'Contribution funding method does not match the Goal.',
+      );
+    }
+    if (goal.fundingMethod != GoalFundingMethod.trackingOnly ||
+        contribution.sourceAccountId != null) {
+      throw const FinanceDataValidationException(
+        'Tracking-only contributions cannot use an account.',
+      );
+    }
   }
 
   Future<void> saveScheduledTransaction(
@@ -1267,6 +2083,11 @@ class FinanceDataStore extends ChangeNotifier {
     TransactionRecord? transaction,
     ScheduledTransactionRecord? scheduledTransaction,
     BudgetRecord? budget,
+    GoalRecord? goal,
+    List<GoalRecord> goalRecords = const [],
+    GoalContributionRecord? goalContribution,
+    List<GoalContributionRecord> goalContributions = const [],
+    List<GoalFundingEventRecord> goalFundingEvents = const [],
     UserPreferences? preferences,
   }) async {
     notifyListeners();
@@ -1295,6 +2116,30 @@ class FinanceDataStore extends ChangeNotifier {
         }
         if (budget != null) {
           await remote.saveBudget(userId: currentUserId, budget: budget);
+        }
+        if (goal != null) {
+          await remote.saveGoal(userId: currentUserId, goal: goal);
+        }
+        for (final goalRecord in goalRecords) {
+          await remote.saveGoal(userId: currentUserId, goal: goalRecord);
+        }
+        if (goalContribution != null) {
+          await remote.saveGoalContribution(
+            userId: currentUserId,
+            contribution: goalContribution,
+          );
+        }
+        for (final contribution in goalContributions) {
+          await remote.saveGoalContribution(
+            userId: currentUserId,
+            contribution: contribution,
+          );
+        }
+        for (final fundingEvent in goalFundingEvents) {
+          await remote.saveGoalFundingEvent(
+            userId: currentUserId,
+            fundingEvent: fundingEvent,
+          );
         }
         if (preferences != null) {
           await remote.savePreferences(
@@ -1506,6 +2351,24 @@ FinanceDataSet mergeFinanceDataSetsPreferCurrent({
       idOf: (item) => item.id,
       syncOf: (item) => item.sync,
     ),
+    goals: mergeFinanceRecordsPreferCurrent(
+      incoming: incoming.goals,
+      current: current.goals,
+      idOf: (item) => item.id,
+      syncOf: (item) => item.sync,
+    ),
+    goalContributions: mergeFinanceRecordsPreferCurrent(
+      incoming: incoming.goalContributions,
+      current: current.goalContributions,
+      idOf: (item) => item.id,
+      syncOf: (item) => item.sync,
+    ),
+    goalFundingEvents: mergeFinanceRecordsPreferCurrent(
+      incoming: incoming.goalFundingEvents,
+      current: current.goalFundingEvents,
+      idOf: (item) => item.id,
+      syncOf: (item) => item.sync,
+    ),
     preferences: current.preferences,
   );
 }
@@ -1553,5 +2416,8 @@ bool financeDataSetHasRecords(FinanceDataSet dataSet) {
       dataSet.categories.isNotEmpty ||
       dataSet.transactions.isNotEmpty ||
       dataSet.scheduledTransactions.isNotEmpty ||
-      dataSet.budgets.isNotEmpty;
+      dataSet.budgets.isNotEmpty ||
+      dataSet.goals.isNotEmpty ||
+      dataSet.goalContributions.isNotEmpty ||
+      dataSet.goalFundingEvents.isNotEmpty;
 }

@@ -39,7 +39,7 @@ void main() {
       await tester.tap(find.text('Last Month').last);
       await tester.pumpAndSettle();
 
-    expect(find.text('Last Month'), findsWidgets);
+      expect(find.text('Last Month'), findsWidgets);
       expect(find.text(r'$400.00'), findsOneWidget);
       expect(find.text(r'$100.00'), findsWidgets);
       expect(find.text(r'$300.00'), findsOneWidget);

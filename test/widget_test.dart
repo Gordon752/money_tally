@@ -6,9 +6,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
+import 'package:money_tally/src/design/money_format.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/category.dart' as v2_category;
 import 'package:money_tally/src/domain/finance_data_set.dart';
+import 'package:money_tally/src/domain/goal.dart';
+import 'package:money_tally/src/domain/goal_funding.dart';
 import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart'
     as v2_scheduled;
@@ -195,6 +198,43 @@ void main() {
     expect(amountMinor, -500);
     expect(find.text(r'-$5.00'), findsOneWidget);
   });
+
+  testWidgets(
+    'amount entry field focuses zero as a placeholder without selecting it',
+    (tester) async {
+      var amountMinor = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AmountEntryField(
+              autofocus: true,
+              replaceZeroOnFirstInput: true,
+              onChanged: (value) => amountMinor = value,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.focusNode!.hasFocus, isTrue);
+      expect(
+        textField.controller!.selection,
+        TextSelection.collapsed(offset: textField.controller!.text.length),
+      );
+
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: r'$0.005',
+          selection: TextSelection.collapsed(offset: 6),
+        ),
+      );
+      await tester.pump();
+
+      expect(amountMinor, 5);
+      expect(textField.controller!.text, r'$0.05');
+    },
+  );
 
   testWidgets('sync pill stays compact', (tester) async {
     await tester.pumpWidget(
@@ -665,7 +705,7 @@ void main() {
       await collapseScheduledCalendar(tester);
       final restoredRow = find.byKey(
         ValueKey(
-          'scheduled-row-${schedule.id}-${calendarDateKey(occurrenceDate)}',
+          'scheduled-row-${schedule.id}-${calendarDateId(occurrenceDate)}',
         ),
       );
       expect(restoredRow, findsOneWidget);
@@ -959,15 +999,15 @@ void main() {
     await tester.pumpAndSettle();
     final save = find.widgetWithText(FilledButton, 'Save');
     expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
-    await tester.ensureVisible(
+    expect(
+      find.byKey(const ValueKey('transaction-single-category-field')),
+      findsOneWidget,
+    );
+    expect(
       find.byKey(const ValueKey('transaction-split-category-field')),
+      findsNothing,
     );
-    final splitAmount = find.descendant(
-      of: find.byKey(const ValueKey('transaction-split-category-field')),
-      matching: find.byType(TextField),
-    );
-    expect(splitAmount, findsOneWidget);
-    expect(tester.widget<TextField>(splitAmount).controller?.text, r'$12.34');
+    expect(find.text('Split transaction'), findsOneWidget);
     await tester.tap(save);
     await tester.pumpAndSettle();
 
@@ -1141,16 +1181,9 @@ void main() {
     expect(splitSection, findsOneWidget);
     expect(
       find.descendant(of: splitSection, matching: find.byType(TextField)),
-      findsOneWidget,
+      findsNWidgets(2),
     );
 
-    await tester.scrollUntilVisible(
-      find.text('Add split'),
-      160,
-      scrollable: find.byType(Scrollable).last,
-    );
-    await tester.tap(find.text('Add split'));
-    await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(of: splitSection, matching: find.text('Choose category')),
     );
@@ -1181,6 +1214,26 @@ void main() {
     expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
     expect(find.text(r'$30.00'), findsOneWidget);
     expect(find.text(r'$34.28'), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('transaction-use-single-category')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('transaction-use-single-category')),
+    );
+    await tester.pumpAndSettle();
+    final discardConfirmation = find.byType(AlertDialog);
+    expect(discardConfirmation, findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: discardConfirmation,
+        matching: find.widgetWithText(TextButton, 'Cancel'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(splitSection, findsOneWidget);
+    expect(splitAmountFields, findsNWidgets(2));
 
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
@@ -1223,8 +1276,12 @@ void main() {
     expect(find.text(r'$64.28'), findsWidgets);
     expect(find.text('Checking'), findsOneWidget);
     expect(
-      find.byKey(const ValueKey('scheduled-split-category-0')),
+      find.byKey(const ValueKey('scheduled-single-category-field')),
       findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('scheduled-split-category-field')),
+      findsNothing,
     );
     expect(find.byKey(const ValueKey('scheduled-next-date')), findsOneWidget);
     expect(find.byKey(const ValueKey('scheduled-alert-time')), findsOneWidget);
@@ -1377,74 +1434,123 @@ void main() {
     expect(segmented.selected, {v2_transaction.TransactionType.income});
   });
 
-  testWidgets(
-    'blank expense and income show the same quiet inline split section',
-    (tester) async {
-      final legacyStore = FinanceStore.seeded();
-      final dataStore = FinanceDataStore(
-        dataSet: const V1SnapshotMigrator().migrate(
-          legacyStore.snapshot().toJson(),
-        ),
-      );
-      await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
-      );
+  testWidgets('normal expense and income use category-first split workflow', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
 
-      await tester.tap(find.byTooltip('Add'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Expense'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Expense'));
+    await tester.pumpAndSettle();
 
-      final splitSection = find.byKey(
-        const ValueKey('transaction-split-category-field'),
-      );
-      expect(splitSection, findsOneWidget);
-      expect(
-        find.descendant(
-          of: splitSection,
-          matching: find.text('Split Categories'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: splitSection,
-          matching: find.text('Choose category'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('transaction-add-split')),
-        findsOneWidget,
-      );
-      final quietRemaining = tester.widget<Text>(
-        find.byKey(const ValueKey('transaction-split-remaining')),
-      );
-      expect(quietRemaining.data, r'$0.00');
-      expect(quietRemaining.style?.color, isNot(AppTheme.accent));
+    final singleCategory = find.byKey(
+      const ValueKey('transaction-single-category-field'),
+    );
+    expect(singleCategory, findsOneWidget);
+    expect(
+      find.descendant(
+        of: singleCategory,
+        matching: find.text('Choose category'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('transaction-split-category-field')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('transaction-enable-split')),
+      findsNothing,
+    );
 
-      await tester.tap(find.text('Income').last);
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('transaction-category')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dining').last);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('transaction-enable-split')),
+      findsOneWidget,
+    );
 
-      expect(splitSection, findsOneWidget);
-      expect(
-        find.descendant(
-          of: splitSection,
-          matching: find.text('Choose category'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const ValueKey('transaction-split-remaining')),
-            )
-            .data,
-        r'$0.00',
-      );
-      expect(find.text('Single Category'), findsNothing);
-    },
-  );
+    await tester.tap(find.byKey(const ValueKey('transaction-enable-split')));
+    await tester.pumpAndSettle();
+    final splitSection = find.byKey(
+      const ValueKey('transaction-split-category-field'),
+    );
+    expect(splitSection, findsOneWidget);
+    expect(
+      find.descendant(of: splitSection, matching: find.text('Choose category')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: splitSection, matching: find.byType(TextField)),
+      findsNWidgets(2),
+    );
+    expect(
+      tester
+          .widget<TextField>(
+            find
+                .descendant(of: splitSection, matching: find.byType(TextField))
+                .at(1),
+          )
+          .autofocus,
+      isTrue,
+    );
+    final newSplitAmount = tester.widget<AmountEntryField>(
+      find
+          .descendant(of: splitSection, matching: find.byType(AmountEntryField))
+          .at(1),
+    );
+    expect(newSplitAmount.replaceZeroOnFirstInput, isTrue);
+    expect(newSplitAmount.selectAllOnFocus, isFalse);
+    expect(find.byKey(const ValueKey('transaction-add-split')), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('transaction-add-split')),
+    );
+    await tester.tap(find.byKey(const ValueKey('transaction-add-split')));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: splitSection, matching: find.byType(TextField)),
+      findsNWidgets(3),
+    );
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('transaction-use-single-category')),
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('transaction-use-single-category')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(
+      find.byKey(const ValueKey('transaction-single-category-field')),
+      findsOneWidget,
+    );
+    expect(splitSection, findsNothing);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Income').last);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('transaction-single-category-field')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('transaction-split-category-field')),
+      findsNothing,
+    );
+  });
 
   testWidgets(
     'add transaction schedules future occurrences only when enabled',
@@ -1725,10 +1831,10 @@ void main() {
       );
 
       await tester.ensureVisible(
-        find.byKey(const ValueKey('transaction-split-category-field')),
+        find.byKey(const ValueKey('transaction-single-category-field')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Choose category').last);
+      await tester.tap(find.byKey(const ValueKey('transaction-category')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add New Category'));
       await tester.pumpAndSettle();
@@ -2648,6 +2754,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Scheduled Transaction'));
     await tester.tap(find.text('Scheduled Transaction'));
     await tester.pumpAndSettle();
 
@@ -2714,9 +2821,9 @@ void main() {
     final saveButton = find.widgetWithText(FilledButton, 'Save');
     expect(tester.widget<FilledButton>(saveButton).onPressed, isNull);
     await tester.ensureVisible(
-      find.byKey(const ValueKey('scheduled-split-category-0')),
+      find.byKey(const ValueKey('scheduled-category')),
     );
-    await tester.tap(find.byKey(const ValueKey('scheduled-split-category-0')));
+    await tester.tap(find.byKey(const ValueKey('scheduled-category')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dining').last);
     await tester.pumpAndSettle();
@@ -2786,6 +2893,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Scheduled Transaction'));
     await tester.tap(find.text('Scheduled Transaction'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('scheduled-account')));
@@ -2805,23 +2913,53 @@ void main() {
       find.byKey(const ValueKey('scheduled-payee')),
       'Split groceries',
     );
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('scheduled-split-category-0')),
+    expect(
+      find.byKey(const ValueKey('scheduled-single-category-field')),
+      findsOneWidget,
     );
-    await tester.tap(find.byKey(const ValueKey('scheduled-split-category-0')));
+    expect(find.byKey(const ValueKey('scheduled-enable-split')), findsNothing);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('scheduled-category')),
+    );
+    await tester.tap(find.byKey(const ValueKey('scheduled-category')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dining').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('scheduled-add-split')));
+    expect(
+      find.byKey(const ValueKey('scheduled-enable-split')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('scheduled-enable-split')));
     await tester.pumpAndSettle();
+    final splitSection = find.byKey(
+      const ValueKey('scheduled-split-category-field'),
+    );
+    expect(
+      find.descendant(of: splitSection, matching: find.byType(TextField)),
+      findsNWidgets(2),
+    );
+    expect(
+      tester
+          .widget<TextField>(
+            find
+                .descendant(of: splitSection, matching: find.byType(TextField))
+                .at(1),
+          )
+          .autofocus,
+      isTrue,
+    );
+    final newSplitAmount = tester.widget<AmountEntryField>(
+      find
+          .descendant(of: splitSection, matching: find.byType(AmountEntryField))
+          .at(1),
+    );
+    expect(newSplitAmount.replaceZeroOnFirstInput, isTrue);
+    expect(newSplitAmount.selectAllOnFocus, isFalse);
     await tester.tap(find.byKey(const ValueKey('scheduled-split-category-1')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Snacks').last);
     await tester.pumpAndSettle();
 
-    final splitSection = find.byKey(
-      const ValueKey('scheduled-split-category-field'),
-    );
     final splitAmounts = find.descendant(
       of: splitSection,
       matching: find.byType(TextField),
@@ -2866,6 +3004,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Scheduled Transaction'));
     await tester.tap(find.text('Scheduled Transaction'));
     await tester.pumpAndSettle();
     await tester.tap(
@@ -2893,13 +3032,13 @@ void main() {
       'Split income',
     );
     await tester.ensureVisible(
-      find.byKey(const ValueKey('scheduled-split-category-0')),
+      find.byKey(const ValueKey('scheduled-category')),
     );
-    await tester.tap(find.byKey(const ValueKey('scheduled-split-category-0')));
+    await tester.tap(find.byKey(const ValueKey('scheduled-category')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Income').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('scheduled-add-split')));
+    await tester.tap(find.byKey(const ValueKey('scheduled-enable-split')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('scheduled-split-category-1')));
     await tester.pumpAndSettle();
@@ -2952,6 +3091,7 @@ void main() {
     await tester.pumpWidget(MoneyTallyApp());
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Scheduled Transaction'));
     await tester.tap(find.text('Scheduled Transaction'));
     await tester.pumpAndSettle();
 
@@ -3004,6 +3144,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Scheduled Transaction'));
     await tester.tap(find.text('Scheduled Transaction'));
     await tester.pumpAndSettle();
     await tester.tap(
@@ -3033,9 +3174,9 @@ void main() {
       'Payroll',
     );
     await tester.ensureVisible(
-      find.byKey(const ValueKey('scheduled-split-category-0')),
+      find.byKey(const ValueKey('scheduled-category')),
     );
-    await tester.tap(find.byKey(const ValueKey('scheduled-split-category-0')));
+    await tester.tap(find.byKey(const ValueKey('scheduled-category')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Income').last);
     await tester.pumpAndSettle();
@@ -3067,6 +3208,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Scheduled Transaction'));
     await tester.tap(find.text('Scheduled Transaction'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Transfer'));
@@ -3670,74 +3812,47 @@ void main() {
       r'$20,631.66',
     );
 
-    expect(
-      tester
-          .widget<Text>(
-            find.byKey(
-              ValueKey(
-                'scheduled-calendar-total-${month.year}-${month.month}-10',
-              ),
-            ),
-          )
-          .data,
-      r'-$20,000.00',
-    );
-
-    final mixedDay = find.byKey(
-      ValueKey('scheduled-calendar-day-${month.year}-${month.month}-14'),
-    );
-    expect(
-      find.descendant(of: mixedDay, matching: find.text('2')),
-      findsOneWidget,
-    );
-    expect(
-      tester
-          .widget<Text>(
-            find.byKey(
-              ValueKey(
-                'scheduled-calendar-total-${month.year}-${month.month}-14',
-              ),
-            ),
-          )
-          .data,
-      r'+$400.00',
-    );
     final expenseDay = find.byKey(
-      ValueKey('scheduled-calendar-day-${month.year}-${month.month}-15'),
+      ValueKey('scheduled-calendar-day-${month.year}-${month.month}-5'),
     );
     expect(
-      find.descendant(of: expenseDay, matching: find.text('2')),
+      find.descendant(
+        of: expenseDay,
+        matching: find.byKey(const ValueKey('calendar-activity-dots')),
+      ),
+      findsNothing,
+    );
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-expenses')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(
+        ValueKey('calendar-filtered-total-${month.year}-${month.month}-5'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(
+          ValueKey('calendar-filtered-total-${month.year}-${month.month}-10'),
+        ),
+        matching: find.text(r'-$20,000.00'),
+      ),
       findsOneWidget,
     );
     expect(
-      tester
-          .widget<Text>(
-            find.byKey(
-              ValueKey(
-                'scheduled-calendar-total-${month.year}-${month.month}-15',
-              ),
-            ),
-          )
-          .data,
-      r'-$31.66',
-    );
-    expect(
-      find.byKey(
-        ValueKey('scheduled-calendar-total-${month.year}-${month.month}-11'),
+      find.descendant(
+        of: find.byKey(
+          ValueKey('calendar-filtered-total-${month.year}-${month.month}-15'),
+        ),
+        matching: find.text(r'-$31.66'),
       ),
-      findsNothing,
-    );
-    expect(
-      find.byKey(
-        ValueKey('scheduled-calendar-total-${month.year}-${month.month}-12'),
-      ),
-      findsNothing,
+      findsOneWidget,
     );
 
     final ordinaryDecoration = tester.widget<DecoratedBox>(
       find.byKey(
         ValueKey(
-          'scheduled-calendar-selection-${month.year}-${month.month}-14',
+          'scheduled-calendar-selection-${month.year}-${month.month}-15',
         ),
       ),
     );
@@ -3747,7 +3862,10 @@ void main() {
       find.byType(Scrollable).first,
     );
     expect(pageScroll.position.pixels, 0);
-    final expenseDayRect = tester.getRect(expenseDay);
+    final scheduledDay = find.byKey(
+      ValueKey('scheduled-calendar-day-${month.year}-${month.month}-15'),
+    );
+    final expenseDayRect = tester.getRect(scheduledDay);
     await tester.tapAt(
       Offset(expenseDayRect.left + 1, expenseDayRect.center.dy),
     );
@@ -3762,8 +3880,12 @@ void main() {
     );
     expect((selectedDecoration.decoration as BoxDecoration).color, isNotNull);
     expect((selectedDecoration.decoration as BoxDecoration).border, isNotNull);
-    expect(find.text('Apple'), findsOneWidget);
-    expect(find.text('Netflix'), findsOneWidget);
+    expect(find.text('Apple'), findsWidgets);
+    expect(find.text('Netflix'), findsWidgets);
+    expect(
+      find.textContaining('No Expense scheduled activity on'),
+      findsNothing,
+    );
 
     tester
         .widget<IconButton>(
@@ -3805,6 +3927,393 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(pageScroll.position.pixels, greaterThan(0));
+  });
+
+  testWidgets('Scheduled page excludes ordinary ledger activity', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final today = DateTime.now();
+    v2_transaction.TransactionRecord activity({
+      required String id,
+      required String payee,
+      required v2_transaction.TransactionType type,
+      required int amountMinor,
+      String? transferAccountId,
+    }) {
+      return v2_transaction.TransactionRecord(
+        id: id,
+        type: type,
+        accountId: 'checking',
+        transferAccountId: transferAccountId,
+        categoryId: type == v2_transaction.TransactionType.transfer
+            ? null
+            : 'dining',
+        date: today,
+        payee: payee,
+        amountMinor: amountMinor,
+        sync: v2_sync.SyncMetadata.fresh(),
+      );
+    }
+
+    final schedules = [
+      scheduledExpense(
+        id: 'calendar-scheduled-income',
+        payee: 'Scheduled Income',
+        amountMinor: 2000000,
+        nextDate: today,
+      ).copyWith(
+        type: v2_transaction.TransactionType.income,
+        frequency: v2_scheduled.RecurrenceFrequency.once,
+      ),
+      scheduledExpense(
+        id: 'calendar-scheduled-expense',
+        payee: 'Scheduled Expense',
+        amountMinor: 10000000,
+        nextDate: today,
+      ).copyWith(frequency: v2_scheduled.RecurrenceFrequency.once),
+      scheduledExpense(
+        id: 'calendar-scheduled-transfer',
+        payee: 'Scheduled Transfer',
+        amountMinor: 500000,
+        nextDate: today,
+      ).copyWith(
+        type: v2_transaction.TransactionType.transfer,
+        transferAccountId: 'cash',
+        clearCategory: true,
+        frequency: v2_scheduled.RecurrenceFrequency.once,
+      ),
+    ];
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        scheduledTransactions: schedules,
+        transactions: [
+          ...migrated.transactions,
+          activity(
+            id: 'calendar-income',
+            payee: 'Calendar Income',
+            type: v2_transaction.TransactionType.income,
+            amountMinor: 2000000,
+          ),
+          activity(
+            id: 'calendar-expense',
+            payee: 'Calendar Expense',
+            type: v2_transaction.TransactionType.expense,
+            amountMinor: 10000000,
+          ),
+          activity(
+            id: 'calendar-transfer',
+            payee: 'Calendar Transfer',
+            type: v2_transaction.TransactionType.transfer,
+            amountMinor: 500000,
+            transferAccountId: 'cash',
+          ),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Calendar Income'), findsNothing);
+    expect(find.text('Calendar Expense'), findsNothing);
+    expect(find.text('Calendar Transfer'), findsNothing);
+    expect(find.text('Scheduled Income'), findsWidgets);
+    expect(find.text('Scheduled Expense'), findsWidgets);
+    expect(find.text('Scheduled Transfer'), findsWidgets);
+    expect(find.byKey(const ValueKey('calendar-activity-dots')), findsWidgets);
+    expect(
+      find.descendant(
+        of: find.byKey(
+          ValueKey(
+            'scheduled-calendar-day-${today.year}-${today.month}-${today.day}',
+          ),
+        ),
+        matching: find.text('3'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-income')));
+    await tester.pumpAndSettle();
+    expect(find.text('Scheduled Income'), findsWidgets);
+    expect(find.text('Scheduled Expense'), findsNothing);
+    expect(find.text('Scheduled Transfer'), findsNothing);
+    expect(find.text(r'$20,000.00'), findsWidgets);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+          .data,
+      r'$20,000.00',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-expenses')));
+    await tester.pumpAndSettle();
+    expect(find.text('Scheduled Income'), findsNothing);
+    expect(find.text('Scheduled Expense'), findsWidgets);
+    expect(find.text('Scheduled Transfer'), findsNothing);
+    expect(find.text(r'-$100,000.00'), findsWidgets);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+          .data,
+      r'$100,000.00',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-transfers')));
+    await tester.pumpAndSettle();
+    expect(find.text('Scheduled Transfer'), findsWidgets);
+    expect(find.text(r'$5,000.00'), findsWidgets);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+          .data,
+      r'$0.00',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-goals')));
+    await tester.pumpAndSettle();
+    expect(find.text('Scheduled Income'), findsNothing);
+    expect(find.text('Scheduled Expense'), findsNothing);
+    expect(find.text('Scheduled Transfer'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('calendar-filter-empty-state')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+          .data,
+      r'$0.00',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('calendar cell preserves full large filtered currency values', (
+    tester,
+  ) async {
+    const amounts = [99, 10000, 999999, 2000000, 10000000, -2000000];
+    for (final amount in amounts) {
+      final scheduled =
+          scheduledExpense(
+            id: 'amount-$amount',
+            payee: 'Amount',
+            amountMinor: amount.abs(),
+            nextDate: DateTime(2026, 7, 24),
+          ).copyWith(
+            type: amount < 0
+                ? v2_transaction.TransactionType.expense
+                : v2_transaction.TransactionType.income,
+          );
+      final occurrence = ScheduledCalendarOccurrence(
+        transaction: scheduled,
+        scheduledDate: scheduled.nextDate,
+        plannedAmountMinor: scheduled.amountMinor,
+      );
+      final filter = amount < 0
+          ? CalendarActivityFilter.expenses
+          : CalendarActivityFilter.income;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 58,
+                child: ScheduledCalendarDayCell(
+                  day: 24,
+                  month: DateTime(2026, 7),
+                  activitySummary: CalendarDayActivitySummary([
+                    CalendarDayActivity.scheduled(occurrence),
+                  ]),
+                  activityFilter: filter,
+                  currency: const UserPreferences().currency,
+                  isSelected: false,
+                  isToday: false,
+                  onSelectDate: (_) {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final expected = MoneyFormatter(
+        const UserPreferences().currency,
+      ).formatMinor(amount);
+      expect(find.text(expected), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  test('calendar aggregation uses one canonical local date key', () {
+    final august = DateTime(2026, 8);
+    v2_transaction.TransactionRecord transaction({
+      required String id,
+      required v2_transaction.TransactionType type,
+      required DateTime date,
+      required int amountMinor,
+      String? transferAccountId,
+    }) {
+      return v2_transaction.TransactionRecord(
+        id: id,
+        type: type,
+        accountId: 'checking',
+        transferAccountId: transferAccountId,
+        categoryId: type == v2_transaction.TransactionType.transfer
+            ? null
+            : 'dining',
+        date: date,
+        payee: id,
+        amountMinor: amountMinor,
+        sync: v2_sync.SyncMetadata.fresh(),
+      );
+    }
+
+    final utcNearMidnight = DateTime.utc(2026, 8, 16, 1, 30);
+    expect(calendarDateKey(utcNearMidnight), DateTime(2026, 8, 15));
+
+    final actual = [
+      transaction(
+        id: 'actual-income-aug-10',
+        type: v2_transaction.TransactionType.income,
+        date: DateTime(2026, 8, 10),
+        amountMinor: 10000,
+      ),
+      transaction(
+        id: 'actual-expense-aug-11',
+        type: v2_transaction.TransactionType.expense,
+        date: DateTime(2026, 8, 11),
+        amountMinor: 11000,
+      ),
+      transaction(
+        id: 'actual-transfer-aug-12',
+        type: v2_transaction.TransactionType.transfer,
+        date: DateTime(2026, 8, 12),
+        amountMinor: 12000,
+        transferAccountId: 'savings',
+      ),
+      transaction(
+        id: 'actual-near-midnight-aug-14',
+        type: v2_transaction.TransactionType.expense,
+        date: DateTime(2026, 8, 14, 23, 59, 59),
+        amountMinor: 14000,
+      ),
+      transaction(
+        id: 'actual-utc-local-aug-15',
+        type: v2_transaction.TransactionType.income,
+        date: utcNearMidnight,
+        amountMinor: 15000,
+      ),
+      transaction(
+        id: 'actual-month-end-aug-31',
+        type: v2_transaction.TransactionType.expense,
+        date: DateTime(2026, 8, 31, 23, 59),
+        amountMinor: 31000,
+      ),
+      transaction(
+        id: 'actual-next-month-sep-1',
+        type: v2_transaction.TransactionType.income,
+        date: DateTime(2026, 9),
+        amountMinor: 100,
+      ),
+    ];
+    final goal = GoalRecord(
+      id: 'goal-calendar-aug',
+      name: 'Calendar Goal',
+      targetAmountMinor: 100000,
+      status: GoalStatus.active,
+      fundingMethod: GoalFundingMethod.accountFunded,
+      defaultFundingAccountId: 'checking',
+      sync: v2_sync.SyncMetadata.fresh(),
+    );
+    final funding = GoalFundingEventRecord(
+      id: 'goal-funding-aug-13',
+      sourceAccountId: 'checking',
+      totalAmountMinor: 13000,
+      date: DateTime(2026, 8, 13),
+      allocations: const [
+        GoalFundingAllocation(
+          id: 'goal-allocation-aug-13',
+          fundingEventId: 'goal-funding-aug-13',
+          goalId: 'goal-calendar-aug',
+          amountMinor: 13000,
+          order: 0,
+        ),
+      ],
+      sync: v2_sync.SyncMetadata.fresh(),
+    );
+    final goals = goalCalendarActivitiesForMonth(
+      [goal],
+      const [],
+      [funding],
+      august,
+    );
+    final actualActivities = calendarActualActivitiesForMonth(
+      actual,
+      goals,
+      august,
+    );
+    final scheduled = [
+      scheduledExpense(
+        id: 'scheduled-expense-aug-21',
+        payee: 'August 21 bill',
+        amountMinor: 21000,
+        nextDate: DateTime(2026, 8, 21),
+      ).copyWith(frequency: v2_scheduled.RecurrenceFrequency.once),
+      scheduledExpense(
+        id: 'scheduled-expense-aug-22',
+        payee: 'August 22 bill',
+        amountMinor: 22000,
+        nextDate: DateTime(2026, 8, 22),
+      ).copyWith(frequency: v2_scheduled.RecurrenceFrequency.once),
+    ];
+    final projected = scheduledOccurrencesForMonth(scheduled, august);
+    final combined = scheduledCalendarActivities(projected);
+    final byDate = calendarActivitySummaryByDay(combined);
+
+    expect(
+      actualActivities
+          .where((item) => item.transaction != null)
+          .map((item) => item.transaction!.id),
+      containsAll([
+        'actual-income-aug-10',
+        'actual-expense-aug-11',
+        'actual-transfer-aug-12',
+        'actual-near-midnight-aug-14',
+        'actual-utc-local-aug-15',
+        'actual-month-end-aug-31',
+      ]),
+    );
+    expect(
+      actualActivities.map((item) => item.transaction?.id),
+      isNot(contains('actual-next-month-sep-1')),
+    );
+    expect(byDate[DateTime(2026, 8, 10)], isNull);
+    expect(byDate[DateTime(2026, 8, 11)], isNull);
+    expect(byDate[DateTime(2026, 8, 12)], isNull);
+    expect(byDate[DateTime(2026, 8, 13)], isNull);
+    expect(byDate[DateTime(2026, 8, 14)], isNull);
+    expect(byDate[DateTime(2026, 8, 15)], isNull);
+    expect(
+      byDate[DateTime(2026, 8, 21)]!.countFor(CalendarActivityFilter.expenses),
+      1,
+    );
+    expect(
+      byDate[DateTime(2026, 8, 22)]!.countFor(CalendarActivityFilter.expenses),
+      1,
+    );
+    expect(byDate[DateTime(2026, 8, 31)], isNull);
+    expect(byDate[DateTime(2026, 9)], isNull);
+    expect(
+      combined.every((activity) => activity.scheduledOccurrence != null),
+      isTrue,
+    );
   });
 
   testWidgets('dashboard shows scheduled due count', (tester) async {
@@ -4143,7 +4652,7 @@ void main() {
 
     final save = find.widgetWithText(FilledButton, 'Save');
     expect(tester.widget<FilledButton>(save).onPressed, isNull);
-    await tester.tap(find.byKey(const ValueKey('scheduled-split-category-0')));
+    await tester.tap(find.byKey(const ValueKey('scheduled-category')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add New Category'));
     await tester.pumpAndSettle();
@@ -4262,7 +4771,7 @@ void main() {
 
     final row = find.byKey(
       ValueKey(
-        'scheduled-row-sched-projected-${calendarDateKey(projectedDate)}',
+        'scheduled-row-sched-projected-${calendarDateId(projectedDate)}',
       ),
     );
     expect(row, findsOneWidget);
@@ -4371,7 +4880,7 @@ void main() {
 
     final row = find.byKey(
       ValueKey(
-        'scheduled-row-sched-deleted-parent-${calendarDateKey(occurrenceDate)}',
+        'scheduled-row-sched-deleted-parent-${calendarDateId(occurrenceDate)}',
       ),
     );
     expect(row, findsNothing);
@@ -4429,7 +4938,7 @@ void main() {
 
     final editRow = find.byKey(
       ValueKey(
-        'scheduled-row-sched-future-edit-${calendarDateKey(currentProjection)}',
+        'scheduled-row-sched-future-edit-${calendarDateId(currentProjection)}',
       ),
     );
     await tester.longPress(editRow);
@@ -4442,17 +4951,14 @@ void main() {
       '30000',
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(
+    expect(
+      find.byKey(const ValueKey('scheduled-single-category-field')),
+      findsOneWidget,
+    );
+    expect(
       find.byKey(const ValueKey('scheduled-split-category-field')),
+      findsNothing,
     );
-    await tester.pumpAndSettle();
-    final projectedSplitAmount = find.descendant(
-      of: find.byKey(const ValueKey('scheduled-split-category-field')),
-      matching: find.byType(TextField),
-    );
-    expect(projectedSplitAmount, findsOneWidget);
-    await tester.enterText(projectedSplitAmount, '30000');
-    await tester.pumpAndSettle();
     final projectedSave = find.widgetWithText(FilledButton, 'Save');
     expect(tester.widget<FilledButton>(projectedSave).onPressed, isNotNull);
     await tester.tap(projectedSave);
@@ -4478,7 +4984,7 @@ void main() {
     await tester.pumpAndSettle();
     final deleteRow = find.byKey(
       ValueKey(
-        'scheduled-row-sched-future-delete-${calendarDateKey(futureProjection)}',
+        'scheduled-row-sched-future-delete-${calendarDateId(futureProjection)}',
       ),
     );
     await tester.longPress(deleteRow);
@@ -4954,17 +5460,14 @@ void main() {
       find.byKey(const ValueKey('scheduled-amount')),
       '925.50',
     );
-    await tester.ensureVisible(
+    expect(
+      find.byKey(const ValueKey('scheduled-single-category-field')),
+      findsOneWidget,
+    );
+    expect(
       find.byKey(const ValueKey('scheduled-split-category-field')),
+      findsNothing,
     );
-    await tester.pumpAndSettle();
-    final splitAmount = find.descendant(
-      of: find.byKey(const ValueKey('scheduled-split-category-field')),
-      matching: find.byType(TextField),
-    );
-    expect(splitAmount, findsOneWidget);
-    await tester.enterText(splitAmount, '925.50');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     await tester.ensureVisible(
       find.byKey(const ValueKey('scheduled-next-date')),
@@ -5055,7 +5558,7 @@ void main() {
   testWidgets('budgets screen renders v2 budget progress text', (tester) async {
     await tester.pumpWidget(MoneyTallyApp());
 
-    await tester.tap(find.text('Budgets').last);
+    await tester.tap(find.text('Plan').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Dining'), findsOneWidget);
@@ -5074,7 +5577,7 @@ void main() {
       MoneyTallyApp(store: legacyStore, dataStore: dataStore),
     );
 
-    await tester.tap(find.text('Budgets').last);
+    await tester.tap(find.text('Plan').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add budget'));
     await tester.pumpAndSettle();
@@ -5103,7 +5606,7 @@ void main() {
       MoneyTallyApp(store: legacyStore, dataStore: dataStore),
     );
 
-    await tester.tap(find.text('Budgets').last);
+    await tester.tap(find.text('Plan').last);
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Dining'));
     await tester.pumpAndSettle();
@@ -5132,7 +5635,7 @@ void main() {
       MoneyTallyApp(store: legacyStore, dataStore: dataStore),
     );
 
-    await tester.tap(find.text('Budgets').last);
+    await tester.tap(find.text('Plan').last);
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Dining'));
     await tester.pumpAndSettle();
@@ -5157,7 +5660,7 @@ void main() {
       MoneyTallyApp(store: legacyStore, dataStore: dataStore),
     );
 
-    await tester.tap(find.text('Budgets').last);
+    await tester.tap(find.text('Plan').last);
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Dining'));
     await tester.pumpAndSettle();
@@ -5170,6 +5673,78 @@ void main() {
     expect(budget.isArchived, isTrue);
     expect(budget.isDeleted, isTrue);
     expect(find.text('Dining'), findsNothing);
+  });
+
+  testWidgets('Plan switches between Budgets and Goals and remembers segment', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: dataSet);
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    expect(find.text('Plan'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Budgets'),
+      ),
+      findsNothing,
+    );
+
+    await tester.tap(find.text('Plan'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('plan-segmented-control')),
+      findsOneWidget,
+    );
+    expect(find.text('Dining'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('plan-segmented-control')),
+        matching: find.text('Goals'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('No goals yet'), findsOneWidget);
+    expect(dataStore.preferences.preferredPlanSegment, PlanSegment.goals);
+
+    await tester.tap(find.text('Dashboard'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Plan'));
+    await tester.pumpAndSettle();
+
+    final control = tester.widget<SegmentedButton<PlanSegment>>(
+      find.byKey(const ValueKey('plan-segmented-control')),
+    );
+    expect(control.selected, {PlanSegment.goals});
+  });
+
+  testWidgets('Plan Goals floating add menu exposes Goal actions', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Plan'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('plan-segmented-control')),
+        matching: find.text('Goals'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create Goal'), findsWidgets);
+    expect(find.text('Fund Goals'), findsWidgets);
+    expect(find.text('Add Budget'), findsNothing);
   });
 
   testWidgets('categories screen renders v2 categories on wide layout', (
@@ -6267,6 +6842,35 @@ void main() {
     expect(find.text('Reports'), findsWidgets);
     expect(find.text('Spending by Category'), findsOneWidget);
     expect(find.text('Monthly Trend'), findsOneWidget);
+  });
+
+  testWidgets('launch preference opens the intended Plan segment', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataSet = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            launchScreen: LaunchScreen.planGoals,
+            preferredPlanSegment: PlanSegment.goals,
+          ),
+        );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: dataSet),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Plan'), findsWidgets);
+    expect(find.text('No goals yet'), findsOneWidget);
+    final control = tester.widget<SegmentedButton<PlanSegment>>(
+      find.byKey(const ValueKey('plan-segmented-control')),
+    );
+    expect(control.selected, {PlanSegment.goals});
   });
 
   testWidgets('reports screen is reachable from wide navigation', (

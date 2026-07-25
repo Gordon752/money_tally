@@ -2,7 +2,18 @@ import 'json_helpers.dart';
 import 'money.dart';
 import 'transaction.dart';
 
-enum LaunchScreen { dashboard, ledger, accounts, budgets, scheduled, reports }
+enum LaunchScreen {
+  dashboard,
+  ledger,
+  accounts,
+  budgets,
+  planBudgets,
+  planGoals,
+  scheduled,
+  reports,
+}
+
+enum PlanSegment { budgets, goals }
 
 enum AppearanceMode { system, light, dark }
 
@@ -20,6 +31,7 @@ const defaultAccountGroupOrderNames = [
 class UserPreferences {
   const UserPreferences({
     this.launchScreen = LaunchScreen.dashboard,
+    this.preferredPlanSegment = PlanSegment.budgets,
     this.appearanceMode = AppearanceMode.system,
     this.floatingAddButtonPosition = FloatingAddButtonPosition.right,
     this.currency = const CurrencyFormatSettings(),
@@ -35,6 +47,7 @@ class UserPreferences {
   });
 
   final LaunchScreen launchScreen;
+  final PlanSegment preferredPlanSegment;
   final AppearanceMode appearanceMode;
   final FloatingAddButtonPosition floatingAddButtonPosition;
   final CurrencyFormatSettings currency;
@@ -50,6 +63,7 @@ class UserPreferences {
 
   UserPreferences copyWith({
     LaunchScreen? launchScreen,
+    PlanSegment? preferredPlanSegment,
     AppearanceMode? appearanceMode,
     FloatingAddButtonPosition? floatingAddButtonPosition,
     CurrencyFormatSettings? currency,
@@ -65,6 +79,7 @@ class UserPreferences {
   }) {
     return UserPreferences(
       launchScreen: launchScreen ?? this.launchScreen,
+      preferredPlanSegment: preferredPlanSegment ?? this.preferredPlanSegment,
       appearanceMode: appearanceMode ?? this.appearanceMode,
       floatingAddButtonPosition:
           floatingAddButtonPosition ?? this.floatingAddButtonPosition,
@@ -89,6 +104,7 @@ class UserPreferences {
   Map<String, Object?> toJson() {
     return {
       'launchScreen': launchScreen.name,
+      'preferredPlanSegment': preferredPlanSegment.name,
       'appearanceMode': appearanceMode.name,
       'floatingAddButtonPosition': floatingAddButtonPosition.name,
       'currency': currency.toJson(),
@@ -110,6 +126,13 @@ class UserPreferences {
         LaunchScreen.values,
         json['launchScreen'],
         LaunchScreen.dashboard,
+      ),
+      preferredPlanSegment: enumByName(
+        PlanSegment.values,
+        json['preferredPlanSegment'],
+        json['launchScreen'] == 'planGoals'
+            ? PlanSegment.goals
+            : PlanSegment.budgets,
       ),
       appearanceMode: enumByName(
         AppearanceMode.values,

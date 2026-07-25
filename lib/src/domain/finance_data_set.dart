@@ -1,6 +1,8 @@
 import 'account.dart';
 import 'budget.dart';
 import 'category.dart';
+import 'goal.dart';
+import 'goal_funding.dart';
 import 'json_helpers.dart';
 import 'scheduled_transaction.dart';
 import 'transaction.dart';
@@ -14,6 +16,9 @@ class FinanceDataSet {
     required this.scheduledTransactions,
     required this.budgets,
     required this.preferences,
+    this.goals = const [],
+    this.goalContributions = const [],
+    this.goalFundingEvents = const [],
   });
 
   final List<AccountRecord> accounts;
@@ -21,6 +26,9 @@ class FinanceDataSet {
   final List<TransactionRecord> transactions;
   final List<ScheduledTransactionRecord> scheduledTransactions;
   final List<BudgetRecord> budgets;
+  final List<GoalRecord> goals;
+  final List<GoalContributionRecord> goalContributions;
+  final List<GoalFundingEventRecord> goalFundingEvents;
   final UserPreferences preferences;
 
   FinanceDataSet copyWith({
@@ -29,6 +37,9 @@ class FinanceDataSet {
     List<TransactionRecord>? transactions,
     List<ScheduledTransactionRecord>? scheduledTransactions,
     List<BudgetRecord>? budgets,
+    List<GoalRecord>? goals,
+    List<GoalContributionRecord>? goalContributions,
+    List<GoalFundingEventRecord>? goalFundingEvents,
     UserPreferences? preferences,
   }) {
     return FinanceDataSet(
@@ -38,24 +49,31 @@ class FinanceDataSet {
       scheduledTransactions:
           scheduledTransactions ?? this.scheduledTransactions,
       budgets: budgets ?? this.budgets,
+      goals: goals ?? this.goals,
+      goalContributions: goalContributions ?? this.goalContributions,
+      goalFundingEvents: goalFundingEvents ?? this.goalFundingEvents,
       preferences: preferences ?? this.preferences,
     );
   }
 
   int balanceForAccount(String accountId) {
     final account = accounts.firstWhere((item) => item.id == accountId);
-    return transactions
+    final transactionBalance = transactions
         .where((transaction) => !transaction.isDeleted)
         .fold(
           account.openingBalanceMinor,
           (total, transaction) =>
               total + transaction.deltaForAccount(accountId),
         );
+    final goalFundingTotal = goalFundingEvents
+        .where((event) => event.isActive && event.sourceAccountId == accountId)
+        .fold<int>(0, (total, event) => total + event.totalAmountMinor.abs());
+    return transactionBalance - goalFundingTotal;
   }
 
   Map<String, Object?> toJson() {
     return {
-      'schemaVersion': 2,
+      'schemaVersion': 4,
       'accounts': accounts.map((item) => item.toJson()).toList(),
       'categories': categories.map((item) => item.toJson()).toList(),
       'transactions': transactions.map((item) => item.toJson()).toList(),
@@ -63,6 +81,13 @@ class FinanceDataSet {
           .map((item) => item.toJson())
           .toList(),
       'budgets': budgets.map((item) => item.toJson()).toList(),
+      'goals': goals.map((item) => item.toJson()).toList(),
+      'goalContributions': goalContributions
+          .map((item) => item.toJson())
+          .toList(),
+      'goalFundingEvents': goalFundingEvents
+          .map((item) => item.toJson())
+          .toList(),
       'preferences': preferences.toJson(),
     };
   }
@@ -84,6 +109,13 @@ class FinanceDataSet {
       budgets: stringMapList(
         json['budgets'],
       ).map(BudgetRecord.fromJson).toList(),
+      goals: stringMapList(json['goals']).map(GoalRecord.fromJson).toList(),
+      goalContributions: stringMapList(
+        json['goalContributions'],
+      ).map(GoalContributionRecord.fromJson).toList(),
+      goalFundingEvents: stringMapList(
+        json['goalFundingEvents'],
+      ).map(GoalFundingEventRecord.fromJson).toList(),
       preferences: UserPreferences.fromJson(stringMap(json['preferences'])),
     );
   }

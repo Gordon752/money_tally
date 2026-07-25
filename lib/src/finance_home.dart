@@ -4,7 +4,7 @@ enum FinanceSection {
   dashboard(Icons.dashboard_outlined, 'Dashboard'),
   accounts(Icons.account_balance_wallet_outlined, 'Accounts'),
   ledger(Icons.receipt_long_outlined, 'Ledger'),
-  budgets(Icons.pie_chart_outline, 'Budgets'),
+  plan(Icons.event_note_outlined, 'Plan'),
   scheduled(Icons.event_repeat_outlined, 'Scheduled'),
   reports(Icons.insights_outlined, 'Reports'),
   categories(Icons.sell_outlined, 'Categories'),
@@ -40,16 +40,46 @@ class _FinanceHomeState extends State<FinanceHome> {
     FinanceSection.dashboard,
     FinanceSection.accounts,
     FinanceSection.ledger,
-    FinanceSection.budgets,
+    FinanceSection.plan,
     FinanceSection.scheduled,
   ];
 
   var selected = FinanceSection.dashboard;
   String? ledgerAccountFilterId;
   DateTime? _selectedFutureScheduledDate;
+  var _planSegment = PlanSegment.budgets;
   var _appliedLaunchPreference = false;
   var _isScrolling = false;
   Timer? _scrollSettleTimer;
+
+  void _setPlanSegment(PlanSegment segment) {
+    if (_planSegment == segment) return;
+    setState(() => _planSegment = segment);
+    final store = FinanceDataStoreScope.read(context);
+    unawaited(
+      store.savePreferences(
+        store.preferences.copyWith(preferredPlanSegment: segment),
+      ),
+    );
+  }
+
+  void _openPlan(PlanSegment segment, {bool createGoal = false}) {
+    setState(() {
+      selected = FinanceSection.plan;
+      _planSegment = segment;
+    });
+    final store = FinanceDataStoreScope.read(context);
+    unawaited(
+      store.savePreferences(
+        store.preferences.copyWith(preferredPlanSegment: segment),
+      ),
+    );
+    if (createGoal) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(showCreateGoalSheet(context));
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -69,9 +99,13 @@ class _FinanceHomeState extends State<FinanceHome> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_appliedLaunchPreference) return;
-    selected = financeSectionForLaunchScreen(
-      FinanceDataStoreScope.read(context).preferences.launchScreen,
-    );
+    final preferences = FinanceDataStoreScope.read(context).preferences;
+    selected = financeSectionForLaunchScreen(preferences.launchScreen);
+    _planSegment = switch (preferences.launchScreen) {
+      LaunchScreen.planGoals => PlanSegment.goals,
+      LaunchScreen.planBudgets || LaunchScreen.budgets => PlanSegment.budgets,
+      _ => preferences.preferredPlanSegment,
+    };
     if (scheduledNotificationLaunchPayload.value != null) {
       scheduledNotificationLaunchPayload.value = null;
       selected = FinanceSection.scheduled;
@@ -135,6 +169,7 @@ class _FinanceHomeState extends State<FinanceHome> {
                         onPressed: () => showFloatingAddMenu(
                           context,
                           section: selected,
+                          planSegment: _planSegment,
                           initialAccountId: selected == FinanceSection.ledger
                               ? ledgerAccountFilterId
                               : null,
@@ -242,6 +277,14 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   Widget _sectionBody() {
+    if (selected == FinanceSection.plan) {
+      return PlanView(
+        selectedSegment: _planSegment,
+        onSegmentChanged: _setPlanSegment,
+        onOpenSettings: () =>
+            setState(() => selected = FinanceSection.settings),
+      );
+    }
     return NotificationListener<ScrollNotification>(
       onNotification: _handleScrollNotification,
       child: CustomScrollView(
@@ -285,8 +328,10 @@ class _FinanceHomeState extends State<FinanceHome> {
                     ledgerAccountFilterId = null;
                     selected = FinanceSection.ledger;
                   }),
-                  onViewBudgets: () =>
-                      setState(() => selected = FinanceSection.budgets),
+                  onViewBudgets: () => _openPlan(PlanSegment.budgets),
+                  onViewGoals: () => _openPlan(PlanSegment.goals),
+                  onCreateGoal: () =>
+                      _openPlan(PlanSegment.goals, createGoal: true),
                   onViewScheduled: () =>
                       setState(() => selected = FinanceSection.scheduled),
                 ),
@@ -302,7 +347,7 @@ class _FinanceHomeState extends State<FinanceHome> {
                   ),
                   initialAccountFilterId: ledgerAccountFilterId,
                 ),
-                FinanceSection.budgets => const BudgetsView(),
+                FinanceSection.plan => const SizedBox.shrink(),
                 FinanceSection.scheduled => ScheduledView(
                   onSelectedDateChanged: (date) {
                     final now = DateTime.now();
@@ -347,7 +392,7 @@ class FinanceManagementScreen extends StatelessWidget {
     final title = switch (section) {
       FinanceSection.accounts => 'Accounts',
       FinanceSection.categories => 'Categories',
-      FinanceSection.budgets => 'Budgets',
+      FinanceSection.plan => 'Plan',
       FinanceSection.reports => 'Reports',
       _ => section.label,
     };
@@ -360,7 +405,7 @@ class FinanceManagementScreen extends StatelessWidget {
           child: switch (section) {
             FinanceSection.accounts => const AccountsView(),
             FinanceSection.categories => const CategoriesView(),
-            FinanceSection.budgets => const BudgetsView(),
+            FinanceSection.plan => const BudgetsView(),
             FinanceSection.reports => const ReportsView(),
             _ => const SizedBox.shrink(),
           },
@@ -981,12 +1026,16 @@ class DashboardView extends StatelessWidget {
   const DashboardView({
     required this.onViewLedger,
     required this.onViewBudgets,
+    required this.onViewGoals,
+    required this.onCreateGoal,
     required this.onViewScheduled,
     super.key,
   });
 
   final VoidCallback onViewLedger;
   final VoidCallback onViewBudgets;
+  final VoidCallback onViewGoals;
+  final VoidCallback onCreateGoal;
   final VoidCallback onViewScheduled;
 
   @override
@@ -1001,7 +1050,7 @@ class DashboardView extends StatelessWidget {
       children: [
         NetWorthHeroCard(
           netWorthMinor: store.netWorthMinor,
-          assetsMinor: store.totalAssetsMinor,
+          assetsMinor: store.totalAssetsMinor + store.fundedGoalAssetsMinor,
           liabilitiesMinor: store.totalLiabilitiesMinor,
           currency: currency,
         ),
@@ -1017,6 +1066,7 @@ class DashboardView extends StatelessWidget {
               expensesMinor: expensesThisMonth,
               currency: currency,
             ),
+            GoalsPreviewCard(onViewAll: onViewGoals, onCreate: onCreateGoal),
             NextScheduledCard(
               scheduled: scheduled,
               currency: currency,
@@ -1962,6 +2012,40 @@ class _LedgerViewState extends State<LedgerView> {
             )
             .toList()
           ..sort(compareTransactionsNewestFirst);
+    final goalFundingEvents =
+        store.goalFundingEvents
+            .where((event) => event.isActive)
+            .where(
+              (event) =>
+                  typeFilterName.isEmpty &&
+                  categoryFilterId.isEmpty &&
+                  (accountFilterId.isEmpty ||
+                      event.sourceAccountId == accountFilterId) &&
+                  dateMatchesLedgerFilter(
+                    event.date,
+                    dateFilter: dateFilter,
+                    now: DateTime.now(),
+                  ),
+            )
+            .where((event) {
+              if (normalizedQuery.isEmpty) return true;
+              final goalNames = event.allocations
+                  .map(
+                    (allocation) => store.goals
+                        .where((goal) => goal.id == allocation.goalId)
+                        .firstOrNull
+                        ?.name,
+                  )
+                  .whereType<String>()
+                  .join(' ');
+              final accountName =
+                  accountsById[event.sourceAccountId]?.name ?? '';
+              return 'funded goals ${event.note} $goalNames $accountName'
+                  .toLowerCase()
+                  .contains(normalizedQuery);
+            })
+            .toList(growable: false)
+          ..sort((a, b) => b.date.compareTo(a.date));
     final hasFilters =
         typeFilterName.isNotEmpty ||
         accountFilterId.isNotEmpty ||
@@ -1995,8 +2079,15 @@ class _LedgerViewState extends State<LedgerView> {
       final month = DateTime(transaction.date.year, transaction.date.month);
       transactionsByMonth.putIfAbsent(month, () => []).add(transaction);
     }
-    final visibleMonths = transactionsByMonth.keys.toList(growable: false)
-      ..sort((a, b) => b.compareTo(a));
+    final fundingByMonth = <DateTime, List<GoalFundingEventRecord>>{};
+    for (final event in goalFundingEvents) {
+      final month = DateTime(event.date.year, event.date.month);
+      fundingByMonth.putIfAbsent(month, () => []).add(event);
+    }
+    final visibleMonths = {
+      ...transactionsByMonth.keys,
+      ...fundingByMonth.keys,
+    }.toList(growable: false)..sort((a, b) => b.compareTo(a));
     for (final month in visibleMonths) {
       _monthAnchors.putIfAbsent(ledgerMonthKey(month), () => GlobalKey());
     }
@@ -2136,7 +2227,7 @@ class _LedgerViewState extends State<LedgerView> {
           ],
         ),
         const SizedBox(height: 12),
-        if (transactions.isEmpty)
+        if (transactions.isEmpty && goalFundingEvents.isEmpty)
           AppCard(
             child: Center(
               child: Text(
@@ -2152,7 +2243,8 @@ class _LedgerViewState extends State<LedgerView> {
             LedgerMonthSection(
               key: _monthAnchors[ledgerMonthKey(month)],
               month: month,
-              transactions: transactionsByMonth[month]!,
+              transactions: transactionsByMonth[month] ?? const [],
+              goalFundingEvents: fundingByMonth[month] ?? const [],
               store: store,
               accountsById: accountsById,
               categoriesById: categoriesById,
@@ -2372,6 +2464,7 @@ class LedgerMonthSection extends StatelessWidget {
   const LedgerMonthSection({
     required this.month,
     required this.transactions,
+    required this.goalFundingEvents,
     required this.store,
     required this.accountsById,
     required this.categoriesById,
@@ -2383,6 +2476,7 @@ class LedgerMonthSection extends StatelessWidget {
 
   final DateTime month;
   final List<TransactionRecord> transactions;
+  final List<GoalFundingEventRecord> goalFundingEvents;
   final FinanceDataStore store;
   final Map<String, v2_account.AccountRecord> accountsById;
   final Map<String, v2_category.CategoryRecord> categoriesById;
@@ -2402,6 +2496,28 @@ class LedgerMonthSection extends StatelessWidget {
         .where((item) => item.type == TransactionType.adjustment)
         .fold(0, (total, item) => total + item.amountMinor);
     final net = income - expenses + adjustments;
+    final activities =
+        <
+            ({
+              DateTime date,
+              TransactionRecord? transaction,
+              GoalFundingEventRecord? fundingEvent,
+            })
+          >[
+            for (final transaction in transactions)
+              (
+                date: transaction.date,
+                transaction: transaction,
+                fundingEvent: null,
+              ),
+            for (final fundingEvent in goalFundingEvents)
+              (
+                date: fundingEvent.date,
+                transaction: null,
+                fundingEvent: fundingEvent,
+              ),
+          ]
+          ..sort((left, right) => right.date.compareTo(left.date));
     final reduceMotion = MediaQuery.of(context).disableAnimations;
 
     return AppCard(
@@ -2438,7 +2554,7 @@ class LedgerMonthSection extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '${transactions.length} ${transactions.length == 1 ? 'transaction' : 'transactions'}',
+                        '${activities.length} ${activities.length == 1 ? 'activity' : 'activities'}',
                         style: Theme.of(context).textTheme.labelMedium
                             ?.copyWith(
                               color: Theme.of(
@@ -2501,37 +2617,52 @@ class LedgerMonthSection extends StatelessWidget {
                       ),
                       for (
                         var index = 0;
-                        index < transactions.length;
+                        index < activities.length;
                         index++
                       ) ...[
-                        LedgerJournalRow(
-                          transaction: transactions[index],
-                          currency: store.preferences.currency,
-                          accountName:
-                              accountsById[transactions[index].accountId]?.name,
-                          categoryName: transactions[index].categoryId == null
-                              ? null
-                              : categoriesById[transactions[index].categoryId]
+                        if (activities[index].transaction
+                            case final transaction?)
+                          LedgerJournalRow(
+                            transaction: transaction,
+                            currency: store.preferences.currency,
+                            accountName:
+                                accountsById[transaction.accountId]?.name,
+                            categoryName: transaction.categoryId == null
+                                ? null
+                                : categoriesById[transaction.categoryId]?.name,
+                            onTap: () async {
+                              onDismissFocus();
+                              await showTransactionDetails(
+                                context,
+                                transaction.id,
+                              );
+                              if (context.mounted) onDismissFocus();
+                            },
+                            onLongPress: () async {
+                              onDismissFocus();
+                              HapticFeedback.mediumImpact();
+                              await showTransactionOptions(
+                                context,
+                                transaction.id,
+                              );
+                              if (context.mounted) onDismissFocus();
+                            },
+                          )
+                        else
+                          GoalFundingLedgerRow(
+                            event: activities[index].fundingEvent!,
+                            accountName:
+                                accountsById[activities[index]
+                                        .fundingEvent!
+                                        .sourceAccountId]
                                     ?.name,
-                          onTap: () async {
-                            onDismissFocus();
-                            await showTransactionDetails(
+                            currency: store.preferences.currency,
+                            onTap: () => showGoalFundingDetails(
                               context,
-                              transactions[index].id,
-                            );
-                            if (context.mounted) onDismissFocus();
-                          },
-                          onLongPress: () async {
-                            onDismissFocus();
-                            HapticFeedback.mediumImpact();
-                            await showTransactionOptions(
-                              context,
-                              transactions[index].id,
-                            );
-                            if (context.mounted) onDismissFocus();
-                          },
-                        ),
-                        if (index != transactions.length - 1)
+                              activities[index].fundingEvent!.id,
+                            ),
+                          ),
+                        if (index != activities.length - 1)
                           Divider(
                             height: 1,
                             indent: 62,
@@ -2706,6 +2837,93 @@ class LedgerJournalRow extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class GoalFundingLedgerRow extends StatelessWidget {
+  const GoalFundingLedgerRow({
+    required this.event,
+    required this.currency,
+    required this.onTap,
+    this.accountName,
+    super.key,
+  });
+
+  final GoalFundingEventRecord event;
+  final CurrencyFormatSettings currency;
+  final String? accountName;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeAllocations = event.allocations
+        .where((allocation) => allocation.amountMinor > 0)
+        .toList(growable: false);
+    final allocationSummary = switch (activeAllocations.length) {
+      0 => 'Goal funding',
+      1 => '1 Goal',
+      final count => '$count Goals',
+    };
+    final secondary = [
+      if (accountName != null) accountName,
+      allocationSummary,
+    ].join(' • ');
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 38,
+              child: Text(
+                '${event.date.day}\n${ledgerDayContext(event.date)}',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w800,
+                  height: 1.1,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Funded Goals',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    secondary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            MoneyText(
+              amountMinor: -event.totalAmountMinor.abs(),
+              currency: currency,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: Colors.blue.shade700,
+            ),
+          ],
         ),
       ),
     );
@@ -2890,6 +3108,24 @@ bool transactionMatchesLedgerFilters(
   };
 }
 
+bool dateMatchesLedgerFilter(
+  DateTime date, {
+  required LedgerDateFilter dateFilter,
+  required DateTime now,
+}) {
+  final day = DateTime(date.year, date.month, date.day);
+  final today = DateTime(now.year, now.month, now.day);
+  return switch (dateFilter) {
+    LedgerDateFilter.all => true,
+    LedgerDateFilter.today => day == today,
+    LedgerDateFilter.thisMonth =>
+      date.year == now.year && date.month == now.month,
+    LedgerDateFilter.last30Days =>
+      !day.isBefore(today.subtract(const Duration(days: 30))) &&
+          !day.isAfter(today),
+  };
+}
+
 String transactionTypeLabel(TransactionType type) {
   return switch (type) {
     TransactionType.expense => 'Expense',
@@ -3024,7 +3260,11 @@ Future<void> showTransactionOptions(
     case 'duplicate':
       await duplicateTransaction(context, transaction);
     case 'split':
-      await showTransactionDialog(context, transaction: transaction);
+      await showTransactionDialog(
+        context,
+        transaction: transaction,
+        initialSplitMode: true,
+      );
     case 'schedule':
       await makeTransactionScheduled(context, transaction);
     case 'delete':
@@ -3527,6 +3767,86 @@ class SplitLineDraft {
   final TextEditingController note;
 }
 
+class SingleCategoryAllocationSection extends StatelessWidget {
+  const SingleCategoryAllocationSection({
+    required this.keyPrefix,
+    required this.categoryName,
+    required this.onChooseCategory,
+    required this.onSplit,
+    super.key,
+  });
+
+  final String keyPrefix;
+  final String? categoryName;
+  final VoidCallback onChooseCategory;
+  final VoidCallback? onSplit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasCategory = categoryName != null;
+    final valueStyle = theme.textTheme.titleMedium?.copyWith(
+      fontSize: 17,
+      fontWeight: FontWeight.w400,
+      letterSpacing: 0,
+      height: 1.15,
+      color: hasCategory
+          ? theme.colorScheme.onSurface
+          : theme.colorScheme.onSurfaceVariant,
+    );
+
+    return Column(
+      key: ValueKey('$keyPrefix-single-category-field'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const TransactionFormLabel('Category'),
+        InkWell(
+          key: ValueKey('$keyPrefix-category'),
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          onTap: onChooseCategory,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(
+              children: [
+                const TransactionFormIcon(Icons.sell_outlined),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Text(
+                    categoryName ?? 'Choose category',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: valueStyle,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                const Icon(Icons.keyboard_arrow_down, size: 28),
+              ],
+            ),
+          ),
+        ),
+        if (hasCategory && onSplit != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 52, top: 1),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: ValueKey('$keyPrefix-enable-split'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: EdgeInsets.zero,
+                ),
+                onPressed: onSplit,
+                icon: const Icon(Icons.call_split_outlined, size: 17),
+                label: const Text('Split transaction'),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class InlineSplitAllocationSection extends StatelessWidget {
   const InlineSplitAllocationSection({
     required this.keyPrefix,
@@ -3539,6 +3859,8 @@ class InlineSplitAllocationSection extends StatelessWidget {
     required this.onAmountChanged,
     required this.onAdd,
     required this.onRemove,
+    this.onUseSingleCategory,
+    this.autofocusAmountIndex,
     this.quietWhenZero = false,
     super.key,
   });
@@ -3553,6 +3875,8 @@ class InlineSplitAllocationSection extends StatelessWidget {
   final void Function(int index, int amountMinor) onAmountChanged;
   final VoidCallback onAdd;
   final ValueChanged<int> onRemove;
+  final VoidCallback? onUseSingleCategory;
+  final int? autofocusAmountIndex;
   final bool quietWhenZero;
 
   @override
@@ -3650,6 +3974,13 @@ class InlineSplitAllocationSection extends StatelessWidget {
                   initialMinor: drafts[index].amountMinor.abs(),
                   currency: currency,
                   labelText: null,
+                  autofocus: autofocusAmountIndex == index,
+                  selectAllOnFocus:
+                      autofocusAmountIndex == index &&
+                      drafts[index].amountMinor != 0,
+                  replaceZeroOnFirstInput:
+                      autofocusAmountIndex == index &&
+                      drafts[index].amountMinor == 0,
                   textAlign: TextAlign.right,
                   decoration: InputDecoration(
                     isDense: true,
@@ -3689,19 +4020,34 @@ class InlineSplitAllocationSection extends StatelessWidget {
             ],
           ),
         ],
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            key: ValueKey('$keyPrefix-add-split'),
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              padding: EdgeInsets.zero,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: AppSpacing.md,
+          children: [
+            TextButton.icon(
+              key: ValueKey('$keyPrefix-add-split'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                padding: EdgeInsets.zero,
+              ),
+              onPressed: onAdd,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add split'),
             ),
-            onPressed: onAdd,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('Add split'),
-          ),
+            if (onUseSingleCategory != null)
+              TextButton(
+                key: ValueKey('$keyPrefix-use-single-category'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: EdgeInsets.zero,
+                ),
+                onPressed: onUseSingleCategory,
+                child: const Text('Use single category'),
+              ),
+          ],
         ),
         const SizedBox(height: AppSpacing.xs),
         Row(
@@ -3741,6 +4087,30 @@ class InlineSplitAllocationSection extends StatelessWidget {
       ],
     );
   }
+}
+
+Future<bool> confirmDiscardAdditionalSplits(BuildContext context) async {
+  return await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Use single category?'),
+          content: const Text(
+            'The additional split allocations will be removed. '
+            'The first category will remain selected.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Use Single Category'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 }
 
 Future<void> makeTransactionScheduled(
@@ -3786,6 +4156,131 @@ class BudgetsView extends StatelessWidget {
   }
 }
 
+class PlanView extends StatefulWidget {
+  const PlanView({
+    required this.selectedSegment,
+    required this.onSegmentChanged,
+    required this.onOpenSettings,
+    super.key,
+  });
+
+  final PlanSegment selectedSegment;
+  final ValueChanged<PlanSegment> onSegmentChanged;
+  final VoidCallback onOpenSettings;
+
+  @override
+  State<PlanView> createState() => _PlanViewState();
+}
+
+class _PlanViewState extends State<PlanView> {
+  final _budgetScrollController = ScrollController();
+  final _goalScrollController = ScrollController();
+  var _completedExpanded = false;
+  var _archivedExpanded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final storage = PageStorage.maybeOf(context);
+    _completedExpanded =
+        storage?.readState(context, identifier: 'plan-completed-expanded')
+            as bool? ??
+        _completedExpanded;
+    _archivedExpanded =
+        storage?.readState(context, identifier: 'plan-archived-expanded')
+            as bool? ??
+        _archivedExpanded;
+  }
+
+  @override
+  void dispose() {
+    _budgetScrollController.dispose();
+    _goalScrollController.dispose();
+    super.dispose();
+  }
+
+  void _setCompletedExpanded(bool value) {
+    setState(() => _completedExpanded = value);
+    PageStorage.maybeOf(
+      context,
+    )?.writeState(context, value, identifier: 'plan-completed-expanded');
+  }
+
+  void _setArchivedExpanded(bool value) {
+    setState(() => _archivedExpanded = value);
+    PageStorage.maybeOf(
+      context,
+    )?.writeState(context, value, identifier: 'plan-archived-expanded');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isGoals = widget.selectedSegment == PlanSegment.goals;
+    return CustomScrollView(
+      key: PageStorageKey('plan-${widget.selectedSegment.name}'),
+      controller: isGoals ? _goalScrollController : _budgetScrollController,
+      slivers: [
+        SliverToBoxAdapter(
+          child: PageHeader(
+            section: FinanceSection.plan,
+            onOpenSettings: widget.onOpenSettings,
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          sliver: SliverToBoxAdapter(
+            child: Center(
+              child: SegmentedButton<PlanSegment>(
+                key: const ValueKey('plan-segmented-control'),
+                style: SegmentedButton.styleFrom(
+                  selectedBackgroundColor: AppTheme.accent,
+                  selectedForegroundColor: Colors.white,
+                  backgroundColor: Theme.of(context).colorScheme.surface,
+                  foregroundColor: Theme.of(context).colorScheme.onSurface,
+                  side: BorderSide(
+                    color: Theme.of(
+                      context,
+                    ).dividerColor.withValues(alpha: 0.55),
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                    value: PlanSegment.budgets,
+                    label: Text('Budgets'),
+                  ),
+                  ButtonSegment(value: PlanSegment.goals, label: Text('Goals')),
+                ],
+                selected: {widget.selectedSegment},
+                onSelectionChanged: (selection) {
+                  HapticFeedback.selectionClick();
+                  widget.onSegmentChanged(selection.single);
+                },
+              ),
+            ),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 112),
+          sliver: SliverToBoxAdapter(
+            child: isGoals
+                ? GoalsPlanContent(
+                    completedExpanded: _completedExpanded,
+                    archivedExpanded: _archivedExpanded,
+                    onCompletedToggle: () =>
+                        _setCompletedExpanded(!_completedExpanded),
+                    onArchivedToggle: () =>
+                        _setArchivedExpanded(!_archivedExpanded),
+                  )
+                : const BudgetsView(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class ScheduledView extends StatefulWidget {
   const ScheduledView({this.onSelectedDateChanged, super.key});
 
@@ -3795,8 +4290,218 @@ class ScheduledView extends StatefulWidget {
   State<ScheduledView> createState() => _ScheduledViewState();
 }
 
+enum CalendarActivityFilter { all, income, expenses, transfers, goals }
+
+extension CalendarActivityFilterPresentation on CalendarActivityFilter {
+  String get label => switch (this) {
+    CalendarActivityFilter.all => 'All',
+    CalendarActivityFilter.income => 'Income',
+    CalendarActivityFilter.expenses => 'Expenses',
+    CalendarActivityFilter.transfers => 'Transfers',
+    CalendarActivityFilter.goals => 'Goals',
+  };
+
+  String get emptyStateLabel => this == CalendarActivityFilter.all
+      ? 'recorded'
+      : label.substring(0, label.length - (label.endsWith('s') ? 1 : 0));
+
+  IconData get icon => switch (this) {
+    CalendarActivityFilter.all => Icons.calendar_view_month_outlined,
+    CalendarActivityFilter.income => Icons.add_circle_outline,
+    CalendarActivityFilter.expenses => Icons.remove_circle_outline,
+    CalendarActivityFilter.transfers => Icons.swap_horiz,
+    CalendarActivityFilter.goals => Icons.flag_outlined,
+  };
+
+  bool matches(CalendarActivityType type) => switch (this) {
+    CalendarActivityFilter.all => true,
+    CalendarActivityFilter.income => type == CalendarActivityType.income,
+    CalendarActivityFilter.expenses => type == CalendarActivityType.expense,
+    CalendarActivityFilter.transfers => type == CalendarActivityType.transfer,
+    CalendarActivityFilter.goals => type == CalendarActivityType.goal,
+  };
+
+  bool matchesScheduled(TransactionType type) => switch (this) {
+    CalendarActivityFilter.all => type != TransactionType.adjustment,
+    CalendarActivityFilter.income => type == TransactionType.income,
+    CalendarActivityFilter.expenses => type == TransactionType.expense,
+    CalendarActivityFilter.transfers => type == TransactionType.transfer,
+    CalendarActivityFilter.goals => false,
+  };
+
+  Color color(BuildContext context) => switch (this) {
+    CalendarActivityFilter.all => AppTheme.accent,
+    CalendarActivityFilter.income => AppTheme.accent,
+    CalendarActivityFilter.expenses => AppColors.danger,
+    CalendarActivityFilter.transfers => Theme.of(
+      context,
+    ).colorScheme.onSurfaceVariant,
+    CalendarActivityFilter.goals => _goalBlue,
+  };
+}
+
+String calendarActivityTypeLabel(CalendarActivityType type) => switch (type) {
+  CalendarActivityType.income => 'Income',
+  CalendarActivityType.expense => 'Expense',
+  CalendarActivityType.transfer => 'Transfer',
+  CalendarActivityType.goal => 'Goal',
+};
+
+class CalendarDayActivity {
+  const CalendarDayActivity.transaction(this.transaction)
+    : goalActivity = null,
+      scheduledOccurrence = null;
+
+  const CalendarDayActivity.goal(this.goalActivity)
+    : transaction = null,
+      scheduledOccurrence = null;
+
+  const CalendarDayActivity.scheduled(this.scheduledOccurrence)
+    : transaction = null,
+      goalActivity = null;
+
+  final TransactionRecord? transaction;
+  final GoalCalendarActivity? goalActivity;
+  final ScheduledCalendarOccurrence? scheduledOccurrence;
+
+  DateTime get date =>
+      transaction?.date ??
+      goalActivity?.date ??
+      scheduledOccurrence!.scheduledDate;
+
+  CalendarActivityType get type {
+    final item = transaction;
+    if (item == null) {
+      final scheduled = scheduledOccurrence;
+      if (scheduled == null) return CalendarActivityType.goal;
+      return switch (scheduled.transaction.type) {
+        TransactionType.income => CalendarActivityType.income,
+        TransactionType.expense => CalendarActivityType.expense,
+        TransactionType.transfer => CalendarActivityType.transfer,
+        TransactionType.adjustment => throw StateError(
+          'Adjustments are not supported scheduled calendar activities.',
+        ),
+      };
+    }
+    return switch (item.type) {
+      TransactionType.income => CalendarActivityType.income,
+      TransactionType.expense => CalendarActivityType.expense,
+      TransactionType.transfer => CalendarActivityType.transfer,
+      TransactionType.adjustment => throw StateError(
+        'Adjustments are not supported calendar activities.',
+      ),
+    };
+  }
+
+  int get displayAmountMinor {
+    final item = transaction;
+    if (item != null) {
+      return switch (item.type) {
+        TransactionType.income => item.amountMinor.abs(),
+        TransactionType.expense => -item.amountMinor.abs(),
+        TransactionType.transfer => item.amountMinor.abs(),
+        TransactionType.adjustment => item.amountMinor,
+      };
+    }
+    final scheduled = scheduledOccurrence;
+    if (scheduled != null) {
+      return switch (scheduled.transaction.type) {
+        TransactionType.income => scheduled.plannedAmountMinor.abs(),
+        TransactionType.expense => -scheduled.plannedAmountMinor.abs(),
+        TransactionType.transfer => scheduled.plannedAmountMinor.abs(),
+        TransactionType.adjustment => scheduled.plannedAmountMinor,
+      };
+    }
+    return (goalActivity!.fundingEvent?.totalAmountMinor ??
+            goalActivity!.contribution!.amountMinor)
+        .abs();
+  }
+
+  String get typeLabel => calendarActivityTypeLabel(type);
+
+  IconData get icon => switch (type) {
+    CalendarActivityType.income => Icons.add_circle_outline,
+    CalendarActivityType.expense => Icons.remove_circle_outline,
+    CalendarActivityType.transfer => Icons.swap_horiz,
+    CalendarActivityType.goal => Icons.flag_outlined,
+  };
+
+  Color color(BuildContext context) => switch (type) {
+    CalendarActivityType.income => AppTheme.accent,
+    CalendarActivityType.expense => AppColors.danger,
+    CalendarActivityType.transfer => Theme.of(
+      context,
+    ).colorScheme.onSurfaceVariant,
+    CalendarActivityType.goal => _goalBlue,
+  };
+}
+
+class CalendarDayActivitySummary {
+  CalendarDayActivitySummary(this.activities);
+
+  final List<CalendarDayActivity> activities;
+
+  Set<CalendarActivityType> get types =>
+      activities.map((activity) => activity.type).toSet();
+
+  int countFor(CalendarActivityFilter filter) =>
+      activities.where((activity) => filter.matches(activity.type)).length;
+
+  int? amountFor(CalendarActivityFilter filter) {
+    if (filter == CalendarActivityFilter.all) return null;
+    final matching = activities.where(
+      (activity) => filter.matches(activity.type),
+    );
+    if (matching.isEmpty) return null;
+    return matching.fold<int>(
+      0,
+      (total, activity) => total + activity.displayAmountMinor,
+    );
+  }
+}
+
+List<CalendarDayActivity> calendarActualActivitiesForMonth(
+  Iterable<TransactionRecord> transactions,
+  Iterable<GoalCalendarActivity> goalActivities,
+  DateTime month,
+) {
+  final start = calendarDateKey(DateTime(month.year, month.month));
+  final end = calendarDateKey(DateTime(month.year, month.month + 1));
+  final result = <CalendarDayActivity>[
+    for (final transaction in transactions)
+      if (!transaction.isDeleted &&
+          transaction.type != TransactionType.adjustment &&
+          !calendarDateKey(transaction.date).isBefore(start) &&
+          calendarDateKey(transaction.date).isBefore(end))
+        CalendarDayActivity.transaction(transaction),
+    for (final activity in goalActivities) CalendarDayActivity.goal(activity),
+  ]..sort((left, right) => left.date.compareTo(right.date));
+  return result;
+}
+
+Map<DateTime, CalendarDayActivitySummary> calendarActivitySummaryByDay(
+  Iterable<CalendarDayActivity> activities,
+) {
+  final grouped = <DateTime, List<CalendarDayActivity>>{};
+  for (final activity in activities) {
+    grouped.putIfAbsent(calendarDateKey(activity.date), () => []).add(activity);
+  }
+  return {
+    for (final entry in grouped.entries)
+      entry.key: CalendarDayActivitySummary(entry.value),
+  };
+}
+
+List<CalendarDayActivity> scheduledCalendarActivities(
+  Iterable<ScheduledCalendarOccurrence> occurrences,
+) => [
+  for (final occurrence in occurrences)
+    CalendarDayActivity.scheduled(occurrence),
+];
+
 class _ScheduledViewState extends State<ScheduledView> {
   var _calendarCollapsed = false;
+  var _activityFilter = CalendarActivityFilter.all;
   final Map<String, GlobalKey> _dateAnchors = {};
   late DateTime _visibleMonth = DateTime(
     DateTime.now().year,
@@ -3808,7 +4513,7 @@ class _ScheduledViewState extends State<ScheduledView> {
     DateTime.now().day,
   );
 
-  String _dateKey(DateTime date) => '${date.year}-${date.month}-${date.day}';
+  String _dateKey(DateTime date) => calendarDateId(date);
 
   void _scrollToDate(DateTime date, [int attempt = 0]) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3838,13 +4543,29 @@ class _ScheduledViewState extends State<ScheduledView> {
     _scrollToDate(date);
   }
 
+  void _changeVisibleMonth(int delta) {
+    final nextMonth = DateTime(_visibleMonth.year, _visibleMonth.month + delta);
+    final selectedDay = min(_selectedDate.day, daysInMonth(nextMonth));
+    final nextSelectedDate = DateTime(
+      nextMonth.year,
+      nextMonth.month,
+      selectedDay,
+    );
+    setState(() {
+      _dateAnchors.clear();
+      _visibleMonth = nextMonth;
+      _selectedDate = nextSelectedDate;
+    });
+    widget.onSelectedDateChanged?.call(nextSelectedDate);
+  }
+
   Widget _buildOccurrenceRow(
     BuildContext context,
     ScheduledCalendarOccurrence occurrence,
     CurrencyFormatSettings currency,
   ) {
     final item = occurrence.transaction;
-    final dateKey = calendarDateKey(occurrence.scheduledDate);
+    final dateKey = calendarDateId(occurrence.scheduledDate);
     final displayItem = item.copyWith(
       nextDate: occurrence.scheduledDate,
       amountMinor: occurrence.plannedAmountMinor,
@@ -3934,14 +4655,28 @@ class _ScheduledViewState extends State<ScheduledView> {
               store.hasActionableScheduledAccounts(occurrence.transaction),
         )
         .toList(growable: false);
-    final groupedOccurrences = scheduledOccurrencesByDate(
+    final calendarActivities = scheduledCalendarActivities(
       visibleMonthOccurrences,
     );
+    final activitySummaryByDay = calendarActivitySummaryByDay(
+      calendarActivities,
+    );
+    final filteredMonthOccurrences = visibleMonthOccurrences
+        .where(
+          (occurrence) =>
+              _activityFilter.matchesScheduled(occurrence.transaction.type),
+        )
+        .toList(growable: false);
+    final groupedOccurrences = scheduledOccurrencesByDate(
+      filteredMonthOccurrences,
+    );
+    final activityDates = groupedOccurrences.keys.toList()..sort();
     final monthSummary = scheduledMonthSummary(
       monthOccurrences.where(
         (occurrence) =>
-            !occurrence.isPending ||
-            store.hasActionableScheduledAccounts(occurrence.transaction),
+            _activityFilter.matchesScheduled(occurrence.transaction.type) &&
+            (!occurrence.isPending ||
+                store.hasActionableScheduledAccounts(occurrence.transaction)),
       ),
       store.transactions,
     );
@@ -3953,30 +4688,39 @@ class _ScheduledViewState extends State<ScheduledView> {
           children: [
             ScheduledCalendarPreview(
               month: _visibleMonth,
-              occurrences: visibleMonthOccurrences,
+              activitySummaryByDay: activitySummaryByDay,
+              activityFilter: _activityFilter,
+              onActivityFilterChanged: (filter) {
+                HapticFeedback.selectionClick();
+                setState(() {
+                  _dateAnchors.clear();
+                  _activityFilter = filter;
+                });
+              },
               summary: monthSummary,
               currency: store.preferences.currency,
               isCollapsed: _calendarCollapsed,
               onToggleCollapsed: () =>
                   setState(() => _calendarCollapsed = !_calendarCollapsed),
-              onPreviousMonth: () => setState(() {
-                _dateAnchors.clear();
-                _visibleMonth = DateTime(
-                  _visibleMonth.year,
-                  _visibleMonth.month - 1,
-                );
-              }),
-              onNextMonth: () => setState(() {
-                _dateAnchors.clear();
-                _visibleMonth = DateTime(
-                  _visibleMonth.year,
-                  _visibleMonth.month + 1,
-                );
-              }),
+              onPreviousMonth: () => _changeVisibleMonth(-1),
+              onNextMonth: () => _changeVisibleMonth(1),
               selectedDate: _selectedDate,
               onSelectDate: _selectDate,
             ),
             const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Scheduled occurrences',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: AppTheme.muted,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
             AnimatedSwitcher(
               duration: MediaQuery.of(context).disableAnimations
                   ? Duration.zero
@@ -3992,10 +4736,14 @@ class _ScheduledViewState extends State<ScheduledView> {
                 ),
               ),
               child: Column(
-                key: ValueKey('${_visibleMonth.year}-${_visibleMonth.month}'),
+                key: ValueKey(
+                  '${_visibleMonth.year}-${_visibleMonth.month}-'
+                  '${_activityFilter.name}',
+                ),
                 children: [
-                  if (visibleMonthOccurrences.isEmpty)
+                  if (filteredMonthOccurrences.isEmpty)
                     ListTile(
+                      key: const ValueKey('calendar-filter-empty-state'),
                       leading: const Icon(
                         Icons.event_busy_outlined,
                         color: AppTheme.muted,
@@ -4005,17 +4753,17 @@ class _ScheduledViewState extends State<ScheduledView> {
                       ),
                     )
                   else
-                    for (final entry in groupedOccurrences.entries) ...[
+                    for (final date in activityDates) ...[
                       Padding(
                         key: _dateAnchors.putIfAbsent(
-                          _dateKey(entry.key),
+                          _dateKey(date),
                           () => GlobalKey(),
                         ),
                         padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            shortDate(entry.key),
+                            shortDate(date),
                             style: Theme.of(context).textTheme.labelLarge
                                 ?.copyWith(
                                   color: AppTheme.muted,
@@ -4024,7 +4772,9 @@ class _ScheduledViewState extends State<ScheduledView> {
                           ),
                         ),
                       ),
-                      for (final occurrence in entry.value)
+                      for (final occurrence
+                          in groupedOccurrences[date] ??
+                              const <ScheduledCalendarOccurrence>[])
                         _buildOccurrenceRow(
                           context,
                           occurrence,
@@ -4055,7 +4805,9 @@ class _ScheduledViewState extends State<ScheduledView> {
 class ScheduledCalendarPreview extends StatelessWidget {
   const ScheduledCalendarPreview({
     required this.month,
-    required this.occurrences,
+    required this.activitySummaryByDay,
+    required this.activityFilter,
+    required this.onActivityFilterChanged,
     required this.summary,
     required this.currency,
     required this.isCollapsed,
@@ -4068,7 +4820,9 @@ class ScheduledCalendarPreview extends StatelessWidget {
   });
 
   final DateTime month;
-  final List<ScheduledCalendarOccurrence> occurrences;
+  final Map<DateTime, CalendarDayActivitySummary> activitySummaryByDay;
+  final CalendarActivityFilter activityFilter;
+  final ValueChanged<CalendarActivityFilter> onActivityFilterChanged;
   final ScheduledMonthSummary summary;
   final CurrencyFormatSettings currency;
   final bool isCollapsed;
@@ -4081,20 +4835,6 @@ class ScheduledCalendarPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final transactionCountByDay = <int, int>{};
-    final plannedTotalByDay = <int, int>{};
-    for (final occurrence in occurrences) {
-      final day = occurrence.scheduledDate.day;
-      transactionCountByDay[day] = (transactionCountByDay[day] ?? 0) + 1;
-      if (occurrence.isSkipped ||
-          occurrence.transaction.type == TransactionType.transfer) {
-        continue;
-      }
-      final signedAmount = occurrence.transaction.type == TransactionType.income
-          ? occurrence.plannedAmountMinor.abs()
-          : -occurrence.plannedAmountMinor.abs();
-      plannedTotalByDay[day] = (plannedTotalByDay[day] ?? 0) + signedAmount;
-    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
@@ -4144,11 +4884,12 @@ class ScheduledCalendarPreview extends StatelessWidget {
                 : CrossFadeState.showFirst,
             firstChild: ScheduledCalendarGrid(
               month: month,
-              transactionCountByDay: transactionCountByDay,
-              plannedTotalByDay: plannedTotalByDay,
+              activitySummaryByDay: activitySummaryByDay,
+              activityFilter: activityFilter,
               currency: currency,
               selectedDate: selectedDate,
               onSelectDate: onSelectDate,
+              onActivityFilterChanged: onActivityFilterChanged,
             ),
             secondChild: const SizedBox.shrink(),
           ),
@@ -4162,20 +4903,22 @@ class ScheduledCalendarPreview extends StatelessWidget {
 class ScheduledCalendarGrid extends StatelessWidget {
   const ScheduledCalendarGrid({
     required this.month,
-    required this.transactionCountByDay,
-    required this.plannedTotalByDay,
+    required this.activitySummaryByDay,
+    required this.activityFilter,
     required this.currency,
     required this.selectedDate,
     required this.onSelectDate,
+    required this.onActivityFilterChanged,
     super.key,
   });
 
   final DateTime month;
-  final Map<int, int> transactionCountByDay;
-  final Map<int, int> plannedTotalByDay;
+  final Map<DateTime, CalendarDayActivitySummary> activitySummaryByDay;
+  final CalendarActivityFilter activityFilter;
   final CurrencyFormatSettings currency;
   final DateTime? selectedDate;
   final ValueChanged<DateTime> onSelectDate;
+  final ValueChanged<CalendarActivityFilter> onActivityFilterChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -4185,6 +4928,57 @@ class ScheduledCalendarGrid extends StatelessWidget {
     final rows = ((firstWeekdayOffset + days) / 7).ceil();
     return Column(
       children: [
+        SizedBox(
+          height: 38,
+          child: SingleChildScrollView(
+            key: const ValueKey('calendar-activity-filter'),
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Row(
+              children: [
+                for (final filter in CalendarActivityFilter.values) ...[
+                  Builder(
+                    builder: (context) {
+                      final selected = filter == activityFilter;
+                      return ChoiceChip(
+                        key: ValueKey('calendar-filter-${filter.name}'),
+                        label: Text(filter.label),
+                        avatar: Icon(
+                          filter.icon,
+                          size: 15,
+                          color: selected
+                              ? Colors.white
+                              : filter == CalendarActivityFilter.all
+                              ? Theme.of(context).colorScheme.onSurfaceVariant
+                              : filter.color(context),
+                        ),
+                        selected: selected,
+                        showCheckmark: false,
+                        visualDensity: VisualDensity.compact,
+                        selectedColor: AppTheme.accent,
+                        labelStyle: TextStyle(
+                          color: selected
+                              ? Colors.white
+                              : Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        side: BorderSide(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.outlineVariant.withValues(alpha: 0.55),
+                        ),
+                        onSelected: (_) => onActivityFilterChanged(filter),
+                      );
+                    },
+                  ),
+                  if (filter != CalendarActivityFilter.values.last)
+                    const SizedBox(width: 6),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
         Row(
           children: [
             for (final label in const ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
@@ -4213,16 +5007,17 @@ class ScheduledCalendarGrid extends StatelessWidget {
                       firstWeekdayOffset: firstWeekdayOffset,
                       daysInMonth: days,
                     );
+                    final summary = day == null
+                        ? null
+                        : activitySummaryByDay[calendarDateKey(
+                            DateTime(month.year, month.month, day),
+                          )];
                     return Expanded(
                       child: ScheduledCalendarDayCell(
                         day: day,
                         month: month,
-                        transactionCount: day == null
-                            ? 0
-                            : transactionCountByDay[day] ?? 0,
-                        plannedTotalMinor: day == null
-                            ? null
-                            : plannedTotalByDay[day],
+                        activitySummary: summary,
+                        activityFilter: activityFilter,
                         currency: currency,
                         isSelected:
                             selectedDate != null &&
@@ -4249,8 +5044,8 @@ class ScheduledCalendarDayCell extends StatelessWidget {
   const ScheduledCalendarDayCell({
     required this.day,
     required this.month,
-    required this.transactionCount,
-    required this.plannedTotalMinor,
+    required this.activitySummary,
+    required this.activityFilter,
     required this.currency,
     required this.isSelected,
     required this.isToday,
@@ -4260,8 +5055,8 @@ class ScheduledCalendarDayCell extends StatelessWidget {
 
   final int? day;
   final DateTime month;
-  final int transactionCount;
-  final int? plannedTotalMinor;
+  final CalendarDayActivitySummary? activitySummary;
+  final CalendarActivityFilter activityFilter;
   final CurrencyFormatSettings currency;
   final bool isSelected;
   final bool isToday;
@@ -4271,142 +5066,228 @@ class ScheduledCalendarDayCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (day == null) {
-      return const SizedBox(height: 58);
+      return const SizedBox(height: 72);
     }
-    final isMarked = transactionCount > 0;
-    return SizedBox(
-      height: 58,
-      child: InkWell(
-        key: ValueKey(
-          'scheduled-calendar-day-${month.year}-${month.month}-$day',
-        ),
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => onSelectDate(DateTime(month.year, month.month, day!)),
-        child: Center(
-          child: SizedBox(
-            width: 48,
-            height: 54,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Positioned.fill(
-                  child: DecoratedBox(
-                    key: ValueKey(
-                      'scheduled-calendar-selection-${month.year}-${month.month}-$day',
-                    ),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? AppTheme.accent.withValues(alpha: 0.10)
-                          : null,
-                      borderRadius: BorderRadius.circular(14),
-                      border: isSelected
-                          ? Border.all(
-                              color: AppTheme.accent.withValues(alpha: 0.55),
-                            )
-                          : null,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(2, 5, 2, 3),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 24,
-                            height: 22,
-                            alignment: Alignment.center,
-                            decoration: isToday
-                                ? BoxDecoration(
-                                    border: Border.all(
-                                      color: AppTheme.accent,
-                                      width: 1.2,
-                                    ),
-                                    borderRadius: BorderRadius.circular(
-                                      AppRadii.pill,
-                                    ),
-                                  )
-                                : null,
-                            child: Text(
-                              '$day',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight: isMarked || isSelected
-                                    ? FontWeight.w900
-                                    : FontWeight.w600,
-                                color: isSelected ? AppTheme.accent : null,
-                                height: 1,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          if (plannedTotalMinor != null)
-                            SizedBox(
-                              width: 46,
-                              height: 10,
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  compactScheduledMoney(
-                                    plannedTotalMinor!,
-                                    currency,
-                                  ),
-                                  key: ValueKey(
-                                    'scheduled-calendar-total-${month.year}-${month.month}-$day',
-                                  ),
-                                  maxLines: 1,
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: plannedTotalMinor! < 0
-                                        ? AppColors.danger
-                                        : plannedTotalMinor! > 0
-                                        ? AppTheme.accent
-                                        : AppTheme.muted,
-                                    fontSize: 8.5,
-                                    fontWeight: FontWeight.w800,
-                                    height: 1,
-                                  ),
-                                ),
-                              ),
-                            )
-                          else
-                            const SizedBox(height: 9),
-                        ],
+    final matchingCount = activitySummary?.countFor(activityFilter) ?? 0;
+    final matchingAmount = activitySummary?.amountFor(activityFilter);
+    final presentTypes =
+        activitySummary?.types ?? const <CalendarActivityType>{};
+    final isAll = activityFilter == CalendarActivityFilter.all;
+    final isMarked = matchingCount > 0;
+    return Semantics(
+      label:
+          '$day, $matchingCount ${matchingCount == 1 ? 'activity' : 'activities'}'
+          '${isAll && presentTypes.isNotEmpty ? ', ${presentTypes.map(calendarActivityTypeLabel).join(', ')}' : ''}'
+          '${!isAll && matchingAmount != null ? ', ${money(matchingAmount, currency)}' : ''}',
+      button: true,
+      child: SizedBox(
+        height: 72,
+        child: InkWell(
+          key: ValueKey(
+            'scheduled-calendar-day-${month.year}-${month.month}-$day',
+          ),
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => onSelectDate(DateTime(month.year, month.month, day!)),
+          child: Center(
+            child: SizedBox(
+              width: 52,
+              height: 68,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      key: ValueKey(
+                        'scheduled-calendar-selection-${month.year}-${month.month}-$day',
                       ),
-                    ),
-                  ),
-                ),
-                if (transactionCount > 0)
-                  Positioned(
-                    top: -3,
-                    right: -3,
-                    child: Container(
-                      constraints: const BoxConstraints(
-                        minWidth: 17,
-                        minHeight: 17,
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? AppTheme.accent.withValues(alpha: 0.16)
-                            : AppTheme.accent.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(AppRadii.pill),
-                        border: Border.all(
-                          color: AppTheme.accent.withValues(alpha: 0.24),
-                          width: 1,
-                        ),
+                            ? AppTheme.accent.withValues(alpha: 0.10)
+                            : null,
+                        borderRadius: BorderRadius.circular(14),
+                        border: isSelected
+                            ? Border.all(
+                                color: AppTheme.accent.withValues(alpha: 0.55),
+                              )
+                            : null,
                       ),
-                      child: Text(
-                        transactionCount > 99 ? '99+' : '$transactionCount',
-                        style: const TextStyle(
-                          color: AppTheme.accent,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w900,
-                          height: 1,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(1, 6, 1, 4),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 22,
+                              alignment: Alignment.center,
+                              decoration: isToday
+                                  ? BoxDecoration(
+                                      border: Border.all(
+                                        color: AppTheme.accent,
+                                        width: 1.2,
+                                      ),
+                                      borderRadius: BorderRadius.circular(
+                                        AppRadii.pill,
+                                      ),
+                                    )
+                                  : null,
+                              child: Text(
+                                '$day',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontWeight: isMarked || isSelected
+                                      ? FontWeight.w900
+                                      : FontWeight.w600,
+                                  color: isSelected ? AppTheme.accent : null,
+                                  height: 1,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            if (isAll)
+                              CalendarActivityDots(types: presentTypes)
+                            else if (matchingAmount != null)
+                              CalendarCellAmount(
+                                key: ValueKey(
+                                  'calendar-filtered-total-'
+                                  '${month.year}-${month.month}-$day',
+                                ),
+                                amountMinor: matchingAmount,
+                                currency: currency,
+                                color: activityFilter.color(context),
+                              )
+                            else
+                              const SizedBox(height: 14),
+                          ],
                         ),
                       ),
                     ),
                   ),
-              ],
+                  if (matchingCount > 0)
+                    Positioned(
+                      top: -3,
+                      right: -3,
+                      child: Container(
+                        constraints: const BoxConstraints(
+                          minWidth: 17,
+                          minHeight: 17,
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppTheme.accent.withValues(alpha: 0.16)
+                              : AppTheme.accent.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(AppRadii.pill),
+                          border: Border.all(
+                            color: AppTheme.accent.withValues(alpha: 0.24),
+                            width: 1,
+                          ),
+                        ),
+                        child: Text(
+                          matchingCount > 99 ? '99+' : '$matchingCount',
+                          style: const TextStyle(
+                            color: AppTheme.accent,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                            height: 1,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class CalendarActivityDots extends StatelessWidget {
+  const CalendarActivityDots({required this.types, super.key});
+
+  final Set<CalendarActivityType> types;
+
+  @override
+  Widget build(BuildContext context) {
+    if (types.isEmpty) return const SizedBox(height: 14);
+    const order = [
+      CalendarActivityType.income,
+      CalendarActivityType.expense,
+      CalendarActivityType.transfer,
+      CalendarActivityType.goal,
+    ];
+    Color colorFor(CalendarActivityType type) => switch (type) {
+      CalendarActivityType.income => AppTheme.accent,
+      CalendarActivityType.expense => AppColors.danger,
+      CalendarActivityType.transfer => Theme.of(
+        context,
+      ).colorScheme.onSurfaceVariant,
+      CalendarActivityType.goal => _goalBlue,
+    };
+
+    return SizedBox(
+      key: const ValueKey('calendar-activity-dots'),
+      height: 14,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          for (final type in order)
+            if (types.contains(type)) ...[
+              Semantics(
+                label: calendarActivityTypeLabel(type),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colorFor(type),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const SizedBox(width: 6, height: 6),
+                ),
+              ),
+              if (type != order.last) const SizedBox(width: 3),
+            ],
+        ],
+      ),
+    );
+  }
+}
+
+class CalendarCellAmount extends StatelessWidget {
+  const CalendarCellAmount({
+    required this.amountMinor,
+    required this.currency,
+    required this.color,
+    super.key,
+  });
+
+  final int amountMinor;
+  final CurrencyFormatSettings currency;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = MoneyFormatter(
+      currency,
+    ).formatMinor(amountMinor, showPositiveSign: false);
+    return SizedBox(
+      width: 52,
+      height: 14,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.center,
+        child: Text(
+          value,
+          maxLines: 1,
+          softWrap: false,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: color,
+            fontSize: 10.5,
+            fontWeight: FontWeight.w900,
+            height: 1,
+            fontFeatures: const [AppTextStyles.tabularFigures],
           ),
         ),
       ),
@@ -4901,7 +5782,9 @@ class _SettingsViewState extends State<SettingsView> {
               icon: Icons.home_outlined,
               label: 'Launch screen',
               value: preferences.launchScreen,
-              values: LaunchScreen.values,
+              values: LaunchScreen.values
+                  .where((value) => value != LaunchScreen.budgets)
+                  .toList(growable: false),
               labelOf: launchScreenLabel,
               onChanged: (value) => store.savePreferences(
                 preferences.copyWith(launchScreen: value),
@@ -5048,7 +5931,7 @@ class _SettingsViewState extends State<SettingsView> {
               title: 'Manage budgets',
               subtitle: 'Budget amounts and categories',
               showDivider: false,
-              onTap: () => widget.onSelectSection?.call(FinanceSection.budgets),
+              onTap: () => widget.onSelectSection?.call(FinanceSection.plan),
             ),
           ],
         ),
@@ -8188,6 +9071,20 @@ Future<void> showAccountOptions(
   } else if (action == 'archive' && context.mounted) {
     await dataStore.archiveAccount(account.id);
   } else if (action == 'delete' && context.mounted) {
+    final funded = dataStore.goalFundingEvents
+        .where((event) => event.isActive && event.sourceAccountId == account.id)
+        .fold<int>(0, (total, event) => total + event.totalAmountMinor.abs());
+    final isDefaultGoalAccount = dataStore.goals.any(
+      (goal) => !goal.isDeleted && goal.defaultFundingAccountId == account.id,
+    );
+    if ((funded > 0 || isDefaultGoalAccount) &&
+        !await confirmDeleteGoalFundingAccount(
+          context,
+          account: account,
+          fundedMinor: funded,
+        )) {
+      return;
+    }
     await dataStore.deleteAccount(account.id);
   }
 }
@@ -8490,6 +9387,7 @@ Future<void> showEditAccountDialog(
 Future<void> showFloatingAddMenu(
   BuildContext context, {
   FinanceSection? section,
+  PlanSegment? planSegment,
   String? initialAccountId,
   DateTime? initialScheduledDate,
 }) async {
@@ -8497,6 +9395,11 @@ Future<void> showFloatingAddMenu(
   final orderedActions = isScheduled
       ? const ['expense', 'income', 'transfer']
       : switch (section) {
+          FinanceSection.plan when planSegment == PlanSegment.goals => const [
+            'goal',
+            'goalFunding',
+          ],
+          FinanceSection.plan => const ['budget'],
           FinanceSection.accounts => const [
             'account',
             'expense',
@@ -8505,19 +9408,11 @@ Future<void> showFloatingAddMenu(
             'category',
             'scheduled',
           ],
-          FinanceSection.budgets => const [
-            'budget',
-            'expense',
-            'income',
-            'transfer',
-            'account',
-            'category',
-            'scheduled',
-          ],
           _ => const [
             'expense',
             'income',
             'transfer',
+            'goalFunding',
             'account',
             'category',
             'scheduled',
@@ -8550,6 +9445,16 @@ Future<void> showFloatingAddMenu(
         label: 'Budget',
         leading: const Icon(Icons.pie_chart_outline),
         onSelected: () => Navigator.pop(context, 'budget'),
+      ),
+      'goal' => FloatingActionMenuItem(
+        label: 'Create Goal',
+        leading: const Icon(Icons.flag_outlined),
+        onSelected: () => Navigator.pop(context, 'goal'),
+      ),
+      'goalFunding' => FloatingActionMenuItem(
+        label: 'Fund Goals',
+        leading: const Icon(Icons.savings_outlined),
+        onSelected: () => Navigator.pop(context, 'goalFunding'),
       ),
       'category' => FloatingActionMenuItem(
         label: 'Category',
@@ -8624,6 +9529,10 @@ Future<void> showFloatingAddMenu(
       }
     case 'budget':
       await showBudgetDialog(context);
+    case 'goal':
+      await showCreateGoalSheet(context);
+    case 'goalFunding':
+      await showFundGoalsSheet(context);
     case 'scheduled':
       await showScheduledTransactionDialog(
         context,
@@ -9749,10 +10658,10 @@ Future<bool> showScheduledTransactionDialog(
       ),
     );
   }
-  var firstSplitAutoRemainder =
-      existing == null &&
-      sourceTransaction == null &&
-      initialSplitLines.isEmpty;
+  var splitMode = initialSplitLines.length > 1;
+  var autofocusSecondSplitAmount = false;
+  final splitSectionKey = GlobalKey();
+  var firstSplitAutoRemainder = !splitMode;
   var frequency =
       existing?.frequency ?? v2_scheduled.RecurrenceFrequency.monthly;
   var alertPreference =
@@ -10026,6 +10935,69 @@ Future<bool> showScheduledTransactionDialog(
               });
             }
 
+            void enterScheduledSplitMode() {
+              if (splitDrafts.isEmpty || categoryId == null) return;
+              setDialogState(() {
+                splitMode = true;
+                firstSplitAutoRemainder = true;
+                splitDrafts.first
+                  ..categoryId = categoryId!
+                  ..amountMinor = amountMinor.abs();
+                if (splitDrafts.length == 1) {
+                  splitDrafts.add(
+                    SplitLineDraft(
+                      id: 'split_${DateTime.now().microsecondsSinceEpoch}_1',
+                      categoryId: '',
+                      amountMinor: 0,
+                    ),
+                  );
+                }
+                autofocusSecondSplitAmount = true;
+                recalculateScheduledRemainder();
+              });
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final splitContext = splitSectionKey.currentContext;
+                if (splitContext == null) return;
+                Scrollable.ensureVisible(
+                  splitContext,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  alignment: 0.35,
+                );
+              });
+            }
+
+            Future<void> useSingleScheduledCategory() async {
+              final hasMeaningfulAdditionalSplits = splitDrafts
+                  .skip(1)
+                  .any(
+                    (draft) =>
+                        draft.categoryId.isNotEmpty ||
+                        draft.amountMinor != 0 ||
+                        draft.note.text.trim().isNotEmpty,
+                  );
+              if (hasMeaningfulAdditionalSplits &&
+                  !await confirmDiscardAdditionalSplits(context)) {
+                return;
+              }
+              if (!context.mounted) return;
+              setDialogState(() {
+                for (final draft in splitDrafts.skip(1)) {
+                  draft.note.dispose();
+                }
+                if (splitDrafts.length > 1) {
+                  splitDrafts.removeRange(1, splitDrafts.length);
+                }
+                splitDrafts.first.amountMinor = amountMinor.abs();
+                categoryId = splitDrafts.first.categoryId.isEmpty
+                    ? null
+                    : splitDrafts.first.categoryId;
+                firstSplitAutoRemainder = true;
+                splitMode = false;
+                autofocusSecondSplitAmount = false;
+              });
+            }
+
             List<TransactionSplitLine> buildScheduledSplitLines() {
               if (type == TransactionType.transfer) return const [];
               return [
@@ -10127,9 +11099,18 @@ Future<bool> showScheduledTransactionDialog(
                               previousType != TransactionType.transfer &&
                               previousType != type) {
                             categoryId = null;
-                            for (final draft in splitDrafts) {
-                              draft.categoryId = '';
+                            for (final draft in splitDrafts.skip(1)) {
+                              draft.note.dispose();
                             }
+                            if (splitDrafts.length > 1) {
+                              splitDrafts.removeRange(1, splitDrafts.length);
+                            }
+                            splitDrafts.first
+                              ..categoryId = ''
+                              ..amountMinor = amountMinor.abs();
+                            firstSplitAutoRemainder = true;
+                            splitMode = false;
+                            autofocusSecondSplitAmount = false;
                           }
                           if (type == TransactionType.transfer &&
                               transferAccountId == accountId) {
@@ -10265,45 +11246,68 @@ Future<bool> showScheduledTransactionDialog(
                       ],
                     ),
                     const TransactionFormDivider(),
-                    InlineSplitAllocationSection(
-                      keyPrefix: 'scheduled',
-                      drafts: splitDrafts,
-                      categories: categories,
-                      currency: dataStore.preferences.currency,
-                      totalMinor: amountMinor.abs(),
-                      firstAutoRemainder: firstSplitAutoRemainder,
-                      onChooseCategory: chooseScheduledSplitCategory,
-                      onAmountChanged: (index, value) => setDialogState(() {
-                        splitDrafts[index].amountMinor = value.abs();
-                        if (index == 0) {
-                          firstSplitAutoRemainder = false;
-                        } else {
+                    if (splitMode)
+                      InlineSplitAllocationSection(
+                        key: splitSectionKey,
+                        keyPrefix: 'scheduled',
+                        drafts: splitDrafts,
+                        categories: categories,
+                        currency: dataStore.preferences.currency,
+                        totalMinor: amountMinor.abs(),
+                        firstAutoRemainder: firstSplitAutoRemainder,
+                        autofocusAmountIndex: autofocusSecondSplitAmount
+                            ? 1
+                            : null,
+                        onChooseCategory: chooseScheduledSplitCategory,
+                        onAmountChanged: (index, value) => setDialogState(() {
+                          autofocusSecondSplitAmount = false;
+                          splitDrafts[index].amountMinor = value.abs();
+                          if (index == 0) {
+                            firstSplitAutoRemainder = false;
+                          } else {
+                            recalculateScheduledRemainder();
+                          }
+                        }),
+                        onAdd: () => setDialogState(() {
+                          autofocusSecondSplitAmount = false;
+                          final currentTotal = splitDrafts.fold<int>(
+                            0,
+                            (total, line) => total + line.amountMinor.abs(),
+                          );
+                          final remainder = amountMinor.abs() - currentTotal;
+                          splitDrafts.add(
+                            SplitLineDraft(
+                              id: 'split_${DateTime.now().microsecondsSinceEpoch}_${splitDrafts.length}',
+                              categoryId: '',
+                              amountMinor: remainder > 0 ? remainder : 0,
+                            ),
+                          );
+                        }),
+                        onRemove: (index) => setDialogState(() {
+                          autofocusSecondSplitAmount = false;
+                          splitDrafts[index].note.dispose();
+                          splitDrafts.removeAt(index);
                           recalculateScheduledRemainder();
-                        }
-                      }),
-                      onAdd: () => setDialogState(() {
-                        final currentTotal = splitDrafts.fold<int>(
-                          0,
-                          (total, line) => total + line.amountMinor.abs(),
-                        );
-                        final remainder = amountMinor.abs() - currentTotal;
-                        splitDrafts.add(
-                          SplitLineDraft(
-                            id: 'split_${DateTime.now().microsecondsSinceEpoch}_${splitDrafts.length}',
-                            categoryId: '',
-                            amountMinor: remainder > 0 ? remainder : 0,
-                          ),
-                        );
-                      }),
-                      onRemove: (index) => setDialogState(() {
-                        splitDrafts[index].note.dispose();
-                        splitDrafts.removeAt(index);
-                        recalculateScheduledRemainder();
-                        categoryId = splitDrafts.first.categoryId.isEmpty
+                          categoryId = splitDrafts.first.categoryId.isEmpty
+                              ? null
+                              : splitDrafts.first.categoryId;
+                          if (splitDrafts.length == 1) {
+                            splitDrafts.first.amountMinor = amountMinor.abs();
+                            firstSplitAutoRemainder = true;
+                            splitMode = false;
+                          }
+                        }),
+                        onUseSingleCategory: useSingleScheduledCategory,
+                      )
+                    else
+                      SingleCategoryAllocationSection(
+                        keyPrefix: 'scheduled',
+                        categoryName: selectedCategory?.name,
+                        onChooseCategory: () => chooseScheduledSplitCategory(0),
+                        onSplit: selectedCategory == null
                             ? null
-                            : splitDrafts.first.categoryId;
-                      }),
-                    ),
+                            : enterScheduledSplitMode,
+                      ),
                   ],
                   const TransactionFormDivider(),
                   Padding(
@@ -11269,7 +12273,7 @@ Future<void> editScheduledTransactionFromOccurrence(
 
   final dataStore = FinanceDataStoreScope.read(context);
   final futureItem = v2_scheduled.ScheduledTransactionRecord(
-    id: '${item.id}_from_${calendarDateKey(scheduledDate)}_${DateTime.now().microsecondsSinceEpoch}',
+    id: '${item.id}_from_${calendarDateId(scheduledDate)}_${DateTime.now().microsecondsSinceEpoch}',
     type: item.type,
     accountId: item.accountId,
     transferAccountId: item.transferAccountId,
@@ -12106,6 +13110,7 @@ Future<void> showTransactionDialog(
   bool? initialIsExpense,
   String? initialAccountId,
   TransactionRecord? transaction,
+  bool initialSplitMode = false,
   bool initialScheduleFutureOccurrences = false,
   FutureScheduleDraft? initialFutureSchedule,
 }) async {
@@ -12142,7 +13147,8 @@ Future<void> showTransactionDialog(
       (transaction == null &&
           (initialIsExpense ?? isExpenseDefault(dataStore.preferences)));
   var categoryId = transaction?.categoryId ?? '';
-  var firstSplitAutoRemainder = transaction?.splitLines.isEmpty ?? true;
+  final hasExistingSplit = (transaction?.splitLines.length ?? 0) > 1;
+  var firstSplitAutoRemainder = !hasExistingSplit;
   final splitDrafts =
       transaction?.splitLines
           .map(
@@ -12167,6 +13173,18 @@ Future<void> showTransactionDialog(
       ),
     );
   }
+  var splitMode = hasExistingSplit || initialSplitMode;
+  if (splitMode && splitDrafts.length == 1 && categoryId.isNotEmpty) {
+    splitDrafts.add(
+      SplitLineDraft(
+        id: 'split_${DateTime.now().microsecondsSinceEpoch}_1',
+        categoryId: '',
+        amountMinor: 0,
+      ),
+    );
+  }
+  var autofocusSecondSplitAmount = initialSplitMode && !hasExistingSplit;
+  final splitSectionKey = GlobalKey();
   var switchToTransfer = false;
   var isCreatingCategory = false;
   var isSavingCategory = false;
@@ -12222,6 +13240,9 @@ Future<void> showTransactionDialog(
             }
 
             final theme = Theme.of(context);
+            final selectedCategory = categoryOptions
+                .where((category) => category.id == categoryId)
+                .firstOrNull;
             final selectedAccount = accountId.isEmpty
                 ? null
                 : activeAccounts.firstWhere(
@@ -12513,6 +13534,67 @@ Future<void> showTransactionDialog(
               });
             }
 
+            void enterSplitMode() {
+              if (splitDrafts.isEmpty || categoryId.isEmpty) return;
+              setDialogState(() {
+                splitMode = true;
+                firstSplitAutoRemainder = true;
+                splitDrafts.first
+                  ..categoryId = categoryId
+                  ..amountMinor = absoluteAmountMinor;
+                if (splitDrafts.length == 1) {
+                  splitDrafts.add(
+                    SplitLineDraft(
+                      id: newSplitId(),
+                      categoryId: '',
+                      amountMinor: 0,
+                    ),
+                  );
+                }
+                autofocusSecondSplitAmount = true;
+                recalculateAutoRemainder();
+              });
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final splitContext = splitSectionKey.currentContext;
+                if (splitContext == null) return;
+                Scrollable.ensureVisible(
+                  splitContext,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  alignment: 0.35,
+                );
+              });
+            }
+
+            Future<void> useSingleCategory() async {
+              final hasMeaningfulAdditionalSplits = splitDrafts
+                  .skip(1)
+                  .any(
+                    (draft) =>
+                        draft.categoryId.isNotEmpty ||
+                        draft.amountMinor != 0 ||
+                        draft.note.text.trim().isNotEmpty,
+                  );
+              if (hasMeaningfulAdditionalSplits &&
+                  !await confirmDiscardAdditionalSplits(context)) {
+                return;
+              }
+              if (!context.mounted) return;
+              setDialogState(() {
+                for (final draft in splitDrafts.skip(1)) {
+                  draft.note.dispose();
+                }
+                if (splitDrafts.length > 1) {
+                  splitDrafts.removeRange(1, splitDrafts.length);
+                }
+                splitDrafts.first.amountMinor = absoluteAmountMinor;
+                categoryId = splitDrafts.first.categoryId;
+                firstSplitAutoRemainder = true;
+                splitMode = false;
+                autofocusSecondSplitAmount = false;
+              });
+            }
+
             void saveTransactionResult() {
               recalculateAutoRemainder();
               syncPrimaryCategoryFromSplit();
@@ -12659,15 +13741,18 @@ Future<void> showTransactionDialog(
 
             Widget splitAllocationSection() {
               return InlineSplitAllocationSection(
+                key: splitSectionKey,
                 keyPrefix: 'transaction',
                 drafts: splitDrafts,
                 categories: categoryOptions,
                 currency: dataStore.preferences.currency,
                 totalMinor: absoluteAmountMinor,
                 firstAutoRemainder: firstSplitAutoRemainder,
+                autofocusAmountIndex: autofocusSecondSplitAmount ? 1 : null,
                 quietWhenZero: true,
                 onChooseCategory: chooseSplitCategory,
                 onAmountChanged: (index, value) => setDialogState(() {
+                  autofocusSecondSplitAmount = false;
                   splitDrafts[index].amountMinor = value.abs();
                   if (index == 0) {
                     firstSplitAutoRemainder = false;
@@ -12676,6 +13761,7 @@ Future<void> showTransactionDialog(
                   }
                 }),
                 onAdd: () => setDialogState(() {
+                  autofocusSecondSplitAmount = false;
                   ensureSplitDrafts();
                   final currentTotal = splitDrafts.fold<int>(
                     0,
@@ -12691,11 +13777,18 @@ Future<void> showTransactionDialog(
                   );
                 }),
                 onRemove: (index) => setDialogState(() {
+                  autofocusSecondSplitAmount = false;
                   splitDrafts[index].note.dispose();
                   splitDrafts.removeAt(index);
                   recalculateAutoRemainder();
                   syncPrimaryCategoryFromSplit();
+                  if (splitDrafts.length == 1) {
+                    splitDrafts.first.amountMinor = absoluteAmountMinor;
+                    firstSplitAutoRemainder = true;
+                    splitMode = false;
+                  }
                 }),
+                onUseSingleCategory: useSingleCategory,
               );
             }
 
@@ -12763,7 +13856,16 @@ Future<void> showTransactionDialog(
                               draft.note.dispose();
                             }
                             splitDrafts.clear();
+                            splitDrafts.add(
+                              SplitLineDraft(
+                                id: 'split_${DateTime.now().microsecondsSinceEpoch}_0',
+                                categoryId: '',
+                                amountMinor: amountMinor.abs(),
+                              ),
+                            );
                             firstSplitAutoRemainder = true;
+                            splitMode = false;
+                            autofocusSecondSplitAmount = false;
                             isCreatingCategory = false;
                             isSavingCategory = false;
                             newCategoryError = null;
@@ -12872,7 +13974,17 @@ Future<void> showTransactionDialog(
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      splitAllocationSection(),
+                      if (splitMode)
+                        splitAllocationSection()
+                      else
+                        SingleCategoryAllocationSection(
+                          keyPrefix: 'transaction',
+                          categoryName: selectedCategory?.name,
+                          onChooseCategory: () => chooseSplitCategory(0),
+                          onSplit: selectedCategory == null
+                              ? null
+                              : enterSplitMode,
+                        ),
                       if (isCreatingCategory) ...[
                         const SizedBox(height: AppSpacing.sm),
                         inlineCategoryCreationRow(),
@@ -13905,7 +15017,8 @@ String launchScreenLabel(LaunchScreen screen) {
     LaunchScreen.dashboard => 'Dashboard',
     LaunchScreen.ledger => 'Ledger',
     LaunchScreen.accounts => 'Accounts',
-    LaunchScreen.budgets => 'Budgets',
+    LaunchScreen.budgets || LaunchScreen.planBudgets => 'Plan — Budgets',
+    LaunchScreen.planGoals => 'Plan — Goals',
     LaunchScreen.scheduled => 'Scheduled',
     LaunchScreen.reports => 'Reports',
   };
@@ -13916,7 +15029,9 @@ FinanceSection financeSectionForLaunchScreen(LaunchScreen screen) {
     LaunchScreen.dashboard => FinanceSection.dashboard,
     LaunchScreen.ledger => FinanceSection.ledger,
     LaunchScreen.accounts => FinanceSection.accounts,
-    LaunchScreen.budgets => FinanceSection.budgets,
+    LaunchScreen.budgets ||
+    LaunchScreen.planBudgets ||
+    LaunchScreen.planGoals => FinanceSection.plan,
     LaunchScreen.scheduled => FinanceSection.scheduled,
     LaunchScreen.reports => FinanceSection.reports,
   };
@@ -15972,11 +17087,7 @@ Map<DateTime, List<ScheduledCalendarOccurrence>> scheduledOccurrencesByDate(
 ) {
   final grouped = <DateTime, List<ScheduledCalendarOccurrence>>{};
   for (final occurrence in occurrences) {
-    final date = DateTime(
-      occurrence.scheduledDate.year,
-      occurrence.scheduledDate.month,
-      occurrence.scheduledDate.day,
-    );
+    final date = calendarDateKey(occurrence.scheduledDate);
     grouped.putIfAbsent(date, () => []).add(occurrence);
   }
   return grouped;
@@ -16020,18 +17131,19 @@ List<ScheduledCalendarOccurrence> scheduledOccurrencesForMonth(
   Iterable<v2_scheduled.ScheduledTransactionRecord> scheduled,
   DateTime month,
 ) {
-  final monthStart = DateTime(month.year, month.month);
-  final monthEnd = DateTime(month.year, month.month + 1);
+  final monthStart = calendarDateKey(DateTime(month.year, month.month));
+  final monthEnd = calendarDateKey(DateTime(month.year, month.month + 1));
   final result = <ScheduledCalendarOccurrence>[];
 
   for (final item in scheduled) {
-    final recordedDates = <String>{};
+    final recordedDates = <DateTime>{};
     for (final occurrence in item.occurrences) {
-      if (occurrence.scheduledDate.isBefore(monthStart) ||
-          !occurrence.scheduledDate.isBefore(monthEnd)) {
+      final occurrenceKey = calendarDateKey(occurrence.scheduledDate);
+      if (occurrenceKey.isBefore(monthStart) ||
+          !occurrenceKey.isBefore(monthEnd)) {
         continue;
       }
-      recordedDates.add(calendarDateKey(occurrence.scheduledDate));
+      recordedDates.add(occurrenceKey);
       result.add(
         ScheduledCalendarOccurrence(
           transaction: item,
@@ -16044,15 +17156,15 @@ List<ScheduledCalendarOccurrence> scheduledOccurrencesForMonth(
 
     if (item.isDeleted) continue;
     var date = item.nextDate;
-    while (date.isBefore(monthStart)) {
+    while (calendarDateKey(date).isBefore(monthStart)) {
       final next = nextDateForScheduledFrequency(date, item.frequency);
       if (next == null || !next.isAfter(date)) break;
       date = next;
     }
-    while (date.isBefore(monthEnd) &&
+    while (calendarDateKey(date).isBefore(monthEnd) &&
         !date.isAfter(item.endDate ?? DateTime(9999))) {
-      if (!date.isBefore(monthStart) &&
-          !recordedDates.contains(calendarDateKey(date))) {
+      final dateKey = calendarDateKey(date);
+      if (!dateKey.isBefore(monthStart) && !recordedDates.contains(dateKey)) {
         result.add(
           ScheduledCalendarOccurrence(
             transaction: item,
@@ -16129,8 +17241,15 @@ int actualAmountForScheduledOccurrence(
   return occurrenceRecord?.actualAmountMinor ?? 0;
 }
 
-String calendarDateKey(DateTime date) =>
-    '${date.year}-${date.month}-${date.day}';
+DateTime calendarDateKey(DateTime date) {
+  final localDate = date.isUtc ? date.toLocal() : date;
+  return DateTime(localDate.year, localDate.month, localDate.day);
+}
+
+String calendarDateId(DateTime date) {
+  final key = calendarDateKey(date);
+  return '${key.year}-${key.month}-${key.day}';
+}
 
 String compactScheduledMoney(int amountMinor, CurrencyFormatSettings currency) {
   final formatter = MoneyFormatter(currency);

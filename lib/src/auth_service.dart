@@ -295,7 +295,9 @@ class _AuthGateState extends State<AuthGate> {
       if (remoteRepository != null && recordRepository == null) {
         _attachStoreSync(userId, remoteRepository, store);
       }
-    } on Exception {
+    } on Exception catch (error, stackTrace) {
+      debugPrint('Cloud record sync failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
       if (!mounted) return;
       setState(() {
         _syncingUid = null;
@@ -368,7 +370,9 @@ class _AuthGateState extends State<AuthGate> {
           _lastSuccessfulSyncAt = DateTime.now();
         });
       }
-    } on Exception {
+    } on Exception catch (error, stackTrace) {
+      debugPrint('Cloud snapshot sync failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
       if (mounted) setState(() => _syncLabel = 'Sync issue');
     }
   }

@@ -382,7 +382,6 @@ class FinanceStore extends ChangeNotifier {
     }
     notifyListeners();
   }
-
 }
 
 class FinanceStoreScope extends InheritedNotifier<FinanceStore> {

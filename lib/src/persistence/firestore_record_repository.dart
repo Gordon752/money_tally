@@ -4,6 +4,8 @@ import '../domain/account.dart';
 import '../domain/budget.dart';
 import '../domain/category.dart';
 import '../domain/finance_data_set.dart';
+import '../domain/goal.dart';
+import '../domain/goal_funding.dart';
 import '../domain/scheduled_transaction.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
@@ -46,6 +48,9 @@ class FirestoreRecordRepository implements FinanceRecordRepository {
       _collection(userId, 'transactions').get(),
       _collection(userId, 'scheduledTransactions').get(),
       _collection(userId, 'budgets').get(),
+      _collection(userId, 'goals').get(),
+      _collection(userId, 'goalContributions').get(),
+      _collection(userId, 'goalFundingEvents').get(),
       _preferencesDoc(userId).get(),
     ]);
 
@@ -56,8 +61,13 @@ class FirestoreRecordRepository implements FinanceRecordRepository {
         results[2] as QuerySnapshot<Map<String, dynamic>>;
     final scheduledSnapshot = results[3] as QuerySnapshot<Map<String, dynamic>>;
     final budgetsSnapshot = results[4] as QuerySnapshot<Map<String, dynamic>>;
+    final goalsSnapshot = results[5] as QuerySnapshot<Map<String, dynamic>>;
+    final contributionsSnapshot =
+        results[6] as QuerySnapshot<Map<String, dynamic>>;
+    final fundingEventsSnapshot =
+        results[7] as QuerySnapshot<Map<String, dynamic>>;
     final preferencesSnapshot =
-        results[5] as DocumentSnapshot<Map<String, dynamic>>;
+        results[8] as DocumentSnapshot<Map<String, dynamic>>;
 
     return FinanceDataSet(
       accounts: accountsSnapshot.docs
@@ -74,6 +84,15 @@ class FirestoreRecordRepository implements FinanceRecordRepository {
           .toList(),
       budgets: budgetsSnapshot.docs
           .map((doc) => BudgetRecord.fromJson(doc.data()))
+          .toList(),
+      goals: goalsSnapshot.docs
+          .map((doc) => GoalRecord.fromJson(doc.data()))
+          .toList(),
+      goalContributions: contributionsSnapshot.docs
+          .map((doc) => GoalContributionRecord.fromJson(doc.data()))
+          .toList(),
+      goalFundingEvents: fundingEventsSnapshot.docs
+          .map((doc) => GoalFundingEventRecord.fromJson(doc.data()))
           .toList(),
       preferences: preferencesSnapshot.data() == null
           ? const UserPreferences()
@@ -133,6 +152,36 @@ class FirestoreRecordRepository implements FinanceRecordRepository {
       userId,
       'budgets',
     ).doc(budget.id).set(budget.toJson(), SetOptions(merge: true));
+  }
+
+  @override
+  Future<void> saveGoal({required String userId, required GoalRecord goal}) {
+    return _collection(
+      userId,
+      'goals',
+    ).doc(goal.id).set(goal.toJson(), SetOptions(merge: true));
+  }
+
+  @override
+  Future<void> saveGoalContribution({
+    required String userId,
+    required GoalContributionRecord contribution,
+  }) {
+    return _collection(
+      userId,
+      'goalContributions',
+    ).doc(contribution.id).set(contribution.toJson(), SetOptions(merge: true));
+  }
+
+  @override
+  Future<void> saveGoalFundingEvent({
+    required String userId,
+    required GoalFundingEventRecord fundingEvent,
+  }) {
+    return _collection(
+      userId,
+      'goalFundingEvents',
+    ).doc(fundingEvent.id).set(fundingEvent.toJson(), SetOptions(merge: true));
   }
 
   @override

@@ -15,6 +15,7 @@ class AmountEntryField extends StatefulWidget {
     this.allowNegative = false,
     this.forceNegative = false,
     this.selectAllOnFocus = false,
+    this.replaceZeroOnFirstInput = false,
     this.keyboardType,
     this.textStyle,
     this.textAlign = TextAlign.right,
@@ -30,6 +31,7 @@ class AmountEntryField extends StatefulWidget {
   final bool allowNegative;
   final bool forceNegative;
   final bool selectAllOnFocus;
+  final bool replaceZeroOnFirstInput;
   final TextInputType? keyboardType;
   final TextStyle? textStyle;
   final TextAlign textAlign;
@@ -46,6 +48,7 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
   late final FocusNode _focusNode;
   var _isUpdating = false;
   var _hasAppliedInitialSelection = false;
+  var _replaceZeroOnNextInput = false;
 
   MoneyFormatter get _formatter => MoneyFormatter(widget.currency);
 
@@ -56,6 +59,8 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
     _controller = TextEditingController(
       text: _formatter.formatMinor(widget.initialMinor),
     );
+    _replaceZeroOnNextInput =
+        widget.replaceZeroOnFirstInput && widget.initialMinor == 0;
   }
 
   @override
@@ -64,6 +69,9 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
     if (oldWidget.initialMinor != widget.initialMinor ||
         oldWidget.currency != widget.currency) {
       _setText(_formatter.formatMinor(widget.initialMinor));
+    }
+    if (widget.initialMinor != 0) {
+      _replaceZeroOnNextInput = false;
     }
   }
 
@@ -124,7 +132,21 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
     final isNegative =
         widget.forceNegative ||
         (widget.allowNegative && rawValue.trim().startsWith('-'));
-    final digits = rawValue.replaceAll(RegExp(r'[^0-9]'), '');
+    var digits = rawValue.replaceAll(RegExp(r'[^0-9]'), '');
+    if (_replaceZeroOnNextInput) {
+      final placeholderDigits = _formatter
+          .formatMinor(0)
+          .replaceAll(RegExp(r'[^0-9]'), '');
+      final enteredDigits =
+          digits.startsWith(placeholderDigits) &&
+              digits.length > placeholderDigits.length
+          ? digits.substring(placeholderDigits.length)
+          : digits;
+      if (enteredDigits != placeholderDigits) {
+        digits = enteredDigits;
+        _replaceZeroOnNextInput = false;
+      }
+    }
     final unsignedMinor = _formatter.parseDigitsToMinor(digits);
     final minor = isNegative ? -unsignedMinor : unsignedMinor;
     widget.onChanged(minor);
@@ -133,6 +155,9 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
 
   void _handleFocusChanged() {
     if (!_focusNode.hasFocus) return;
+    if (widget.replaceZeroOnFirstInput && widget.initialMinor == 0) {
+      _replaceZeroOnNextInput = true;
+    }
     if (widget.selectAllOnFocus && !_hasAppliedInitialSelection) {
       _hasAppliedInitialSelection = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {

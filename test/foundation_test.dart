@@ -4,6 +4,8 @@ import 'package:money_tally/src/domain/account.dart';
 import 'package:money_tally/src/domain/budget.dart';
 import 'package:money_tally/src/domain/category.dart';
 import 'package:money_tally/src/domain/finance_data_set.dart';
+import 'package:money_tally/src/domain/goal.dart';
+import 'package:money_tally/src/domain/goal_funding.dart';
 import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart';
@@ -763,6 +765,66 @@ void main() {
       'cash',
     ]);
   });
+
+  test(
+    'Goal records, contributions, and undo tombstones use per-record sync',
+    () async {
+      final goal = GoalRecord(
+        id: 'remote-goal',
+        name: 'Emergency Fund',
+        targetAmountMinor: 100000,
+        status: GoalStatus.active,
+        fundingMethod: GoalFundingMethod.trackingOnly,
+        sync: SyncMetadata.fresh(now: DateTime.utc(2026, 7, 20)),
+      );
+      final contribution = GoalContributionRecord(
+        id: 'remote-contribution',
+        goalId: goal.id,
+        amountMinor: 25000,
+        date: DateTime(2026, 7, 21),
+        fundingMethod: GoalFundingMethod.trackingOnly,
+        sync: SyncMetadata.fresh(now: DateTime.utc(2026, 7, 21)),
+      );
+      final remote = FakeRecordRepository(dataSet: _emptyDataSet());
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          goals: [goal],
+          goalContributions: [contribution],
+        ),
+        deviceId: 'phone',
+      );
+
+      await store.attachRemoteSync(remoteRepository: remote, userId: 'user-1');
+
+      expect(remote.savedGoals.single.id, goal.id);
+      expect(remote.savedGoalContributions.single.id, contribution.id);
+
+      await store.undoGoalContribution(contribution.id);
+      final tombstone = remote.savedGoalContributions.last;
+      expect(tombstone.id, contribution.id);
+      expect(tombstone.isDeleted, isTrue);
+
+      remote.remoteDataSet = _emptyDataSet().copyWith(
+        goals: [goal],
+        goalContributions: [tombstone],
+      );
+      final signedBackIn = FinanceDataStore(
+        dataSet: _emptyDataSet(),
+        deviceId: 'tablet',
+      );
+      await signedBackIn.attachRemoteSync(
+        remoteRepository: remote,
+        userId: 'user-1',
+      );
+
+      expect(signedBackIn.goalById(goal.id).name, 'Emergency Fund');
+      expect(
+        signedBackIn.goalContributionById(contribution.id).isDeleted,
+        isTrue,
+      );
+      expect(signedBackIn.currentGoalAmountMinor(goal.id), 0);
+    },
+  );
 
   test(
     'local-first category survives sync attach and notifies listeners',
@@ -2148,6 +2210,9 @@ class FakeRecordRepository implements FinanceRecordRepository {
   final savedTransactions = <TransactionRecord>[];
   final savedScheduled = <ScheduledTransactionRecord>[];
   final savedBudgets = <BudgetRecord>[];
+  final savedGoals = <GoalRecord>[];
+  final savedGoalContributions = <GoalContributionRecord>[];
+  final savedGoalFundingEvents = <GoalFundingEventRecord>[];
   UserPreferences? savedPreferences;
 
   @override
@@ -2175,6 +2240,30 @@ class FakeRecordRepository implements FinanceRecordRepository {
     required CategoryRecord category,
   }) async {
     savedCategories.add(category);
+  }
+
+  @override
+  Future<void> saveGoal({
+    required String userId,
+    required GoalRecord goal,
+  }) async {
+    savedGoals.add(goal);
+  }
+
+  @override
+  Future<void> saveGoalContribution({
+    required String userId,
+    required GoalContributionRecord contribution,
+  }) async {
+    savedGoalContributions.add(contribution);
+  }
+
+  @override
+  Future<void> saveGoalFundingEvent({
+    required String userId,
+    required GoalFundingEventRecord fundingEvent,
+  }) async {
+    savedGoalFundingEvents.add(fundingEvent);
   }
 
   @override

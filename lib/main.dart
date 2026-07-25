@@ -27,12 +27,15 @@ import 'src/domain/budget.dart';
 import 'src/domain/account.dart' as v2_account;
 import 'src/domain/category.dart' as v2_category;
 import 'src/domain/finance_data_set.dart';
+import 'src/domain/goal.dart';
+import 'src/domain/goal_funding.dart';
 import 'src/domain/money.dart';
 import 'src/domain/scheduled_transaction.dart' as v2_scheduled;
 import 'src/domain/sync_metadata.dart' as v2_sync;
 import 'src/domain/transaction.dart';
 import 'src/domain/user_preferences.dart';
 import 'src/export/export_file_service.dart';
+import 'src/goals/goal_calculator.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
 import 'src/notifications/local_notification_scheduler.dart';
 import 'src/notifications/notification_scheduler.dart';
@@ -48,6 +51,7 @@ part 'src/app_theme.dart';
 part 'src/auth_service.dart';
 part 'src/domain.dart';
 part 'src/finance_home.dart';
+part 'src/goals/goals_ui.dart';
 part 'src/finance_store.dart';
 part 'src/firestore_finance_repository.dart';
 part 'src/local_finance_repository.dart';
@@ -258,6 +262,9 @@ FinanceDataSet mergeDataSetsPreferCurrent({
       incoming: incoming.budgets,
       current: current.budgets,
     ),
+    goals: current.goals,
+    goalContributions: current.goalContributions,
+    goalFundingEvents: current.goalFundingEvents,
     preferences: current.preferences,
   );
 }
