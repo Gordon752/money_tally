@@ -13,16 +13,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'firebase_options.dart';
+import 'src/design/app_icons.dart';
+import 'src/design/category_icon_catalog.dart';
 import 'src/design/design_tokens.dart';
 import 'src/design/money_format.dart';
 import 'src/design/widgets/amount_entry_field.dart';
 import 'src/design/widgets/budget_progress_bar.dart';
+import 'src/design/widgets/category_icon_picker.dart';
 import 'src/design/widgets/account_card.dart';
 import 'src/design/widgets/floating_action_button.dart';
 import 'src/design/widgets/floating_action_menu.dart';
 import 'src/design/widgets/money_text.dart';
 import 'src/design/widgets/scheduled_transaction_row.dart';
 import 'src/design/widgets/transaction_row.dart';
+import 'src/budgets/budget_calculator.dart';
 import 'src/domain/budget.dart';
 import 'src/domain/account.dart' as v2_account;
 import 'src/domain/category.dart' as v2_category;
@@ -414,15 +418,15 @@ class StartupLoadingView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.account_balance_wallet_outlined,
+              AppIcon.wallet,
               color: AppTheme.accent,
-              size: 48,
+              size: AppIconSize.brand,
             ),
             SizedBox(height: 16),
             CircularProgressIndicator(),
@@ -451,15 +455,15 @@ class StartupErrorView extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(
-                    Icons.error_outline,
+                  Icon(
+                    AppIcon.error,
                     color: AppTheme.rose,
-                    size: 48,
+                    size: AppIconSize.brand,
                   ),
                   const SizedBox(height: 16),
                   const Text(

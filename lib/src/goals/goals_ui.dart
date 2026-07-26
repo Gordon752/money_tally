@@ -81,15 +81,12 @@ class GoalsPreviewCard extends StatelessWidget {
     final preview = goals.take(2).toList(growable: false);
     return AppCard(
       title: 'Goals',
-      padding: const EdgeInsets.all(AppSpacing.sm),
+      padding: EdgeInsets.all(AppSpacing.sm),
       child: preview.isEmpty
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const CompactEmptyRow(
-                  icon: Icons.flag_outlined,
-                  label: 'No goals yet',
-                ),
+                CompactEmptyRow(icon: AppIcon.goal, label: 'No goals yet'),
                 Padding(
                   padding: const EdgeInsets.only(left: 32, top: AppSpacing.xxs),
                   child: Text(
@@ -102,9 +99,9 @@ class GoalsPreviewCard extends StatelessWidget {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
-                    key: const ValueKey('dashboard-create-goal'),
+                    key: ValueKey('dashboard-create-goal'),
                     onPressed: onCreate ?? () => showCreateGoalSheet(context),
-                    icon: const Icon(Icons.add, size: 17),
+                    icon: Icon(AppIcon.add, size: AppIconSize.inline),
                     label: const Text('Create Goal'),
                   ),
                 ),
@@ -125,10 +122,10 @@ class GoalsPreviewCard extends StatelessWidget {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
-                    key: const ValueKey('dashboard-view-all-goals'),
+                    key: ValueKey('dashboard-view-all-goals'),
                     onPressed: onViewAll ?? () => openGoalsPage(context),
                     iconAlignment: IconAlignment.end,
-                    icon: const Icon(Icons.arrow_forward, size: 17),
+                    icon: Icon(AppIcon.arrowForward, size: AppIconSize.inline),
                     label: const Text('View All Goals'),
                   ),
                 ),
@@ -266,9 +263,9 @@ class GoalsPlanContent extends StatelessWidget {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  key: const ValueKey('plan-create-goal'),
+                  key: ValueKey('plan-create-goal'),
                   onPressed: () => showCreateGoalSheet(context),
-                  icon: const Icon(Icons.flag_outlined),
+                  icon: Icon(AppIcon.goal),
                   label: const Text('Create Goal'),
                 ),
               ),
@@ -285,22 +282,19 @@ class GoalsPlanContent extends StatelessWidget {
                       )
                       ? () => showFundGoalsSheet(context)
                       : null,
-                  icon: const Icon(Icons.savings_outlined),
+                  icon: Icon(AppIcon.savings),
                   label: const Text('Fund Goals'),
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: AppSpacing.sm),
+        SizedBox(height: AppSpacing.sm),
         if (!hasGoals)
           AppCard(
             child: Column(
               children: [
-                const TransactionFormIcon(
-                  Icons.flag_outlined,
-                  color: _goalBlue,
-                ),
+                TransactionFormIcon(AppIcon.goal, color: _goalBlue),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
                   'No goals yet',
@@ -372,26 +366,23 @@ class _GoalsPageState extends State<GoalsPage> {
         scrolledUnderElevation: 0,
         actions: [
           IconButton(
-            key: const ValueKey('goals-add'),
+            key: ValueKey('goals-add'),
             tooltip: 'Add Goal',
             onPressed: () => showCreateGoalSheet(context),
-            icon: const Icon(Icons.add),
+            icon: Icon(AppIcon.add),
           ),
         ],
       ),
       body: SafeArea(
         top: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 40),
           children: [
             if (!hasGoals)
               AppCard(
                 child: Column(
                   children: [
-                    const TransactionFormIcon(
-                      Icons.flag_outlined,
-                      color: _goalBlue,
-                    ),
+                    TransactionFormIcon(AppIcon.goal, color: _goalBlue),
                     const SizedBox(height: AppSpacing.sm),
                     Text(
                       'No goals yet',
@@ -407,11 +398,11 @@ class _GoalsPageState extends State<GoalsPage> {
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.md),
+                    SizedBox(height: AppSpacing.md),
                     FilledButton.icon(
-                      key: const ValueKey('goals-empty-create'),
+                      key: ValueKey('goals-empty-create'),
                       onPressed: () => showCreateGoalSheet(context),
-                      icon: const Icon(Icons.add),
+                      icon: Icon(AppIcon.add),
                       label: const Text('Create Goal'),
                     ),
                   ],
@@ -484,12 +475,12 @@ class GoalCollapsibleSection extends StatelessWidget {
             onTap: onToggle,
             title: Text(
               '$title ($count)',
-              style: const TextStyle(fontWeight: FontWeight.w900),
+              style: TextStyle(fontWeight: FontWeight.w900),
             ),
             trailing: AnimatedRotation(
               turns: expanded ? 0.5 : 0,
-              duration: const Duration(milliseconds: 160),
-              child: const Icon(Icons.keyboard_arrow_down),
+              duration: Duration(milliseconds: 160),
+              child: Icon(AppIcon.chevronDown),
             ),
           ),
           if (expanded)
@@ -547,7 +538,7 @@ class GoalCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const Icon(Icons.chevron_right),
+                  Icon(AppIcon.chevronRight),
                 ],
               ),
               const SizedBox(height: AppSpacing.xs),
@@ -812,13 +803,10 @@ Future<void> showGoalEditor(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const TransactionFormLabel('Goal name'),
+                TransactionFormLabel('Goal name'),
                 Row(
                   children: [
-                    const TransactionFormIcon(
-                      Icons.flag_outlined,
-                      color: _goalBlue,
-                    ),
+                    TransactionFormIcon(AppIcon.goal, color: _goalBlue),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: TextField(
@@ -833,13 +821,13 @@ Future<void> showGoalEditor(
                     ),
                   ],
                 ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Goal type'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Goal type'),
                 PolishedFormValueRow(
-                  key: const ValueKey('goal-type'),
+                  key: ValueKey('goal-type'),
                   icon: goalType == GoalType.reachTarget
-                      ? Icons.flag_outlined
-                      : Icons.shield_outlined,
+                      ? AppIcon.goal
+                      : AppIcon.shield,
                   value: goalTypeLabel(goalType),
                   secondary: goalType == GoalType.reachTarget
                       ? 'Save toward a target amount'
@@ -856,8 +844,8 @@ Future<void> showGoalEditor(
                             label: goalTypeLabel(option),
                             leading: Icon(
                               option == GoalType.reachTarget
-                                  ? Icons.flag_outlined
-                                  : Icons.shield_outlined,
+                                  ? AppIcon.goal
+                                  : AppIcon.shield,
                             ),
                           ),
                       ],
@@ -887,11 +875,11 @@ Future<void> showGoalEditor(
                     setDialogState(() => goalType = selected);
                   },
                 ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Target amount'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Target amount'),
                 Row(
                   children: [
-                    const TransactionFormIcon(Icons.track_changes_outlined),
+                    TransactionFormIcon(AppIcon.target),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: AmountEntryField(
@@ -905,11 +893,11 @@ Future<void> showGoalEditor(
                     ),
                   ],
                 ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Starting amount'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Starting amount'),
                 Row(
                   children: [
-                    const TransactionFormIcon(Icons.savings_outlined),
+                    TransactionFormIcon(AppIcon.savings),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: AmountEntryField(
@@ -930,8 +918,8 @@ Future<void> showGoalEditor(
                       : 'Target date',
                 ),
                 PolishedFormValueRow(
-                  key: const ValueKey('goal-target-date'),
-                  icon: Icons.calendar_today_outlined,
+                  key: ValueKey('goal-target-date'),
+                  icon: AppIcon.calendar,
                   value: targetDate == null
                       ? goalType == GoalType.maintainBalance
                             ? 'No restore-by date'
@@ -959,11 +947,11 @@ Future<void> showGoalEditor(
                       child: const Text('Remove date'),
                     ),
                   ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Funding method'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Funding method'),
                 PolishedFormValueRow(
-                  key: const ValueKey('goal-funding-method'),
-                  icon: Icons.account_balance_wallet_outlined,
+                  key: ValueKey('goal-funding-method'),
+                  icon: AppIcon.wallet,
                   value: goalFundingMethodLabel(method),
                   onTap: () async {
                     final selected =
@@ -978,8 +966,8 @@ Future<void> showGoalEditor(
                                 label: goalFundingMethodLabel(option),
                                 leading: Icon(
                                   option == GoalFundingMethod.accountFunded
-                                      ? Icons.account_balance_outlined
-                                      : Icons.insights_outlined,
+                                      ? AppIcon.bank
+                                      : AppIcon.insights,
                                 ),
                               ),
                           ],
@@ -1012,11 +1000,11 @@ Future<void> showGoalEditor(
                   },
                 ),
                 if (method == GoalFundingMethod.accountFunded) ...[
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Funding account'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Funding account'),
                   PolishedFormValueRow(
-                    key: const ValueKey('goal-funding-account'),
-                    icon: Icons.account_balance_outlined,
+                    key: ValueKey('goal-funding-account'),
+                    icon: AppIcon.bank,
                     value: account?.name ?? 'Choose account',
                     secondary: account == null
                         ? null
@@ -1048,12 +1036,12 @@ Future<void> showGoalEditor(
                         ),
                   ),
                 ],
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Description'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Description'),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const TransactionFormIcon(Icons.notes_outlined),
+                    TransactionFormIcon(AppIcon.notes),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: TextField(
@@ -1167,7 +1155,7 @@ class PolishedFormValueRow extends StatelessWidget {
                 ],
               ),
             ),
-            if (onTap != null) const Icon(Icons.keyboard_arrow_down),
+            if (onTap != null) Icon(AppIcon.chevronDown),
           ],
         ),
       ),
@@ -1317,10 +1305,10 @@ Future<void> showFundGoalsSheet(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const TransactionFormLabel('From Account'),
+                TransactionFormLabel('From Account'),
                 PolishedFormValueRow(
-                  key: const ValueKey('fund-goals-account'),
-                  icon: Icons.account_balance_outlined,
+                  key: ValueKey('fund-goals-account'),
+                  icon: AppIcon.bank,
                   value: account?.name ?? 'Choose account',
                   secondary: account == null
                       ? null
@@ -1336,14 +1324,11 @@ Future<void> showFundGoalsSheet(
                     }
                   },
                 ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Total Amount'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Total Amount'),
                 Row(
                   children: [
-                    const TransactionFormIcon(
-                      Icons.savings_outlined,
-                      color: _goalBlue,
-                    ),
+                    TransactionFormIcon(AppIcon.savings, color: _goalBlue),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: AmountEntryField(
@@ -1399,9 +1384,7 @@ Future<void> showFundGoalsSheet(
                                           PolishedChoice(
                                             value: goal.id,
                                             label: goal.name,
-                                            leading: const Icon(
-                                              Icons.flag_outlined,
-                                            ),
+                                            leading: Icon(AppIcon.goal),
                                           ),
                                     ],
                                   );
@@ -1459,7 +1442,7 @@ Future<void> showFundGoalsSheet(
                               allocations.removeAt(index);
                               rebalanceFirst();
                             }),
-                            icon: const Icon(Icons.remove_circle_outline),
+                            icon: Icon(AppIcon.expense),
                           ),
                       ],
                     ),
@@ -1478,7 +1461,7 @@ Future<void> showFundGoalsSheet(
                             );
                             rebalanceFirst();
                           }),
-                    icon: const Icon(Icons.add),
+                    icon: Icon(AppIcon.add),
                     label: const Text('Add Goal'),
                   ),
                 ),
@@ -1487,11 +1470,11 @@ Future<void> showFundGoalsSheet(
                   allocatedAmountMinor: allocatedTotal,
                   currency: store.preferences.currency,
                 ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Date'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Date'),
                 PolishedFormValueRow(
-                  key: const ValueKey('fund-goals-date'),
-                  icon: Icons.calendar_today_outlined,
+                  key: ValueKey('fund-goals-date'),
+                  icon: AppIcon.calendar,
                   value: fullMonthDateLabel(date),
                   onTap: () async {
                     final selected = await pickDateForField(
@@ -1503,11 +1486,11 @@ Future<void> showFundGoalsSheet(
                     }
                   },
                 ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Note'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Note'),
                 Row(
                   children: [
-                    const TransactionFormIcon(Icons.notes_outlined),
+                    TransactionFormIcon(AppIcon.notes),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: TextField(
@@ -1666,14 +1649,11 @@ Future<void> showAddGoalContributionSheet(
                   metrics: metrics,
                   currency: store.preferences.currency,
                 ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Progress amount'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Progress amount'),
                 Row(
                   children: [
-                    const TransactionFormIcon(
-                      Icons.add_circle_outline,
-                      color: _goalBlue,
-                    ),
+                    TransactionFormIcon(AppIcon.income, color: _goalBlue),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: AmountEntryField(
@@ -1689,11 +1669,11 @@ Future<void> showAddGoalContributionSheet(
                     ),
                   ],
                 ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Contribution date'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Contribution date'),
                 PolishedFormValueRow(
-                  key: const ValueKey('goal-contribution-date'),
-                  icon: Icons.calendar_today_outlined,
+                  key: ValueKey('goal-contribution-date'),
+                  icon: AppIcon.calendar,
                   value: fullMonthDateLabel(date),
                   onTap: () async {
                     final selected = await pickDateForField(
@@ -1703,11 +1683,11 @@ Future<void> showAddGoalContributionSheet(
                     if (selected != null) setDialogState(() => date = selected);
                   },
                 ),
-                const TransactionFormDivider(),
-                const TransactionFormLabel('Note'),
+                TransactionFormDivider(),
+                TransactionFormLabel('Note'),
                 Row(
                   children: [
-                    const TransactionFormIcon(Icons.notes_outlined),
+                    TransactionFormIcon(AppIcon.notes),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: TextField(
@@ -1875,24 +1855,24 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               color: goalStatusColor(metrics.status),
               semanticsLabel: metrics.status.label,
             ),
-            const SizedBox(height: AppSpacing.md),
+            SizedBox(height: AppSpacing.md),
             GoalDetailValue(
               label: 'Goal type',
               value: goalTypeLabel(goal.goalType),
               icon: goal.goalType == GoalType.maintainBalance
-                  ? Icons.shield_outlined
-                  : Icons.flag_outlined,
+                  ? AppIcon.shield
+                  : AppIcon.goal,
             ),
             GoalDetailValue(
               label: 'Status',
               value: metrics.status.label,
-              icon: Icons.insights_outlined,
+              icon: AppIcon.insights,
             ),
             if (goal.targetDate != null)
               GoalDetailValue(
                 label: goalDateLabel(goal),
                 value: fullMonthDateLabel(goal.targetDate!),
-                icon: Icons.calendar_today_outlined,
+                icon: AppIcon.calendar,
               ),
             if (goal.targetDate != null && goal.isActive)
               GoalDetailValue(
@@ -1901,7 +1881,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                     '${money(metrics.requiredWeeklyMinor, store.preferences.currency)}/week ${goal.goalType == GoalType.maintainBalance ? 'to restore' : 'needed'}\nAbout ${money(metrics.requiredMonthlyMinor, store.preferences.currency)}/month ${goal.goalType == GoalType.maintainBalance ? 'to restore' : 'needed'}',
                 helperText:
                     'Based on the remaining amount and ${goal.goalType == GoalType.maintainBalance ? 'restore-by' : 'target'} date',
-                icon: Icons.trending_up_outlined,
+                icon: AppIcon.trend,
               ),
             GoalDetailValue(
               label: goal.goalType == GoalType.maintainBalance
@@ -1914,20 +1894,20 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                   : metrics.aheadBehindMinor >= 0
                   ? '${money(metrics.aheadBehindMinor, store.preferences.currency)} ahead'
                   : '${money(metrics.aheadBehindMinor.abs(), store.preferences.currency)} behind',
-              icon: Icons.compare_arrows_outlined,
+              icon: AppIcon.adjustment,
             ),
             GoalDetailValue(
               label: 'Funding',
               value: account == null
                   ? goalFundingMethodLabel(goal.fundingMethod)
                   : '${goalFundingMethodLabel(goal.fundingMethod)} · ${account.name}',
-              icon: Icons.account_balance_wallet_outlined,
+              icon: AppIcon.wallet,
             ),
             if (goal.description.trim().isNotEmpty)
               GoalDetailValue(
                 label: 'Description',
                 value: goal.description,
-                icon: Icons.notes_outlined,
+                icon: AppIcon.notes,
               ),
             const TransactionFormDivider(),
             Text(
@@ -1975,7 +1955,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                             await store.markGoalComplete(goal.id);
                           }
                         },
-                        icon: const Icon(Icons.check_circle_outline),
+                        icon: Icon(AppIcon.success),
                         label: const Text('Mark Complete'),
                       ),
                     ),
@@ -1995,7 +1975,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                         );
                         if (confirmed) await store.archiveGoal(goal.id);
                       },
-                      icon: const Icon(Icons.archive_outlined),
+                      icon: Icon(AppIcon.archive),
                       label: const Text('Archive'),
                     ),
                   ),
@@ -2024,7 +2004,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                     ).showSnackBar(SnackBar(content: Text(error.toString())));
                   }
                 },
-                icon: const Icon(Icons.unarchive_outlined),
+                icon: Icon(AppIcon.unarchive),
                 label: const Text('Restore Goal'),
               ),
             ],
@@ -2107,10 +2087,7 @@ class GoalContributionRow extends StatelessWidget {
     return ListTile(
       key: ValueKey('goal-contribution-${contribution.id}'),
       contentPadding: EdgeInsets.zero,
-      leading: const TransactionFormIcon(
-        Icons.add_circle_outline,
-        color: _goalBlue,
-      ),
+      leading: TransactionFormIcon(AppIcon.income, color: _goalBlue),
       title: Text(
         money(contribution.amountMinor, store.preferences.currency),
         style: const TextStyle(color: _goalBlue, fontWeight: FontWeight.w900),
@@ -2124,7 +2101,7 @@ class GoalContributionRow extends StatelessWidget {
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: Icon(AppIcon.chevronRight),
       onTap: onTap,
     );
   }
@@ -2151,14 +2128,11 @@ class GoalFundingHistoryRow extends StatelessWidget {
     final account = store.accounts
         .where((item) => item.id == event.sourceAccountId)
         .firstOrNull;
-    if (allocation == null) return const SizedBox.shrink();
+    if (allocation == null) return SizedBox.shrink();
     return ListTile(
       key: ValueKey('goal-funding-history-${event.id}-$goalId'),
       contentPadding: EdgeInsets.zero,
-      leading: const TransactionFormIcon(
-        Icons.savings_outlined,
-        color: _goalBlue,
-      ),
+      leading: TransactionFormIcon(AppIcon.savings, color: _goalBlue),
       title: Text(
         money(allocation.amountMinor, store.preferences.currency),
         style: const TextStyle(color: _goalBlue, fontWeight: FontWeight.w900),
@@ -2173,7 +2147,7 @@ class GoalFundingHistoryRow extends StatelessWidget {
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: Icon(AppIcon.chevronRight),
       onTap: onTap,
     );
   }
@@ -2249,17 +2223,17 @@ Future<void> showGoalFundingDetails(
           GoalDetailValue(
             label: 'From Account',
             value: account?.name ?? 'Account unavailable',
-            icon: Icons.account_balance_outlined,
+            icon: AppIcon.bank,
           ),
           GoalDetailValue(
             label: 'Total',
             value: money(event.totalAmountMinor, store.preferences.currency),
-            icon: Icons.savings_outlined,
+            icon: AppIcon.savings,
           ),
           GoalDetailValue(
             label: 'Date',
             value: fullMonthDateLabel(event.date),
-            icon: Icons.calendar_today_outlined,
+            icon: AppIcon.calendar,
           ),
           const TransactionFormDivider(),
           Text(
@@ -2273,7 +2247,7 @@ Future<void> showGoalFundingDetails(
           ]..sort((left, right) => left.order.compareTo(right.order)))
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.flag_outlined, color: _goalBlue),
+              leading: Icon(AppIcon.goal, color: _goalBlue),
               title: Text(
                 store.goals
                         .where((goal) => goal.id == allocation.goalId)
@@ -2293,7 +2267,7 @@ Future<void> showGoalFundingDetails(
             GoalDetailValue(
               label: 'Note',
               value: event.note,
-              icon: Icons.notes_outlined,
+              icon: AppIcon.notes,
             ),
           if (account == null)
             Text(
@@ -2374,7 +2348,7 @@ Future<void> showLegacyGoalMigrationSheet(
                         });
                       }
                     },
-              icon: const Icon(Icons.account_balance_outlined),
+              icon: Icon(AppIcon.bank),
               label: const Text('Move Saved Amount From Account'),
             ),
             const SizedBox(height: AppSpacing.xs),
@@ -2407,7 +2381,7 @@ Future<void> showLegacyGoalMigrationSheet(
                         });
                       }
                     },
-              icon: const Icon(Icons.insights_outlined),
+              icon: Icon(AppIcon.insights),
               label: const Text('Keep as Tracked Progress'),
             ),
             const SizedBox(height: AppSpacing.xs),
@@ -2521,7 +2495,7 @@ Future<void> showGoalContributionDetails(
             GoalDetailValue(
               label: 'Goal',
               value: goal.name,
-              icon: Icons.flag_outlined,
+              icon: AppIcon.goal,
             ),
             GoalDetailValue(
               label: 'Amount',
@@ -2529,25 +2503,25 @@ Future<void> showGoalContributionDetails(
                 contribution.amountMinor,
                 store.preferences.currency,
               ),
-              icon: Icons.add_circle_outline,
+              icon: AppIcon.income,
             ),
             GoalDetailValue(
               label: 'Date',
               value: fullMonthDateLabel(contribution.date),
-              icon: Icons.calendar_today_outlined,
+              icon: AppIcon.calendar,
             ),
             GoalDetailValue(
               label: 'Type',
               value: account == null
                   ? 'Tracked progress'
                   : 'Legacy progress · ${account.name}',
-              icon: Icons.insights_outlined,
+              icon: AppIcon.insights,
             ),
             if (contribution.note.trim().isNotEmpty)
               GoalDetailValue(
                 label: 'Note',
                 value: contribution.note,
-                icon: Icons.notes_outlined,
+                icon: AppIcon.notes,
               ),
           ],
         ),
@@ -2689,7 +2663,7 @@ class GoalCalendarActivityRow extends StatelessWidget {
         activity.contribution!.amountMinor;
     return ListTile(
       key: ValueKey('goal-calendar-$id'),
-      leading: const TransactionFormIcon(Icons.flag_outlined, color: _goalBlue),
+      leading: TransactionFormIcon(AppIcon.goal, color: _goalBlue),
       title: Text(
         isFunding ? 'Funded Goals' : activity.goal!.name,
         maxLines: 1,

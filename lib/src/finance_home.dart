@@ -1,18 +1,28 @@
 part of '../main.dart';
 
 enum FinanceSection {
-  dashboard(Icons.dashboard_outlined, 'Dashboard'),
-  accounts(Icons.account_balance_wallet_outlined, 'Accounts'),
-  ledger(Icons.receipt_long_outlined, 'Ledger'),
-  plan(Icons.event_note_outlined, 'Plan'),
-  scheduled(Icons.event_repeat_outlined, 'Scheduled'),
-  reports(Icons.insights_outlined, 'Reports'),
-  categories(Icons.sell_outlined, 'Categories'),
-  settings(Icons.settings_outlined, 'Settings');
+  dashboard('Dashboard'),
+  accounts('Accounts'),
+  ledger('Ledger'),
+  plan('Plan'),
+  scheduled('Scheduled'),
+  reports('Reports'),
+  categories('Categories'),
+  settings('Settings');
 
-  const FinanceSection(this.icon, this.label);
-  final IconData icon;
+  const FinanceSection(this.label);
   final String label;
+
+  IconData get icon => switch (this) {
+    FinanceSection.dashboard => AppIcon.dashboard,
+    FinanceSection.accounts => AppIcon.accounts,
+    FinanceSection.ledger => AppIcon.ledger,
+    FinanceSection.plan => AppIcon.plan,
+    FinanceSection.scheduled => AppIcon.scheduled,
+    FinanceSection.reports => AppIcon.reports,
+    FinanceSection.categories => AppIcon.category,
+    FinanceSection.settings => AppIcon.settings,
+  };
 
   bool get supportsFloatingAdd => this != FinanceSection.reports;
 }
@@ -178,7 +188,7 @@ class _FinanceHomeState extends State<FinanceHome> {
                               ? _selectedFutureScheduledDate
                               : null,
                         ),
-                        child: const Icon(Icons.add),
+                        child: Icon(AppIcon.add),
                       ),
                     ),
                   ),
@@ -242,9 +252,9 @@ class _FinanceHomeState extends State<FinanceHome> {
               }
             });
           },
-          leading: const Padding(
+          leading: Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
-            child: Icon(Icons.account_balance, color: AppTheme.accent),
+            child: Icon(AppIcon.bankSolid, color: AppTheme.accent),
           ),
           destinations: [
             for (final section in FinanceSection.values)
@@ -305,9 +315,9 @@ class _FinanceHomeState extends State<FinanceHome> {
                   borderRadius: BorderRadius.circular(AppRadii.card),
                   child: ListTile(
                     dense: true,
-                    leading: const Icon(Icons.cloud_off_outlined),
-                    title: const Text('Cloud sync needs attention'),
-                    trailing: const Icon(Icons.chevron_right),
+                    leading: Icon(AppIcon.cloudOff),
+                    title: Text('Cloud sync needs attention'),
+                    trailing: Icon(AppIcon.chevronRight),
                     onTap: () =>
                         setState(() => selected = FinanceSection.settings),
                   ),
@@ -517,7 +527,7 @@ class PageHeader extends StatelessWidget {
                 tooltip: 'Settings',
                 visualDensity: VisualDensity.compact,
                 onPressed: onOpenSettings,
-                icon: const Icon(Icons.settings_outlined, size: 21),
+                icon: Icon(AppIcon.settings, size: AppIconSize.row),
               ),
             ],
           ),
@@ -554,11 +564,15 @@ class SyncPill extends StatelessWidget {
     return SizedBox(
       height: 36,
       child: Padding(
-        padding: const EdgeInsets.only(left: 12, right: 8),
+        padding: EdgeInsets.only(left: 12, right: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_queue, color: AppTheme.accent, size: 15),
+            Icon(
+              AppIcon.cloud,
+              color: AppTheme.accent,
+              size: AppIconSize.compact,
+            ),
             const SizedBox(width: 6),
             SizedBox(
               width: 62,
@@ -594,13 +608,10 @@ class SyncPill extends StatelessWidget {
                     minimumSize: const Size(24, 24),
                     fixedSize: const Size(24, 24),
                   ),
-                  constraints: const BoxConstraints.tightFor(
-                    width: 24,
-                    height: 24,
-                  ),
+                  constraints: BoxConstraints.tightFor(width: 24, height: 24),
                   padding: EdgeInsets.zero,
                   onPressed: onSignOut,
-                  icon: const Icon(Icons.logout, size: 15),
+                  icon: Icon(AppIcon.signOutSolid, size: AppIconSize.compact),
                 ),
               ),
             ],
@@ -784,7 +795,11 @@ class TransactionFormIcon extends StatelessWidget {
         color: resolvedColor.withValues(alpha: 0.08),
         shape: BoxShape.circle,
       ),
-      child: Icon(icon, color: resolvedColor.withValues(alpha: 0.9), size: 21),
+      child: Icon(
+        icon,
+        color: resolvedColor.withValues(alpha: 0.9),
+        size: AppIconSize.row,
+      ),
     );
   }
 }
@@ -802,6 +817,50 @@ class TransactionFormDivider extends StatelessWidget {
           context,
         ).colorScheme.outlineVariant.withValues(alpha: 0.52),
       ),
+    );
+  }
+}
+
+class TransactionFormValueRow extends StatelessWidget {
+  const TransactionFormValueRow({
+    required this.icon,
+    required this.value,
+    this.secondary,
+    this.trailing,
+    super.key,
+  });
+
+  final IconData icon;
+  final String value;
+  final String? secondary;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        TransactionFormIcon(icon),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(value, style: Theme.of(context).textTheme.titleMedium),
+              if (secondary != null)
+                Text(
+                  secondary!,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        ...switch (trailing) {
+          null => const <Widget>[],
+          final value => <Widget>[value],
+        },
+      ],
     );
   }
 }
@@ -909,7 +968,7 @@ class _ManagementSwipeRowState extends State<ManagementSwipeRow> {
                               children: [
                                 Icon(
                                   action.icon,
-                                  size: 16,
+                                  size: AppIconSize.compact,
                                   color: action.color,
                                 ),
                                 Text(
@@ -1116,14 +1175,11 @@ class NetWorthHeroCard extends StatelessWidget {
     return Card(
       color: AppTheme.accent,
       child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
+        padding: EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(
-              Icons.account_balance_wallet_outlined,
-              color: Colors.white,
-            ),
+            Icon(AppIcon.wallet, color: Colors.white),
             const SizedBox(height: AppSpacing.sm),
             Text(
               'NET WORTH',
@@ -1232,12 +1288,12 @@ class CashSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppCard(
       title: 'Cash Summary',
-      padding: const EdgeInsets.all(AppSpacing.sm),
+      padding: EdgeInsets.all(AppSpacing.sm),
       child: CompactMetricRow(
         label: 'Available Cash',
         amountMinor: availableCashMinor,
         currency: currency,
-        icon: Icons.payments_outlined,
+        icon: AppIcon.cash,
       ),
     );
   }
@@ -1259,27 +1315,27 @@ class ThisMonthSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppCard(
       title: 'This Month',
-      padding: const EdgeInsets.all(AppSpacing.sm),
+      padding: EdgeInsets.all(AppSpacing.sm),
       child: Column(
         children: [
           CompactMetricRow(
             label: 'Income',
             amountMinor: incomeMinor,
             currency: currency,
-            icon: Icons.add_circle_outline,
+            icon: AppIcon.income,
             showPositiveSign: true,
           ),
           CompactMetricRow(
             label: 'Expenses',
             amountMinor: -expensesMinor.abs(),
             currency: currency,
-            icon: Icons.remove_circle_outline,
+            icon: AppIcon.expense,
           ),
           CompactMetricRow(
             label: 'Remaining',
             amountMinor: incomeMinor - expensesMinor,
             currency: currency,
-            icon: Icons.savings_outlined,
+            icon: AppIcon.savings,
             showPositiveSign: incomeMinor - expensesMinor > 0,
           ),
         ],
@@ -1305,10 +1361,10 @@ class NextScheduledCard extends StatelessWidget {
     final nextItems = scheduled.take(3).toList(growable: false);
     return AppCard(
       title: 'Next Scheduled',
-      padding: const EdgeInsets.all(AppSpacing.sm),
+      padding: EdgeInsets.all(AppSpacing.sm),
       child: nextItems.isEmpty
-          ? const CompactEmptyRow(
-              icon: Icons.event_repeat_outlined,
+          ? CompactEmptyRow(
+              icon: AppIcon.recurrence,
               label: 'No scheduled transactions',
             )
           : Column(
@@ -1330,9 +1386,9 @@ class NextScheduledCard extends StatelessWidget {
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
                     onPressed: onViewAll,
-                    label: const Text('View All Scheduled'),
+                    label: Text('View All Scheduled'),
                     iconAlignment: IconAlignment.end,
-                    icon: const Icon(Icons.arrow_forward, size: 17),
+                    icon: Icon(AppIcon.arrowForward, size: AppIconSize.inline),
                   ),
                 ),
               ],
@@ -1351,7 +1407,7 @@ class _NextScheduledRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Icon(Icons.event_repeat_outlined, color: AppTheme.accent),
+        Icon(AppIcon.recurrence, color: AppTheme.accent),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: Column(
@@ -1416,7 +1472,7 @@ class CompactMetricRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Row(
         children: [
-          Icon(icon, color: AppTheme.accent, size: 22),
+          Icon(icon, color: AppTheme.accent, size: AppIconSize.form),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
@@ -1572,12 +1628,12 @@ class AccountGroupCard extends StatelessWidget {
                         turns: isCollapsed ? -0.25 : 0,
                         duration: MediaQuery.of(context).disableAnimations
                             ? Duration.zero
-                            : const Duration(milliseconds: 160),
+                            : Duration(milliseconds: 160),
                         curve: Curves.easeOutCubic,
                         child: Icon(
-                          Icons.arrow_drop_down_rounded,
+                          AppIcon.dropdown,
                           color: theme.colorScheme.onSurfaceVariant,
-                          size: 24,
+                          size: AppIconSize.action,
                         ),
                       ),
                       const SizedBox(width: AppSpacing.xs),
@@ -1650,14 +1706,14 @@ class AccountGroupCard extends StatelessWidget {
                               DismissDirection.startToEnd: 0.22,
                               DismissDirection.endToStart: 0.22,
                             },
-                            background: const SwipeActionBackground(
+                            background: SwipeActionBackground(
                               alignment: Alignment.centerLeft,
-                              icon: Icons.swap_horiz,
+                              icon: AppIcon.transfer,
                               label: 'Expense  Income  Transfer',
                             ),
-                            secondaryBackground: const SwipeActionBackground(
+                            secondaryBackground: SwipeActionBackground(
                               alignment: Alignment.centerRight,
-                              icon: Icons.edit_outlined,
+                              icon: AppIcon.edit,
                               label: 'Edit  Archive  Delete',
                               destructive: true,
                             ),
@@ -1691,7 +1747,7 @@ class AccountGroupCard extends StatelessWidget {
                               leading: Icon(
                                 accountGroupIcon(group.name),
                                 color: AppTheme.accent,
-                                size: 22,
+                                size: AppIconSize.form,
                               ),
                               onTap: onOpenLedgerForAccount == null
                                   ? null
@@ -1855,21 +1911,21 @@ Future<void> showAccountGroupActions(
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
-            leading: const Icon(Icons.edit_outlined),
-            title: const Text('Rename'),
+            leading: Icon(AppIcon.edit),
+            title: Text('Rename'),
             onTap: () => Navigator.pop(sheetContext, 'rename'),
           ),
           ListTile(
             enabled: canMoveUp,
-            leading: const Icon(Icons.arrow_upward),
-            title: const Text('Move Up'),
+            leading: Icon(AppIcon.arrowUp),
+            title: Text('Move Up'),
             onTap: canMoveUp
                 ? () => Navigator.pop(sheetContext, 'moveUp')
                 : null,
           ),
           ListTile(
             enabled: canMoveDown,
-            leading: const Icon(Icons.arrow_downward),
+            leading: Icon(AppIcon.arrowDown),
             title: const Text('Move Down'),
             onTap: canMoveDown
                 ? () => Navigator.pop(sheetContext, 'moveDown')
@@ -2138,7 +2194,7 @@ class _LedgerViewState extends State<LedgerView> {
                   focusNode: _searchFocusNode,
                   decoration: InputDecoration(
                     hintText: 'Search',
-                    prefixIcon: const Icon(Icons.search, size: 18),
+                    prefixIcon: Icon(AppIcon.search, size: AppIconSize.inline),
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 14,
@@ -2192,7 +2248,7 @@ class _LedgerViewState extends State<LedgerView> {
                   );
                   if (mounted) _dismissSearchFocus();
                 },
-                icon: const Icon(Icons.tune_outlined, size: 22),
+                icon: Icon(AppIcon.filter, size: AppIconSize.form),
                 style: IconButton.styleFrom(
                   backgroundColor: activeFilterCount == 0
                       ? Theme.of(context).colorScheme.surfaceContainerHighest
@@ -2213,7 +2269,7 @@ class _LedgerViewState extends State<LedgerView> {
               child: IconButton(
                 tooltip: 'Clear filters',
                 onPressed: hasFilters ? clearFilters : null,
-                icon: const Icon(Icons.filter_alt_off_outlined, size: 22),
+                icon: Icon(AppIcon.clearFilter, size: AppIconSize.form),
                 style: IconButton.styleFrom(
                   backgroundColor: Theme.of(
                     context,
@@ -2317,7 +2373,7 @@ class _LedgerViewState extends State<LedgerView> {
                 children: [
                   LedgerFilterButton<String>(
                     buttonKey: ValueKey('ledger-type-$typeFilterName'),
-                    icon: Icons.tune_outlined,
+                    icon: AppIcon.filter,
                     label: selectedTypeLabel,
                     isActive: typeFilterName.isNotEmpty,
                     items: [
@@ -2335,7 +2391,7 @@ class _LedgerViewState extends State<LedgerView> {
                   ),
                   LedgerFilterButton<String>(
                     buttonKey: ValueKey('ledger-account-$accountFilterId'),
-                    icon: Icons.account_balance_wallet_outlined,
+                    icon: AppIcon.wallet,
                     label: selectedAccountLabel,
                     isActive: accountFilterId.isNotEmpty,
                     items: [
@@ -2356,7 +2412,7 @@ class _LedgerViewState extends State<LedgerView> {
                   ),
                   LedgerFilterButton<String>(
                     buttonKey: ValueKey('ledger-category-$categoryFilterId'),
-                    icon: Icons.sell_outlined,
+                    icon: AppIcon.category,
                     label: selectedCategoryLabel,
                     isActive: categoryFilterId.isNotEmpty,
                     items: [
@@ -2377,7 +2433,7 @@ class _LedgerViewState extends State<LedgerView> {
                   ),
                   LedgerFilterButton<LedgerDateFilter>(
                     buttonKey: ValueKey('ledger-date-${dateFilter.name}'),
-                    icon: Icons.calendar_today_outlined,
+                    icon: AppIcon.calendar,
                     label: selectedDateLabel,
                     isActive: dateFilter != LedgerDateFilter.all,
                     items: [
@@ -2394,8 +2450,8 @@ class _LedgerViewState extends State<LedgerView> {
                   ),
                   if (visibleMonths.isNotEmpty)
                     LedgerFilterButton<String>(
-                      buttonKey: const ValueKey('ledger-jump-month'),
-                      icon: Icons.event_outlined,
+                      buttonKey: ValueKey('ledger-jump-month'),
+                      icon: AppIcon.event,
                       label: 'Jump to month',
                       items: [
                         for (final month in visibleMonths)
@@ -2420,13 +2476,13 @@ class _LedgerViewState extends State<LedgerView> {
                     ),
                 ],
               ),
-              const SizedBox(height: AppSpacing.md),
+              SizedBox(height: AppSpacing.md),
               TextButton.icon(
                 onPressed: () {
                   clearFilters();
                   Navigator.pop(sheetContext);
                 },
-                icon: const Icon(Icons.filter_alt_off_outlined),
+                icon: Icon(AppIcon.clearFilter),
                 label: const Text('Clear filters'),
               ),
             ],
@@ -2538,12 +2594,9 @@ class LedgerMonthSection extends StatelessWidget {
                         turns: isCollapsed ? -0.25 : 0,
                         duration: reduceMotion
                             ? Duration.zero
-                            : const Duration(milliseconds: 170),
+                            : Duration(milliseconds: 170),
                         curve: Curves.easeOutCubic,
-                        child: const Icon(
-                          Icons.arrow_drop_down_rounded,
-                          size: 22,
-                        ),
+                        child: Icon(AppIcon.dropdown, size: AppIconSize.form),
                       ),
                       const SizedBox(width: AppSpacing.xs),
                       Expanded(
@@ -2770,14 +2823,14 @@ class LedgerJournalRow extends StatelessWidget {
         );
         return false;
       },
-      background: const SwipeActionBackground(
+      background: SwipeActionBackground(
         alignment: Alignment.centerLeft,
-        icon: Icons.copy_outlined,
+        icon: AppIcon.copy,
         label: 'More',
       ),
-      secondaryBackground: const SwipeActionBackground(
+      secondaryBackground: SwipeActionBackground(
         alignment: Alignment.centerRight,
-        icon: Icons.edit_outlined,
+        icon: AppIcon.edit,
         label: 'Actions',
       ),
       child: InkWell(
@@ -3027,7 +3080,7 @@ class LedgerFilterButton<T> extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 18, color: foreground),
+            Icon(icon, size: AppIconSize.inline, color: foreground),
             const SizedBox(width: AppSpacing.xs),
             Flexible(
               child: Text(
@@ -3040,8 +3093,12 @@ class LedgerFilterButton<T> extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: AppSpacing.xxs),
-            Icon(Icons.keyboard_arrow_down, size: 18, color: foreground),
+            SizedBox(width: AppSpacing.xxs),
+            Icon(
+              AppIcon.chevronDown,
+              size: AppIconSize.inline,
+              color: foreground,
+            ),
           ],
         ),
       ),
@@ -3137,10 +3194,10 @@ String transactionTypeLabel(TransactionType type) {
 
 IconData transactionTypeIcon(TransactionType type) {
   return switch (type) {
-    TransactionType.expense => Icons.trending_down,
-    TransactionType.income => Icons.trending_up,
-    TransactionType.transfer => Icons.swap_horiz,
-    TransactionType.adjustment => Icons.tune,
+    TransactionType.expense => AppIcon.trendDown,
+    TransactionType.income => AppIcon.trendUp,
+    TransactionType.transfer => AppIcon.transfer,
+    TransactionType.adjustment => AppIcon.tune,
   };
 }
 
@@ -3199,7 +3256,7 @@ Future<void> showTransactionOptions(
                   transaction.type == TransactionType.expense ||
                   transaction.type == TransactionType.income ||
                   transaction.type == TransactionType.transfer,
-              leading: const Icon(Icons.edit_outlined),
+              leading: Icon(AppIcon.edit),
               title: const Text('Edit'),
               onTap:
                   transaction.type == TransactionType.expense ||
@@ -3210,7 +3267,7 @@ Future<void> showTransactionOptions(
             ),
           if (allowedActions == null || allowedActions.contains('duplicate'))
             ListTile(
-              leading: const Icon(Icons.copy_outlined),
+              leading: Icon(AppIcon.copy),
               title: const Text('Duplicate'),
               onTap: () => Navigator.pop(sheetContext, 'duplicate'),
             ),
@@ -3219,7 +3276,7 @@ Future<void> showTransactionOptions(
               enabled:
                   transaction.type == TransactionType.expense ||
                   transaction.type == TransactionType.income,
-              leading: const Icon(Icons.call_split_outlined),
+              leading: Icon(AppIcon.split),
               title: const Text('Split'),
               onTap:
                   transaction.type == TransactionType.expense ||
@@ -3230,7 +3287,7 @@ Future<void> showTransactionOptions(
           if (allowedActions == null || allowedActions.contains('schedule'))
             ListTile(
               enabled: transaction.type != TransactionType.adjustment,
-              leading: const Icon(Icons.event_repeat_outlined),
+              leading: Icon(AppIcon.recurrence),
               title: const Text('Make Scheduled'),
               onTap: transaction.type != TransactionType.adjustment
                   ? () => Navigator.pop(sheetContext, 'schedule')
@@ -3238,7 +3295,7 @@ Future<void> showTransactionOptions(
             ),
           if (allowedActions == null || allowedActions.contains('delete'))
             ListTile(
-              leading: const Icon(Icons.delete_outline),
+              leading: Icon(AppIcon.delete),
               title: const Text('Delete'),
               textColor: AppTheme.rose,
               iconColor: AppTheme.rose,
@@ -3320,10 +3377,10 @@ Future<void> showTransactionDetails(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           ScheduledTransactionDetailRow(
-            rowKey: const ValueKey('transaction-detail-payee'),
+            rowKey: ValueKey('transaction-detail-payee'),
             icon: transaction.type == TransactionType.transfer
-                ? Icons.short_text_outlined
-                : Icons.person_outline,
+                ? AppIcon.description
+                : AppIcon.payee,
             label: transaction.type == TransactionType.transfer
                 ? 'Description'
                 : 'Payee',
@@ -3337,17 +3394,17 @@ Future<void> showTransactionDetails(
             label: 'Type',
             value: transactionTypeLabel(transaction.type),
           ),
-          const TransactionFormDivider(),
+          TransactionFormDivider(),
           ScheduledTransactionDetailRow(
-            icon: Icons.attach_money,
+            icon: AppIcon.money,
             label: 'Amount',
             value: money(signedAmount, dataStore.preferences.currency),
             valueColor: amountColor,
             tabularFigures: true,
           ),
-          const TransactionFormDivider(),
+          TransactionFormDivider(),
           ScheduledTransactionDetailRow(
-            icon: Icons.calendar_today_outlined,
+            icon: AppIcon.calendar,
             label: 'Date',
             value: fullMonthDateLabel(transaction.date),
           ),
@@ -3363,9 +3420,9 @@ Future<void> showTransactionDetails(
             value: accountsById[transaction.accountId]?.name ?? 'Unavailable',
           ),
           if (transaction.transferAccountId != null) ...[
-            const TransactionFormDivider(),
+            TransactionFormDivider(),
             ScheduledTransactionDetailRow(
-              icon: Icons.account_balance_wallet_outlined,
+              icon: AppIcon.wallet,
               label: 'To Account',
               value:
                   accountsById[transaction.transferAccountId]?.name ??
@@ -3373,25 +3430,25 @@ Future<void> showTransactionDetails(
             ),
           ],
           if (transaction.categoryId != null) ...[
-            const TransactionFormDivider(),
+            TransactionFormDivider(),
             ScheduledTransactionDetailRow(
-              icon: Icons.sell_outlined,
+              icon: AppIcon.category,
               label: 'Category',
               value: categoriesById[transaction.categoryId]?.name ?? 'Unknown',
             ),
           ],
           if (transaction.note.trim().isNotEmpty) ...[
-            const TransactionFormDivider(),
+            TransactionFormDivider(),
             ScheduledTransactionDetailRow(
-              icon: Icons.notes_outlined,
+              icon: AppIcon.notes,
               label: 'Notes',
               value: transaction.note,
             ),
           ],
           for (final split in transaction.splitLines) ...[
-            const TransactionFormDivider(),
+            TransactionFormDivider(),
             ScheduledTransactionDetailRow(
-              icon: Icons.call_split_outlined,
+              icon: AppIcon.split,
               label: categoriesById[split.categoryId]?.name ?? 'Split category',
               value: money(split.amountMinor, dataStore.preferences.currency),
               tabularFigures: true,
@@ -3505,16 +3562,16 @@ Future<void> showUndoScheduledPaymentConfirmation(
                 style: Theme.of(dialogContext).textTheme.bodyLarge,
               ),
               if (plannedAmount != actualAmount) ...[
-                const SizedBox(height: AppSpacing.lg),
+                SizedBox(height: AppSpacing.lg),
                 ScheduledTransactionDetailRow(
-                  icon: Icons.event_note_outlined,
+                  icon: AppIcon.eventNote,
                   label: 'Planned amount',
                   value: money(plannedAmount, dataStore.preferences.currency),
                   tabularFigures: true,
                 ),
-                const TransactionFormDivider(),
+                TransactionFormDivider(),
                 ScheduledTransactionDetailRow(
-                  icon: Icons.receipt_long_outlined,
+                  icon: AppIcon.receipt,
                   label: 'Actual payment',
                   value: money(actualAmount, dataStore.preferences.currency),
                   tabularFigures: true,
@@ -3541,10 +3598,10 @@ Future<void> showUndoScheduledPaymentConfirmation(
 
 IconData transactionDetailIcon(TransactionType type) {
   return switch (type) {
-    TransactionType.expense => Icons.remove_circle_outline,
-    TransactionType.income => Icons.add_circle_outline,
-    TransactionType.transfer => Icons.swap_horiz,
-    TransactionType.adjustment => Icons.tune_outlined,
+    TransactionType.expense => AppIcon.expense,
+    TransactionType.income => AppIcon.income,
+    TransactionType.transfer => AppIcon.transfer,
+    TransactionType.adjustment => AppIcon.filter,
   };
 }
 
@@ -3674,7 +3731,7 @@ Future<void> showSplitTransactionDialog(
                               ? () =>
                                     setDialogState(() => drafts.removeAt(index))
                               : null,
-                          icon: const Icon(Icons.remove_circle_outline),
+                          icon: Icon(AppIcon.expense),
                         ),
                       ],
                     ),
@@ -3690,7 +3747,7 @@ Future<void> showSplitTransactionDialog(
                         ),
                       ),
                     ),
-                    icon: const Icon(Icons.add),
+                    icon: Icon(AppIcon.add),
                     label: const Text('Add line'),
                   ),
                 ),
@@ -3805,10 +3862,10 @@ class SingleCategoryAllocationSection extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppRadii.control),
           onTap: onChooseCategory,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
+            padding: EdgeInsets.symmetric(vertical: 3),
             child: Row(
               children: [
-                const TransactionFormIcon(Icons.sell_outlined),
+                TransactionFormIcon(AppIcon.category),
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Text(
@@ -3818,8 +3875,8 @@ class SingleCategoryAllocationSection extends StatelessWidget {
                     style: valueStyle,
                   ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
-                const Icon(Icons.keyboard_arrow_down, size: 28),
+                SizedBox(width: AppSpacing.sm),
+                Icon(AppIcon.chevronDown, size: AppIconSize.hero),
               ],
             ),
           ),
@@ -3837,7 +3894,7 @@ class SingleCategoryAllocationSection extends StatelessWidget {
                   padding: EdgeInsets.zero,
                 ),
                 onPressed: onSplit,
-                icon: const Icon(Icons.call_split_outlined, size: 17),
+                icon: Icon(AppIcon.split, size: AppIconSize.inline),
                 label: const Text('Split transaction'),
               ),
             ),
@@ -3928,8 +3985,8 @@ class InlineSplitAllocationSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Icon(
-                Icons.drag_handle,
-                size: 19,
+                AppIcon.drag,
+                size: AppIconSize.inline,
                 color: theme.colorScheme.onSurfaceVariant.withValues(
                   alpha: 0.62,
                 ),
@@ -4008,8 +4065,8 @@ class InlineSplitAllocationSection extends StatelessWidget {
                     : 'Remove split',
                 onPressed: index == 0 ? null : () => onRemove(index),
                 icon: Icon(
-                  Icons.remove_circle_outline,
-                  size: 20,
+                  AppIcon.expense,
+                  size: AppIconSize.row,
                   color: index == 0
                       ? theme.colorScheme.onSurfaceVariant.withValues(
                           alpha: 0.32,
@@ -4033,7 +4090,7 @@ class InlineSplitAllocationSection extends StatelessWidget {
                 padding: EdgeInsets.zero,
               ),
               onPressed: onAdd,
-              icon: const Icon(Icons.add, size: 18),
+              icon: Icon(AppIcon.add, size: AppIconSize.inline),
               label: const Text('Add split'),
             ),
             if (onUseSingleCategory != null)
@@ -4306,11 +4363,11 @@ extension CalendarActivityFilterPresentation on CalendarActivityFilter {
       : label.substring(0, label.length - (label.endsWith('s') ? 1 : 0));
 
   IconData get icon => switch (this) {
-    CalendarActivityFilter.all => Icons.calendar_view_month_outlined,
-    CalendarActivityFilter.income => Icons.add_circle_outline,
-    CalendarActivityFilter.expenses => Icons.remove_circle_outline,
-    CalendarActivityFilter.transfers => Icons.swap_horiz,
-    CalendarActivityFilter.goals => Icons.flag_outlined,
+    CalendarActivityFilter.all => AppIcon.calendarGrid,
+    CalendarActivityFilter.income => AppIcon.income,
+    CalendarActivityFilter.expenses => AppIcon.expense,
+    CalendarActivityFilter.transfers => AppIcon.transfer,
+    CalendarActivityFilter.goals => AppIcon.goal,
   };
 
   bool matches(CalendarActivityType type) => switch (this) {
@@ -4327,6 +4384,14 @@ extension CalendarActivityFilterPresentation on CalendarActivityFilter {
     CalendarActivityFilter.expenses => type == TransactionType.expense,
     CalendarActivityFilter.transfers => type == TransactionType.transfer,
     CalendarActivityFilter.goals => false,
+  };
+
+  String get scheduledCompletedLabel => switch (this) {
+    CalendarActivityFilter.all => 'Completed',
+    CalendarActivityFilter.income => 'Received',
+    CalendarActivityFilter.expenses => 'Paid',
+    CalendarActivityFilter.transfers => 'Completed',
+    CalendarActivityFilter.goals => 'Funded',
   };
 
   Color color(BuildContext context) => switch (this) {
@@ -4420,10 +4485,10 @@ class CalendarDayActivity {
   String get typeLabel => calendarActivityTypeLabel(type);
 
   IconData get icon => switch (type) {
-    CalendarActivityType.income => Icons.add_circle_outline,
-    CalendarActivityType.expense => Icons.remove_circle_outline,
-    CalendarActivityType.transfer => Icons.swap_horiz,
-    CalendarActivityType.goal => Icons.flag_outlined,
+    CalendarActivityType.income => AppIcon.income,
+    CalendarActivityType.expense => AppIcon.expense,
+    CalendarActivityType.transfer => AppIcon.transfer,
+    CalendarActivityType.goal => AppIcon.goal,
   };
 
   Color color(BuildContext context) => switch (type) {
@@ -4612,14 +4677,14 @@ class _ScheduledViewState extends State<ScheduledView> {
         DismissDirection.startToEnd: 0.22,
         DismissDirection.endToStart: 0.22,
       },
-      background: const SwipeActionBackground(
+      background: SwipeActionBackground(
         alignment: Alignment.centerLeft,
-        icon: Icons.edit_outlined,
+        icon: AppIcon.edit,
         label: 'Edit',
       ),
-      secondaryBackground: const SwipeActionBackground(
+      secondaryBackground: SwipeActionBackground(
         alignment: Alignment.centerRight,
-        icon: Icons.skip_next_outlined,
+        icon: AppIcon.skip,
         label: 'Skip Once  Delete',
         destructive: true,
       ),
@@ -4674,11 +4739,11 @@ class _ScheduledViewState extends State<ScheduledView> {
     final monthSummary = scheduledMonthSummary(
       monthOccurrences.where(
         (occurrence) =>
-            _activityFilter.matchesScheduled(occurrence.transaction.type) &&
-            (!occurrence.isPending ||
-                store.hasActionableScheduledAccounts(occurrence.transaction)),
+            !occurrence.isPending ||
+            store.hasActionableScheduledAccounts(occurrence.transaction),
       ),
       store.transactions,
+      filter: _activityFilter,
     );
     return AppCard(
       padding: EdgeInsets.zero,
@@ -4743,11 +4808,8 @@ class _ScheduledViewState extends State<ScheduledView> {
                 children: [
                   if (filteredMonthOccurrences.isEmpty)
                     ListTile(
-                      key: const ValueKey('calendar-filter-empty-state'),
-                      leading: const Icon(
-                        Icons.event_busy_outlined,
-                        color: AppTheme.muted,
-                      ),
+                      key: ValueKey('calendar-filter-empty-state'),
+                      leading: Icon(AppIcon.eventBusy, color: AppTheme.muted),
                       title: Text(
                         'No scheduled transactions in ${monthLabel(_visibleMonth)}',
                       ),
@@ -4784,12 +4846,9 @@ class _ScheduledViewState extends State<ScheduledView> {
                 ],
               ),
             ),
-            const Divider(height: 1),
-            const ListTile(
-              leading: Icon(
-                Icons.notifications_outlined,
-                color: AppTheme.accent,
-              ),
+            Divider(height: 1),
+            ListTile(
+              leading: Icon(AppIcon.notification, color: AppTheme.accent),
               title: Text('Local alerts'),
               subtitle: Text(
                 'Enabled alerts are scheduled locally for this device.',
@@ -4836,7 +4895,7 @@ class ScheduledCalendarPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: EdgeInsets.symmetric(vertical: 12),
       child: Column(
         children: [
           Row(
@@ -4844,7 +4903,7 @@ class ScheduledCalendarPreview extends StatelessWidget {
               IconButton(
                 tooltip: 'Previous month',
                 onPressed: onPreviousMonth,
-                icon: const Icon(Icons.chevron_left),
+                icon: Icon(AppIcon.chevronLeft),
               ),
               Expanded(
                 child: Text(
@@ -4858,7 +4917,7 @@ class ScheduledCalendarPreview extends StatelessWidget {
               IconButton(
                 tooltip: 'Next month',
                 onPressed: onNextMonth,
-                icon: const Icon(Icons.chevron_right),
+                icon: Icon(AppIcon.chevronRight),
               ),
               IconButton(
                 tooltip: isCollapsed ? 'Expand calendar' : 'Collapse calendar',
@@ -4870,9 +4929,9 @@ class ScheduledCalendarPreview extends StatelessWidget {
                   turns: isCollapsed ? 0 : 0.5,
                   duration: MediaQuery.of(context).disableAnimations
                       ? Duration.zero
-                      : const Duration(milliseconds: 160),
+                      : Duration(milliseconds: 160),
                   curve: Curves.easeOutCubic,
-                  child: const Icon(Icons.keyboard_arrow_down),
+                  child: Icon(AppIcon.chevronDown),
                 ),
               ),
             ],
@@ -4893,7 +4952,11 @@ class ScheduledCalendarPreview extends StatelessWidget {
             ),
             secondChild: const SizedBox.shrink(),
           ),
-          ScheduledMonthlySummary(summary: summary, currency: currency),
+          ScheduledMonthlySummary(
+            summary: summary,
+            activityFilter: activityFilter,
+            currency: currency,
+          ),
         ],
       ),
     );
@@ -4945,7 +5008,7 @@ class ScheduledCalendarGrid extends StatelessWidget {
                         label: Text(filter.label),
                         avatar: Icon(
                           filter.icon,
-                          size: 15,
+                          size: AppIconSize.compact,
                           color: selected
                               ? Colors.white
                               : filter == CalendarActivityFilter.all
@@ -4996,44 +5059,47 @@ class ScheduledCalendarGrid extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         for (var row = 0; row < rows; row++)
-          Row(
-            children: [
-              for (var column = 0; column < 7; column++)
-                Builder(
-                  builder: (context) {
-                    final day = dayForCalendarCell(
-                      row: row,
-                      column: column,
-                      firstWeekdayOffset: firstWeekdayOffset,
-                      daysInMonth: days,
-                    );
-                    final summary = day == null
-                        ? null
-                        : activitySummaryByDay[calendarDateKey(
-                            DateTime(month.year, month.month, day),
-                          )];
-                    return Expanded(
-                      child: ScheduledCalendarDayCell(
-                        day: day,
-                        month: month,
-                        activitySummary: summary,
-                        activityFilter: activityFilter,
-                        currency: currency,
-                        isSelected:
-                            selectedDate != null &&
-                            selectedDate!.year == month.year &&
-                            selectedDate!.month == month.month &&
-                            selectedDate!.day == day,
-                        isToday:
-                            DateTime.now().year == month.year &&
-                            DateTime.now().month == month.month &&
-                            DateTime.now().day == day,
-                        onSelectDate: onSelectDate,
-                      ),
-                    );
-                  },
-                ),
-            ],
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Row(
+              children: [
+                for (var column = 0; column < 7; column++)
+                  Builder(
+                    builder: (context) {
+                      final day = dayForCalendarCell(
+                        row: row,
+                        column: column,
+                        firstWeekdayOffset: firstWeekdayOffset,
+                        daysInMonth: days,
+                      );
+                      final summary = day == null
+                          ? null
+                          : activitySummaryByDay[calendarDateKey(
+                              DateTime(month.year, month.month, day),
+                            )];
+                      return Expanded(
+                        child: ScheduledCalendarDayCell(
+                          day: day,
+                          month: month,
+                          activitySummary: summary,
+                          activityFilter: activityFilter,
+                          currency: currency,
+                          isSelected:
+                              selectedDate != null &&
+                              selectedDate!.year == month.year &&
+                              selectedDate!.month == month.month &&
+                              selectedDate!.day == day,
+                          isToday:
+                              DateTime.now().year == month.year &&
+                              DateTime.now().month == month.month &&
+                              DateTime.now().day == day,
+                          onSelectDate: onSelectDate,
+                        ),
+                      );
+                    },
+                  ),
+              ],
+            ),
           ),
       ],
     );
@@ -5093,7 +5159,7 @@ class ScheduledCalendarDayCell extends StatelessWidget {
               width: 52,
               height: 68,
               child: Stack(
-                clipBehavior: Clip.none,
+                clipBehavior: Clip.hardEdge,
                 children: [
                   Positioned.fill(
                     child: DecoratedBox(
@@ -5164,9 +5230,13 @@ class ScheduledCalendarDayCell extends StatelessWidget {
                   ),
                   if (matchingCount > 0)
                     Positioned(
-                      top: -3,
-                      right: -3,
+                      top: 1,
+                      right: 1,
                       child: Container(
+                        key: ValueKey(
+                          'scheduled-calendar-count-'
+                          '${month.year}-${month.month}-$day',
+                        ),
                         constraints: const BoxConstraints(
                           minWidth: 17,
                           minHeight: 17,
@@ -5184,7 +5254,7 @@ class ScheduledCalendarDayCell extends StatelessWidget {
                           ),
                         ),
                         child: Text(
-                          matchingCount > 99 ? '99+' : '$matchingCount',
+                          matchingCount > 999 ? '999+' : '$matchingCount',
                           style: const TextStyle(
                             color: AppTheme.accent,
                             fontSize: 9,
@@ -5298,11 +5368,13 @@ class CalendarCellAmount extends StatelessWidget {
 class ScheduledMonthlySummary extends StatelessWidget {
   const ScheduledMonthlySummary({
     required this.summary,
+    required this.activityFilter,
     required this.currency,
     super.key,
   });
 
   final ScheduledMonthSummary summary;
+  final CalendarActivityFilter activityFilter;
   final CurrencyFormatSettings currency;
 
   @override
@@ -5327,7 +5399,8 @@ class ScheduledMonthlySummary extends StatelessWidget {
             valueKey: const ValueKey('scheduled-month-planned'),
           ),
           ScheduledMonthlySummaryValue(
-            label: 'Paid',
+            label: activityFilter.scheduledCompletedLabel,
+            labelKey: const ValueKey('scheduled-month-completed-label'),
             value: MoneyFormatter(
               currency,
             ).formatMinor(summary.paidAmountMinor),
@@ -5351,12 +5424,14 @@ class ScheduledMonthlySummaryValue extends StatelessWidget {
     required this.label,
     required this.value,
     required this.valueKey,
+    this.labelKey,
     super.key,
   });
 
   final String label;
   final String value;
   final Key valueKey;
+  final Key? labelKey;
 
   @override
   Widget build(BuildContext context) {
@@ -5367,6 +5442,7 @@ class ScheduledMonthlySummaryValue extends StatelessWidget {
         children: [
           Text(
             label,
+            key: labelKey,
             style: theme.textTheme.labelSmall?.copyWith(
               color: AppTheme.muted,
               fontWeight: FontWeight.w700,
@@ -5418,7 +5494,7 @@ class _CategoriesViewState extends State<CategoriesView> {
           alignment: Alignment.centerRight,
           child: FilledButton.icon(
             onPressed: () => showCategoryDialog(context),
-            icon: const Icon(Icons.add),
+            icon: Icon(AppIcon.add),
             label: const Text('Add category'),
           ),
         ),
@@ -5489,7 +5565,7 @@ class _CategoriesViewState extends State<CategoriesView> {
                                 actions: [
                                   ManagementSwipeAction(
                                     label: 'Edit',
-                                    icon: Icons.edit_outlined,
+                                    icon: AppIcon.edit,
                                     color: AppTheme.accent,
                                     actionKey: ValueKey(
                                       'category-edit-${category.id}',
@@ -5501,7 +5577,7 @@ class _CategoriesViewState extends State<CategoriesView> {
                                   ),
                                   ManagementSwipeAction(
                                     label: 'Archive',
-                                    icon: Icons.archive_outlined,
+                                    icon: AppIcon.archive,
                                     color: Theme.of(
                                       context,
                                     ).colorScheme.onSurfaceVariant,
@@ -5513,7 +5589,7 @@ class _CategoriesViewState extends State<CategoriesView> {
                                   ),
                                   ManagementSwipeAction(
                                     label: 'Delete',
-                                    icon: Icons.delete_outline,
+                                    icon: AppIcon.delete,
                                     color: AppColors.danger,
                                     actionKey: ValueKey(
                                       'category-delete-${category.id}',
@@ -5623,15 +5699,13 @@ class _CategoriesViewState extends State<CategoriesView> {
                                               milliseconds: 180,
                                             ),
                                             curve: Curves.easeOutCubic,
-                                            child: const Icon(
-                                              Icons.chevron_right,
-                                            ),
+                                            child: Icon(AppIcon.chevronRight),
                                           ),
                                         )
                                       else
-                                        const SizedBox(
+                                        SizedBox(
                                           width: 48,
-                                          child: Icon(Icons.chevron_right),
+                                          child: Icon(AppIcon.chevronRight),
                                         ),
                                     ],
                                   ),
@@ -5729,8 +5803,8 @@ class _SettingsViewState extends State<SettingsView> {
           children: [
             SettingsActionRow(
               icon: widget.syncLabel == 'Sync issue'
-                  ? Icons.cloud_off_outlined
-                  : Icons.cloud_done_outlined,
+                  ? AppIcon.cloudOff
+                  : AppIcon.cloudDone,
               title: 'Status',
               subtitle: switch (widget.syncLabel) {
                 'Synced' => 'Your data is securely synced',
@@ -5746,7 +5820,7 @@ class _SettingsViewState extends State<SettingsView> {
                   : () => widget.onSyncNow!.call(),
             ),
             SettingsActionRow(
-              icon: Icons.schedule_outlined,
+              icon: AppIcon.schedule,
               title: 'Last successful sync',
               subtitle:
                   widget.lastSuccessfulSyncLabel ??
@@ -5757,7 +5831,7 @@ class _SettingsViewState extends State<SettingsView> {
             ),
             if (widget.onSyncNow != null)
               SettingsActionRow(
-                icon: Icons.sync_outlined,
+                icon: AppIcon.sync,
                 title: 'Sync now',
                 subtitle: 'Refresh your data',
                 showDivider: widget.onSignOut != null,
@@ -5765,7 +5839,7 @@ class _SettingsViewState extends State<SettingsView> {
               ),
             if (widget.onSignOut != null)
               SettingsActionRow(
-                icon: Icons.logout_outlined,
+                icon: AppIcon.signOut,
                 title: 'Sign out',
                 subtitle: 'Sign out of your account',
                 destructive: true,
@@ -5774,12 +5848,12 @@ class _SettingsViewState extends State<SettingsView> {
               ),
           ],
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         SettingsSectionCard(
           title: 'App Preferences',
           children: [
             SettingsDropdown<LaunchScreen>(
-              icon: Icons.home_outlined,
+              icon: AppIcon.home,
               label: 'Launch screen',
               value: preferences.launchScreen,
               values: LaunchScreen.values
@@ -5791,7 +5865,7 @@ class _SettingsViewState extends State<SettingsView> {
               ),
             ),
             SettingsDropdown<AppearanceMode>(
-              icon: Icons.contrast_outlined,
+              icon: AppIcon.contrast,
               label: 'Appearance',
               value: preferences.appearanceMode,
               values: AppearanceMode.values,
@@ -5801,7 +5875,7 @@ class _SettingsViewState extends State<SettingsView> {
               ),
             ),
             SettingsDropdown<FloatingAddButtonPosition>(
-              icon: Icons.add_circle_outline,
+              icon: AppIcon.income,
               label: 'Floating add button',
               value: preferences.floatingAddButtonPosition,
               values: FloatingAddButtonPosition.values,
@@ -5811,7 +5885,7 @@ class _SettingsViewState extends State<SettingsView> {
               ),
             ),
             SettingsDropdown<DefaultTransactionType>(
-              icon: Icons.receipt_long_outlined,
+              icon: AppIcon.receipt,
               label: 'Default transaction type',
               showDivider: false,
               value: preferences.defaultTransactionType,
@@ -5823,12 +5897,12 @@ class _SettingsViewState extends State<SettingsView> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         SettingsSectionCard(
           title: 'Money Format',
           children: [
             SettingsDropdown<CurrencyFormatSettings>(
-              icon: Icons.currency_exchange_outlined,
+              icon: AppIcon.currency,
               label: 'Currency',
               value: SettingsView._currencyFor(
                 preferences.currency.currencyCode,
@@ -5845,14 +5919,14 @@ class _SettingsViewState extends State<SettingsView> {
               ),
             ),
             SettingsActionRow(
-              icon: Icons.edit_outlined,
+              icon: AppIcon.edit,
               title: 'Custom currency',
               subtitle:
                   '${preferences.currency.currencyCode} ${preferences.currency.symbol}',
               onTap: () => showCustomCurrencyDialog(context),
             ),
             SettingsDropdown<int>(
-              icon: Icons.numbers_outlined,
+              icon: AppIcon.numbers,
               label: 'Decimal places',
               value: preferences.currency.decimalPlaces,
               values: const [0, 2],
@@ -5864,7 +5938,7 @@ class _SettingsViewState extends State<SettingsView> {
               ),
             ),
             SettingsDropdown<String>(
-              icon: Icons.format_list_numbered_outlined,
+              icon: AppIcon.numberedList,
               label: 'Thousands separator',
               showDivider: false,
               value: preferences.currency.thousandsSeparator,
@@ -5880,12 +5954,12 @@ class _SettingsViewState extends State<SettingsView> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         SettingsSectionCard(
           title: 'Notifications',
           children: [
             SettingsSwitch(
-              icon: Icons.notifications_outlined,
+              icon: AppIcon.notification,
               label: 'Scheduled transaction alerts',
               subtitle: 'Receive reminders for scheduled transactions',
               value: preferences.notificationsEnabled,
@@ -5895,39 +5969,39 @@ class _SettingsViewState extends State<SettingsView> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         SettingsSectionCard(
           title: 'Manage',
           children: [
             SettingsActionRow(
-              icon: Icons.account_balance_wallet_outlined,
+              icon: AppIcon.wallet,
               title: 'Manage accounts',
               subtitle: 'Accounts, balances, and account groups',
               onTap: () =>
                   widget.onSelectSection?.call(FinanceSection.accounts),
             ),
             SettingsActionRow(
-              icon: Icons.sell_outlined,
+              icon: AppIcon.category,
               title: 'Manage categories',
               subtitle: 'Expense and income categories',
               onTap: () =>
                   widget.onSelectSection?.call(FinanceSection.categories),
             ),
             SettingsActionRow(
-              icon: Icons.person_outline,
+              icon: AppIcon.payee,
               title: 'Manage payees',
               subtitle: 'Active and archived payees',
               onTap: () {
                 HapticFeedback.selectionClick();
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (context) => const PayeesManagementScreen(),
+                    builder: (context) => PayeesManagementScreen(),
                   ),
                 );
               },
             ),
             SettingsActionRow(
-              icon: Icons.pie_chart_outline,
+              icon: AppIcon.pieChart,
               title: 'Manage budgets',
               subtitle: 'Budget amounts and categories',
               showDivider: false,
@@ -5935,12 +6009,12 @@ class _SettingsViewState extends State<SettingsView> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         SettingsSectionCard(
           title: 'More',
           children: [
             SettingsActionRow(
-              icon: Icons.insights_outlined,
+              icon: AppIcon.insights,
               title: 'Reports',
               subtitle: 'Review spending and category trends',
               showDivider: false,
@@ -5948,12 +6022,12 @@ class _SettingsViewState extends State<SettingsView> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         SettingsSectionCard(
           title: 'Data Management',
           children: [
             SettingsActionRow(
-              icon: Icons.history_toggle_off_outlined,
+              icon: AppIcon.history,
               title: 'Reset Scheduled History',
               subtitle: 'Clear paid and skipped occurrence history',
               destructive: true,
@@ -5961,7 +6035,7 @@ class _SettingsViewState extends State<SettingsView> {
             ),
             Builder(
               builder: (rowContext) => SettingsActionRow(
-                icon: Icons.file_download_outlined,
+                icon: AppIcon.import,
                 title: 'Export CSV',
                 subtitle: 'Share or copy your transaction history',
                 trailingText: _sharingExport == _ExportKind.csv
@@ -5973,7 +6047,7 @@ class _SettingsViewState extends State<SettingsView> {
             ),
             Builder(
               builder: (rowContext) => SettingsActionRow(
-                icon: Icons.data_object_outlined,
+                icon: AppIcon.backup,
                 title: 'Export Backup',
                 subtitle: 'Share or copy a complete Money Tally backup',
                 trailingText: _sharingExport == _ExportKind.backup
@@ -5984,7 +6058,7 @@ class _SettingsViewState extends State<SettingsView> {
               ),
             ),
             SettingsActionRow(
-              icon: Icons.restore_outlined,
+              icon: AppIcon.restore,
               title: 'Backup and restore',
               subtitle: 'Restore a JSON backup from the clipboard',
               showDivider: false,
@@ -6086,10 +6160,10 @@ Future<_ExportAction?> _showExportActionSheet(
               sheetContext,
             ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
           ),
-          const SizedBox(height: AppSpacing.sm),
+          SizedBox(height: AppSpacing.sm),
           _ExportActionTile(
-            key: const ValueKey('export-share-file'),
-            icon: Icons.ios_share_outlined,
+            key: ValueKey('export-share-file'),
+            icon: AppIcon.export,
             title: isCsv ? 'Share CSV File' : 'Share Backup File',
             subtitle: isCsv
                 ? 'Create a CSV file and open the phone’s share sheet'
@@ -6105,8 +6179,8 @@ Future<_ExportAction?> _showExportActionSheet(
             ).colorScheme.outlineVariant.withValues(alpha: 0.45),
           ),
           _ExportActionTile(
-            key: const ValueKey('export-copy-clipboard'),
-            icon: Icons.content_copy_outlined,
+            key: ValueKey('export-copy-clipboard'),
+            icon: AppIcon.contentCopy,
             title: isCsv ? 'Copy CSV to Clipboard' : 'Copy JSON to Clipboard',
             subtitle: isCsv
                 ? 'Copy the raw CSV text'
@@ -6145,7 +6219,7 @@ class _ExportActionTile extends StatelessWidget {
       minTileHeight: 72,
       contentPadding: EdgeInsets.zero,
       leading: SettingsRowIcon(icon: icon),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      title: Text(title, style: TextStyle(fontWeight: FontWeight.w800)),
       subtitle: Text(
         subtitle,
         style: TextStyle(
@@ -6153,7 +6227,7 @@ class _ExportActionTile extends StatelessWidget {
           height: 1.25,
         ),
       ),
-      trailing: const Icon(Icons.chevron_right_rounded),
+      trailing: Icon(AppIcon.chevronRightRounded),
       onTap: onTap,
     );
   }
@@ -6289,29 +6363,29 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
     }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Payees'),
+        title: Text('Payees'),
         scrolledUnderElevation: 0,
         actions: [
           IconButton(
             tooltip: 'Add payee',
             onPressed: () => addManagedPayee(context),
-            icon: const Icon(Icons.add),
+            icon: Icon(AppIcon.add),
           ),
         ],
       ),
       body: SafeArea(
         top: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 40),
           children: [
             if (payees.isEmpty)
               AppCard(
                 child: Column(
                   children: [
-                    const Icon(
-                      Icons.person_add_alt_outlined,
+                    Icon(
+                      AppIcon.addPerson,
                       color: AppTheme.accent,
-                      size: 32,
+                      size: AppIconSize.prominent,
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     Text(
@@ -6328,10 +6402,10 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.md),
+                    SizedBox(height: AppSpacing.md),
                     FilledButton.icon(
                       onPressed: () => addManagedPayee(context),
-                      icon: const Icon(Icons.add),
+                      icon: Icon(AppIcon.add),
                       label: const Text('Add payee'),
                     ),
                   ],
@@ -6373,7 +6447,7 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                               actions: [
                                 ManagementSwipeAction(
                                   label: 'Edit',
-                                  icon: Icons.edit_outlined,
+                                  icon: AppIcon.edit,
                                   color: AppTheme.accent,
                                   actionKey: ValueKey(
                                     'payee-edit-${payee.toLowerCase()}',
@@ -6383,7 +6457,7 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                                 ),
                                 ManagementSwipeAction(
                                   label: 'Archive',
-                                  icon: Icons.archive_outlined,
+                                  icon: AppIcon.archive,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurfaceVariant,
@@ -6395,7 +6469,7 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                                 ),
                                 ManagementSwipeAction(
                                   label: 'Delete',
-                                  icon: Icons.delete_outline,
+                                  icon: AppIcon.delete,
                                   color: AppColors.danger,
                                   actionKey: ValueKey(
                                     'payee-delete-${payee.toLowerCase()}',
@@ -6435,10 +6509,10 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                                         payee,
                                       ),
                                     ),
-                                    const SizedBox(width: 6),
-                                    const SizedBox(
+                                    SizedBox(width: 6),
+                                    SizedBox(
                                       width: 48,
-                                      child: Icon(Icons.chevron_right),
+                                      child: Icon(AppIcon.chevronRight),
                                     ),
                                   ],
                                 ),
@@ -6471,9 +6545,9 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                         ),
                         trailing: AnimatedRotation(
                           turns: _archivedExpanded ? 0.5 : 0,
-                          duration: const Duration(milliseconds: 180),
+                          duration: Duration(milliseconds: 180),
                           curve: Curves.easeOutCubic,
-                          child: const Icon(Icons.keyboard_arrow_down),
+                          child: Icon(AppIcon.chevronDown),
                         ),
                         onTap: () {
                           HapticFeedback.selectionClick();
@@ -6522,7 +6596,7 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                                         context,
                                         archived[index],
                                       ),
-                                  icon: const Icon(Icons.delete_outline),
+                                  icon: Icon(AppIcon.delete),
                                   color: AppColors.danger,
                                 ),
                               ],
@@ -6647,17 +6721,17 @@ Future<void> showManagedPayeeActions(BuildContext context, String payee) async {
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
-            leading: const Icon(Icons.edit_outlined),
-            title: const Text('Edit'),
+            leading: Icon(AppIcon.edit),
+            title: Text('Edit'),
             onTap: () => Navigator.pop(sheetContext, 'edit'),
           ),
           ListTile(
-            leading: const Icon(Icons.archive_outlined),
-            title: const Text('Archive'),
+            leading: Icon(AppIcon.archive),
+            title: Text('Archive'),
             onTap: () => Navigator.pop(sheetContext, 'archive'),
           ),
           ListTile(
-            leading: const Icon(Icons.delete_outline),
+            leading: Icon(AppIcon.delete),
             title: const Text('Delete permanently'),
             textColor: AppColors.danger,
             iconColor: AppColors.danger,
@@ -6808,10 +6882,10 @@ Future<void> showCustomCurrencyDialog(BuildContext context) async {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const TransactionFormLabel('Currency code'),
+          TransactionFormLabel('Currency code'),
           Row(
             children: [
-              const TransactionFormIcon(Icons.text_fields_outlined),
+              TransactionFormIcon(AppIcon.text),
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: TextField(
@@ -6835,11 +6909,11 @@ Future<void> showCustomCurrencyDialog(BuildContext context) async {
               ),
             ],
           ),
-          const TransactionFormDivider(),
-          const TransactionFormLabel('Symbol'),
+          TransactionFormDivider(),
+          TransactionFormLabel('Symbol'),
           Row(
             children: [
-              const TransactionFormIcon(Icons.attach_money_outlined),
+              TransactionFormIcon(AppIcon.moneyOutlined),
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: TextField(
@@ -6941,7 +7015,7 @@ class _ReportsViewState extends State<ReportsView> {
           PolishedChoice(
             value: range,
             label: range.label,
-            leading: const Icon(Icons.date_range_outlined),
+            leading: Icon(AppIcon.dateRange),
           ),
       ],
     );
@@ -6967,13 +7041,13 @@ class _ReportsViewState extends State<ReportsView> {
             borderRadius: BorderRadius.circular(AppRadii.card),
             onTap: _chooseRange,
             child: Padding(
-              padding: const EdgeInsets.symmetric(
+              padding: EdgeInsets.symmetric(
                 horizontal: AppSpacing.md,
                 vertical: AppSpacing.sm,
               ),
               child: Row(
                 children: [
-                  const TransactionFormIcon(Icons.calendar_month_outlined),
+                  TransactionFormIcon(AppIcon.calendarMonth),
                   const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Column(
@@ -6998,7 +7072,7 @@ class _ReportsViewState extends State<ReportsView> {
                       ],
                     ),
                   ),
-                  const Icon(Icons.keyboard_arrow_down),
+                  Icon(AppIcon.chevronDown),
                 ],
               ),
             ),
@@ -7024,8 +7098,8 @@ class _ReportsViewState extends State<ReportsView> {
                     });
                   },
                 )
-              : const ReportEmptyState(
-                  icon: Icons.donut_large_outlined,
+              : ReportEmptyState(
+                  icon: AppIcon.donutChart,
                   message: 'No expense data for this period',
                 ),
         ),
@@ -7037,8 +7111,8 @@ class _ReportsViewState extends State<ReportsView> {
                   totals: report.monthlyTotals,
                   currency: currency,
                 )
-              : const ReportEmptyState(
-                  icon: Icons.bar_chart_outlined,
+              : ReportEmptyState(
+                  icon: AppIcon.barChart,
                   message: 'No trend data yet',
                 ),
         ),
@@ -7868,10 +7942,10 @@ class SettingsActionRow extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    SizedBox(width: 4),
                   ],
                   Icon(
-                    Icons.chevron_right_rounded,
+                    AppIcon.chevronRightRounded,
                     color: destructive
                         ? theme.colorScheme.error
                         : theme.colorScheme.onSurfaceVariant,
@@ -7907,7 +7981,7 @@ class SettingsRowIcon extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
-      child: Icon(icon, color: effectiveColor, size: 21),
+      child: Icon(icon, color: effectiveColor, size: AppIconSize.row),
     );
   }
 }
@@ -8015,10 +8089,7 @@ class AccountBalancePanel extends StatelessWidget {
       child: Column(
         children: [
           if (accounts.isEmpty)
-            const CompactEmptyRow(
-              icon: Icons.account_balance_wallet_outlined,
-              label: 'No accounts yet',
-            ),
+            CompactEmptyRow(icon: AppIcon.wallet, label: 'No accounts yet'),
           for (final account in accounts)
             MetricRow(
               label: account.name,
@@ -8049,14 +8120,14 @@ class UpcomingPanel extends StatelessWidget {
             MetricRow(
               label: 'Due today',
               value: '$dueCount',
-              icon: Icons.notification_important_outlined,
+              icon: AppIcon.notificationImportant,
             ),
           for (final item in scheduled.take(3))
             MetricRow(
               label: item.payee,
               value:
                   '${money(item.type.name == 'expense' ? -item.amountMinor.abs() : item.amountMinor, currency)} · ${dateShort(item.nextDate)}',
-              icon: Icons.event_repeat_outlined,
+              icon: AppIcon.recurrence,
             ),
         ],
       ),
@@ -8086,6 +8157,9 @@ class BudgetPanel extends StatelessWidget {
     final budgets = store.budgets
         .where((budget) => budget.isVisible)
         .toList(growable: false);
+    final archivedBudgets = store.budgets
+        .where((budget) => budget.isArchived && !budget.isDeleted)
+        .toList(growable: false);
     final visibleBudgets = showAll ? budgets : budgets.take(maxRows ?? 3);
     return AppCard(
       title: title,
@@ -8097,19 +8171,63 @@ class BudgetPanel extends StatelessWidget {
               alignment: Alignment.centerRight,
               child: FilledButton.icon(
                 onPressed: () => showBudgetDialog(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Add budget'),
+                icon: Icon(AppIcon.add),
+                label: Text('Add budget'),
               ),
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
           ],
           if (visibleBudgets.isEmpty)
-            const CompactEmptyRow(
-              icon: Icons.pie_chart_outline,
-              label: 'No budgets yet',
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+              child: Column(
+                children: [
+                  CompactEmptyRow(
+                    icon: AppIcon.pieChart,
+                    label: 'No budgets yet',
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  const Text(
+                    'Create a budget to set a spending limit and track what remains.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppTheme.muted),
+                  ),
+                  if (showAll) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    OutlinedButton(
+                      onPressed: () => showBudgetDialog(context),
+                      child: const Text('Create Budget'),
+                    ),
+                  ],
+                ],
+              ),
             ),
           for (final budget in visibleBudgets)
             BudgetProgressRow(budget: budget),
+          if (showAll && archivedBudgets.isNotEmpty) ...[
+            const Divider(height: AppSpacing.lg),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              title: Text(
+                'Archived (${archivedBudgets.length})',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              children: [
+                for (final budget in archivedBudgets)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(budget.name),
+                    subtitle: Text(budget.period.label),
+                    trailing: TextButton(
+                      onPressed: () => store.restoreBudget(budget.id),
+                      child: const Text('Restore'),
+                    ),
+                    onTap: () => showBudgetDetails(context, budget),
+                  ),
+              ],
+            ),
+          ],
           if (onViewAll != null) ...[
             const SizedBox(height: AppSpacing.xs),
             Align(
@@ -8163,8 +8281,8 @@ class RecentTransactionsPanel extends StatelessWidget {
       child: Column(
         children: [
           if (transactions.isEmpty)
-            const CompactEmptyRow(
-              icon: Icons.receipt_long_outlined,
+            CompactEmptyRow(
+              icon: AppIcon.receipt,
               label: 'No recent transactions',
             ),
           for (final transaction in transactions.take(maxRows))
@@ -8451,7 +8569,7 @@ class ScheduledTile extends StatelessWidget {
     final currency = currencyForContext(context);
 
     return ListTile(
-      leading: const Icon(Icons.event_repeat_outlined, color: AppTheme.accent),
+      leading: Icon(AppIcon.recurrence, color: AppTheme.accent),
       title: Text(
         item.payee,
         style: const TextStyle(fontWeight: FontWeight.w900),
@@ -8486,10 +8604,14 @@ class BudgetProgressRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final currency = store.preferences.currency;
-    final spent = store.spentThisMonthForBudget(budget);
-    final remaining = budget.remainingMinor(spent);
-    final isOver = budget.isOverBudget(spent);
+    final period = store.budgetPeriodResult(budget);
+    final spent = period.spentMinor;
+    final remaining = period.remainingMinor;
+    final isOver = period.isOverBudget;
     final categorySummary = budgetCategorySummary(store, budget);
+    final today = budgetDateKey(DateTime.now());
+    final daysLeft = period.window.endExclusive.difference(today).inDays;
+    final dateRange = budgetPeriodDateRange(period.window);
 
     return Dismissible(
       key: ValueKey('budget-swipe-${budget.id}'),
@@ -8498,14 +8620,14 @@ class BudgetProgressRow extends StatelessWidget {
         DismissDirection.startToEnd: 0.22,
         DismissDirection.endToStart: 0.22,
       },
-      background: const SwipeActionBackground(
+      background: SwipeActionBackground(
         alignment: Alignment.centerLeft,
-        icon: Icons.tune,
+        icon: AppIcon.tune,
         label: 'Adjust Budget',
       ),
-      secondaryBackground: const SwipeActionBackground(
+      secondaryBackground: SwipeActionBackground(
         alignment: Alignment.centerRight,
-        icon: Icons.edit_outlined,
+        icon: AppIcon.edit,
         label: 'Edit  Delete',
         destructive: true,
       ),
@@ -8521,6 +8643,7 @@ class BudgetProgressRow extends StatelessWidget {
         return false;
       },
       child: InkWell(
+        onTap: () => showBudgetDetails(context, budget),
         onLongPress: () {
           HapticFeedback.mediumImpact();
           showBudgetActions(context, budget);
@@ -8551,12 +8674,35 @@ class BudgetProgressRow extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                'Spent ${money(spent, currency)} of ${money(budget.amountMinor, currency)}',
+                '${period.configuration.period.label} · $dateRange',
                 style: const TextStyle(color: AppTheme.muted),
               ),
               const SizedBox(height: 4),
               Text(
-                categorySummary,
+                '${money(spent, currency)} spent of ${money(period.availableMinor, currency)} available',
+                style: const TextStyle(color: AppTheme.muted),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                spent == 0
+                    ? 'No spending yet this period'
+                    : isOver
+                    ? '${money(remaining.abs(), currency)} over budget'
+                    : '${money(remaining, currency)} remaining',
+                style: TextStyle(
+                  color: isOver ? AppTheme.rose : AppTheme.ink,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                [
+                  categorySummary,
+                  if (daysLeft > 0)
+                    '$daysLeft ${daysLeft == 1 ? 'day' : 'days'} left'
+                  else if (daysLeft == 0)
+                    'Ends today',
+                ].join(' · '),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,
@@ -8565,8 +8711,16 @@ class BudgetProgressRow extends StatelessWidget {
               const SizedBox(height: 8),
               BudgetProgressBar(
                 spentMinor: spent,
-                budgetMinor: budget.amountMinor,
+                budgetMinor: period.availableMinor,
               ),
+              if (period.configuration.rolloverEnabled &&
+                  period.rolloverInMinor != 0) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'Includes ${money(period.rolloverInMinor, currency)} rollover',
+                  style: const TextStyle(color: AppTheme.muted, fontSize: 12),
+                ),
+              ],
             ],
           ),
         ),
@@ -8576,12 +8730,15 @@ class BudgetProgressRow extends StatelessWidget {
 }
 
 String budgetCategorySummary(FinanceDataStore store, BudgetRecord budget) {
-  if (budget.categoryIds.isEmpty) return 'No categories selected';
+  final categoryIds = const BudgetCalculator()
+      .configurationAt(budget, DateTime.now())
+      .categoryIds;
+  if (categoryIds.isEmpty) return 'No categories selected';
   final categoriesById = {
     for (final category in store.categories) category.id: category,
   };
   final names = [
-    for (final categoryId in budget.categoryIds)
+    for (final categoryId in categoryIds)
       categoriesById[categoryId]?.name ?? 'Unknown category',
   ];
   final visibleNames = names.take(3).join(', ');
@@ -8590,14 +8747,308 @@ String budgetCategorySummary(FinanceDataStore store, BudgetRecord budget) {
   return 'Categories: $visibleNames, +$hiddenCount more';
 }
 
+String budgetPeriodDateRange(BudgetPeriodWindow window) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final end = window.endExclusive.subtract(const Duration(days: 1));
+  if (window.start.year == end.year && window.start.month == end.month) {
+    return '${months[window.start.month - 1]} ${window.start.day}–${end.day}';
+  }
+  if (window.start.year == end.year) {
+    return '${months[window.start.month - 1]} ${window.start.day}–'
+        '${months[end.month - 1]} ${end.day}';
+  }
+  return '${months[window.start.month - 1]} ${window.start.day}, '
+      '${window.start.year}–${months[end.month - 1]} ${end.day}, ${end.year}';
+}
+
+class _BudgetFormResult {
+  const _BudgetFormResult({
+    required this.name,
+    required this.amountMinor,
+    required this.categoryIds,
+    required this.period,
+    required this.anchorDate,
+    required this.weekStartDay,
+    required this.rolloverEnabled,
+    required this.includeSubcategories,
+    required this.note,
+  });
+
+  final String name;
+  final int amountMinor;
+  final List<String> categoryIds;
+  final BudgetPeriod period;
+  final DateTime anchorDate;
+  final int weekStartDay;
+  final bool rolloverEnabled;
+  final bool includeSubcategories;
+  final String note;
+}
+
+enum _BudgetEditScope { thisPeriod, thisAndFuture, nextPeriod }
+
+Future<void> showBudgetDetails(
+  BuildContext context,
+  BudgetRecord budget,
+) async {
+  final store = FinanceDataStoreScope.read(context);
+  final currency = store.preferences.currency;
+  final history = store.budgetHistoryThrough(budget);
+  var periodIndex = history.length - 1;
+
+  final action = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        final period = history[periodIndex];
+        final remaining = period.remainingMinor;
+        final current = periodIndex == history.length - 1;
+        final categoriesById = {
+          for (final category in store.categories) category.id: category,
+        };
+        final categoryNames = period.configuration.categoryIds
+            .map((id) => categoriesById[id]?.name ?? 'Unknown category')
+            .join(', ');
+        final today = budgetDateKey(DateTime.now());
+        final daysLeft = current
+            ? period.window.endExclusive.difference(today).inDays
+            : 0;
+
+        return TransactionSheetFrame(
+          title: 'Budget Details',
+          actions: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Close'),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: budget.isArchived
+                      ? null
+                      : () => Navigator.pop(dialogContext, 'archive'),
+                  icon: Icon(AppIcon.archive),
+                  label: const Text('Archive'),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: budget.isArchived
+                      ? null
+                      : () => Navigator.pop(dialogContext, 'edit'),
+                  icon: Icon(AppIcon.edit),
+                  label: const Text('Edit'),
+                ),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                budget.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Previous period',
+                    onPressed: periodIndex > 0
+                        ? () => setDialogState(() => periodIndex--)
+                        : null,
+                    icon: Icon(AppIcon.chevronLeft),
+                  ),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          period.configuration.period.label,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        Text(
+                          budgetPeriodDateRange(period.window),
+                          style: const TextStyle(color: AppTheme.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Next period',
+                    onPressed: periodIndex < history.length - 1
+                        ? () => setDialogState(() => periodIndex++)
+                        : null,
+                    icon: Icon(AppIcon.chevronRight),
+                  ),
+                ],
+              ),
+              const TransactionFormDivider(),
+              ScheduledTransactionDetailRow(
+                icon: AppIcon.category,
+                label: period.configuration.categoryIds.length == 1
+                    ? 'Category'
+                    : 'Categories',
+                value: categoryNames,
+              ),
+              const TransactionFormDivider(),
+              ScheduledTransactionDetailRow(
+                icon: AppIcon.money,
+                label: 'Base budget',
+                value: money(period.baseAmountMinor, currency),
+                tabularFigures: true,
+              ),
+              const TransactionFormDivider(),
+              ScheduledTransactionDetailRow(
+                icon: AppIcon.recurrence,
+                label: 'Rollover brought forward',
+                value: period.configuration.rolloverEnabled
+                    ? money(period.rolloverInMinor, currency)
+                    : 'Off',
+                tabularFigures: true,
+              ),
+              const TransactionFormDivider(),
+              ScheduledTransactionDetailRow(
+                icon: AppIcon.wallet,
+                label: 'Available this period',
+                value: money(period.availableMinor, currency),
+                tabularFigures: true,
+              ),
+              const TransactionFormDivider(),
+              ScheduledTransactionDetailRow(
+                icon: AppIcon.expense,
+                label: 'Spent',
+                value: money(period.spentMinor, currency),
+                valueColor: period.spentMinor == 0 ? AppTheme.muted : null,
+                tabularFigures: true,
+              ),
+              const TransactionFormDivider(),
+              ScheduledTransactionDetailRow(
+                icon: remaining < 0 ? AppIcon.error : AppIcon.check,
+                label: remaining < 0 ? 'Over budget' : 'Remaining',
+                value: money(remaining.abs(), currency),
+                valueColor: remaining < 0 ? AppTheme.rose : AppTheme.accent,
+                tabularFigures: true,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              BudgetProgressBar(
+                spentMinor: period.spentMinor,
+                budgetMinor: period.availableMinor,
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                current && daysLeft > 0
+                    ? '$daysLeft ${daysLeft == 1 ? 'day' : 'days'} left'
+                    : current
+                    ? 'Current period'
+                    : 'Completed period · Rollover out ${money(period.rolloverOutMinor, currency)}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppTheme.muted),
+              ),
+              const TransactionFormDivider(),
+              Text(
+                'Transactions this period',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+              ),
+              if (period.includedTransactions.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+                  child: Text(
+                    'No spending yet this period',
+                    style: TextStyle(color: AppTheme.muted),
+                  ),
+                )
+              else
+                for (final included in period.includedTransactions)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      included.transaction.payee.trim().isEmpty
+                          ? 'Expense'
+                          : included.transaction.payee,
+                    ),
+                    subtitle: Text(dateShort(included.transaction.date)),
+                    trailing: Text(
+                      money(included.amountMinor, currency),
+                      style: const TextStyle(
+                        color: AppTheme.rose,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.pop(dialogContext);
+                      unawaited(
+                        showTransactionDetails(
+                          context,
+                          included.transaction.id,
+                        ),
+                      );
+                    },
+                  ),
+              if (budget.note.trim().isNotEmpty) ...[
+                const TransactionFormDivider(),
+                ScheduledTransactionDetailRow(
+                  icon: AppIcon.notes,
+                  label: 'Note',
+                  value: budget.note,
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    ),
+  );
+
+  if (!context.mounted || action == null) return;
+  if (action == 'edit') {
+    await showBudgetDialog(context, budget: budget);
+  } else if (action == 'archive') {
+    await FinanceDataStoreScope.read(context).archiveBudget(budget.id);
+  }
+}
+
 Future<void> showBudgetDialog(
   BuildContext context, {
   BudgetRecord? budget,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
+  final calculator = const BudgetCalculator();
+  final now = budgetDateKey(DateTime.now());
+  final currentConfiguration = budget == null
+      ? null
+      : calculator.configurationAt(budget, now);
   final name = TextEditingController(text: budget?.name ?? '');
-  var amountMinor = budget?.amountMinor ?? 0;
-  final selectedCategoryIds = {...?budget?.categoryIds};
+  final note = TextEditingController(text: budget?.note ?? '');
+  var amountMinor = currentConfiguration?.amountMinor ?? 0;
+  final selectedCategoryIds = {...?currentConfiguration?.categoryIds};
+  var period = currentConfiguration?.period ?? BudgetPeriod.monthly;
+  var anchorDate = currentConfiguration?.anchorDate ?? now;
+  var weekStartDay = currentConfiguration?.weekStartDay ?? DateTime.sunday;
+  var rolloverEnabled = currentConfiguration?.rolloverEnabled ?? false;
+  var includeSubcategories = currentConfiguration?.includeSubcategories ?? true;
   final categories = dataStore.categories
       .where(
         (category) =>
@@ -8606,172 +9057,484 @@ Future<void> showBudgetDialog(
       )
       .toList(growable: false);
 
-  final result =
-      await showDialog<
-        ({String name, int amountMinor, List<String> categoryIds})
-      >(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) {
-            final theme = Theme.of(context);
-            final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
-              fontSize: 17,
-              fontWeight: FontWeight.w400,
-              letterSpacing: 0,
-              height: 1.15,
-            );
-            final fieldHintStyle = fieldValueStyle?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            );
-            const borderlessDecoration = InputDecoration(
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.symmetric(vertical: 8),
-            );
+  final result = await showDialog<_BudgetFormResult>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        final theme = Theme.of(context);
+        final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
+          fontSize: 17,
+          fontWeight: FontWeight.w400,
+          letterSpacing: 0,
+          height: 1.15,
+        );
+        final fieldHintStyle = fieldValueStyle?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        );
+        const borderlessDecoration = InputDecoration(
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          isDense: true,
+          contentPadding: EdgeInsets.symmetric(vertical: 8),
+        );
 
-            void saveBudgetResult() {
-              Navigator.pop(context, (
-                name: name.text.trim(),
-                amountMinor: amountMinor.abs(),
-                categoryIds: selectedCategoryIds.toList(),
-              ));
-            }
+        void saveBudgetResult() {
+          Navigator.pop(
+            context,
+            _BudgetFormResult(
+              name: name.text.trim(),
+              amountMinor: amountMinor.abs(),
+              categoryIds: selectedCategoryIds.toList(),
+              period: period,
+              anchorDate: budgetDateKey(anchorDate),
+              weekStartDay: weekStartDay,
+              rolloverEnabled: rolloverEnabled,
+              includeSubcategories: includeSubcategories,
+              note: note.text.trim(),
+            ),
+          );
+        }
 
-            return TransactionSheetFrame(
-              title: budget == null ? 'Add Budget' : 'Edit Budget',
-              actions: TransactionFormActions(
-                onCancel: () => Navigator.pop(context),
-                onSave: saveBudgetResult,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
+        final canSave =
+            name.text.trim().isNotEmpty &&
+            amountMinor > 0 &&
+            selectedCategoryIds.isNotEmpty;
+
+        return TransactionSheetFrame(
+          title: budget == null ? 'Create Budget' : 'Edit Budget',
+          actions: TransactionFormActions(
+            onCancel: () => Navigator.pop(context),
+            onSave: canSave ? saveBudgetResult : null,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TransactionFormLabel('Name'),
+              Row(
                 children: [
-                  const TransactionFormLabel('Name'),
-                  Row(
-                    children: [
-                      const TransactionFormIcon(Icons.pie_chart_outline),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: TextField(
-                          controller: name,
-                          decoration: borderlessDecoration.copyWith(
-                            hintText: 'Budget name',
-                            hintStyle: fieldHintStyle,
-                          ),
-                          textCapitalization: TextCapitalization.words,
-                          textInputAction: TextInputAction.next,
-                          style: fieldValueStyle,
-                          autofocus: true,
-                        ),
+                  TransactionFormIcon(AppIcon.pieChart),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: TextField(
+                      controller: name,
+                      decoration: borderlessDecoration.copyWith(
+                        hintText: 'Budget name',
+                        hintStyle: fieldHintStyle,
                       ),
-                    ],
-                  ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Budget amount'),
-                  Row(
-                    children: [
-                      const TransactionFormIcon(Icons.attach_money),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: AmountEntryField(
-                          fieldKey: const ValueKey('budget-amount'),
-                          initialMinor: amountMinor,
-                          currency: dataStore.preferences.currency,
-                          labelText: null,
-                          keyboardType: TextInputType.number,
-                          decoration: borderlessDecoration,
-                          textStyle: fieldValueStyle,
-                          onChanged: (value) => amountMinor = value,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const TransactionFormDivider(),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 1, bottom: 2),
-                    child: Text(
-                      'Categories',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: AppTheme.accent,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0,
-                      ),
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.next,
+                      style: fieldValueStyle,
+                      autofocus: true,
+                      onChanged: (_) => setDialogState(() {}),
                     ),
                   ),
-                  Text(
-                    'Choose the expense categories included in this budget.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  for (var index = 0; index < categories.length; index++) ...[
-                    CheckboxListTile(
-                      key: ValueKey('budget-category-${categories[index].id}'),
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      visualDensity: const VisualDensity(vertical: -1),
-                      secondary: TransactionFormIcon(
-                        categoryIcon(categories[index]),
-                        color: categories[index].colorValue == null
-                            ? null
-                            : Color(categories[index].colorValue!),
-                      ),
-                      title: Text(
-                        categories[index].name,
-                        style: fieldValueStyle,
-                      ),
-                      value: selectedCategoryIds.contains(categories[index].id),
-                      activeColor: AppTheme.accent,
-                      onChanged: (value) => setDialogState(() {
-                        if (value ?? false) {
-                          selectedCategoryIds.add(categories[index].id);
-                        } else {
-                          selectedCategoryIds.remove(categories[index].id);
-                        }
-                      }),
-                    ),
-                    if (index != categories.length - 1)
-                      Divider(
-                        height: 1,
-                        indent: 56,
-                        color: theme.colorScheme.outlineVariant.withValues(
-                          alpha: 0.38,
-                        ),
-                      ),
-                  ],
                 ],
               ),
-            );
-          },
-        ),
-      );
+              TransactionFormDivider(),
+              TransactionFormLabel('Budget amount'),
+              Row(
+                children: [
+                  TransactionFormIcon(AppIcon.money),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: AmountEntryField(
+                      fieldKey: const ValueKey('budget-amount'),
+                      initialMinor: amountMinor,
+                      currency: dataStore.preferences.currency,
+                      labelText: null,
+                      keyboardType: TextInputType.number,
+                      decoration: borderlessDecoration,
+                      textStyle: fieldValueStyle,
+                      onChanged: (value) =>
+                          setDialogState(() => amountMinor = value),
+                    ),
+                  ),
+                ],
+              ),
+              const TransactionFormDivider(),
+              Padding(
+                padding: const EdgeInsets.only(top: 1, bottom: 2),
+                child: Text(
+                  'Categories',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: AppTheme.accent,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0,
+                  ),
+                ),
+              ),
+              Text(
+                'Choose the expense categories included in this budget.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              for (var index = 0; index < categories.length; index++) ...[
+                CheckboxListTile(
+                  key: ValueKey('budget-category-${categories[index].id}'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  visualDensity: const VisualDensity(vertical: -1),
+                  secondary: TransactionFormIcon(
+                    categoryIcon(categories[index]),
+                    color: categories[index].colorValue == null
+                        ? null
+                        : Color(categories[index].colorValue!),
+                  ),
+                  title: Text(categories[index].name, style: fieldValueStyle),
+                  value: selectedCategoryIds.contains(categories[index].id),
+                  activeColor: AppTheme.accent,
+                  onChanged: (value) => setDialogState(() {
+                    if (value ?? false) {
+                      selectedCategoryIds.add(categories[index].id);
+                    } else {
+                      selectedCategoryIds.remove(categories[index].id);
+                    }
+                  }),
+                ),
+                if (index != categories.length - 1)
+                  Divider(
+                    height: 1,
+                    indent: 56,
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.38,
+                    ),
+                  ),
+              ],
+              if (categories.any(
+                (category) =>
+                    selectedCategoryIds.contains(category.id) &&
+                    categories.any(
+                      (candidate) =>
+                          candidate.parentCategoryId == category.id &&
+                          candidate.isVisible,
+                    ),
+              )) ...[
+                const TransactionFormDivider(),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Include subcategories',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: const Text(
+                    'Count spending in child categories too.',
+                  ),
+                  value: includeSubcategories,
+                  onChanged: (value) =>
+                      setDialogState(() => includeSubcategories = value),
+                ),
+              ],
+              const TransactionFormDivider(),
+              TransactionFormLabel('Period'),
+              InkWell(
+                key: const ValueKey('budget-period'),
+                onTap: () async {
+                  final selected = await showPolishedChoicePicker(
+                    context,
+                    title: 'Budget period',
+                    selected: period,
+                    choices: [
+                      for (final value in BudgetPeriod.values)
+                        PolishedChoice(
+                          value: value,
+                          label: value.label,
+                          leading: Icon(AppIcon.calendar),
+                        ),
+                    ],
+                  );
+                  if (selected != null) {
+                    setDialogState(() {
+                      period = selected;
+                      if (period != BudgetPeriod.biweekly) {
+                        anchorDate = now;
+                      }
+                    });
+                  }
+                },
+                child: TransactionFormValueRow(
+                  icon: AppIcon.calendar,
+                  value: period.label,
+                  trailing: Icon(AppIcon.chevronDown),
+                ),
+              ),
+              const TransactionFormDivider(),
+              if (period == BudgetPeriod.weekly) ...[
+                TransactionFormLabel('Week starts'),
+                InkWell(
+                  key: const ValueKey('budget-week-start'),
+                  onTap: () async {
+                    final selected = await showPolishedChoicePicker(
+                      context,
+                      title: 'Week starts',
+                      selected: weekStartDay,
+                      choices: [
+                        PolishedChoice(value: DateTime.sunday, label: 'Sunday'),
+                        PolishedChoice(value: DateTime.monday, label: 'Monday'),
+                      ],
+                    );
+                    if (selected != null) {
+                      setDialogState(() => weekStartDay = selected);
+                    }
+                  },
+                  child: TransactionFormValueRow(
+                    icon: AppIcon.calendar,
+                    value: weekStartDay == DateTime.monday
+                        ? 'Monday'
+                        : 'Sunday',
+                    trailing: Icon(AppIcon.chevronDown),
+                  ),
+                ),
+                const TransactionFormDivider(),
+              ] else if (period == BudgetPeriod.biweekly) ...[
+                TransactionFormLabel('Period anchor'),
+                InkWell(
+                  key: const ValueKey('budget-anchor-date'),
+                  onTap: () async {
+                    final selected = await pickDateForField(
+                      context,
+                      anchorDate,
+                    );
+                    if (selected != null) {
+                      setDialogState(() => anchorDate = selected);
+                    }
+                  },
+                  child: TransactionFormValueRow(
+                    icon: AppIcon.calendar,
+                    value: fullMonthDateLabel(anchorDate),
+                    secondary: 'Each period lasts 14 days',
+                    trailing: Icon(AppIcon.chevronDown),
+                  ),
+                ),
+                const TransactionFormDivider(),
+              ] else ...[
+                TransactionFormLabel('Reset rule'),
+                TransactionFormValueRow(
+                  icon: AppIcon.recurrence,
+                  value: switch (period) {
+                    BudgetPeriod.monthly => 'First day of each month',
+                    BudgetPeriod.quarterly => 'Calendar quarters',
+                    BudgetPeriod.yearly => 'January 1',
+                    _ => period.label,
+                  },
+                ),
+                const TransactionFormDivider(),
+              ],
+              SwitchListTile.adaptive(
+                key: const ValueKey('budget-rollover'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Rollover unused amount',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text(
+                  'Unused or overspent amounts carry into the next budget period.',
+                ),
+                value: rolloverEnabled,
+                onChanged: (value) =>
+                    setDialogState(() => rolloverEnabled = value),
+              ),
+              const TransactionFormDivider(),
+              TransactionFormLabel('Note'),
+              Row(
+                children: [
+                  TransactionFormIcon(AppIcon.notes),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: TextField(
+                      controller: note,
+                      decoration: borderlessDecoration.copyWith(
+                        hintText: 'Add a note (optional)',
+                        hintStyle: fieldHintStyle,
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                      style: fieldValueStyle,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
 
-  if (result == null || result.name.isEmpty) return;
+  if (!context.mounted ||
+      result == null ||
+      result.name.isEmpty ||
+      result.amountMinor <= 0 ||
+      result.categoryIds.isEmpty) {
+    return;
+  }
   HapticFeedback.mediumImpact();
   if (budget == null) {
+    final id = 'budget_${DateTime.now().microsecondsSinceEpoch}';
+    final provisional = BudgetConfigurationRevision(
+      id: '${id}_configuration_${DateTime.now().microsecondsSinceEpoch}',
+      effectiveDate: now,
+      period: result.period,
+      amountMinor: result.amountMinor,
+      categoryIds: result.categoryIds,
+      anchorDate: result.period == BudgetPeriod.biweekly
+          ? result.anchorDate
+          : now,
+      weekStartDay: result.weekStartDay,
+      rolloverEnabled: result.rolloverEnabled,
+      includeSubcategories: result.includeSubcategories,
+    );
+    final effectiveDate = calculator
+        .periodWindowContaining(provisional, now)
+        .start;
+    final configuration = provisional.copyWith(effectiveDate: effectiveDate);
     await dataStore.saveBudget(
       BudgetRecord(
-        id: 'budget_${DateTime.now().microsecondsSinceEpoch}',
+        id: id,
         name: result.name,
+        period: result.period,
         amountMinor: result.amountMinor,
         categoryIds: result.categoryIds,
+        anchorDate: configuration.anchorDate,
+        weekStartDay: result.weekStartDay,
+        rolloverEnabled: result.rolloverEnabled,
+        includeSubcategories: result.includeSubcategories,
+        note: result.note,
+        configurationRevisions: [configuration],
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
       ),
     );
     return;
   }
 
+  final structuralChange =
+      result.period != currentConfiguration!.period ||
+      result.weekStartDay != currentConfiguration.weekStartDay ||
+      (result.period == BudgetPeriod.biweekly &&
+          !isSameCalendarDay(
+            result.anchorDate,
+            currentConfiguration.anchorDate,
+          ));
+  final financialChange =
+      result.amountMinor != currentConfiguration.amountMinor ||
+      !_sameStringSet(result.categoryIds, currentConfiguration.categoryIds) ||
+      result.rolloverEnabled != currentConfiguration.rolloverEnabled ||
+      result.includeSubcategories != currentConfiguration.includeSubcategories;
+  var scope = _BudgetEditScope.thisAndFuture;
+  if (structuralChange) {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Change future budget periods?'),
+        content: const Text(
+          'The new period structure will begin after the current period. '
+          'Completed budget history will remain unchanged.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Begin Next Period'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    scope = _BudgetEditScope.nextPeriod;
+  } else if (financialChange) {
+    if (!context.mounted) return;
+    final selected = await showPolishedChoicePicker<_BudgetEditScope>(
+      context,
+      title: 'Apply changes to',
+      selected: _BudgetEditScope.thisAndFuture,
+      choices: const [
+        PolishedChoice(
+          value: _BudgetEditScope.thisPeriod,
+          label: 'This period only',
+        ),
+        PolishedChoice(
+          value: _BudgetEditScope.thisAndFuture,
+          label: 'This and future periods',
+        ),
+      ],
+    );
+    if (selected == null) return;
+    scope = selected;
+  }
+
+  final currentWindow = calculator.periodWindowContaining(
+    currentConfiguration,
+    now,
+  );
+  final changeEffectiveDate = scope == _BudgetEditScope.nextPeriod
+      ? currentWindow.endExclusive
+      : currentWindow.start;
+  final changed = currentConfiguration.copyWith(
+    id: '${budget.id}_configuration_${DateTime.now().microsecondsSinceEpoch}',
+    effectiveDate: changeEffectiveDate,
+    period: result.period,
+    amountMinor: result.amountMinor,
+    categoryIds: result.categoryIds,
+    anchorDate: result.period == BudgetPeriod.biweekly
+        ? result.anchorDate
+        : changeEffectiveDate,
+    weekStartDay: result.weekStartDay,
+    rolloverEnabled: result.rolloverEnabled,
+    includeSubcategories: result.includeSubcategories,
+  );
+  final revisions = calculator.normalizedRevisions(budget).where((revision) {
+    final effective = budgetDateKey(revision.effectiveDate);
+    if (scope == _BudgetEditScope.nextPeriod) {
+      return effective.isBefore(changeEffectiveDate);
+    }
+    if (scope == _BudgetEditScope.thisPeriod) {
+      return effective.isBefore(currentWindow.start) ||
+          !effective.isBefore(currentWindow.endExclusive);
+    }
+    return effective.isBefore(currentWindow.start);
+  }).toList();
+  revisions.add(changed);
+  final hasNextBoundary = revisions.any(
+    (revision) =>
+        isSameCalendarDay(revision.effectiveDate, currentWindow.endExclusive),
+  );
+  if (scope == _BudgetEditScope.thisPeriod && !hasNextBoundary) {
+    revisions.add(
+      currentConfiguration.copyWith(
+        id: '${budget.id}_configuration_revert_${DateTime.now().microsecondsSinceEpoch}',
+        effectiveDate: currentWindow.endExclusive,
+      ),
+    );
+  }
+  revisions.sort(
+    (left, right) => left.effectiveDate.compareTo(right.effectiveDate),
+  );
+  final latest = revisions.last;
   await dataStore.saveBudget(
     budget.copyWith(
       name: result.name,
-      amountMinor: result.amountMinor,
-      categoryIds: result.categoryIds,
+      period: latest.period,
+      amountMinor: latest.amountMinor,
+      categoryIds: latest.categoryIds,
+      anchorDate: latest.anchorDate,
+      weekStartDay: latest.weekStartDay,
+      rolloverEnabled: latest.rolloverEnabled,
+      includeSubcategories: latest.includeSubcategories,
+      note: result.note,
+      configurationRevisions: revisions,
     ),
   );
+}
+
+bool _sameStringSet(Iterable<String> left, Iterable<String> right) {
+  final leftSet = left.toSet();
+  final rightSet = right.toSet();
+  return leftSet.length == rightSet.length && leftSet.containsAll(rightSet);
 }
 
 Future<void> showBudgetActions(
@@ -8790,25 +9553,25 @@ Future<void> showBudgetActions(
         children: [
           if (allows('adjust'))
             ListTile(
-              leading: const Icon(Icons.tune),
-              title: const Text('Adjust Budget'),
+              leading: Icon(AppIcon.tune),
+              title: Text('Adjust Budget'),
               onTap: () => Navigator.pop(sheetContext, 'adjust'),
             ),
           if (allows('edit'))
             ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit'),
+              leading: Icon(AppIcon.edit),
+              title: Text('Edit'),
               onTap: () => Navigator.pop(sheetContext, 'edit'),
             ),
           if (allows('archive'))
             ListTile(
-              leading: const Icon(Icons.archive_outlined),
-              title: const Text('Archive'),
+              leading: Icon(AppIcon.archive),
+              title: Text('Archive'),
               onTap: () => Navigator.pop(sheetContext, 'archive'),
             ),
           if (allows('delete'))
             ListTile(
-              leading: const Icon(Icons.delete_outline),
+              leading: Icon(AppIcon.delete),
               title: const Text('Delete'),
               textColor: AppTheme.rose,
               iconColor: AppTheme.rose,
@@ -8828,7 +9591,30 @@ Future<void> showBudgetActions(
     case 'archive':
       await FinanceDataStoreScope.read(context).archiveBudget(budget.id);
     case 'delete':
-      await FinanceDataStoreScope.read(context).deleteBudget(budget.id);
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Delete budget?'),
+          content: const Text(
+            'This removes the budget and its derived history. '
+            'Your ledger transactions will not be deleted.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.rose),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete Budget'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true && context.mounted) {
+        await FinanceDataStoreScope.read(context).deleteBudget(budget.id);
+      }
   }
 }
 
@@ -8871,16 +9657,16 @@ Future<void> showAdjustBalanceDialog(
                   DialogFieldGroup(
                     label: 'Balance type',
                     child: SegmentedButton<bool>(
-                      segments: const [
+                      segments: [
                         ButtonSegment<bool>(
                           value: true,
                           label: Text('Debt'),
-                          icon: Icon(Icons.remove_circle_outline),
+                          icon: Icon(AppIcon.expense),
                         ),
                         ButtonSegment<bool>(
                           value: false,
                           label: Text('Credit'),
-                          icon: Icon(Icons.add_circle_outline),
+                          icon: Icon(AppIcon.income),
                         ),
                       ],
                       selected: {isDebtBalance},
@@ -8969,20 +9755,20 @@ Future<void> showAccountOptions(
           children: [
             if (allows('expense'))
               ListTile(
-                leading: const Icon(Icons.remove_circle_outline),
-                title: const Text('Add Expense'),
+                leading: Icon(AppIcon.expense),
+                title: Text('Add Expense'),
                 onTap: () => Navigator.pop(context, 'expense'),
               ),
             if (allows('income'))
               ListTile(
-                leading: const Icon(Icons.add_circle_outline),
+                leading: Icon(AppIcon.income),
                 title: const Text('Add Income'),
                 onTap: () => Navigator.pop(context, 'income'),
               ),
             if (allows('transfer'))
               ListTile(
                 enabled: dataStore.activeAccountsInDisplayOrder.length > 1,
-                leading: const Icon(Icons.swap_horiz),
+                leading: Icon(AppIcon.transfer),
                 title: const Text('Transfer'),
                 onTap: dataStore.activeAccountsInDisplayOrder.length > 1
                     ? () => Navigator.pop(context, 'transfer')
@@ -8990,14 +9776,14 @@ Future<void> showAccountOptions(
               ),
             if (allows('adjust'))
               ListTile(
-                leading: const Icon(Icons.tune),
-                title: const Text('Adjust Balance'),
+                leading: Icon(AppIcon.tune),
+                title: Text('Adjust Balance'),
                 onTap: () => Navigator.pop(context, 'adjust'),
               ),
             if (allows('moveUp'))
               ListTile(
                 enabled: canMoveUp,
-                leading: const Icon(Icons.arrow_upward),
+                leading: Icon(AppIcon.arrowUp),
                 title: const Text('Move Up'),
                 onTap: canMoveUp
                     ? () => Navigator.pop(context, 'moveUp')
@@ -9006,7 +9792,7 @@ Future<void> showAccountOptions(
             if (allows('moveDown'))
               ListTile(
                 enabled: canMoveDown,
-                leading: const Icon(Icons.arrow_downward),
+                leading: Icon(AppIcon.arrowDown),
                 title: const Text('Move Down'),
                 onTap: canMoveDown
                     ? () => Navigator.pop(context, 'moveDown')
@@ -9014,25 +9800,25 @@ Future<void> showAccountOptions(
               ),
             if (allows('changeType'))
               ListTile(
-                leading: const Icon(Icons.category_outlined),
-                title: const Text('Change Type'),
+                leading: Icon(AppIcon.categoryGroup),
+                title: Text('Change Type'),
                 onTap: () => Navigator.pop(context, 'changeType'),
               ),
             if (allows('edit'))
               ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('Edit'),
+                leading: Icon(AppIcon.edit),
+                title: Text('Edit'),
                 onTap: () => Navigator.pop(context, 'edit'),
               ),
             if (allows('archive'))
               ListTile(
-                leading: const Icon(Icons.archive_outlined),
-                title: const Text('Archive'),
+                leading: Icon(AppIcon.archive),
+                title: Text('Archive'),
                 onTap: () => Navigator.pop(context, 'archive'),
               ),
             if (allows('delete'))
               ListTile(
-                leading: const Icon(Icons.delete_outline),
+                leading: Icon(AppIcon.delete),
                 title: const Text('Delete'),
                 textColor: AppTheme.rose,
                 iconColor: AppTheme.rose,
@@ -9106,7 +9892,7 @@ Future<void> showChangeAccountTypeDialog(
               leading: Icon(v2AccountIcon(type)),
               title: Text(v2AccountTypeLabel(type)),
               trailing: type == account.type
-                  ? const Icon(Icons.check, color: AppTheme.accent)
+                  ? Icon(AppIcon.check, color: AppTheme.accent)
                   : null,
               onTap: () => Navigator.pop(sheetContext, type),
             ),
@@ -9195,12 +9981,10 @@ Future<void> showEditAccountDialog(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const TransactionFormLabel('Name'),
+                  TransactionFormLabel('Name'),
                   Row(
                     children: [
-                      const TransactionFormIcon(
-                        Icons.account_balance_wallet_outlined,
-                      ),
+                      TransactionFormIcon(AppIcon.wallet),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: TextField(
@@ -9243,7 +10027,7 @@ Future<void> showEditAccountDialog(
                               style: fieldValueStyle,
                             ),
                           ),
-                          const Icon(Icons.keyboard_arrow_down, size: 28),
+                          Icon(AppIcon.chevronDown, size: AppIconSize.hero),
                         ],
                       ),
                     ),
@@ -9265,13 +10049,11 @@ Future<void> showEditAccountDialog(
                             key: const ValueKey('credit-limit-field'),
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              const TransactionFormDivider(),
-                              const TransactionFormLabel('Credit limit'),
+                              TransactionFormDivider(),
+                              TransactionFormLabel('Credit limit'),
                               Row(
                                 children: [
-                                  const TransactionFormIcon(
-                                    Icons.credit_card_outlined,
-                                  ),
+                                  TransactionFormIcon(AppIcon.creditCard),
                                   const SizedBox(width: AppSpacing.md),
                                   Expanded(
                                     child: AmountEntryField(
@@ -9298,14 +10080,10 @@ Future<void> showEditAccountDialog(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               const TransactionFormDivider(),
-                              const TransactionFormLabel(
-                                'Original loan amount',
-                              ),
+                              TransactionFormLabel('Original loan amount'),
                               Row(
                                 children: [
-                                  const TransactionFormIcon(
-                                    Icons.request_quote_outlined,
-                                  ),
+                                  TransactionFormIcon(AppIcon.loan),
                                   const SizedBox(width: AppSpacing.md),
                                   Expanded(
                                     child: AmountEntryField(
@@ -9330,13 +10108,11 @@ Future<void> showEditAccountDialog(
                             key: ValueKey('no-account-extra-field'),
                           ),
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Balance options'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Balance options'),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
-                    secondary: const TransactionFormIcon(
-                      Icons.account_balance_outlined,
-                    ),
+                    secondary: TransactionFormIcon(AppIcon.bank),
                     title: Text(
                       'Include in group balance',
                       style: fieldValueStyle,
@@ -9354,9 +10130,7 @@ Future<void> showEditAccountDialog(
                   ),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
-                    secondary: const TransactionFormIcon(
-                      Icons.pie_chart_outline,
-                    ),
+                    secondary: TransactionFormIcon(AppIcon.pieChart),
                     title: Text('Include in net worth', style: fieldValueStyle),
                     value: includeInNetWorth,
                     onChanged: (value) =>
@@ -9423,47 +10197,47 @@ Future<void> showFloatingAddMenu(
     return switch (action) {
       'expense' => FloatingActionMenuItem(
         label: 'Expense',
-        leading: const Icon(Icons.remove_circle_outline),
+        leading: Icon(AppIcon.expense),
         onSelected: () => Navigator.pop(context, 'expense'),
       ),
       'income' => FloatingActionMenuItem(
         label: 'Income',
-        leading: const Icon(Icons.add_circle_outline),
+        leading: Icon(AppIcon.income),
         onSelected: () => Navigator.pop(context, 'income'),
       ),
       'transfer' => FloatingActionMenuItem(
         label: 'Transfer',
-        leading: const Icon(Icons.swap_horiz),
+        leading: Icon(AppIcon.transfer),
         onSelected: () => Navigator.pop(context, 'transfer'),
       ),
       'account' => FloatingActionMenuItem(
         label: 'Account',
-        leading: const Icon(Icons.account_balance_wallet_outlined),
+        leading: Icon(AppIcon.wallet),
         onSelected: () => Navigator.pop(context, 'account'),
       ),
       'budget' => FloatingActionMenuItem(
         label: 'Budget',
-        leading: const Icon(Icons.pie_chart_outline),
+        leading: Icon(AppIcon.pieChart),
         onSelected: () => Navigator.pop(context, 'budget'),
       ),
       'goal' => FloatingActionMenuItem(
         label: 'Create Goal',
-        leading: const Icon(Icons.flag_outlined),
+        leading: Icon(AppIcon.goal),
         onSelected: () => Navigator.pop(context, 'goal'),
       ),
       'goalFunding' => FloatingActionMenuItem(
         label: 'Fund Goals',
-        leading: const Icon(Icons.savings_outlined),
+        leading: Icon(AppIcon.savings),
         onSelected: () => Navigator.pop(context, 'goalFunding'),
       ),
       'category' => FloatingActionMenuItem(
         label: 'Category',
-        leading: const Icon(Icons.sell_outlined),
+        leading: Icon(AppIcon.category),
         onSelected: () => Navigator.pop(context, 'category'),
       ),
       _ => FloatingActionMenuItem(
         label: 'Scheduled Transaction',
-        leading: const Icon(Icons.event_repeat_outlined),
+        leading: Icon(AppIcon.recurrence),
         onSelected: () => Navigator.pop(context, 'scheduled'),
       ),
     };
@@ -9613,12 +10387,10 @@ Future<void> showAccountDialog(BuildContext context) async {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const TransactionFormLabel('Name'),
+                  TransactionFormLabel('Name'),
                   Row(
                     children: [
-                      const TransactionFormIcon(
-                        Icons.account_balance_wallet_outlined,
-                      ),
+                      TransactionFormIcon(AppIcon.wallet),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: TextField(
@@ -9661,7 +10433,7 @@ Future<void> showAccountDialog(BuildContext context) async {
                               style: fieldValueStyle,
                             ),
                           ),
-                          const Icon(Icons.keyboard_arrow_down, size: 28),
+                          Icon(AppIcon.chevronDown, size: AppIconSize.hero),
                         ],
                       ),
                     ),
@@ -9683,13 +10455,11 @@ Future<void> showAccountDialog(BuildContext context) async {
                             key: const ValueKey('credit-limit-field'),
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              const TransactionFormDivider(),
-                              const TransactionFormLabel('Credit limit'),
+                              TransactionFormDivider(),
+                              TransactionFormLabel('Credit limit'),
                               Row(
                                 children: [
-                                  const TransactionFormIcon(
-                                    Icons.credit_card_outlined,
-                                  ),
+                                  TransactionFormIcon(AppIcon.creditCard),
                                   const SizedBox(width: AppSpacing.md),
                                   Expanded(
                                     child: AmountEntryField(
@@ -9716,14 +10486,10 @@ Future<void> showAccountDialog(BuildContext context) async {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               const TransactionFormDivider(),
-                              const TransactionFormLabel(
-                                'Original loan amount',
-                              ),
+                              TransactionFormLabel('Original loan amount'),
                               Row(
                                 children: [
-                                  const TransactionFormIcon(
-                                    Icons.request_quote_outlined,
-                                  ),
+                                  TransactionFormIcon(AppIcon.loan),
                                   const SizedBox(width: AppSpacing.md),
                                   Expanded(
                                     child: AmountEntryField(
@@ -9748,11 +10514,11 @@ Future<void> showAccountDialog(BuildContext context) async {
                             key: ValueKey('no-account-extra-field'),
                           ),
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Opening balance'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Opening balance'),
                   Row(
                     children: [
-                      const TransactionFormIcon(Icons.attach_money),
+                      TransactionFormIcon(AppIcon.money),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: AmountEntryField(
@@ -9768,13 +10534,11 @@ Future<void> showAccountDialog(BuildContext context) async {
                       ),
                     ],
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Balance options'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Balance options'),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
-                    secondary: const TransactionFormIcon(
-                      Icons.account_balance_outlined,
-                    ),
+                    secondary: TransactionFormIcon(AppIcon.bank),
                     title: Text(
                       'Include in group balance',
                       style: fieldValueStyle,
@@ -9792,9 +10556,7 @@ Future<void> showAccountDialog(BuildContext context) async {
                   ),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
-                    secondary: const TransactionFormIcon(
-                      Icons.pie_chart_outline,
-                    ),
+                    secondary: TransactionFormIcon(AppIcon.pieChart),
                     title: Text('Include in net worth', style: fieldValueStyle),
                     value: includeInNetWorth,
                     onChanged: (value) =>
@@ -10029,12 +10791,12 @@ Future<void> showTransferDialog(
                 child: Opacity(
                   opacity: enabled ? 1 : 0.46,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    padding: EdgeInsets.symmetric(vertical: 3),
                     child: Row(
                       children: [
                         TransactionFormIcon(
                           account == null
-                              ? Icons.account_balance_wallet_outlined
+                              ? AppIcon.wallet
                               : v2AccountIcon(account.type),
                         ),
                         const SizedBox(width: AppSpacing.md),
@@ -10062,8 +10824,8 @@ Future<void> showTransferDialog(
                             ],
                           ),
                         ),
-                        const SizedBox(width: AppSpacing.sm),
-                        const Icon(Icons.keyboard_arrow_down, size: 28),
+                        SizedBox(width: AppSpacing.sm),
+                        Icon(AppIcon.chevronDown, size: AppIconSize.hero),
                       ],
                     ),
                   ),
@@ -10165,11 +10927,11 @@ Future<void> showTransferDialog(
                       });
                     },
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Amount'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Amount'),
                   Row(
                     children: [
-                      const TransactionFormIcon(Icons.attach_money),
+                      TransactionFormIcon(AppIcon.money),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: AmountEntryField(
@@ -10228,12 +10990,12 @@ Future<void> showTransferDialog(
                             }
                           },
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Description'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Description'),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const TransactionFormIcon(Icons.short_text_outlined),
+                      TransactionFormIcon(AppIcon.description),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: TextField(
@@ -10276,12 +11038,10 @@ Future<void> showTransferDialog(
                       FocusManager.instance.primaryFocus?.unfocus();
                     },
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      padding: EdgeInsets.symmetric(vertical: 2),
                       child: Row(
                         children: [
-                          const TransactionFormIcon(
-                            Icons.calendar_today_outlined,
-                          ),
+                          TransactionFormIcon(AppIcon.calendar),
                           const SizedBox(width: AppSpacing.md),
                           Expanded(
                             child: Text(
@@ -10303,21 +11063,21 @@ Future<void> showTransferDialog(
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          const SizedBox(width: AppSpacing.sm),
+                          SizedBox(width: AppSpacing.sm),
                           Icon(
-                            Icons.event_outlined,
+                            AppIcon.event,
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ],
                       ),
                     ),
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Notes'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Notes'),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const TransactionFormIcon(Icons.notes_outlined),
+                      TransactionFormIcon(AppIcon.notes),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: TextField(
@@ -10352,12 +11112,10 @@ Future<void> showTransferDialog(
                             !scheduleFutureOccurrences,
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        padding: EdgeInsets.symmetric(vertical: 2),
                         child: Row(
                           children: [
-                            const TransactionFormIcon(
-                              Icons.event_repeat_outlined,
-                            ),
+                            TransactionFormIcon(AppIcon.recurrence),
                             const SizedBox(width: AppSpacing.md),
                             Expanded(
                               child: Text(
@@ -10393,12 +11151,10 @@ Future<void> showTransferDialog(
                         Navigator.pop(context);
                       },
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        padding: EdgeInsets.symmetric(vertical: 3),
                         child: Row(
                           children: [
-                            const TransactionFormIcon(
-                              Icons.event_repeat_outlined,
-                            ),
+                            TransactionFormIcon(AppIcon.recurrence),
                             const SizedBox(width: AppSpacing.md),
                             Expanded(
                               child: Column(
@@ -10416,7 +11172,7 @@ Future<void> showTransferDialog(
                                 ],
                               ),
                             ),
-                            const Icon(Icons.chevron_right),
+                            Icon(AppIcon.chevronRight),
                           ],
                         ),
                       ),
@@ -10799,12 +11555,12 @@ Future<bool> showScheduledTransactionDialog(
                 child: Opacity(
                   opacity: onTap == null ? 0.46 : 1,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    padding: EdgeInsets.symmetric(vertical: 3),
                     child: Row(
                       children: [
                         TransactionFormIcon(
                           account == null
-                              ? Icons.account_balance_wallet_outlined
+                              ? AppIcon.wallet
                               : v2AccountIcon(account.type),
                         ),
                         const SizedBox(width: AppSpacing.md),
@@ -10835,8 +11591,8 @@ Future<bool> showScheduledTransactionDialog(
                             ],
                           ),
                         ),
-                        const SizedBox(width: AppSpacing.sm),
-                        const Icon(Icons.keyboard_arrow_down, size: 28),
+                        SizedBox(width: AppSpacing.sm),
+                        Icon(AppIcon.chevronDown, size: AppIconSize.hero),
                       ],
                     ),
                   ),
@@ -10868,13 +11624,13 @@ Future<bool> showScheduledTransactionDialog(
                           children: [
                             Text(value, style: rowValueStyle),
                             if (secondary != null) ...[
-                              const SizedBox(height: 4),
+                              SizedBox(height: 4),
                               Text(secondary, style: mutedStyle),
                             ],
                           ],
                         ),
                       ),
-                      const Icon(Icons.keyboard_arrow_down, size: 28),
+                      Icon(AppIcon.chevronDown, size: AppIconSize.hero),
                     ],
                   ),
                 ),
@@ -11132,11 +11888,11 @@ Future<bool> showScheduledTransactionDialog(
                     placeholder: 'Choose account',
                     onTap: () => chooseAccount(destination: false),
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Amount'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Amount'),
                   Row(
                     children: [
-                      const TransactionFormIcon(Icons.attach_money),
+                      TransactionFormIcon(AppIcon.money),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: AmountEntryField(
@@ -11179,12 +11935,12 @@ Future<bool> showScheduledTransactionDialog(
                           ? null
                           : () => chooseAccount(destination: true),
                     ),
-                    const TransactionFormDivider(),
-                    const TransactionFormLabel('Description'),
+                    TransactionFormDivider(),
+                    TransactionFormLabel('Description'),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const TransactionFormIcon(Icons.short_text_outlined),
+                        TransactionFormIcon(AppIcon.description),
                         const SizedBox(width: AppSpacing.md),
                         Expanded(
                           child: TextField(
@@ -11213,11 +11969,11 @@ Future<bool> showScheduledTransactionDialog(
                     // Future purpose-based Goal Allocations can be inserted
                     // here without changing scheduled transfer accounting.
                   ] else ...[
-                    const TransactionFormLabel('Payee'),
+                    TransactionFormLabel('Payee'),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const TransactionFormIcon(Icons.person_outline),
+                        TransactionFormIcon(AppIcon.payee),
                         const SizedBox(width: AppSpacing.md),
                         Expanded(
                           child: PayeeAutocompleteField(
@@ -11321,10 +12077,10 @@ Future<bool> showScheduledTransactionDialog(
                       ),
                     ),
                   ),
-                  const TransactionFormLabel('Frequency'),
+                  TransactionFormLabel('Frequency'),
                   choiceRow(
-                    rowKey: const ValueKey('scheduled-frequency'),
-                    icon: Icons.repeat,
+                    rowKey: ValueKey('scheduled-frequency'),
+                    icon: AppIcon.repeat,
                     value: recurrenceFrequencyLabel(frequency),
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
@@ -11340,11 +12096,11 @@ Future<bool> showScheduledTransactionDialog(
                       }
                     },
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Start date'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Start date'),
                   choiceRow(
-                    rowKey: const ValueKey('scheduled-next-date'),
-                    icon: Icons.calendar_today_outlined,
+                    rowKey: ValueKey('scheduled-next-date'),
+                    icon: AppIcon.calendar,
                     value: fullMonthDateLabel(
                       parseDateInput(nextDate.text, DateTime.now()),
                     ),
@@ -11367,11 +12123,11 @@ Future<bool> showScheduledTransactionDialog(
                       FocusManager.instance.primaryFocus?.unfocus();
                     },
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Time'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Time'),
                   choiceRow(
-                    rowKey: const ValueKey('scheduled-alert-time'),
-                    icon: Icons.schedule_outlined,
+                    rowKey: ValueKey('scheduled-alert-time'),
+                    icon: AppIcon.schedule,
                     value: customAlertTime.text,
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
@@ -11403,12 +12159,12 @@ Future<bool> showScheduledTransactionDialog(
                     },
                   ),
                   const TransactionFormDivider(),
-                  const TransactionFormLabel('Reminder'),
+                  TransactionFormLabel('Reminder'),
                   choiceRow(
-                    rowKey: const ValueKey('scheduled-alert'),
+                    rowKey: ValueKey('scheduled-alert'),
                     icon: alertPreference == v2_scheduled.AlertPreference.none
-                        ? Icons.notifications_none_outlined
-                        : Icons.notifications_active_outlined,
+                        ? AppIcon.notificationNone
+                        : AppIcon.notificationActive,
                     value: alertPreferenceLabel(alertPreference),
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
@@ -11452,11 +12208,11 @@ Future<bool> showScheduledTransactionDialog(
                                   !repeatAlertUntilResolved,
                             ),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              padding: EdgeInsets.symmetric(vertical: 2),
                               child: Row(
                                 children: [
-                                  const TransactionFormIcon(
-                                    Icons.notification_important_outlined,
+                                  TransactionFormIcon(
+                                    AppIcon.notificationImportant,
                                   ),
                                   const SizedBox(width: AppSpacing.md),
                                   Expanded(
@@ -11479,12 +12235,12 @@ Future<bool> showScheduledTransactionDialog(
                       ],
                     ),
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Notes'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Notes'),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const TransactionFormIcon(Icons.notes_outlined),
+                      TransactionFormIcon(AppIcon.notes),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: TextField(
@@ -11634,7 +12390,7 @@ Future<T?> showScheduledChoicePicker<T>(
                       key: ValueKey('scheduled-choice-${label(value)}'),
                       title: Text(label(value)),
                       trailing: value == selected
-                          ? const Icon(Icons.check, color: AppTheme.accent)
+                          ? Icon(AppIcon.check, color: AppTheme.accent)
                           : null,
                       onTap: () => Navigator.pop(sheetContext, value),
                     ),
@@ -11694,10 +12450,10 @@ Future<void> showScheduledTransactionDetails(
         mainAxisSize: MainAxisSize.min,
         children: [
           ScheduledTransactionDetailRow(
-            rowKey: const ValueKey('scheduled-detail-payee'),
+            rowKey: ValueKey('scheduled-detail-payee'),
             icon: item.type == TransactionType.transfer
-                ? Icons.short_text_outlined
-                : Icons.person_outline,
+                ? AppIcon.description
+                : AppIcon.payee,
             label: item.type == TransactionType.transfer
                 ? 'Description'
                 : 'Payee',
@@ -11709,27 +12465,27 @@ Future<void> showScheduledTransactionDetails(
             label: 'Type',
             value: transactionTypeLabel(item.type),
           ),
-          const TransactionFormDivider(),
+          TransactionFormDivider(),
           ScheduledTransactionDetailRow(
-            icon: Icons.attach_money,
+            icon: AppIcon.money,
             label: 'Scheduled amount',
             value: money(occurrenceAmount, dataStore.preferences.currency),
             tabularFigures: true,
           ),
-          const TransactionFormDivider(),
+          TransactionFormDivider(),
           ScheduledTransactionDetailRow(
-            icon: Icons.calendar_today_outlined,
+            icon: AppIcon.calendar,
             label: 'Next date',
             value: fullMonthDateLabel(occurrenceDate),
           ),
           if (occurrenceRecord != null) ...[
-            const TransactionFormDivider(),
+            TransactionFormDivider(),
             ScheduledTransactionDetailRow(
               icon:
                   occurrenceRecord.status ==
                       v2_scheduled.ScheduledOccurrenceStatus.paid
-                  ? Icons.check_circle_outline
-                  : Icons.skip_next_outlined,
+                  ? AppIcon.success
+                  : AppIcon.skip,
               label: 'Status',
               value:
                   occurrenceRecord.status ==
@@ -11738,9 +12494,9 @@ Future<void> showScheduledTransactionDetails(
                   : 'Skipped',
             ),
           ],
-          const TransactionFormDivider(),
+          TransactionFormDivider(),
           ScheduledTransactionDetailRow(
-            icon: Icons.repeat,
+            icon: AppIcon.repeat,
             label: 'Frequency',
             value: recurrenceFrequencyLabel(item.frequency),
           ),
@@ -11759,32 +12515,32 @@ Future<void> showScheduledTransactionDetails(
             value: accountName(item.accountId),
           ),
           if (item.type == TransactionType.transfer) ...[
-            const TransactionFormDivider(),
+            TransactionFormDivider(),
             ScheduledTransactionDetailRow(
-              icon: Icons.account_balance_wallet_outlined,
+              icon: AppIcon.wallet,
               label: 'To Account',
               value: accountName(item.transferAccountId),
             ),
           ] else ...[
-            const TransactionFormDivider(),
+            TransactionFormDivider(),
             ScheduledTransactionDetailRow(
-              icon: Icons.sell_outlined,
+              icon: AppIcon.category,
               label: 'Category',
               value: categoryName(item.categoryId),
             ),
           ],
-          const TransactionFormDivider(),
+          TransactionFormDivider(),
           ScheduledTransactionDetailRow(
             icon: item.alertPreference == v2_scheduled.AlertPreference.none
-                ? Icons.notifications_none_outlined
-                : Icons.notifications_active_outlined,
+                ? AppIcon.notificationNone
+                : AppIcon.notificationActive,
             label: 'Alert',
             value: alertPreferenceLabel(item.alertPreference),
           ),
           if (item.note.trim().isNotEmpty) ...[
-            const TransactionFormDivider(),
+            TransactionFormDivider(),
             ScheduledTransactionDetailRow(
-              icon: Icons.notes_outlined,
+              icon: AppIcon.notes,
               label: 'Notes',
               value: item.note,
             ),
@@ -11954,7 +12710,7 @@ class ScheduledTransactionDetailActions extends StatelessWidget {
                 foregroundColor: AppTheme.rose,
                 side: BorderSide(color: AppTheme.rose.withValues(alpha: 0.5)),
               ),
-              icon: const Icon(Icons.undo_outlined),
+              icon: Icon(AppIcon.undo),
               label: const Text('Undo Scheduled Payment'),
             ),
           ),
@@ -12017,24 +12773,24 @@ Future<void> showCompletedScheduledOccurrenceActions(
         children: [
           if (transaction != null)
             ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit payment'),
+              leading: Icon(AppIcon.edit),
+              title: Text('Edit payment'),
               onTap: () => Navigator.pop(sheetContext, 'editPayment'),
             ),
           if (!item.isDeleted)
             ListTile(
-              leading: const Icon(Icons.event_repeat_outlined),
-              title: const Text('Edit future schedule'),
+              leading: Icon(AppIcon.recurrence),
+              title: Text('Edit future schedule'),
               onTap: () => Navigator.pop(sheetContext, 'editFuture'),
             ),
           if (canRestore)
             ListTile(
-              leading: const Icon(Icons.restore_outlined),
-              title: const Text('Restore future schedule'),
+              leading: Icon(AppIcon.restore),
+              title: Text('Restore future schedule'),
               onTap: () => Navigator.pop(sheetContext, 'restoreFuture'),
             ),
           ListTile(
-            leading: const Icon(Icons.delete_outline),
+            leading: Icon(AppIcon.delete),
             title: const Text('Delete occurrence'),
             subtitle: Text(
               transaction == null
@@ -12185,31 +12941,31 @@ Future<void> showScheduledTransactionActions(
         children: [
           if (allows('paid'))
             ListTile(
-              leading: const Icon(Icons.check_circle_outline),
-              title: const Text('Mark as Paid'),
+              leading: Icon(AppIcon.success),
+              title: Text('Mark as Paid'),
               onTap: () => Navigator.pop(sheetContext, 'paid'),
             ),
           if (allows('skip'))
             ListTile(
-              leading: const Icon(Icons.skip_next_outlined),
-              title: const Text('Skip Once'),
+              leading: Icon(AppIcon.skip),
+              title: Text('Skip Once'),
               onTap: () => Navigator.pop(sheetContext, 'skip'),
             ),
           if (allows('edit'))
             ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit'),
+              leading: Icon(AppIcon.edit),
+              title: Text('Edit'),
               onTap: () => Navigator.pop(sheetContext, 'edit'),
             ),
           if (allows('duplicate'))
             ListTile(
-              leading: const Icon(Icons.copy_outlined),
-              title: const Text('Duplicate'),
+              leading: Icon(AppIcon.copy),
+              title: Text('Duplicate'),
               onTap: () => Navigator.pop(sheetContext, 'duplicate'),
             ),
           if (allows('delete'))
             ListTile(
-              leading: const Icon(Icons.delete_outline),
+              leading: Icon(AppIcon.delete),
               title: const Text('Delete'),
               textColor: AppTheme.rose,
               iconColor: AppTheme.rose,
@@ -12456,11 +13212,11 @@ Future<void> markScheduledTransactionPaid(
             borderRadius: BorderRadius.circular(AppRadii.control),
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
+              padding: EdgeInsets.symmetric(vertical: 3),
               child: Row(
                 children: [
                   Expanded(child: content),
-                  const Icon(Icons.keyboard_arrow_down, size: 28),
+                  Icon(AppIcon.chevronDown, size: AppIconSize.hero),
                 ],
               ),
             ),
@@ -12548,10 +13304,10 @@ Future<void> markScheduledTransactionPaid(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const TransactionFormLabel('Scheduled amount'),
+              TransactionFormLabel('Scheduled amount'),
               readOnlyRow(
-                rowKey: const ValueKey('mark-paid-scheduled-amount'),
-                icon: Icons.event_note_outlined,
+                rowKey: ValueKey('mark-paid-scheduled-amount'),
+                icon: AppIcon.eventNote,
                 value: money(
                   occurrenceAmount.abs(),
                   dataStore.preferences.currency,
@@ -12559,11 +13315,11 @@ Future<void> markScheduledTransactionPaid(
                 secondary: 'Planned for this occurrence',
                 tabular: true,
               ),
-              const TransactionFormDivider(),
-              const TransactionFormLabel('Actual amount'),
+              TransactionFormDivider(),
+              TransactionFormLabel('Actual amount'),
               Row(
                 children: [
-                  const TransactionFormIcon(Icons.attach_money),
+                  TransactionFormIcon(AppIcon.money),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: AmountEntryField(
@@ -12608,10 +13364,10 @@ Future<void> markScheduledTransactionPaid(
                   FocusManager.instance.primaryFocus?.unfocus();
                 },
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  padding: EdgeInsets.symmetric(vertical: 3),
                   child: Row(
                     children: [
-                      const TransactionFormIcon(Icons.calendar_today_outlined),
+                      TransactionFormIcon(AppIcon.calendar),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: Text(
@@ -12635,21 +13391,21 @@ Future<void> markScheduledTransactionPaid(
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(width: AppSpacing.sm),
+                      SizedBox(width: AppSpacing.sm),
                       Icon(
-                        Icons.event_outlined,
+                        AppIcon.event,
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ],
                   ),
                 ),
               ),
-              const TransactionFormDivider(),
+              TransactionFormDivider(),
               TransactionFormLabel(isTransfer ? 'From Account' : 'Account'),
               readOnlyRow(
-                rowKey: const ValueKey('mark-paid-account'),
+                rowKey: ValueKey('mark-paid-account'),
                 icon: sourceAccount == null
-                    ? Icons.account_balance_wallet_outlined
+                    ? AppIcon.wallet
                     : v2AccountIcon(sourceAccount.type),
                 value: sourceAccount?.name ?? 'Unavailable account',
                 secondary: sourceAccount == null
@@ -12657,12 +13413,12 @@ Future<void> markScheduledTransactionPaid(
                     : 'Balance ${money(dataStore.balanceForAccount(sourceAccount.id), dataStore.preferences.currency)}',
               ),
               if (isTransfer) ...[
-                const TransactionFormDivider(),
-                const TransactionFormLabel('To Account'),
+                TransactionFormDivider(),
+                TransactionFormLabel('To Account'),
                 readOnlyRow(
-                  rowKey: const ValueKey('mark-paid-to-account'),
+                  rowKey: ValueKey('mark-paid-to-account'),
                   icon: destinationAccount == null
-                      ? Icons.account_balance_wallet_outlined
+                      ? AppIcon.wallet
                       : v2AccountIcon(destinationAccount.type),
                   value: destinationAccount?.name ?? 'Unavailable destination',
                   secondary: destinationAccount == null
@@ -12676,9 +13432,7 @@ Future<void> markScheduledTransactionPaid(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   TransactionFormIcon(
-                    isTransfer
-                        ? Icons.short_text_outlined
-                        : Icons.person_outline,
+                    isTransfer ? AppIcon.description : AppIcon.payee,
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
@@ -12742,12 +13496,12 @@ Future<void> markScheduledTransactionPaid(
                   }),
                 ),
               ],
-              const TransactionFormDivider(),
-              const TransactionFormLabel('Notes'),
+              TransactionFormDivider(),
+              TransactionFormLabel('Notes'),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const TransactionFormIcon(Icons.notes_outlined),
+                  TransactionFormIcon(AppIcon.notes),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: TextField(
@@ -13445,10 +14199,10 @@ Future<void> showTransactionDialog(
                 key: const ValueKey('transaction-new-category'),
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const TransactionFormLabel('New Category'),
+                  TransactionFormLabel('New Category'),
                   Row(
                     children: [
-                      const TransactionFormIcon(Icons.sell_outlined),
+                      TransactionFormIcon(AppIcon.category),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: TextField(
@@ -13499,7 +14253,7 @@ Future<void> showTransactionDialog(
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Icon(Icons.check),
+                            : Icon(AppIcon.check),
                       ),
                     ],
                   ),
@@ -13731,8 +14485,8 @@ Future<void> showTransactionDialog(
                           ],
                         ),
                       ),
-                      const SizedBox(width: AppSpacing.sm),
-                      const Icon(Icons.keyboard_arrow_down, size: 28),
+                      SizedBox(width: AppSpacing.sm),
+                      Icon(AppIcon.chevronDown, size: AppIconSize.hero),
                     ],
                   ),
                 ),
@@ -13876,11 +14630,11 @@ Future<void> showTransactionDialog(
                       ),
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  const TransactionFormLabel('Account'),
+                  SizedBox(height: AppSpacing.md),
+                  TransactionFormLabel('Account'),
                   selectableRow(
                     icon: selectedAccount == null
-                        ? Icons.account_balance_wallet_outlined
+                        ? AppIcon.wallet
                         : v2AccountIcon(selectedAccount.type),
                     placeholder: selectedAccount == null
                         ? 'Choose account'
@@ -13900,11 +14654,11 @@ Future<void> showTransactionDialog(
                       }
                     },
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Amount'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Amount'),
                   Row(
                     children: [
-                      const TransactionFormIcon(Icons.attach_money),
+                      TransactionFormIcon(AppIcon.money),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: AmountEntryField(
@@ -13937,12 +14691,12 @@ Future<void> showTransactionDialog(
                       ),
                     ],
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Payee'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Payee'),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const TransactionFormIcon(Icons.person_outline),
+                      TransactionFormIcon(AppIcon.payee),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: PayeeAutocompleteField(
@@ -14007,12 +14761,10 @@ Future<void> showTransactionDialog(
                       FocusManager.instance.primaryFocus?.unfocus();
                     },
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      padding: EdgeInsets.symmetric(vertical: 2),
                       child: Row(
                         children: [
-                          const TransactionFormIcon(
-                            Icons.calendar_today_outlined,
-                          ),
+                          TransactionFormIcon(AppIcon.calendar),
                           const SizedBox(width: AppSpacing.md),
                           Expanded(
                             child: Text(
@@ -14034,21 +14786,21 @@ Future<void> showTransactionDialog(
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          const SizedBox(width: AppSpacing.sm),
+                          SizedBox(width: AppSpacing.sm),
                           Icon(
-                            Icons.event_outlined,
+                            AppIcon.event,
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ],
                       ),
                     ),
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Notes'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Notes'),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const TransactionFormIcon(Icons.notes_outlined),
+                      TransactionFormIcon(AppIcon.notes),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: TextField(
@@ -14083,12 +14835,10 @@ Future<void> showTransactionDialog(
                             !scheduleFutureOccurrences,
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        padding: EdgeInsets.symmetric(vertical: 2),
                         child: Row(
                           children: [
-                            const TransactionFormIcon(
-                              Icons.event_repeat_outlined,
-                            ),
+                            TransactionFormIcon(AppIcon.recurrence),
                             const SizedBox(width: AppSpacing.md),
                             Expanded(
                               child: Text(
@@ -14124,12 +14874,10 @@ Future<void> showTransactionDialog(
                         Navigator.pop(context);
                       },
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        padding: EdgeInsets.symmetric(vertical: 3),
                         child: Row(
                           children: [
-                            const TransactionFormIcon(
-                              Icons.event_repeat_outlined,
-                            ),
+                            TransactionFormIcon(AppIcon.recurrence),
                             const SizedBox(width: AppSpacing.md),
                             Expanded(
                               child: Column(
@@ -14149,7 +14897,7 @@ Future<void> showTransactionDialog(
                                 ],
                               ),
                             ),
-                            const Icon(Icons.chevron_right),
+                            Icon(AppIcon.chevronRight),
                           ],
                         ),
                       ),
@@ -14407,9 +15155,7 @@ Future<String?> showCategoryDialog(
             final selectedParent = parentOptions
                 .where((item) => item.id == parentDropdownValue)
                 .firstOrNull;
-            final selectedIcon = v2_category.curatedCategoryIcons
-                .where((item) => item.sfSymbolName == iconName)
-                .firstOrNull;
+            final selectedIcon = CategoryIconCatalog.find(iconName);
             final selectedColor = categoryColorOptions
                 .where((item) => item.value == colorValue)
                 .firstOrNull;
@@ -14428,9 +15174,9 @@ Future<String?> showCategoryDialog(
                   child: Row(
                     children: [
                       TransactionFormIcon(icon, color: iconColor),
-                      const SizedBox(width: AppSpacing.md),
+                      SizedBox(width: AppSpacing.md),
                       Expanded(child: Text(value, style: fieldValueStyle)),
-                      const Icon(Icons.keyboard_arrow_down, size: 28),
+                      Icon(AppIcon.chevronDown, size: AppIconSize.hero),
                     ],
                   ),
                 ),
@@ -14459,10 +15205,10 @@ Future<String?> showCategoryDialog(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const TransactionFormLabel('Category name'),
+                  TransactionFormLabel('Category name'),
                   Row(
                     children: [
-                      const TransactionFormIcon(Icons.sell_outlined),
+                      TransactionFormIcon(AppIcon.category),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: TextField(
@@ -14508,10 +15254,10 @@ Future<String?> showCategoryDialog(
                       }
                     },
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Parent category'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Parent category'),
                   choiceRow(
-                    icon: Icons.account_tree_outlined,
+                    icon: AppIcon.categoryTree,
                     value: selectedParent?.name ?? 'None',
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
@@ -14520,10 +15266,10 @@ Future<String?> showCategoryDialog(
                         title: 'Parent category',
                         selected: parentDropdownValue ?? noCategoryChoice,
                         choices: [
-                          const PolishedChoice(
+                          PolishedChoice(
                             value: noCategoryChoice,
                             label: 'None',
-                            leading: Icon(Icons.remove_circle_outline),
+                            leading: Icon(AppIcon.expense),
                           ),
                           for (final item in parentOptions)
                             PolishedChoice(
@@ -14549,39 +15295,23 @@ Future<String?> showCategoryDialog(
                     value: selectedIcon?.label ?? 'No icon',
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
-                      final selected = await showPolishedChoicePicker(
+                      final selected = await showCategoryIconPicker(
                         context,
-                        title: 'Category icon',
-                        selected: iconName ?? noCategoryChoice,
-                        choices: [
-                          const PolishedChoice(
-                            value: noCategoryChoice,
-                            label: 'No icon',
-                            leading: Icon(Icons.hide_source_outlined),
-                          ),
-                          for (final item in v2_category.curatedCategoryIcons)
-                            PolishedChoice(
-                              value: item.sfSymbolName,
-                              label: item.label,
-                              leading: Icon(
-                                categoryIconForName(item.sfSymbolName, kind),
-                              ),
-                            ),
-                        ],
+                        selectedKey: iconName ?? categoryIconNoneKey,
                       );
                       if (selected != null) {
                         setDialogState(
-                          () => iconName = selected == noCategoryChoice
+                          () => iconName = selected == categoryIconNoneKey
                               ? null
                               : selected,
                         );
                       }
                     },
                   ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Color'),
+                  TransactionFormDivider(),
+                  TransactionFormLabel('Color'),
                   choiceRow(
-                    icon: Icons.palette_outlined,
+                    icon: AppIcon.palette,
                     iconColor: colorValue == null
                         ? AppTheme.accent
                         : Color(colorValue!),
@@ -14593,17 +15323,17 @@ Future<String?> showCategoryDialog(
                         title: 'Category color',
                         selected: colorValue ?? noCategoryColorChoice,
                         choices: [
-                          const PolishedChoice(
+                          PolishedChoice(
                             value: noCategoryColorChoice,
                             label: 'Default',
-                            leading: Icon(Icons.format_color_reset_outlined),
+                            leading: Icon(AppIcon.clearColor),
                           ),
                           for (final item in categoryColorOptions)
                             PolishedChoice(
                               value: item.value,
                               label: item.label,
                               leading: Icon(
-                                Icons.circle,
+                                AppIcon.circle,
                                 color: Color(item.value),
                               ),
                             ),
@@ -14739,7 +15469,7 @@ Future<T?> showPolishedChoicePicker<T>(
                             ),
                       title: Text(choice.label),
                       trailing: choice.value == selected
-                          ? const Icon(Icons.check, color: AppTheme.accent)
+                          ? Icon(AppIcon.check, color: AppTheme.accent)
                           : null,
                       onTap: () => Navigator.pop(sheetContext, choice.value),
                     ),
@@ -14766,17 +15496,17 @@ Future<void> showCategoryActions(
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
-            leading: const Icon(Icons.edit_outlined),
-            title: const Text('Edit'),
+            leading: Icon(AppIcon.edit),
+            title: Text('Edit'),
             onTap: () => Navigator.pop(sheetContext, 'edit'),
           ),
           ListTile(
-            leading: const Icon(Icons.archive_outlined),
-            title: const Text('Archive'),
+            leading: Icon(AppIcon.archive),
+            title: Text('Archive'),
             onTap: () => Navigator.pop(sheetContext, 'archive'),
           ),
           ListTile(
-            leading: const Icon(Icons.delete_outline),
+            leading: Icon(AppIcon.delete),
             title: const Text('Delete'),
             textColor: AppTheme.rose,
             iconColor: AppTheme.rose,
@@ -14800,11 +15530,11 @@ Future<void> showCategoryActions(
 
 IconData accountIcon(AccountType type) {
   return switch (type) {
-    AccountType.cash => Icons.payments_outlined,
-    AccountType.checking => Icons.account_balance_outlined,
-    AccountType.savings => Icons.savings_outlined,
-    AccountType.creditCard => Icons.credit_card_outlined,
-    AccountType.loan => Icons.request_quote_outlined,
+    AccountType.cash => AppIcon.cash,
+    AccountType.checking => AppIcon.bank,
+    AccountType.savings => AppIcon.savings,
+    AccountType.creditCard => AppIcon.creditCard,
+    AccountType.loan => AppIcon.loan,
   };
 }
 
@@ -14841,31 +15571,30 @@ String v2AccountTypeLabel(v2_account.AccountType type) {
 
 IconData v2AccountIcon(v2_account.AccountType type) {
   return switch (type) {
-    v2_account.AccountType.cash => Icons.payments_outlined,
-    v2_account.AccountType.checking => Icons.account_balance_outlined,
-    v2_account.AccountType.savings => Icons.savings_outlined,
-    v2_account.AccountType.creditCard => Icons.credit_card_outlined,
-    v2_account.AccountType.loan => Icons.request_quote_outlined,
-    v2_account.AccountType.otherBanking =>
-      Icons.account_balance_wallet_outlined,
+    v2_account.AccountType.cash => AppIcon.cash,
+    v2_account.AccountType.checking => AppIcon.bank,
+    v2_account.AccountType.savings => AppIcon.savings,
+    v2_account.AccountType.creditCard => AppIcon.creditCard,
+    v2_account.AccountType.loan => AppIcon.loan,
+    v2_account.AccountType.otherBanking => AppIcon.wallet,
   };
 }
 
 IconData accountGroupIcon(String groupName) {
   return switch (groupName) {
-    'cash' => Icons.payments_outlined,
-    'creditCards' => Icons.credit_card_outlined,
-    'loans' => Icons.request_quote_outlined,
-    _ => Icons.account_balance_outlined,
+    'cash' => AppIcon.cash,
+    'creditCards' => AppIcon.creditCard,
+    'loans' => AppIcon.loan,
+    _ => AppIcon.bank,
   };
 }
 
 IconData categoryKindIcon(String kindName) {
   return switch (kindName) {
-    'income' => Icons.trending_up,
-    'transfer' => Icons.swap_horiz,
-    'system' => Icons.settings_outlined,
-    _ => Icons.sell_outlined,
+    'income' => AppIcon.trendUp,
+    'transfer' => AppIcon.transfer,
+    'system' => AppIcon.settings,
+    _ => AppIcon.category,
   };
 }
 
@@ -14953,21 +15682,8 @@ IconData categoryIcon(v2_category.CategoryRecord category) {
 }
 
 IconData categoryIconForName(String? iconName, v2_category.CategoryKind kind) {
-  return switch (iconName) {
-    'fork.knife' => Icons.restaurant_outlined,
-    'cart' => Icons.shopping_cart_outlined,
-    'car' => Icons.directions_car_outlined,
-    'fuelpump' => Icons.local_gas_station_outlined,
-    'film' => Icons.movie_outlined,
-    'house' => Icons.home_outlined,
-    'cross.case' => Icons.medical_services_outlined,
-    'phone' => Icons.phone_outlined,
-    'bolt' => Icons.bolt_outlined,
-    'shield' => Icons.shield_outlined,
-    'wrench.adjustable' => Icons.build_outlined,
-    'tag' => Icons.sell_outlined,
-    _ => categoryKindIcon(kind.name),
-  };
+  return CategoryIconCatalog.find(iconName)?.icon ??
+      categoryKindIcon(kind.name);
 }
 
 String categorySubtitle(
@@ -15211,7 +15927,7 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
                         ? IconButton(
                             tooltip: 'Hide suggestions',
                             onPressed: _dismissSuggestions,
-                            icon: const Icon(Icons.keyboard_arrow_up),
+                            icon: Icon(AppIcon.chevronUp),
                           )
                         : null,
                   ),
@@ -15240,14 +15956,12 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
                     child: SizedBox(
                       height: 40,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        padding: EdgeInsets.symmetric(horizontal: 12),
                         child: Row(
                           children: [
                             Icon(
-                              isCreate
-                                  ? Icons.person_add_outlined
-                                  : Icons.person_outline,
-                              size: 18,
+                              isCreate ? AppIcon.addPayee : AppIcon.payee,
+                              size: AppIconSize.inline,
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -15288,12 +16002,12 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
                     height: 30,
                     child: Row(
                       children: [
-                        const SizedBox(width: 4),
+                        SizedBox(width: 4),
                         Icon(
                           suggestions[index] == newPayeeSuggestionValue
-                              ? Icons.person_add_outlined
-                              : Icons.person_outline,
-                          size: 16,
+                              ? AppIcon.addPayee
+                              : AppIcon.payee,
+                          size: AppIconSize.compact,
                           color: AppTheme.accent.withValues(alpha: 0.9),
                         ),
                         const SizedBox(width: 10),
@@ -15643,10 +16357,7 @@ String? sanitizedCategoryIconName(String? iconName) {
   if (iconName == null) return null;
   final trimmed = iconName.trim();
   if (trimmed.isEmpty) return null;
-  final isCuratedIcon = v2_category.curatedCategoryIcons.any(
-    (option) => option.sfSymbolName == trimmed,
-  );
-  return isCuratedIcon ? trimmed : null;
+  return CategoryIconCatalog.contains(trimmed) ? trimmed : null;
 }
 
 int? sanitizedCategoryColorValue(int? colorValue) {
@@ -15758,13 +16469,13 @@ class InlineFutureScheduleSection extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.control),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
+          padding: EdgeInsets.symmetric(vertical: 3),
           child: Row(
             children: [
               TransactionFormIcon(icon),
-              const SizedBox(width: AppSpacing.md),
+              SizedBox(width: AppSpacing.md),
               Expanded(child: Text(value, style: rowValueStyle)),
-              const Icon(Icons.keyboard_arrow_down, size: 28),
+              Icon(AppIcon.chevronDown, size: AppIconSize.hero),
             ],
           ),
         ),
@@ -15786,10 +16497,10 @@ class InlineFutureScheduleSection extends StatelessWidget {
             ),
           ),
         ),
-        const TransactionFormLabel('First scheduled date'),
+        TransactionFormLabel('First scheduled date'),
         row(
           keyName: 'first-date',
-          icon: Icons.calendar_today_outlined,
+          icon: AppIcon.calendar,
           value: fullMonthDateLabel(draft.parsedFirstDate(DateTime.now())),
           onTap: () async {
             FocusManager.instance.primaryFocus?.unfocus();
@@ -15804,11 +16515,11 @@ class InlineFutureScheduleSection extends StatelessWidget {
             FocusManager.instance.primaryFocus?.unfocus();
           },
         ),
-        const TransactionFormDivider(),
-        const TransactionFormLabel('Time'),
+        TransactionFormDivider(),
+        TransactionFormLabel('Time'),
         row(
           keyName: 'time',
-          icon: Icons.schedule_outlined,
+          icon: AppIcon.schedule,
           value: draft.time.text,
           onTap: () async {
             FocusManager.instance.primaryFocus?.unfocus();
@@ -15832,11 +16543,11 @@ class InlineFutureScheduleSection extends StatelessWidget {
             FocusManager.instance.primaryFocus?.unfocus();
           },
         ),
-        const TransactionFormDivider(),
-        const TransactionFormLabel('Frequency'),
+        TransactionFormDivider(),
+        TransactionFormLabel('Frequency'),
         row(
           keyName: 'frequency',
-          icon: Icons.repeat,
+          icon: AppIcon.repeat,
           value: recurrenceFrequencyLabel(draft.frequency),
           onTap: () async {
             FocusManager.instance.primaryFocus?.unfocus();
@@ -15853,13 +16564,13 @@ class InlineFutureScheduleSection extends StatelessWidget {
             }
           },
         ),
-        const TransactionFormDivider(),
-        const TransactionFormLabel('Reminder'),
+        TransactionFormDivider(),
+        TransactionFormLabel('Reminder'),
         row(
           keyName: 'alert',
           icon: draft.alertPreference == v2_scheduled.AlertPreference.none
-              ? Icons.notifications_none_outlined
-              : Icons.notifications_active_outlined,
+              ? AppIcon.notificationNone
+              : AppIcon.notificationActive,
           value: alertPreferenceLabel(draft.alertPreference),
           onTap: () async {
             FocusManager.instance.primaryFocus?.unfocus();
@@ -16062,7 +16773,7 @@ Future<AccountType?> showAccountTypePicker(
               leading: Icon(accountIcon(type), color: AppTheme.accent),
               title: Text(accountTypeLabel(type)),
               trailing: type == selected
-                  ? const Icon(Icons.check, color: AppTheme.accent)
+                  ? Icon(AppIcon.check, color: AppTheme.accent)
                   : null,
               onTap: () => Navigator.pop(sheetContext, type),
             ),
@@ -16106,7 +16817,7 @@ Future<v2_account.AccountType?> showV2AccountTypePicker(
               leading: Icon(v2AccountIcon(type), color: AppTheme.accent),
               title: Text(v2AccountTypeLabel(type)),
               trailing: type == selected
-                  ? const Icon(Icons.check, color: AppTheme.accent)
+                  ? Icon(AppIcon.check, color: AppTheme.accent)
                   : null,
               onTap: () => Navigator.pop(sheetContext, type),
             ),
@@ -16160,7 +16871,7 @@ Future<String?> showTransactionAccountPicker(
                     ),
                     title: Text(account.name),
                     trailing: account.id == selectedAccountId
-                        ? const Icon(Icons.check, color: AppTheme.accent)
+                        ? Icon(AppIcon.check, color: AppTheme.accent)
                         : null,
                     onTap: () => Navigator.pop(sheetContext, account.id),
                   );
@@ -16331,9 +17042,7 @@ Future<String?> showTransactionCategoryCreationDialog(
         final selectedParent = parentOptions
             .where((item) => item.id == selectedParentId)
             .firstOrNull;
-        final selectedIcon = v2_category.curatedCategoryIcons
-            .where((item) => item.sfSymbolName == iconName)
-            .firstOrNull;
+        final selectedIcon = CategoryIconCatalog.find(iconName);
         final selectedColor = categoryColorOptions
             .where((item) => item.value == colorValue)
             .firstOrNull;
@@ -16350,10 +17059,10 @@ Future<String?> showTransactionCategoryCreationDialog(
             child: Row(
               children: [
                 TransactionFormIcon(icon, color: iconColor),
-                const SizedBox(width: AppSpacing.md),
+                SizedBox(width: AppSpacing.md),
                 Expanded(child: Text(value, style: fieldValueStyle)),
                 if (onTap != null)
-                  const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
+                  Icon(AppIcon.chevronDownRounded, size: AppIconSize.hero),
               ],
             ),
           );
@@ -16378,10 +17087,10 @@ Future<String?> showTransactionCategoryCreationDialog(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const TransactionFormLabel('Category name'),
+              TransactionFormLabel('Category name'),
               Row(
                 children: [
-                  const TransactionFormIcon(Icons.sell_outlined),
+                  TransactionFormIcon(AppIcon.category),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: TextField(
@@ -16412,11 +17121,11 @@ Future<String?> showTransactionCategoryCreationDialog(
                 icon: categoryKindIcon(kind.name),
                 value: categoryKindLabel(kind.name),
               ),
-              const TransactionFormDivider(),
-              const TransactionFormLabel('Parent category'),
+              TransactionFormDivider(),
+              TransactionFormLabel('Parent category'),
               valueRow(
-                key: const ValueKey('transaction-new-category-parent'),
-                icon: Icons.account_tree_outlined,
+                key: ValueKey('transaction-new-category-parent'),
+                icon: AppIcon.categoryTree,
                 value: selectedParent?.name ?? 'None',
                 onTap: () async {
                   FocusManager.instance.primaryFocus?.unfocus();
@@ -16425,10 +17134,10 @@ Future<String?> showTransactionCategoryCreationDialog(
                     title: 'Parent category',
                     selected: selectedParentId ?? noCategoryChoice,
                     choices: [
-                      const PolishedChoice(
+                      PolishedChoice(
                         value: noCategoryChoice,
                         label: 'None',
-                        leading: Icon(Icons.remove_circle_outline),
+                        leading: Icon(AppIcon.expense),
                       ),
                       for (final item in parentOptions)
                         PolishedChoice(
@@ -16454,39 +17163,23 @@ Future<String?> showTransactionCategoryCreationDialog(
                 value: selectedIcon?.label ?? 'No icon',
                 onTap: () async {
                   FocusManager.instance.primaryFocus?.unfocus();
-                  final selected = await showPolishedChoicePicker<String>(
+                  final selected = await showCategoryIconPicker(
                     dialogContext,
-                    title: 'Category icon',
-                    selected: iconName ?? noCategoryChoice,
-                    choices: [
-                      const PolishedChoice(
-                        value: noCategoryChoice,
-                        label: 'No icon',
-                        leading: Icon(Icons.hide_source_outlined),
-                      ),
-                      for (final item in v2_category.curatedCategoryIcons)
-                        PolishedChoice(
-                          value: item.sfSymbolName,
-                          label: item.label,
-                          leading: Icon(
-                            categoryIconForName(item.sfSymbolName, kind),
-                          ),
-                        ),
-                    ],
+                    selectedKey: iconName ?? categoryIconNoneKey,
                   );
                   if (selected != null && dialogContext.mounted) {
                     setDialogState(
-                      () => iconName = selected == noCategoryChoice
+                      () => iconName = selected == categoryIconNoneKey
                           ? null
                           : selected,
                     );
                   }
                 },
               ),
-              const TransactionFormDivider(),
-              const TransactionFormLabel('Color'),
+              TransactionFormDivider(),
+              TransactionFormLabel('Color'),
               valueRow(
-                icon: Icons.palette_outlined,
+                icon: AppIcon.palette,
                 iconColor: colorValue == null
                     ? AppTheme.accent
                     : Color(colorValue!),
@@ -16498,16 +17191,19 @@ Future<String?> showTransactionCategoryCreationDialog(
                     title: 'Category color',
                     selected: colorValue ?? noCategoryColorChoice,
                     choices: [
-                      const PolishedChoice(
+                      PolishedChoice(
                         value: noCategoryColorChoice,
                         label: 'Default',
-                        leading: Icon(Icons.format_color_reset_outlined),
+                        leading: Icon(AppIcon.clearColor),
                       ),
                       for (final item in categoryColorOptions)
                         PolishedChoice(
                           value: item.value,
                           label: item.label,
-                          leading: Icon(Icons.circle, color: Color(item.value)),
+                          leading: Icon(
+                            AppIcon.circle,
+                            color: Color(item.value),
+                          ),
                         ),
                     ],
                   );
@@ -16688,12 +17384,12 @@ Future<_TransactionCategoryPickerResult?> _showTransactionCategoryPickerSheet(
                       ),
                     ),
                     if (isSelected)
-                      const Padding(
+                      Padding(
                         padding: EdgeInsets.symmetric(horizontal: 8),
                         child: Icon(
-                          Icons.check_rounded,
+                          AppIcon.checkRounded,
                           color: AppTheme.accent,
-                          size: 23,
+                          size: AppIconSize.form,
                         ),
                       ),
                     if (hasChildren)
@@ -16714,9 +17410,9 @@ Future<_TransactionCategoryPickerResult?> _showTransactionCategoryPickerSheet(
                         },
                         icon: AnimatedRotation(
                           turns: isExpanded ? 0.25 : 0,
-                          duration: const Duration(milliseconds: 180),
+                          duration: Duration(milliseconds: 180),
                           curve: Curves.easeOutCubic,
-                          child: const Icon(Icons.chevron_right_rounded),
+                          child: Icon(AppIcon.chevronRightRounded),
                         ),
                       )
                     else
@@ -16784,7 +17480,7 @@ Future<_TransactionCategoryPickerResult?> _showTransactionCategoryPickerSheet(
                       sheetContext,
                       const _TransactionCategoryPickerResult.addNew(),
                     ),
-                    child: const Padding(
+                    child: Padding(
                       padding: EdgeInsets.fromLTRB(
                         AppSpacing.lg,
                         AppSpacing.md,
@@ -16793,7 +17489,7 @@ Future<_TransactionCategoryPickerResult?> _showTransactionCategoryPickerSheet(
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.add_rounded, color: AppTheme.accent),
+                          Icon(AppIcon.addRounded, color: AppTheme.accent),
                           SizedBox(width: AppSpacing.sm),
                           Text(
                             'Add New Category',
@@ -17189,8 +17885,9 @@ List<ScheduledCalendarOccurrence> scheduledOccurrencesForMonth(
 
 ScheduledMonthSummary scheduledMonthSummary(
   Iterable<ScheduledCalendarOccurrence> occurrences,
-  Iterable<TransactionRecord> transactions,
-) {
+  Iterable<TransactionRecord> transactions, {
+  CalendarActivityFilter filter = CalendarActivityFilter.all,
+}) {
   final activeTransactions = transactions
       .where((transaction) => !transaction.isDeleted)
       .toList(growable: false);
@@ -17198,14 +17895,16 @@ ScheduledMonthSummary scheduledMonthSummary(
   var paid = 0;
   var remaining = 0;
   for (final occurrence in occurrences) {
-    if (occurrence.transaction.type == TransactionType.transfer) continue;
+    if (!filter.matchesScheduled(occurrence.transaction.type)) continue;
     final plannedAmount = occurrence.plannedAmountMinor.abs();
     planned += plannedAmount;
     if (occurrence.isPaid) {
-      paid += actualAmountForScheduledOccurrence(
+      final completedAmount = actualAmountForScheduledOccurrence(
         occurrence,
         activeTransactions,
       ).abs();
+      paid += completedAmount;
+      remaining += max(plannedAmount - completedAmount, 0);
     } else if (occurrence.isPending) {
       remaining += plannedAmount;
     }

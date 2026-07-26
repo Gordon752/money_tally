@@ -400,15 +400,15 @@ class SignInView extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 440),
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.all(24),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(
-                    Icons.account_balance_wallet_outlined,
+                  Icon(
+                    AppIcon.wallet,
                     color: AppTheme.accent,
-                    size: 52,
+                    size: AppIconSize.brand,
                   ),
                   const SizedBox(height: 20),
                   const Text(
@@ -435,12 +435,12 @@ class SignInView extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: isSigningIn ? null : onAppleSignIn,
                     icon: isSigningIn
-                        ? const SizedBox(
+                        ? SizedBox(
                             height: 18,
                             width: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.apple),
+                        : Icon(AppIcon.apple),
                     label: Text(
                       isSigningIn ? 'Signing in' : 'Sign in with Apple',
                     ),

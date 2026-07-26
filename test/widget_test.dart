@@ -8,6 +8,7 @@ import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/design/money_format.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
+import 'package:money_tally/src/domain/budget.dart';
 import 'package:money_tally/src/domain/category.dart' as v2_category;
 import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/goal.dart';
@@ -3751,7 +3752,7 @@ void main() {
           nextDate: DateTime(month.year, month.month, 12),
         ).copyWith(
           type: v2_transaction.TransactionType.transfer,
-          transferAccountId: 'savings',
+          transferAccountId: 'cash',
           clearCategory: true,
         ),
       ),
@@ -3797,7 +3798,7 @@ void main() {
       tester
           .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
           .data,
-      r'$20,831.66',
+      r'$21,131.66',
     );
     expect(
       tester
@@ -3809,7 +3810,15 @@ void main() {
       tester
           .widget<Text>(find.byKey(const ValueKey('scheduled-month-remaining')))
           .data,
-      r'$20,631.66',
+      r'$20,931.66',
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('scheduled-month-completed-label')),
+          )
+          .data,
+      'Completed',
     );
 
     final expenseDay = find.byKey(
@@ -3824,6 +3833,32 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('calendar-filter-expenses')));
     await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('scheduled-month-completed-label')),
+          )
+          .data,
+      'Paid',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+          .data,
+      r'$20,331.66',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-paid')))
+          .data,
+      r'$900.00',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('scheduled-month-remaining')))
+          .data,
+      r'$20,131.66',
+    );
     expect(
       find.byKey(
         ValueKey('calendar-filtered-total-${month.year}-${month.month}-5'),
@@ -3848,6 +3883,69 @@ void main() {
       ),
       findsOneWidget,
     );
+
+    Future<void> expectSummaryForFilter({
+      required String filter,
+      required String completedLabel,
+      required String planned,
+      required String completed,
+      required String remaining,
+    }) async {
+      await tester.tap(find.byKey(ValueKey('calendar-filter-$filter')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('scheduled-month-completed-label')),
+            )
+            .data,
+        completedLabel,
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
+            .data,
+        planned,
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('scheduled-month-paid')))
+            .data,
+        completed,
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('scheduled-month-remaining')),
+            )
+            .data,
+        remaining,
+      );
+    }
+
+    await expectSummaryForFilter(
+      filter: 'income',
+      completedLabel: 'Received',
+      planned: r'$500.00',
+      completed: r'$0.00',
+      remaining: r'$500.00',
+    );
+    await expectSummaryForFilter(
+      filter: 'transfers',
+      completedLabel: 'Completed',
+      planned: r'$300.00',
+      completed: r'$0.00',
+      remaining: r'$300.00',
+    );
+    await expectSummaryForFilter(
+      filter: 'goals',
+      completedLabel: 'Funded',
+      planned: r'$0.00',
+      completed: r'$0.00',
+      remaining: r'$0.00',
+    );
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-expenses')));
+    await tester.pumpAndSettle();
 
     final ordinaryDecoration = tester.widget<DecoratedBox>(
       find.byKey(
@@ -3928,6 +4026,165 @@ void main() {
     await tester.pumpAndSettle();
     expect(pageScroll.position.pixels, greaterThan(0));
   });
+
+  test(
+    'scheduled monthly summary is type-aware and credits partial payment',
+    () {
+      final expenseDate = DateTime(2026, 8, 11);
+      final incomeDate = DateTime(2026, 8, 12);
+      final transferDate = DateTime(2026, 8, 13);
+      final skippedDate = DateTime(2026, 8, 14);
+      final expense =
+          scheduledExpense(
+            id: 'summary-expense',
+            payee: 'Expense',
+            amountMinor: 10000,
+            nextDate: expenseDate,
+          ).copyWith(
+            occurrences: [
+              v2_scheduled.ScheduledOccurrenceRecord(
+                scheduledDate: expenseDate,
+                plannedAmountMinor: 10000,
+                status: v2_scheduled.ScheduledOccurrenceStatus.paid,
+                actualAmountMinor: 15000,
+                transactionId: 'summary-expense-actual',
+              ),
+            ],
+          );
+      final income = scheduledExpense(
+        id: 'summary-income',
+        payee: 'Income',
+        amountMinor: 20000,
+        nextDate: incomeDate,
+      ).copyWith(type: v2_transaction.TransactionType.income);
+      final transfer =
+          scheduledExpense(
+            id: 'summary-transfer',
+            payee: 'Transfer',
+            amountMinor: 90000,
+            nextDate: transferDate,
+          ).copyWith(
+            type: v2_transaction.TransactionType.transfer,
+            transferAccountId: 'savings',
+            clearCategory: true,
+            occurrences: [
+              v2_scheduled.ScheduledOccurrenceRecord(
+                scheduledDate: transferDate,
+                plannedAmountMinor: 90000,
+                status: v2_scheduled.ScheduledOccurrenceStatus.paid,
+                actualAmountMinor: 64160,
+                transactionId: 'summary-transfer-actual',
+              ),
+            ],
+          );
+      final skipped =
+          scheduledExpense(
+            id: 'summary-skipped',
+            payee: 'Skipped',
+            amountMinor: 5000,
+            nextDate: skippedDate,
+          ).copyWith(
+            occurrences: [
+              v2_scheduled.ScheduledOccurrenceRecord(
+                scheduledDate: skippedDate,
+                plannedAmountMinor: 5000,
+                status: v2_scheduled.ScheduledOccurrenceStatus.skipped,
+              ),
+            ],
+          );
+      final occurrences = [
+        ScheduledCalendarOccurrence(
+          transaction: expense,
+          scheduledDate: expenseDate,
+          plannedAmountMinor: 10000,
+          record: expense.occurrences.single,
+        ),
+        ScheduledCalendarOccurrence(
+          transaction: income,
+          scheduledDate: incomeDate,
+          plannedAmountMinor: 20000,
+        ),
+        ScheduledCalendarOccurrence(
+          transaction: transfer,
+          scheduledDate: transferDate,
+          plannedAmountMinor: 90000,
+          record: transfer.occurrences.single,
+        ),
+        ScheduledCalendarOccurrence(
+          transaction: skipped,
+          scheduledDate: skippedDate,
+          plannedAmountMinor: 5000,
+          record: skipped.occurrences.single,
+        ),
+      ];
+      final transactions = [
+        v2_transaction.TransactionRecord(
+          id: 'summary-expense-actual',
+          type: v2_transaction.TransactionType.expense,
+          accountId: 'checking',
+          categoryId: 'dining',
+          date: expenseDate,
+          payee: 'Expense',
+          amountMinor: 15000,
+          scheduledTransactionId: expense.id,
+          scheduledOccurrenceDate: expenseDate,
+          scheduledPlannedAmountMinor: 10000,
+          sync: v2_sync.SyncMetadata.fresh(),
+        ),
+        v2_transaction.TransactionRecord(
+          id: 'summary-transfer-actual',
+          type: v2_transaction.TransactionType.transfer,
+          accountId: 'checking',
+          transferAccountId: 'savings',
+          date: transferDate,
+          payee: 'Transfer',
+          amountMinor: 64160,
+          scheduledTransactionId: transfer.id,
+          scheduledOccurrenceDate: transferDate,
+          scheduledPlannedAmountMinor: 90000,
+          sync: v2_sync.SyncMetadata.fresh(),
+        ),
+      ];
+
+      ScheduledMonthSummary summary(CalendarActivityFilter filter) =>
+          scheduledMonthSummary(occurrences, transactions, filter: filter);
+
+      expect(
+        summary(CalendarActivityFilter.expenses).plannedAmountMinor,
+        15000,
+      );
+      expect(summary(CalendarActivityFilter.expenses).paidAmountMinor, 15000);
+      expect(summary(CalendarActivityFilter.expenses).remainingAmountMinor, 0);
+      expect(summary(CalendarActivityFilter.income).plannedAmountMinor, 20000);
+      expect(summary(CalendarActivityFilter.income).paidAmountMinor, 0);
+      expect(
+        summary(CalendarActivityFilter.income).remainingAmountMinor,
+        20000,
+      );
+      expect(
+        summary(CalendarActivityFilter.transfers).plannedAmountMinor,
+        90000,
+      );
+      expect(summary(CalendarActivityFilter.transfers).paidAmountMinor, 64160);
+      expect(
+        summary(CalendarActivityFilter.transfers).remainingAmountMinor,
+        25840,
+      );
+      expect(summary(CalendarActivityFilter.goals).plannedAmountMinor, 0);
+      expect(summary(CalendarActivityFilter.all).plannedAmountMinor, 125000);
+      expect(summary(CalendarActivityFilter.all).paidAmountMinor, 79160);
+      expect(summary(CalendarActivityFilter.all).remainingAmountMinor, 45840);
+
+      expect(CalendarActivityFilter.all.scheduledCompletedLabel, 'Completed');
+      expect(CalendarActivityFilter.income.scheduledCompletedLabel, 'Received');
+      expect(CalendarActivityFilter.expenses.scheduledCompletedLabel, 'Paid');
+      expect(
+        CalendarActivityFilter.transfers.scheduledCompletedLabel,
+        'Completed',
+      );
+      expect(CalendarActivityFilter.goals.scheduledCompletedLabel, 'Funded');
+    },
+  );
 
   testWidgets('Scheduled page excludes ordinary ledger activity', (
     tester,
@@ -4074,7 +4331,7 @@ void main() {
       tester
           .widget<Text>(find.byKey(const ValueKey('scheduled-month-planned')))
           .data,
-      r'$0.00',
+      r'$5,000.00',
     );
 
     await tester.tap(find.byKey(const ValueKey('calendar-filter-goals')));
@@ -4149,6 +4406,83 @@ void main() {
       expect(find.text(expected), findsOneWidget);
       expect(tester.takeException(), isNull);
     }
+  });
+
+  testWidgets('calendar edge badges stay inside Sunday and Saturday cells', (
+    tester,
+  ) async {
+    final month = DateTime(2026, 8);
+    ScheduledCalendarOccurrence occurrence(int day, int index) {
+      final scheduled = scheduledExpense(
+        id: 'edge-$day-$index',
+        payee: 'Edge',
+        amountMinor: 10000000,
+        nextDate: DateTime(2026, 8, day),
+      );
+      return ScheduledCalendarOccurrence(
+        transaction: scheduled,
+        scheduledDate: scheduled.nextDate,
+        plannedAmountMinor: scheduled.amountMinor,
+      );
+    }
+
+    final sundayActivities = [CalendarDayActivity.scheduled(occurrence(2, 0))];
+    final saturdayActivities = [
+      for (var index = 0; index < 123; index++)
+        CalendarDayActivity.scheduled(occurrence(8, index)),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(1.3)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 350,
+              child: ScheduledCalendarGrid(
+                month: month,
+                activitySummaryByDay: {
+                  calendarDateKey(DateTime(2026, 8, 2)):
+                      CalendarDayActivitySummary(sundayActivities),
+                  calendarDateKey(DateTime(2026, 8, 8)):
+                      CalendarDayActivitySummary(saturdayActivities),
+                },
+                activityFilter: CalendarActivityFilter.expenses,
+                currency: const UserPreferences().currency,
+                selectedDate: DateTime(2026, 8, 8),
+                onSelectDate: (_) {},
+                onActivityFilterChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    for (final day in const [2, 8]) {
+      final cell = find.byKey(ValueKey('scheduled-calendar-day-2026-8-$day'));
+      final badge = find.byKey(
+        ValueKey('scheduled-calendar-count-2026-8-$day'),
+      );
+      expect(cell, findsOneWidget);
+      expect(badge, findsOneWidget);
+      final cellRect = tester.getRect(cell);
+      final badgeRect = tester.getRect(badge);
+      expect(badgeRect.left, greaterThanOrEqualTo(cellRect.left));
+      expect(badgeRect.right, lessThanOrEqualTo(cellRect.right));
+      expect(badgeRect.top, greaterThanOrEqualTo(cellRect.top));
+      expect(badgeRect.bottom, lessThanOrEqualTo(cellRect.bottom));
+    }
+    expect(find.text('1'), findsWidgets);
+    expect(find.text('123'), findsOneWidget);
+    expect(find.text(r'-$100,000.00'), findsWidgets);
+    expect(tester.takeException(), isNull);
   });
 
   test('calendar aggregation uses one canonical local date key', () {
@@ -5562,8 +5896,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Dining'), findsOneWidget);
-    expect(find.textContaining('Spent'), findsWidgets);
-    expect(find.text('Categories: Dining'), findsOneWidget);
+    expect(find.textContaining('spent of'), findsWidgets);
+    expect(find.textContaining('Monthly ·'), findsWidgets);
+    expect(find.textContaining('Categories:'), findsWidgets);
   });
 
   testWidgets('budget dialog creates budget with categories', (tester) async {
@@ -5586,12 +5921,18 @@ void main() {
     await tester.enterText(fields.at(0), 'Fuel');
     await tester.enterText(fields.at(1), '250.00');
     await tester.tap(find.widgetWithText(CheckboxListTile, 'Dining'));
+    await tester.pumpAndSettle();
+    expect(find.text('Monthly'), findsOneWidget);
+    expect(find.byKey(const ValueKey('budget-rollover')), findsOneWidget);
     await tester.tap(find.text('Save').last);
     await tester.pumpAndSettle();
 
     final budget = dataStore.budgets.singleWhere((item) => item.name == 'Fuel');
     expect(budget.amountMinor, 25000);
     expect(budget.categoryIds, contains('dining'));
+    expect(budget.period, BudgetPeriod.monthly);
+    expect(budget.rolloverEnabled, isFalse);
+    expect(budget.configurationRevisions, hasLength(1));
     expect(find.text('Fuel'), findsOneWidget);
   });
 
@@ -5665,6 +6006,9 @@ void main() {
     await tester.longPress(find.text('Dining'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete budget?'), findsOneWidget);
+    await tester.tap(find.text('Delete Budget'));
     await tester.pumpAndSettle();
 
     final budget = dataStore.budgets.singleWhere(

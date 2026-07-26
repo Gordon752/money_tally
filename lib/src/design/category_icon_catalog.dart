@@ -1,0 +1,1235 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+
+/// A deliberately curated category-icon choice.
+///
+/// [key] is persisted, so existing keys must never be renamed. The first
+/// twelve entries retain Money Tally's original SF-symbol-style storage keys.
+@immutable
+class AppCategoryIcon {
+  const AppCategoryIcon({
+    required this.key,
+    required this.label,
+    required this.group,
+    required this.materialIcon,
+    required this.cupertinoIcon,
+  });
+
+  final String key;
+  final String label;
+  final String group;
+  final IconData materialIcon;
+  final IconData cupertinoIcon;
+
+  IconData get icon => defaultTargetPlatform == TargetPlatform.iOS
+      ? cupertinoIcon
+      : materialIcon;
+
+  bool matches(String query) {
+    final normalized = query.trim().toLowerCase();
+    return normalized.isEmpty ||
+        label.toLowerCase().contains(normalized) ||
+        group.toLowerCase().contains(normalized) ||
+        key.toLowerCase().contains(normalized);
+  }
+}
+
+abstract final class CategoryIconCatalog {
+  static const groups = <String>[
+    'Finance',
+    'Food',
+    'Transportation',
+    'Fuel',
+    'Shopping',
+    'Medical',
+    'Utilities',
+    'Housing',
+    'Business',
+    'Technology',
+    'Pets',
+    'Travel',
+    'Entertainment',
+    'Education',
+    'Taxes',
+    'Insurance',
+    'Maintenance',
+    'Personal',
+    'Goals',
+    'Miscellaneous',
+  ];
+
+  static const icons = <AppCategoryIcon>[
+    // Finance
+    AppCategoryIcon(
+      key: 'finance.bank',
+      label: 'Bank',
+      group: 'Finance',
+      materialIcon: Icons.account_balance_outlined,
+      cupertinoIcon: CupertinoIcons.building_2_fill,
+    ),
+    AppCategoryIcon(
+      key: 'finance.wallet',
+      label: 'Wallet',
+      group: 'Finance',
+      materialIcon: Icons.account_balance_wallet_outlined,
+      cupertinoIcon: CupertinoIcons.creditcard,
+    ),
+    AppCategoryIcon(
+      key: 'finance.cash',
+      label: 'Cash',
+      group: 'Finance',
+      materialIcon: Icons.payments_outlined,
+      cupertinoIcon: CupertinoIcons.money_dollar,
+    ),
+    AppCategoryIcon(
+      key: 'finance.card',
+      label: 'Credit Card',
+      group: 'Finance',
+      materialIcon: Icons.credit_card_outlined,
+      cupertinoIcon: CupertinoIcons.creditcard,
+    ),
+    AppCategoryIcon(
+      key: 'finance.savings',
+      label: 'Savings',
+      group: 'Finance',
+      materialIcon: Icons.savings_outlined,
+      cupertinoIcon: CupertinoIcons.money_dollar_circle,
+    ),
+    AppCategoryIcon(
+      key: 'finance.investment',
+      label: 'Investment',
+      group: 'Finance',
+      materialIcon: Icons.show_chart_outlined,
+      cupertinoIcon: CupertinoIcons.chart_bar,
+    ),
+    AppCategoryIcon(
+      key: 'finance.loan',
+      label: 'Loan',
+      group: 'Finance',
+      materialIcon: Icons.request_quote_outlined,
+      cupertinoIcon: CupertinoIcons.doc_text,
+    ),
+    AppCategoryIcon(
+      key: 'finance.interest',
+      label: 'Interest',
+      group: 'Finance',
+      materialIcon: Icons.percent_outlined,
+      cupertinoIcon: CupertinoIcons.percent,
+    ),
+    AppCategoryIcon(
+      key: 'finance.exchange',
+      label: 'Currency Exchange',
+      group: 'Finance',
+      materialIcon: Icons.currency_exchange_outlined,
+      cupertinoIcon: CupertinoIcons.arrow_right_arrow_left,
+    ),
+
+    // Food (the original Dining key is intentionally preserved).
+    AppCategoryIcon(
+      key: 'fork.knife',
+      label: 'Dining',
+      group: 'Food',
+      materialIcon: Icons.restaurant_outlined,
+      cupertinoIcon: CupertinoIcons.placemark,
+    ),
+    AppCategoryIcon(
+      key: 'food.groceries',
+      label: 'Groceries',
+      group: 'Food',
+      materialIcon: Icons.local_grocery_store_outlined,
+      cupertinoIcon: CupertinoIcons.cart,
+    ),
+    AppCategoryIcon(
+      key: 'food.cafe',
+      label: 'Coffee',
+      group: 'Food',
+      materialIcon: Icons.local_cafe_outlined,
+      cupertinoIcon: CupertinoIcons.cube_box,
+    ),
+    AppCategoryIcon(
+      key: 'food.fast',
+      label: 'Fast Food',
+      group: 'Food',
+      materialIcon: Icons.fastfood_outlined,
+      cupertinoIcon: CupertinoIcons.bag,
+    ),
+    AppCategoryIcon(
+      key: 'food.bakery',
+      label: 'Bakery',
+      group: 'Food',
+      materialIcon: Icons.bakery_dining_outlined,
+      cupertinoIcon: CupertinoIcons.circle_grid_hex,
+    ),
+    AppCategoryIcon(
+      key: 'food.drink',
+      label: 'Drinks',
+      group: 'Food',
+      materialIcon: Icons.local_bar_outlined,
+      cupertinoIcon: CupertinoIcons.drop,
+    ),
+    AppCategoryIcon(
+      key: 'food.delivery',
+      label: 'Food Delivery',
+      group: 'Food',
+      materialIcon: Icons.delivery_dining_outlined,
+      cupertinoIcon: CupertinoIcons.car,
+    ),
+    AppCategoryIcon(
+      key: 'food.lunch',
+      label: 'Lunch',
+      group: 'Food',
+      materialIcon: Icons.lunch_dining_outlined,
+      cupertinoIcon: CupertinoIcons.bag,
+    ),
+
+    // Transportation
+    AppCategoryIcon(
+      key: 'car',
+      label: 'Car',
+      group: 'Transportation',
+      materialIcon: Icons.directions_car_outlined,
+      cupertinoIcon: CupertinoIcons.car,
+    ),
+    AppCategoryIcon(
+      key: 'transport.bus',
+      label: 'Bus',
+      group: 'Transportation',
+      materialIcon: Icons.directions_bus_outlined,
+      cupertinoIcon: CupertinoIcons.bus,
+    ),
+    AppCategoryIcon(
+      key: 'transport.train',
+      label: 'Train',
+      group: 'Transportation',
+      materialIcon: Icons.train_outlined,
+      cupertinoIcon: CupertinoIcons.tram_fill,
+    ),
+    AppCategoryIcon(
+      key: 'transport.flight',
+      label: 'Flight',
+      group: 'Transportation',
+      materialIcon: Icons.flight_outlined,
+      cupertinoIcon: CupertinoIcons.airplane,
+    ),
+    AppCategoryIcon(
+      key: 'transport.taxi',
+      label: 'Taxi',
+      group: 'Transportation',
+      materialIcon: Icons.local_taxi_outlined,
+      cupertinoIcon: CupertinoIcons.car_detailed,
+    ),
+    AppCategoryIcon(
+      key: 'transport.bike',
+      label: 'Bicycle',
+      group: 'Transportation',
+      materialIcon: Icons.pedal_bike_outlined,
+      cupertinoIcon: CupertinoIcons.circle_grid_hex,
+    ),
+    AppCategoryIcon(
+      key: 'transport.walk',
+      label: 'Walking',
+      group: 'Transportation',
+      materialIcon: Icons.directions_walk_outlined,
+      cupertinoIcon: CupertinoIcons.person,
+    ),
+    AppCategoryIcon(
+      key: 'transport.parking',
+      label: 'Parking',
+      group: 'Transportation',
+      materialIcon: Icons.local_parking_outlined,
+      cupertinoIcon: CupertinoIcons.circle,
+    ),
+    AppCategoryIcon(
+      key: 'transport.toll',
+      label: 'Tolls',
+      group: 'Transportation',
+      materialIcon: Icons.toll_outlined,
+      cupertinoIcon: CupertinoIcons.money_dollar_circle,
+    ),
+
+    // Fuel
+    AppCategoryIcon(
+      key: 'fuelpump',
+      label: 'Fuel',
+      group: 'Fuel',
+      materialIcon: Icons.local_gas_station_outlined,
+      cupertinoIcon: CupertinoIcons.drop,
+    ),
+    AppCategoryIcon(
+      key: 'fuel.ev',
+      label: 'EV Charging',
+      group: 'Fuel',
+      materialIcon: Icons.ev_station_outlined,
+      cupertinoIcon: CupertinoIcons.bolt,
+    ),
+    AppCategoryIcon(
+      key: 'fuel.diesel',
+      label: 'Diesel',
+      group: 'Fuel',
+      materialIcon: Icons.oil_barrel_outlined,
+      cupertinoIcon: CupertinoIcons.drop_fill,
+    ),
+    AppCategoryIcon(
+      key: 'fuel.charger',
+      label: 'Home Charger',
+      group: 'Fuel',
+      materialIcon: Icons.electrical_services_outlined,
+      cupertinoIcon: CupertinoIcons.bolt,
+    ),
+    AppCategoryIcon(
+      key: 'fuel.mileage',
+      label: 'Mileage',
+      group: 'Fuel',
+      materialIcon: Icons.speed_outlined,
+      cupertinoIcon: CupertinoIcons.gauge,
+    ),
+    AppCategoryIcon(
+      key: 'fuel.carwash',
+      label: 'Car Wash',
+      group: 'Fuel',
+      materialIcon: Icons.local_car_wash_outlined,
+      cupertinoIcon: CupertinoIcons.drop_triangle,
+    ),
+    AppCategoryIcon(
+      key: 'fuel.air',
+      label: 'Tires & Air',
+      group: 'Fuel',
+      materialIcon: Icons.tire_repair_outlined,
+      cupertinoIcon: CupertinoIcons.circle,
+    ),
+
+    // Shopping
+    AppCategoryIcon(
+      key: 'cart',
+      label: 'Shopping',
+      group: 'Shopping',
+      materialIcon: Icons.shopping_cart_outlined,
+      cupertinoIcon: CupertinoIcons.cart,
+    ),
+    AppCategoryIcon(
+      key: 'shopping.bag',
+      label: 'Retail',
+      group: 'Shopping',
+      materialIcon: Icons.shopping_bag_outlined,
+      cupertinoIcon: CupertinoIcons.bag,
+    ),
+    AppCategoryIcon(
+      key: 'shopping.clothes',
+      label: 'Clothing',
+      group: 'Shopping',
+      materialIcon: Icons.checkroom_outlined,
+      cupertinoIcon: CupertinoIcons.person_crop_square,
+    ),
+    AppCategoryIcon(
+      key: 'shopping.gift',
+      label: 'Gifts',
+      group: 'Shopping',
+      materialIcon: Icons.card_giftcard_outlined,
+      cupertinoIcon: CupertinoIcons.gift,
+    ),
+    AppCategoryIcon(
+      key: 'shopping.store',
+      label: 'Store',
+      group: 'Shopping',
+      materialIcon: Icons.storefront_outlined,
+      cupertinoIcon: CupertinoIcons.building_2_fill,
+    ),
+    AppCategoryIcon(
+      key: 'shopping.online',
+      label: 'Online Shopping',
+      group: 'Shopping',
+      materialIcon: Icons.shopping_basket_outlined,
+      cupertinoIcon: CupertinoIcons.cart_badge_plus,
+    ),
+    AppCategoryIcon(
+      key: 'shopping.jewelry',
+      label: 'Jewelry',
+      group: 'Shopping',
+      materialIcon: Icons.diamond_outlined,
+      cupertinoIcon: CupertinoIcons.sparkles,
+    ),
+    AppCategoryIcon(
+      key: 'shopping.discount',
+      label: 'Discounts',
+      group: 'Shopping',
+      materialIcon: Icons.discount_outlined,
+      cupertinoIcon: CupertinoIcons.tag,
+    ),
+
+    // Medical
+    AppCategoryIcon(
+      key: 'cross.case',
+      label: 'Medical',
+      group: 'Medical',
+      materialIcon: Icons.medical_services_outlined,
+      cupertinoIcon: CupertinoIcons.bandage,
+    ),
+    AppCategoryIcon(
+      key: 'medical.hospital',
+      label: 'Hospital',
+      group: 'Medical',
+      materialIcon: Icons.local_hospital_outlined,
+      cupertinoIcon: CupertinoIcons.bandage,
+    ),
+    AppCategoryIcon(
+      key: 'medical.medicine',
+      label: 'Medication',
+      group: 'Medical',
+      materialIcon: Icons.medication_outlined,
+      cupertinoIcon: CupertinoIcons.capsule,
+    ),
+    AppCategoryIcon(
+      key: 'medical.pharmacy',
+      label: 'Pharmacy',
+      group: 'Medical',
+      materialIcon: Icons.local_pharmacy_outlined,
+      cupertinoIcon: CupertinoIcons.add_circled,
+    ),
+    AppCategoryIcon(
+      key: 'medical.dental',
+      label: 'Dental',
+      group: 'Medical',
+      materialIcon: Icons.health_and_safety_outlined,
+      cupertinoIcon: CupertinoIcons.heart,
+    ),
+    AppCategoryIcon(
+      key: 'medical.vision',
+      label: 'Vision',
+      group: 'Medical',
+      materialIcon: Icons.visibility_outlined,
+      cupertinoIcon: CupertinoIcons.eye,
+    ),
+    AppCategoryIcon(
+      key: 'medical.fitness',
+      label: 'Fitness',
+      group: 'Medical',
+      materialIcon: Icons.fitness_center_outlined,
+      cupertinoIcon: CupertinoIcons.heart_circle,
+    ),
+    AppCategoryIcon(
+      key: 'medical.therapy',
+      label: 'Therapy',
+      group: 'Medical',
+      materialIcon: Icons.psychology_outlined,
+      cupertinoIcon: CupertinoIcons.person_2,
+    ),
+
+    // Utilities
+    AppCategoryIcon(
+      key: 'bolt',
+      label: 'Utilities',
+      group: 'Utilities',
+      materialIcon: Icons.bolt_outlined,
+      cupertinoIcon: CupertinoIcons.bolt,
+    ),
+    AppCategoryIcon(
+      key: 'utilities.power',
+      label: 'Electricity',
+      group: 'Utilities',
+      materialIcon: Icons.electric_bolt_outlined,
+      cupertinoIcon: CupertinoIcons.bolt_fill,
+    ),
+    AppCategoryIcon(
+      key: 'utilities.water',
+      label: 'Water',
+      group: 'Utilities',
+      materialIcon: Icons.water_drop_outlined,
+      cupertinoIcon: CupertinoIcons.drop,
+    ),
+    AppCategoryIcon(
+      key: 'utilities.gas',
+      label: 'Natural Gas',
+      group: 'Utilities',
+      materialIcon: Icons.local_fire_department_outlined,
+      cupertinoIcon: CupertinoIcons.flame,
+    ),
+    AppCategoryIcon(
+      key: 'utilities.internet',
+      label: 'Internet',
+      group: 'Utilities',
+      materialIcon: Icons.wifi_outlined,
+      cupertinoIcon: CupertinoIcons.wifi,
+    ),
+    AppCategoryIcon(
+      key: 'phone',
+      label: 'Phone',
+      group: 'Utilities',
+      materialIcon: Icons.phone_outlined,
+      cupertinoIcon: CupertinoIcons.phone,
+    ),
+    AppCategoryIcon(
+      key: 'utilities.cable',
+      label: 'Cable TV',
+      group: 'Utilities',
+      materialIcon: Icons.tv_outlined,
+      cupertinoIcon: CupertinoIcons.tv,
+    ),
+    AppCategoryIcon(
+      key: 'utilities.trash',
+      label: 'Waste',
+      group: 'Utilities',
+      materialIcon: Icons.delete_sweep_outlined,
+      cupertinoIcon: CupertinoIcons.trash,
+    ),
+
+    // Housing
+    AppCategoryIcon(
+      key: 'house',
+      label: 'Home',
+      group: 'Housing',
+      materialIcon: Icons.home_outlined,
+      cupertinoIcon: CupertinoIcons.house,
+    ),
+    AppCategoryIcon(
+      key: 'housing.rent',
+      label: 'Rent',
+      group: 'Housing',
+      materialIcon: Icons.apartment_outlined,
+      cupertinoIcon: CupertinoIcons.building_2_fill,
+    ),
+    AppCategoryIcon(
+      key: 'housing.mortgage',
+      label: 'Mortgage',
+      group: 'Housing',
+      materialIcon: Icons.real_estate_agent_outlined,
+      cupertinoIcon: CupertinoIcons.house_fill,
+    ),
+    AppCategoryIcon(
+      key: 'housing.property',
+      label: 'Property',
+      group: 'Housing',
+      materialIcon: Icons.location_city_outlined,
+      cupertinoIcon: CupertinoIcons.building_2_fill,
+    ),
+    AppCategoryIcon(
+      key: 'housing.furniture',
+      label: 'Furniture',
+      group: 'Housing',
+      materialIcon: Icons.chair_outlined,
+      cupertinoIcon: CupertinoIcons.square_grid_2x2,
+    ),
+    AppCategoryIcon(
+      key: 'housing.garden',
+      label: 'Lawn & Garden',
+      group: 'Housing',
+      materialIcon: Icons.yard_outlined,
+      cupertinoIcon: CupertinoIcons.leaf_arrow_circlepath,
+    ),
+    AppCategoryIcon(
+      key: 'housing.cleaning',
+      label: 'Cleaning',
+      group: 'Housing',
+      materialIcon: Icons.cleaning_services_outlined,
+      cupertinoIcon: CupertinoIcons.sparkles,
+    ),
+    AppCategoryIcon(
+      key: 'housing.security',
+      label: 'Home Security',
+      group: 'Housing',
+      materialIcon: Icons.security_outlined,
+      cupertinoIcon: CupertinoIcons.lock_shield,
+    ),
+
+    // Business
+    AppCategoryIcon(
+      key: 'business.office',
+      label: 'Office',
+      group: 'Business',
+      materialIcon: Icons.business_center_outlined,
+      cupertinoIcon: CupertinoIcons.briefcase,
+    ),
+    AppCategoryIcon(
+      key: 'business.invoice',
+      label: 'Invoices',
+      group: 'Business',
+      materialIcon: Icons.receipt_long_outlined,
+      cupertinoIcon: CupertinoIcons.doc_text,
+    ),
+    AppCategoryIcon(
+      key: 'business.payroll',
+      label: 'Payroll',
+      group: 'Business',
+      materialIcon: Icons.badge_outlined,
+      cupertinoIcon: CupertinoIcons.person_2,
+    ),
+    AppCategoryIcon(
+      key: 'business.supplies',
+      label: 'Office Supplies',
+      group: 'Business',
+      materialIcon: Icons.inventory_2_outlined,
+      cupertinoIcon: CupertinoIcons.archivebox,
+    ),
+    AppCategoryIcon(
+      key: 'business.shipping',
+      label: 'Shipping',
+      group: 'Business',
+      materialIcon: Icons.local_shipping_outlined,
+      cupertinoIcon: CupertinoIcons.cube_box,
+    ),
+    AppCategoryIcon(
+      key: 'business.marketing',
+      label: 'Marketing',
+      group: 'Business',
+      materialIcon: Icons.campaign_outlined,
+      cupertinoIcon: CupertinoIcons.speaker_2,
+    ),
+    AppCategoryIcon(
+      key: 'business.meeting',
+      label: 'Meetings',
+      group: 'Business',
+      materialIcon: Icons.groups_outlined,
+      cupertinoIcon: CupertinoIcons.person_3,
+    ),
+    AppCategoryIcon(
+      key: 'business.subscription',
+      label: 'Business Services',
+      group: 'Business',
+      materialIcon: Icons.room_service_outlined,
+      cupertinoIcon: CupertinoIcons.briefcase,
+    ),
+
+    // Technology
+    AppCategoryIcon(
+      key: 'technology.computer',
+      label: 'Computer',
+      group: 'Technology',
+      materialIcon: Icons.computer_outlined,
+      cupertinoIcon: CupertinoIcons.device_laptop,
+    ),
+    AppCategoryIcon(
+      key: 'technology.mobile',
+      label: 'Mobile Device',
+      group: 'Technology',
+      materialIcon: Icons.smartphone_outlined,
+      cupertinoIcon: CupertinoIcons.device_phone_portrait,
+    ),
+    AppCategoryIcon(
+      key: 'technology.software',
+      label: 'Software',
+      group: 'Technology',
+      materialIcon: Icons.apps_outlined,
+      cupertinoIcon: CupertinoIcons.app,
+    ),
+    AppCategoryIcon(
+      key: 'technology.cloud',
+      label: 'Cloud Services',
+      group: 'Technology',
+      materialIcon: Icons.cloud_outlined,
+      cupertinoIcon: CupertinoIcons.cloud,
+    ),
+    AppCategoryIcon(
+      key: 'technology.storage',
+      label: 'Data Storage',
+      group: 'Technology',
+      materialIcon: Icons.storage_outlined,
+      cupertinoIcon: CupertinoIcons.archivebox,
+    ),
+    AppCategoryIcon(
+      key: 'technology.gaming',
+      label: 'Gaming',
+      group: 'Technology',
+      materialIcon: Icons.sports_esports_outlined,
+      cupertinoIcon: CupertinoIcons.game_controller,
+    ),
+    AppCategoryIcon(
+      key: 'technology.camera',
+      label: 'Camera',
+      group: 'Technology',
+      materialIcon: Icons.photo_camera_outlined,
+      cupertinoIcon: CupertinoIcons.camera,
+    ),
+    AppCategoryIcon(
+      key: 'technology.repair',
+      label: 'Device Repair',
+      group: 'Technology',
+      materialIcon: Icons.phonelink_setup_outlined,
+      cupertinoIcon: CupertinoIcons.wrench,
+    ),
+
+    // Pets
+    AppCategoryIcon(
+      key: 'pets.paw',
+      label: 'Pets',
+      group: 'Pets',
+      materialIcon: Icons.pets_outlined,
+      cupertinoIcon: CupertinoIcons.paw,
+    ),
+    AppCategoryIcon(
+      key: 'pets.food',
+      label: 'Pet Food',
+      group: 'Pets',
+      materialIcon: Icons.set_meal_outlined,
+      cupertinoIcon: CupertinoIcons.cart,
+    ),
+    AppCategoryIcon(
+      key: 'pets.vet',
+      label: 'Veterinary',
+      group: 'Pets',
+      materialIcon: Icons.vaccines_outlined,
+      cupertinoIcon: CupertinoIcons.bandage,
+    ),
+    AppCategoryIcon(
+      key: 'pets.grooming',
+      label: 'Pet Grooming',
+      group: 'Pets',
+      materialIcon: Icons.content_cut_outlined,
+      cupertinoIcon: CupertinoIcons.scissors,
+    ),
+    AppCategoryIcon(
+      key: 'pets.boarding',
+      label: 'Pet Boarding',
+      group: 'Pets',
+      materialIcon: Icons.night_shelter_outlined,
+      cupertinoIcon: CupertinoIcons.house,
+    ),
+    AppCategoryIcon(
+      key: 'pets.supplies',
+      label: 'Pet Supplies',
+      group: 'Pets',
+      materialIcon: Icons.catching_pokemon_outlined,
+      cupertinoIcon: CupertinoIcons.bag,
+    ),
+    AppCategoryIcon(
+      key: 'pets.insurance',
+      label: 'Pet Insurance',
+      group: 'Pets',
+      materialIcon: Icons.health_and_safety_outlined,
+      cupertinoIcon: CupertinoIcons.shield,
+    ),
+
+    // Travel
+    AppCategoryIcon(
+      key: 'travel.luggage',
+      label: 'Travel',
+      group: 'Travel',
+      materialIcon: Icons.luggage_outlined,
+      cupertinoIcon: CupertinoIcons.bag,
+    ),
+    AppCategoryIcon(
+      key: 'travel.hotel',
+      label: 'Hotel',
+      group: 'Travel',
+      materialIcon: Icons.hotel_outlined,
+      cupertinoIcon: CupertinoIcons.bed_double,
+    ),
+    AppCategoryIcon(
+      key: 'travel.beach',
+      label: 'Beach',
+      group: 'Travel',
+      materialIcon: Icons.beach_access_outlined,
+      cupertinoIcon: CupertinoIcons.sun_max,
+    ),
+    AppCategoryIcon(
+      key: 'travel.map',
+      label: 'Tours',
+      group: 'Travel',
+      materialIcon: Icons.map_outlined,
+      cupertinoIcon: CupertinoIcons.map,
+    ),
+    AppCategoryIcon(
+      key: 'travel.passport',
+      label: 'Passport & Visas',
+      group: 'Travel',
+      materialIcon: Icons.badge_outlined,
+      cupertinoIcon: CupertinoIcons.person_crop_rectangle,
+    ),
+    AppCategoryIcon(
+      key: 'travel.cruise',
+      label: 'Cruise',
+      group: 'Travel',
+      materialIcon: Icons.directions_boat_outlined,
+      cupertinoIcon: CupertinoIcons.location,
+    ),
+    AppCategoryIcon(
+      key: 'travel.camping',
+      label: 'Camping',
+      group: 'Travel',
+      materialIcon: Icons.cabin_outlined,
+      cupertinoIcon: CupertinoIcons.house,
+    ),
+    AppCategoryIcon(
+      key: 'travel.language',
+      label: 'Travel Services',
+      group: 'Travel',
+      materialIcon: Icons.travel_explore_outlined,
+      cupertinoIcon: CupertinoIcons.globe,
+    ),
+
+    // Entertainment
+    AppCategoryIcon(
+      key: 'film',
+      label: 'Movies',
+      group: 'Entertainment',
+      materialIcon: Icons.movie_outlined,
+      cupertinoIcon: CupertinoIcons.film,
+    ),
+    AppCategoryIcon(
+      key: 'entertainment.music',
+      label: 'Music',
+      group: 'Entertainment',
+      materialIcon: Icons.music_note_outlined,
+      cupertinoIcon: CupertinoIcons.music_note,
+    ),
+    AppCategoryIcon(
+      key: 'entertainment.live',
+      label: 'Live Events',
+      group: 'Entertainment',
+      materialIcon: Icons.theater_comedy_outlined,
+      cupertinoIcon: CupertinoIcons.tickets,
+    ),
+    AppCategoryIcon(
+      key: 'entertainment.sports',
+      label: 'Sports',
+      group: 'Entertainment',
+      materialIcon: Icons.sports_basketball_outlined,
+      cupertinoIcon: CupertinoIcons.sportscourt,
+    ),
+    AppCategoryIcon(
+      key: 'entertainment.books',
+      label: 'Books',
+      group: 'Entertainment',
+      materialIcon: Icons.menu_book_outlined,
+      cupertinoIcon: CupertinoIcons.book,
+    ),
+    AppCategoryIcon(
+      key: 'entertainment.streaming',
+      label: 'Streaming',
+      group: 'Entertainment',
+      materialIcon: Icons.live_tv_outlined,
+      cupertinoIcon: CupertinoIcons.play_rectangle,
+    ),
+    AppCategoryIcon(
+      key: 'entertainment.hobby',
+      label: 'Hobbies',
+      group: 'Entertainment',
+      materialIcon: Icons.palette_outlined,
+      cupertinoIcon: CupertinoIcons.paintbrush,
+    ),
+    AppCategoryIcon(
+      key: 'entertainment.games',
+      label: 'Games',
+      group: 'Entertainment',
+      materialIcon: Icons.casino_outlined,
+      cupertinoIcon: CupertinoIcons.game_controller,
+    ),
+
+    // Education
+    AppCategoryIcon(
+      key: 'education.school',
+      label: 'Education',
+      group: 'Education',
+      materialIcon: Icons.school_outlined,
+      cupertinoIcon: CupertinoIcons.book,
+    ),
+    AppCategoryIcon(
+      key: 'education.college',
+      label: 'College',
+      group: 'Education',
+      materialIcon: Icons.account_balance_outlined,
+      cupertinoIcon: CupertinoIcons.building_2_fill,
+    ),
+    AppCategoryIcon(
+      key: 'education.tuition',
+      label: 'Tuition',
+      group: 'Education',
+      materialIcon: Icons.auto_stories_outlined,
+      cupertinoIcon: CupertinoIcons.book_fill,
+    ),
+    AppCategoryIcon(
+      key: 'education.course',
+      label: 'Courses',
+      group: 'Education',
+      materialIcon: Icons.cast_for_education_outlined,
+      cupertinoIcon: CupertinoIcons.play_rectangle,
+    ),
+    AppCategoryIcon(
+      key: 'education.supplies',
+      label: 'School Supplies',
+      group: 'Education',
+      materialIcon: Icons.edit_note_outlined,
+      cupertinoIcon: CupertinoIcons.pencil,
+    ),
+    AppCategoryIcon(
+      key: 'education.childcare',
+      label: 'Childcare',
+      group: 'Education',
+      materialIcon: Icons.child_care_outlined,
+      cupertinoIcon: CupertinoIcons.person_2,
+    ),
+    AppCategoryIcon(
+      key: 'education.library',
+      label: 'Library',
+      group: 'Education',
+      materialIcon: Icons.local_library_outlined,
+      cupertinoIcon: CupertinoIcons.book,
+    ),
+    AppCategoryIcon(
+      key: 'education.graduation',
+      label: 'Graduation',
+      group: 'Education',
+      materialIcon: Icons.workspace_premium_outlined,
+      cupertinoIcon: CupertinoIcons.rosette,
+    ),
+
+    // Taxes
+    AppCategoryIcon(
+      key: 'taxes.receipt',
+      label: 'Taxes',
+      group: 'Taxes',
+      materialIcon: Icons.receipt_outlined,
+      cupertinoIcon: CupertinoIcons.doc_text,
+    ),
+    AppCategoryIcon(
+      key: 'taxes.federal',
+      label: 'Federal Tax',
+      group: 'Taxes',
+      materialIcon: Icons.account_balance_outlined,
+      cupertinoIcon: CupertinoIcons.building_2_fill,
+    ),
+    AppCategoryIcon(
+      key: 'taxes.state',
+      label: 'State Tax',
+      group: 'Taxes',
+      materialIcon: Icons.location_city_outlined,
+      cupertinoIcon: CupertinoIcons.map,
+    ),
+    AppCategoryIcon(
+      key: 'taxes.property',
+      label: 'Property Tax',
+      group: 'Taxes',
+      materialIcon: Icons.home_work_outlined,
+      cupertinoIcon: CupertinoIcons.house,
+    ),
+    AppCategoryIcon(
+      key: 'taxes.sales',
+      label: 'Sales Tax',
+      group: 'Taxes',
+      materialIcon: Icons.point_of_sale_outlined,
+      cupertinoIcon: CupertinoIcons.cart,
+    ),
+    AppCategoryIcon(
+      key: 'taxes.accounting',
+      label: 'Tax Preparation',
+      group: 'Taxes',
+      materialIcon: Icons.calculate_outlined,
+      cupertinoIcon: CupertinoIcons.number,
+    ),
+    AppCategoryIcon(
+      key: 'taxes.refund',
+      label: 'Tax Refund',
+      group: 'Taxes',
+      materialIcon: Icons.currency_exchange_outlined,
+      cupertinoIcon: CupertinoIcons.arrow_counterclockwise,
+    ),
+
+    // Insurance
+    AppCategoryIcon(
+      key: 'shield',
+      label: 'Insurance',
+      group: 'Insurance',
+      materialIcon: Icons.shield_outlined,
+      cupertinoIcon: CupertinoIcons.shield,
+    ),
+    AppCategoryIcon(
+      key: 'insurance.auto',
+      label: 'Auto Insurance',
+      group: 'Insurance',
+      materialIcon: Icons.car_crash_outlined,
+      cupertinoIcon: CupertinoIcons.car,
+    ),
+    AppCategoryIcon(
+      key: 'insurance.home',
+      label: 'Home Insurance',
+      group: 'Insurance',
+      materialIcon: Icons.other_houses_outlined,
+      cupertinoIcon: CupertinoIcons.house,
+    ),
+    AppCategoryIcon(
+      key: 'insurance.health',
+      label: 'Health Insurance',
+      group: 'Insurance',
+      materialIcon: Icons.monitor_heart_outlined,
+      cupertinoIcon: CupertinoIcons.heart,
+    ),
+    AppCategoryIcon(
+      key: 'insurance.life',
+      label: 'Life Insurance',
+      group: 'Insurance',
+      materialIcon: Icons.favorite_border,
+      cupertinoIcon: CupertinoIcons.heart,
+    ),
+    AppCategoryIcon(
+      key: 'insurance.travel',
+      label: 'Travel Insurance',
+      group: 'Insurance',
+      materialIcon: Icons.flight_takeoff_outlined,
+      cupertinoIcon: CupertinoIcons.airplane,
+    ),
+    AppCategoryIcon(
+      key: 'insurance.claim',
+      label: 'Insurance Claim',
+      group: 'Insurance',
+      materialIcon: Icons.assignment_outlined,
+      cupertinoIcon: CupertinoIcons.doc_text,
+    ),
+
+    // Maintenance
+    AppCategoryIcon(
+      key: 'wrench.adjustable',
+      label: 'Maintenance',
+      group: 'Maintenance',
+      materialIcon: Icons.build_outlined,
+      cupertinoIcon: CupertinoIcons.wrench,
+    ),
+    AppCategoryIcon(
+      key: 'maintenance.tools',
+      label: 'Tools',
+      group: 'Maintenance',
+      materialIcon: Icons.handyman_outlined,
+      cupertinoIcon: CupertinoIcons.hammer,
+    ),
+    AppCategoryIcon(
+      key: 'maintenance.auto',
+      label: 'Auto Repair',
+      group: 'Maintenance',
+      materialIcon: Icons.car_repair_outlined,
+      cupertinoIcon: CupertinoIcons.wrench,
+    ),
+    AppCategoryIcon(
+      key: 'maintenance.home',
+      label: 'Home Repair',
+      group: 'Maintenance',
+      materialIcon: Icons.home_repair_service_outlined,
+      cupertinoIcon: CupertinoIcons.house,
+    ),
+    AppCategoryIcon(
+      key: 'maintenance.plumbing',
+      label: 'Plumbing',
+      group: 'Maintenance',
+      materialIcon: Icons.plumbing_outlined,
+      cupertinoIcon: CupertinoIcons.drop,
+    ),
+    AppCategoryIcon(
+      key: 'maintenance.electric',
+      label: 'Electrical',
+      group: 'Maintenance',
+      materialIcon: Icons.electrical_services_outlined,
+      cupertinoIcon: CupertinoIcons.bolt,
+    ),
+    AppCategoryIcon(
+      key: 'maintenance.paint',
+      label: 'Painting',
+      group: 'Maintenance',
+      materialIcon: Icons.format_paint_outlined,
+      cupertinoIcon: CupertinoIcons.paintbrush,
+    ),
+    AppCategoryIcon(
+      key: 'maintenance.hvac',
+      label: 'Heating & Cooling',
+      group: 'Maintenance',
+      materialIcon: Icons.thermostat_outlined,
+      cupertinoIcon: CupertinoIcons.thermometer,
+    ),
+
+    // Personal
+    AppCategoryIcon(
+      key: 'personal.person',
+      label: 'Personal',
+      group: 'Personal',
+      materialIcon: Icons.person_outline,
+      cupertinoIcon: CupertinoIcons.person,
+    ),
+    AppCategoryIcon(
+      key: 'personal.hair',
+      label: 'Haircare',
+      group: 'Personal',
+      materialIcon: Icons.content_cut_outlined,
+      cupertinoIcon: CupertinoIcons.scissors,
+    ),
+    AppCategoryIcon(
+      key: 'personal.beauty',
+      label: 'Beauty',
+      group: 'Personal',
+      materialIcon: Icons.face_retouching_natural_outlined,
+      cupertinoIcon: CupertinoIcons.sparkles,
+    ),
+    AppCategoryIcon(
+      key: 'personal.wellness',
+      label: 'Wellness',
+      group: 'Personal',
+      materialIcon: Icons.self_improvement_outlined,
+      cupertinoIcon: CupertinoIcons.heart,
+    ),
+    AppCategoryIcon(
+      key: 'personal.family',
+      label: 'Family',
+      group: 'Personal',
+      materialIcon: Icons.family_restroom_outlined,
+      cupertinoIcon: CupertinoIcons.person_3,
+    ),
+    AppCategoryIcon(
+      key: 'personal.children',
+      label: 'Children',
+      group: 'Personal',
+      materialIcon: Icons.child_friendly_outlined,
+      cupertinoIcon: CupertinoIcons.person_2,
+    ),
+    AppCategoryIcon(
+      key: 'personal.donation',
+      label: 'Charity',
+      group: 'Personal',
+      materialIcon: Icons.volunteer_activism_outlined,
+      cupertinoIcon: CupertinoIcons.heart_circle,
+    ),
+    AppCategoryIcon(
+      key: 'personal.religion',
+      label: 'Faith',
+      group: 'Personal',
+      materialIcon: Icons.church_outlined,
+      cupertinoIcon: CupertinoIcons.building_2_fill,
+    ),
+
+    // Goals
+    AppCategoryIcon(
+      key: 'goals.target',
+      label: 'Target',
+      group: 'Goals',
+      materialIcon: Icons.track_changes_outlined,
+      cupertinoIcon: CupertinoIcons.scope,
+    ),
+    AppCategoryIcon(
+      key: 'goals.piggy',
+      label: 'Piggy Bank',
+      group: 'Goals',
+      materialIcon: Icons.savings_outlined,
+      cupertinoIcon: CupertinoIcons.money_dollar_circle,
+    ),
+    AppCategoryIcon(
+      key: 'goals.emergency',
+      label: 'Emergency Fund',
+      group: 'Goals',
+      materialIcon: Icons.emergency_outlined,
+      cupertinoIcon: CupertinoIcons.exclamationmark_shield,
+    ),
+    AppCategoryIcon(
+      key: 'goals.truck',
+      label: 'Truck',
+      group: 'Goals',
+      materialIcon: Icons.fire_truck_outlined,
+      cupertinoIcon: CupertinoIcons.car,
+    ),
+    AppCategoryIcon(
+      key: 'goals.house',
+      label: 'House Goal',
+      group: 'Goals',
+      materialIcon: Icons.cottage_outlined,
+      cupertinoIcon: CupertinoIcons.house,
+    ),
+    AppCategoryIcon(
+      key: 'goals.graduation',
+      label: 'Education Goal',
+      group: 'Goals',
+      materialIcon: Icons.school_outlined,
+      cupertinoIcon: CupertinoIcons.book,
+    ),
+    AppCategoryIcon(
+      key: 'goals.vacation',
+      label: 'Vacation Goal',
+      group: 'Goals',
+      materialIcon: Icons.beach_access_outlined,
+      cupertinoIcon: CupertinoIcons.sun_max,
+    ),
+    AppCategoryIcon(
+      key: 'goals.gift',
+      label: 'Gift Goal',
+      group: 'Goals',
+      materialIcon: Icons.card_giftcard_outlined,
+      cupertinoIcon: CupertinoIcons.gift,
+    ),
+    AppCategoryIcon(
+      key: 'goals.repair',
+      label: 'Repair Reserve',
+      group: 'Goals',
+      materialIcon: Icons.construction_outlined,
+      cupertinoIcon: CupertinoIcons.hammer,
+    ),
+    AppCategoryIcon(
+      key: 'goals.flag',
+      label: 'Milestone',
+      group: 'Goals',
+      materialIcon: Icons.flag_outlined,
+      cupertinoIcon: CupertinoIcons.flag,
+    ),
+
+    // Miscellaneous
+    AppCategoryIcon(
+      key: 'tag',
+      label: 'General',
+      group: 'Miscellaneous',
+      materialIcon: Icons.sell_outlined,
+      cupertinoIcon: CupertinoIcons.tag,
+    ),
+    AppCategoryIcon(
+      key: 'misc.star',
+      label: 'Favorite',
+      group: 'Miscellaneous',
+      materialIcon: Icons.star_border,
+      cupertinoIcon: CupertinoIcons.star,
+    ),
+    AppCategoryIcon(
+      key: 'misc.calendar',
+      label: 'Event',
+      group: 'Miscellaneous',
+      materialIcon: Icons.event_outlined,
+      cupertinoIcon: CupertinoIcons.calendar,
+    ),
+    AppCategoryIcon(
+      key: 'misc.subscription',
+      label: 'Subscription',
+      group: 'Miscellaneous',
+      materialIcon: Icons.autorenew_outlined,
+      cupertinoIcon: CupertinoIcons.repeat,
+    ),
+    AppCategoryIcon(
+      key: 'misc.membership',
+      label: 'Membership',
+      group: 'Miscellaneous',
+      materialIcon: Icons.card_membership_outlined,
+      cupertinoIcon: CupertinoIcons.creditcard,
+    ),
+    AppCategoryIcon(
+      key: 'misc.alert',
+      label: 'Emergency',
+      group: 'Miscellaneous',
+      materialIcon: Icons.warning_amber_outlined,
+      cupertinoIcon: CupertinoIcons.exclamationmark_triangle,
+    ),
+    AppCategoryIcon(
+      key: 'misc.time',
+      label: 'Time',
+      group: 'Miscellaneous',
+      materialIcon: Icons.schedule_outlined,
+      cupertinoIcon: CupertinoIcons.clock,
+    ),
+    AppCategoryIcon(
+      key: 'misc.other',
+      label: 'Other',
+      group: 'Miscellaneous',
+      materialIcon: Icons.more_horiz,
+      cupertinoIcon: CupertinoIcons.ellipsis,
+    ),
+  ];
+
+  static final Map<String, AppCategoryIcon> _byKey = {
+    for (final icon in icons) icon.key: icon,
+  };
+
+  static AppCategoryIcon? find(String? key) =>
+      key == null ? null : _byKey[key.trim()];
+
+  static bool contains(String? key) => find(key) != null;
+
+  static List<AppCategoryIcon> matching(String query) =>
+      icons.where((icon) => icon.matches(query)).toList(growable: false);
+}

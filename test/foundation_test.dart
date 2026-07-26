@@ -490,6 +490,31 @@ void main() {
           sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
         ),
       ],
+      budgets: [
+        BudgetRecord(
+          id: 'budget-weekly',
+          name: 'Weekly groceries',
+          period: BudgetPeriod.weekly,
+          amountMinor: 25000,
+          categoryIds: const ['dining'],
+          weekStartDay: DateTime.monday,
+          rolloverEnabled: true,
+          note: 'Carry the difference',
+          configurationRevisions: [
+            BudgetConfigurationRevision(
+              id: 'budget-weekly-r1',
+              effectiveDate: DateTime(2026, 7, 6),
+              period: BudgetPeriod.weekly,
+              amountMinor: 25000,
+              categoryIds: const ['dining'],
+              anchorDate: DateTime(2026, 7, 6),
+              weekStartDay: DateTime.monday,
+              rolloverEnabled: true,
+            ),
+          ],
+          sync: SyncMetadata.fresh(now: DateTime(2026, 7, 6)),
+        ),
+      ],
     );
 
     final restored = codec.decodeJson(codec.encodeJson(dataSet));
@@ -498,6 +523,13 @@ void main() {
     expect(restored.accounts.first.creditLimitMinor, 250000);
     expect(restored.transactions.single.type, TransactionType.transfer);
     expect(restored.transactions.single.transferAccountId, 'cash');
+    expect(restored.budgets.single.period, BudgetPeriod.weekly);
+    expect(restored.budgets.single.rolloverEnabled, isTrue);
+    expect(restored.budgets.single.configurationRevisions, hasLength(1));
+    expect(
+      restored.budgets.single.configurationRevisions.single.weekStartDay,
+      DateTime.monday,
+    );
   });
 
   test('backup codec exports ledger transactions as csv', () {

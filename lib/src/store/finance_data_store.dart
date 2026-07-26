@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../budgets/budget_calculator.dart';
 import '../domain/account.dart';
 import '../domain/budget.dart';
 import '../domain/category.dart';
@@ -565,49 +566,40 @@ class FinanceDataStore extends ChangeNotifier {
   }
 
   int spentThisMonthForBudget(BudgetRecord budget, {DateTime? now}) {
-    final anchor = now ?? DateTime.now();
-    final periodStart = DateTime(anchor.year, anchor.month);
-    final periodEnd = DateTime(anchor.year, anchor.month + 1);
-    final categoryIds = _categoryAndDescendantIds(budget.categoryIds);
-
-    return transactions
-        .where((transaction) {
-          return !transaction.isDeleted &&
-              transaction.type == TransactionType.expense &&
-              !transaction.date.isBefore(periodStart) &&
-              transaction.date.isBefore(periodEnd);
-        })
-        .fold(0, (total, transaction) {
-          if (transaction.isSplit) {
-            final splitSpent = transaction.splitLines
-                .where((line) => categoryIds.contains(line.categoryId))
-                .fold(
-                  0,
-                  (splitTotal, line) => splitTotal + line.amountMinor.abs(),
-                );
-            return total + splitSpent;
-          }
-          return categoryIds.contains(transaction.categoryId)
-              ? total + transaction.amountMinor.abs()
-              : total;
-        });
+    return budgetPeriodResult(budget, date: now).spentMinor;
   }
 
-  Set<String> _categoryAndDescendantIds(Iterable<String> rootCategoryIds) {
-    final categoryIds = rootCategoryIds.toSet();
-    var changed = true;
-    while (changed) {
-      changed = false;
-      for (final category in categories) {
-        final parentId = category.parentCategoryId;
-        if (parentId != null &&
-            categoryIds.contains(parentId) &&
-            categoryIds.add(category.id)) {
-          changed = true;
-        }
-      }
-    }
-    return categoryIds;
+  BudgetPeriodResult budgetPeriodResult(BudgetRecord budget, {DateTime? date}) {
+    final requestedDate = date ?? DateTime.now();
+    final effectiveDate =
+        budget.isArchived &&
+            requestedDate.isAfter(budget.sync.updatedAt.toLocal())
+        ? budget.sync.updatedAt.toLocal()
+        : requestedDate;
+    return const BudgetCalculator().calculate(
+      budget: budget,
+      transactions: transactions,
+      categories: categories,
+      date: effectiveDate,
+    );
+  }
+
+  List<BudgetPeriodResult> budgetHistoryThrough(
+    BudgetRecord budget, {
+    DateTime? date,
+  }) {
+    final requestedDate = date ?? DateTime.now();
+    final effectiveDate =
+        budget.isArchived &&
+            requestedDate.isAfter(budget.sync.updatedAt.toLocal())
+        ? budget.sync.updatedAt.toLocal()
+        : requestedDate;
+    return const BudgetCalculator().historyThrough(
+      budget: budget,
+      transactions: transactions,
+      categories: categories,
+      date: effectiveDate,
+    );
   }
 
   AccountRecord accountById(String id) {
@@ -821,6 +813,11 @@ class FinanceDataStore extends ChangeNotifier {
 
   Future<void> archiveBudget(String budgetId) async {
     final budget = budgetById(budgetId).copyWith(isArchived: true);
+    await saveBudget(budget);
+  }
+
+  Future<void> restoreBudget(String budgetId) async {
+    final budget = budgetById(budgetId).copyWith(isArchived: false);
     await saveBudget(budget);
   }
 
