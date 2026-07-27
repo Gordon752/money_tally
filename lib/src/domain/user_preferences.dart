@@ -21,6 +21,8 @@ enum FloatingAddButtonPosition { left, center, right }
 
 enum DefaultTransactionType { expense, income, transfer, lastUsed }
 
+enum AccountDefaultMode { lastUsed, none, specific, useTransactionDefault }
+
 const defaultAccountGroupOrderNames = [
   'banking',
   'cash',
@@ -37,6 +39,15 @@ class UserPreferences {
     this.currency = const CurrencyFormatSettings(),
     this.defaultTransactionType = DefaultTransactionType.lastUsed,
     this.lastUsedTransactionType = TransactionType.expense,
+    this.defaultTransactionAccountMode = AccountDefaultMode.lastUsed,
+    this.defaultTransactionAccountId,
+    this.defaultTransferSourceMode = AccountDefaultMode.lastUsed,
+    this.defaultTransferSourceAccountId,
+    this.lastUsedTransactionAccountId,
+    this.lastUsedTransferSourceAccountId,
+    this.newAccountIncludeInGroupBalance = true,
+    this.newAccountIncludeInNetWorth = true,
+    this.warnBeforeNegativeAssetBalance = true,
     this.notificationsEnabled = false,
     this.collapsedAccountGroupNames = const {},
     this.accountGroupOrderNames = defaultAccountGroupOrderNames,
@@ -53,6 +64,15 @@ class UserPreferences {
   final CurrencyFormatSettings currency;
   final DefaultTransactionType defaultTransactionType;
   final TransactionType lastUsedTransactionType;
+  final AccountDefaultMode defaultTransactionAccountMode;
+  final String? defaultTransactionAccountId;
+  final AccountDefaultMode defaultTransferSourceMode;
+  final String? defaultTransferSourceAccountId;
+  final String? lastUsedTransactionAccountId;
+  final String? lastUsedTransferSourceAccountId;
+  final bool newAccountIncludeInGroupBalance;
+  final bool newAccountIncludeInNetWorth;
+  final bool warnBeforeNegativeAssetBalance;
   final bool notificationsEnabled;
   final Set<String> collapsedAccountGroupNames;
   final List<String> accountGroupOrderNames;
@@ -69,6 +89,15 @@ class UserPreferences {
     CurrencyFormatSettings? currency,
     DefaultTransactionType? defaultTransactionType,
     TransactionType? lastUsedTransactionType,
+    AccountDefaultMode? defaultTransactionAccountMode,
+    String? defaultTransactionAccountId,
+    AccountDefaultMode? defaultTransferSourceMode,
+    String? defaultTransferSourceAccountId,
+    String? lastUsedTransactionAccountId,
+    String? lastUsedTransferSourceAccountId,
+    bool? newAccountIncludeInGroupBalance,
+    bool? newAccountIncludeInNetWorth,
+    bool? warnBeforeNegativeAssetBalance,
     bool? notificationsEnabled,
     Set<String>? collapsedAccountGroupNames,
     List<String>? accountGroupOrderNames,
@@ -88,6 +117,26 @@ class UserPreferences {
           defaultTransactionType ?? this.defaultTransactionType,
       lastUsedTransactionType:
           lastUsedTransactionType ?? this.lastUsedTransactionType,
+      defaultTransactionAccountMode:
+          defaultTransactionAccountMode ?? this.defaultTransactionAccountMode,
+      defaultTransactionAccountId:
+          defaultTransactionAccountId ?? this.defaultTransactionAccountId,
+      defaultTransferSourceMode:
+          defaultTransferSourceMode ?? this.defaultTransferSourceMode,
+      defaultTransferSourceAccountId:
+          defaultTransferSourceAccountId ?? this.defaultTransferSourceAccountId,
+      lastUsedTransactionAccountId:
+          lastUsedTransactionAccountId ?? this.lastUsedTransactionAccountId,
+      lastUsedTransferSourceAccountId:
+          lastUsedTransferSourceAccountId ??
+          this.lastUsedTransferSourceAccountId,
+      newAccountIncludeInGroupBalance:
+          newAccountIncludeInGroupBalance ??
+          this.newAccountIncludeInGroupBalance,
+      newAccountIncludeInNetWorth:
+          newAccountIncludeInNetWorth ?? this.newAccountIncludeInNetWorth,
+      warnBeforeNegativeAssetBalance:
+          warnBeforeNegativeAssetBalance ?? this.warnBeforeNegativeAssetBalance,
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       collapsedAccountGroupNames:
           collapsedAccountGroupNames ?? this.collapsedAccountGroupNames,
@@ -110,6 +159,15 @@ class UserPreferences {
       'currency': currency.toJson(),
       'defaultTransactionType': defaultTransactionType.name,
       'lastUsedTransactionType': lastUsedTransactionType.name,
+      'defaultTransactionAccountMode': defaultTransactionAccountMode.name,
+      'defaultTransactionAccountId': defaultTransactionAccountId,
+      'defaultTransferSourceMode': defaultTransferSourceMode.name,
+      'defaultTransferSourceAccountId': defaultTransferSourceAccountId,
+      'lastUsedTransactionAccountId': lastUsedTransactionAccountId,
+      'lastUsedTransferSourceAccountId': lastUsedTransferSourceAccountId,
+      'newAccountIncludeInGroupBalance': newAccountIncludeInGroupBalance,
+      'newAccountIncludeInNetWorth': newAccountIncludeInNetWorth,
+      'warnBeforeNegativeAssetBalance': warnBeforeNegativeAssetBalance,
       'notificationsEnabled': notificationsEnabled,
       'collapsedAccountGroupNames': collapsedAccountGroupNames.toList()..sort(),
       'accountGroupOrderNames': accountGroupOrderNames,
@@ -155,6 +213,30 @@ class UserPreferences {
         json['lastUsedTransactionType'],
         TransactionType.expense,
       ),
+      defaultTransactionAccountMode: enumByName(
+        AccountDefaultMode.values,
+        json['defaultTransactionAccountMode'],
+        AccountDefaultMode.lastUsed,
+      ),
+      defaultTransactionAccountId:
+          json['defaultTransactionAccountId'] as String?,
+      defaultTransferSourceMode: enumByName(
+        AccountDefaultMode.values,
+        json['defaultTransferSourceMode'],
+        AccountDefaultMode.lastUsed,
+      ),
+      defaultTransferSourceAccountId:
+          json['defaultTransferSourceAccountId'] as String?,
+      lastUsedTransactionAccountId:
+          json['lastUsedTransactionAccountId'] as String?,
+      lastUsedTransferSourceAccountId:
+          json['lastUsedTransferSourceAccountId'] as String?,
+      newAccountIncludeInGroupBalance:
+          json['newAccountIncludeInGroupBalance'] as bool? ?? true,
+      newAccountIncludeInNetWorth:
+          json['newAccountIncludeInNetWorth'] as bool? ?? true,
+      warnBeforeNegativeAssetBalance:
+          json['warnBeforeNegativeAssetBalance'] as bool? ?? true,
       notificationsEnabled: json['notificationsEnabled'] as bool? ?? false,
       collapsedAccountGroupNames:
           (json['collapsedAccountGroupNames'] as List<Object?>?)

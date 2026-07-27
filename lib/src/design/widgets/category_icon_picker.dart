@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../app_icons.dart';
 import '../category_icon_catalog.dart';
 import '../design_tokens.dart';
+import '../../domain/category.dart';
+import 'category_icon_badge.dart';
 
 const categoryIconNoneKey = '__none__';
 
@@ -10,6 +12,8 @@ const categoryIconNoneKey = '__none__';
 Future<String?> showCategoryIconPicker(
   BuildContext context, {
   required String selectedKey,
+  CategoryKind categoryKind = CategoryKind.expense,
+  int? categoryColorValue,
 }) {
   return showModalBottomSheet<String>(
     context: context,
@@ -19,14 +23,24 @@ Future<String?> showCategoryIconPicker(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
-    builder: (_) => _CategoryIconPicker(selectedKey: selectedKey),
+    builder: (_) => _CategoryIconPicker(
+      selectedKey: selectedKey,
+      categoryKind: categoryKind,
+      categoryColorValue: categoryColorValue,
+    ),
   );
 }
 
 class _CategoryIconPicker extends StatefulWidget {
-  const _CategoryIconPicker({required this.selectedKey});
+  const _CategoryIconPicker({
+    required this.selectedKey,
+    required this.categoryKind,
+    required this.categoryColorValue,
+  });
 
   final String selectedKey;
+  final CategoryKind categoryKind;
+  final int? categoryColorValue;
 
   @override
   State<_CategoryIconPicker> createState() => _CategoryIconPickerState();
@@ -83,25 +97,20 @@ class _CategoryIconPickerState extends State<_CategoryIconPicker> {
                     ),
                   ),
                 ),
-                Semantics(
-                  label: preview == null
-                      ? 'No icon selected'
-                      : '${preview.label} selected',
-                  child: Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: AppColors.accent.withValues(alpha: .09),
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      preview?.icon ?? AppIcon.hidden,
-                      size: AppIconSize.action,
-                      color: AppColors.accent,
-                    ),
+                if (preview == null)
+                  Semantics(
+                    label: 'No icon selected',
+                    child: Icon(AppIcon.hidden, size: AppIconSize.action),
+                  )
+                else
+                  CategoryIconBadge(
+                    iconName: preview.key,
+                    kind: widget.categoryKind,
+                    colorValue: widget.categoryColorValue,
+                    semanticLabel: '${preview.label} selected',
+                    size: CategoryIconBadgeSize.hero,
+                    selected: true,
                   ),
-                ),
               ],
             ),
           ),
@@ -112,7 +121,7 @@ class _CategoryIconPickerState extends State<_CategoryIconPicker> {
               onChanged: (value) => setState(() => _query = value),
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: 'Search 160 icons',
+                hintText: 'Search ${CategoryIconCatalog.icons.length} icons',
                 prefixIcon: Icon(AppIcon.search, size: AppIconSize.row),
                 suffixIcon: _query.isEmpty
                     ? null
@@ -191,6 +200,8 @@ class _CategoryIconPickerState extends State<_CategoryIconPicker> {
                               return _IconChoice(
                                 item: item,
                                 selected: item.key == _previewKey,
+                                categoryKind: widget.categoryKind,
+                                categoryColorValue: widget.categoryColorValue,
                                 onTap: () {
                                   setState(() => _previewKey = item.key);
                                   Navigator.pop(context, item.key);
@@ -240,11 +251,15 @@ class _IconChoice extends StatelessWidget {
   const _IconChoice({
     required this.item,
     required this.selected,
+    required this.categoryKind,
+    required this.categoryColorValue,
     required this.onTap,
   });
 
   final AppCategoryIcon item;
   final bool selected;
+  final CategoryKind categoryKind;
+  final int? categoryColorValue;
   final VoidCallback onTap;
 
   @override
@@ -276,12 +291,13 @@ class _IconChoice extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                item.icon,
-                size: AppIconSize.action,
-                color: selected
-                    ? AppColors.accent
-                    : theme.colorScheme.onSurfaceVariant,
+              CategoryIconBadge(
+                iconName: item.key,
+                kind: categoryKind,
+                colorValue: categoryColorValue,
+                size: CategoryIconBadgeSize.row,
+                selected: selected,
+                semanticLabel: null,
               ),
               const SizedBox(height: AppSpacing.xxs),
               Text(

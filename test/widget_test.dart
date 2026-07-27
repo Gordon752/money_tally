@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
+import 'package:money_tally/src/design/app_icons.dart';
 import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
+import 'package:money_tally/src/design/widgets/category_icon_badge.dart';
 import 'package:money_tally/src/design/money_format.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/budget.dart';
@@ -2178,6 +2180,19 @@ void main() {
           parentCategoryId: 'picker-parent',
           sync: v2_sync.SyncMetadata.fresh(),
         ),
+        v2_category.CategoryRecord(
+          id: 'picker-other-parent',
+          name: 'Auto Costs',
+          kind: v2_category.CategoryKind.expense,
+          sync: v2_sync.SyncMetadata.fresh(),
+        ),
+        v2_category.CategoryRecord(
+          id: 'picker-other-child',
+          name: 'Fuel',
+          kind: v2_category.CategoryKind.expense,
+          parentCategoryId: 'picker-other-parent',
+          sync: v2_sync.SyncMetadata.fresh(),
+        ),
       ];
       final dataStore = FinanceDataStore(
         dataSet: migrated.copyWith(
@@ -2199,24 +2214,32 @@ void main() {
         find.byKey(const ValueKey('category-picker-add-new')),
         findsOneWidget,
       );
+      expect(find.text('1 subcategory'), findsNWidgets(2));
       expect(
         find.byKey(const ValueKey('category-picker-hierarchy-picker-child')),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.text('Repairs'), findsOneWidget);
+      expect(find.text('Repairs'), findsNothing);
+      expect(find.text('Fuel'), findsNothing);
 
       await tester.tap(
         find.byKey(const ValueKey('category-picker-toggle-picker-parent')),
       );
+      await tester.pumpAndSettle();
+      expect(find.text('Repairs'), findsOneWidget);
+      expect(find.text('Fuel'), findsNothing);
+
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose category'));
       await tester.pumpAndSettle();
       expect(find.text('Repairs'), findsNothing);
-      expect(find.text('1 subcategory'), findsOneWidget);
+      expect(find.text('Fuel'), findsNothing);
 
       await tester.tap(
         find.byKey(const ValueKey('category-picker-toggle-picker-parent')),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Repairs'), findsOneWidget);
       await tester.tap(
         find.byKey(const ValueKey('category-picker-row-picker-child')),
       );
@@ -6108,6 +6131,37 @@ void main() {
     expect(find.text('Expense'), findsWidgets);
   });
 
+  testWidgets('management count pills share width and cap overflow', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Row(
+            children: [
+              ManagementCountPill(
+                key: ValueKey('four-digit-pill'),
+                count: 9999,
+              ),
+              ManagementCountPill(key: ValueKey('overflow-pill'), count: 10000),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester.getSize(find.byKey(const ValueKey('four-digit-pill'))),
+      const Size(58, 28),
+    );
+    expect(
+      tester.getSize(find.byKey(const ValueKey('overflow-pill'))),
+      const Size(58, 28),
+    );
+    expect(find.text('9999'), findsOneWidget);
+    expect(find.text('9999+'), findsOneWidget);
+  });
+
   testWidgets('categories screen indents subcategories', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
@@ -6136,6 +6190,11 @@ void main() {
     await tester.tap(find.text('Categories').last);
     await tester.pumpAndSettle();
 
+    expect(find.text('Snacks'), findsNothing);
+    expect(find.text('Expense · 1 subcategory'), findsOneWidget);
+    expect(find.byTooltip('Expand Dining'), findsOneWidget);
+    await tester.tap(find.byTooltip('Expand Dining'));
+    await tester.pumpAndSettle();
     expect(find.text('Expense · Dining'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('Snacks')).dx,
@@ -6145,28 +6204,33 @@ void main() {
       find.byKey(const ValueKey('category-branch-snacks')),
       findsOneWidget,
     );
-    final parentAvatar = tester.widget<CircleAvatar>(
+    final parentBadge = tester.widget<CategoryIconBadge>(
       find.descendant(
         of: find.byKey(const ValueKey('category-row-dining')),
-        matching: find.byType(CircleAvatar),
+        matching: find.byType(CategoryIconBadge),
       ),
     );
-    final childAvatar = tester.widget<CircleAvatar>(
+    final childBadge = tester.widget<CategoryIconBadge>(
       find.descendant(
         of: find.byKey(const ValueKey('category-row-snacks')),
-        matching: find.byType(CircleAvatar),
+        matching: find.byType(CategoryIconBadge),
       ),
     );
-    expect(parentAvatar.radius, 18);
-    expect(childAvatar.radius, 14);
+    expect(parentBadge.size, CategoryIconBadgeSize.row);
+    expect(childBadge.size, CategoryIconBadgeSize.compact);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('category-count-dining')),
-        matching: find.text(
-          '${transactionCountForCategory(dataStore, 'dining')}',
-        ),
+        matching: find.text('1'),
       ),
       findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('category-row-snacks')),
+        matching: find.byType(IconButton),
+      ),
+      findsNothing,
     );
 
     await tester.tap(find.byTooltip('Collapse Dining'));
@@ -6260,6 +6324,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('category-row-dining')));
     await tester.pumpAndSettle();
 
+    expect(find.text('Category Details'), findsOneWidget);
+    expect(find.text('Edit Category'), findsNothing);
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
     expect(find.text('Edit Category'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -6318,6 +6386,41 @@ void main() {
     expect(category.isArchived, isTrue);
     expect(category.isDeleted, isTrue);
     expect(find.text('Dining'), findsNothing);
+  });
+
+  testWidgets('category count pill opens the exact rolling Ledger filter', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Categories').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('category-count-dining')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ledger'), findsOneWidget);
+    expect(find.text('Category: Dining'), findsOneWidget);
+    expect(find.text('Period: Last 12 Months'), findsOneWidget);
+    expect(find.text('Diner'), findsOneWidget);
+    expect(find.text('Walmart'), findsNothing);
+    expect(find.text('Clear Filter'), findsOneWidget);
+
+    await tester.tap(find.text('Clear Filter'));
+    await tester.pumpAndSettle();
+    expect(find.text('Walmart'), findsOneWidget);
   });
 
   testWidgets('payee manager groups archived payees and restores them', (
@@ -6419,18 +6522,24 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('payee-count-apple')),
-        matching: find.text('${transactionCountForPayee(dataStore, 'Apple')}'),
+        matching: find.text('0'),
       ),
       findsOneWidget,
     );
     final payeePillSize = tester.getSize(
       find.byKey(const ValueKey('payee-count-apple')),
     );
-    expect(payeePillSize.height, 24);
-    expect(payeePillSize.width, greaterThan(payeePillSize.height));
+    expect(payeePillSize, const Size(58, 28));
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('payee-row-apple')),
+        matching: find.byIcon(AppIcon.chevronRight),
+      ),
+      findsNothing,
+    );
     expect(
       tester.getSize(find.byKey(const ValueKey('payee-row-apple'))).height,
-      lessThanOrEqualTo(48),
+      44,
     );
 
     final bestBuySwipe = find.byKey(const ValueKey('payee-swipe-best buy'));
@@ -6444,6 +6553,98 @@ void main() {
     expect(find.byKey(const ValueKey('payee-row-best buy')), findsNothing);
     expect(find.text('Archived (1)'), findsOneWidget);
     expect(find.byKey(const ValueKey('archived-payee-best buy')), findsNothing);
+  });
+
+  testWidgets('payee tap shows details, long press actions, and pill Ledger', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Manage payees'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('payee-row-diner')));
+    await tester.pumpAndSettle();
+    expect(find.text('Payee Details'), findsOneWidget);
+    expect(find.text('Edit payee'), findsNothing);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.byKey(const ValueKey('payee-row-diner')));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete permanently'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('payee-count-diner')));
+    await tester.pumpAndSettle();
+    expect(find.text('Payee: Diner'), findsOneWidget);
+    expect(find.text('Period: Last 12 Months'), findsOneWidget);
+    expect(find.text('Diner'), findsWidgets);
+    expect(find.text('Walmart'), findsNothing);
+  });
+
+  testWidgets('system balance-adjustment label is not a manageable payee', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        transactions: [
+          ...migrated.transactions,
+          v2_transaction.TransactionRecord(
+            id: 'system-adjustment',
+            type: v2_transaction.TransactionType.adjustment,
+            accountId: migrated.accounts.first.id,
+            date: DateTime.now(),
+            payee: 'Balance adjustment',
+            amountMinor: 5000,
+            sync: v2_sync.SyncMetadata.fresh(),
+          ),
+        ],
+        preferences: migrated.preferences.copyWith(
+          savedPayeeNames: [
+            ...migrated.preferences.savedPayeeNames,
+            'Balance adjustment',
+          ],
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Manage payees'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Balance adjustment'), findsNothing);
   });
 
   testWidgets('permanently deleted payee stays deleted after reload and sync', (
@@ -6791,8 +6992,11 @@ void main() {
       await tester.tap(manageAccounts);
       await tester.pumpAndSettle();
 
-      expect(find.text('Accounts'), findsWidgets);
-      expect(find.text('Checking'), findsOneWidget);
+      expect(find.text('Manage Accounts'), findsOneWidget);
+      expect(find.text('Defaults'), findsOneWidget);
+      expect(find.text('New Account Defaults'), findsOneWidget);
+      expect(find.text('Display & Totals'), findsOneWidget);
+      expect(find.text('Warnings'), findsOneWidget);
 
       await tester.tap(find.byTooltip('Back'));
       await tester.pumpAndSettle();

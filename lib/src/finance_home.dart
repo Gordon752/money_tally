@@ -866,30 +866,51 @@ class TransactionFormValueRow extends StatelessWidget {
 }
 
 class ManagementCountPill extends StatelessWidget {
-  const ManagementCountPill({required this.count, super.key});
+  const ManagementCountPill({
+    required this.count,
+    this.onTap,
+    this.semanticLabel,
+    super.key,
+  });
 
   final int count;
+  final VoidCallback? onTap;
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 24,
-      constraints: const BoxConstraints(minWidth: 30),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: Theme.of(
-          context,
-        ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.62),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        '$count',
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-          fontWeight: FontWeight.w700,
-          fontFeatures: const [FontFeature.tabularFigures()],
+    final theme = Theme.of(context);
+    final displayCount = count > 9999 ? '9999+' : '$count';
+    return Semantics(
+      button: onTap != null,
+      label: semanticLabel ?? '$count transactions',
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.78,
+        ),
+        shape: StadiumBorder(
+          side: BorderSide(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.64),
+          ),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const StadiumBorder(),
+          child: SizedBox(
+            width: 58,
+            height: 28,
+            child: Center(
+              child: Text(
+                displayCount,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -1987,9 +2008,14 @@ Future<void> showRenameAccountGroupDialog(
 }
 
 class LedgerView extends StatefulWidget {
-  const LedgerView({this.initialAccountFilterId, super.key});
+  const LedgerView({
+    this.initialAccountFilterId,
+    this.initialManagementFilter,
+    super.key,
+  });
 
   final String? initialAccountFilterId;
+  final ManagementLedgerFilter? initialManagementFilter;
 
   @override
   State<LedgerView> createState() => _LedgerViewState();
@@ -2005,6 +2031,7 @@ class _LedgerViewState extends State<LedgerView> {
   var accountFilterId = '';
   var categoryFilterId = '';
   var dateFilter = LedgerDateFilter.all;
+  ManagementLedgerFilter? managementFilter;
   final _collapsedMonthKeys = <String>{};
   final _monthAnchors = <String, GlobalKey>{};
 
@@ -2012,6 +2039,7 @@ class _LedgerViewState extends State<LedgerView> {
   void initState() {
     super.initState();
     accountFilterId = widget.initialAccountFilterId ?? '';
+    managementFilter = widget.initialManagementFilter;
   }
 
   @override
@@ -2020,6 +2048,9 @@ class _LedgerViewState extends State<LedgerView> {
     if (widget.initialAccountFilterId != oldWidget.initialAccountFilterId &&
         widget.initialAccountFilterId != null) {
       accountFilterId = widget.initialAccountFilterId!;
+    }
+    if (widget.initialManagementFilter != oldWidget.initialManagementFilter) {
+      managementFilter = widget.initialManagementFilter;
     }
   }
 
@@ -2042,10 +2073,23 @@ class _LedgerViewState extends State<LedgerView> {
     final categoriesById = {
       for (final category in store.categories) category.id: category,
     };
+    final now = DateTime.now();
+    final managementTransactionIds = managementFilter == null
+        ? null
+        : ManagementLedgerIndex.build(
+            transactions: store.transactions,
+            categories: store.categories,
+            now: now,
+          ).transactionIdsFor(managementFilter!);
     final normalizedQuery = query.trim().toLowerCase();
     final transactions =
         store.transactions
             .where((transaction) => !transaction.isDeleted)
+            .where(
+              (transaction) =>
+                  managementTransactionIds == null ||
+                  managementTransactionIds.contains(transaction.id),
+            )
             .where(
               (transaction) => transactionMatchesSearch(
                 transaction,
@@ -2063,7 +2107,7 @@ class _LedgerViewState extends State<LedgerView> {
                 accountFilterId: accountFilterId,
                 categoryFilterId: categoryFilterId,
                 dateFilter: dateFilter,
-                now: DateTime.now(),
+                now: now,
               ),
             )
             .toList()
@@ -2073,6 +2117,7 @@ class _LedgerViewState extends State<LedgerView> {
             .where((event) => event.isActive)
             .where(
               (event) =>
+                  managementFilter == null &&
                   typeFilterName.isEmpty &&
                   categoryFilterId.isEmpty &&
                   (accountFilterId.isEmpty ||
@@ -2080,7 +2125,7 @@ class _LedgerViewState extends State<LedgerView> {
                   dateMatchesLedgerFilter(
                     event.date,
                     dateFilter: dateFilter,
-                    now: DateTime.now(),
+                    now: now,
                   ),
             )
             .where((event) {
@@ -2106,7 +2151,8 @@ class _LedgerViewState extends State<LedgerView> {
         typeFilterName.isNotEmpty ||
         accountFilterId.isNotEmpty ||
         categoryFilterId.isNotEmpty ||
-        dateFilter != LedgerDateFilter.all;
+        dateFilter != LedgerDateFilter.all ||
+        managementFilter != null;
     final selectedTypeLabel = typeFilterName.isEmpty
         ? 'Type'
         : transactionTypeLabel(
@@ -2180,6 +2226,65 @@ class _LedgerViewState extends State<LedgerView> {
                   currency: store.preferences.currency,
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (managementFilter case final filter?) ...[
+          Container(
+            key: const ValueKey('ledger-management-filter-context'),
+            margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
+            decoration: BoxDecoration(
+              color: Theme.of(
+                context,
+              ).colorScheme.primaryContainer.withValues(alpha: 0.46),
+              borderRadius: BorderRadius.circular(AppRadii.control),
+              border: Border.all(
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.16),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  filter.kind == ManagementLedgerFilterKind.category
+                      ? AppIcon.category
+                      : AppIcon.payee,
+                  size: AppIconSize.inline,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${filter.kind == ManagementLedgerFilterKind.category ? 'Category' : 'Payee'}: ${filter.label}',
+                        key: const ValueKey('ledger-management-filter-label'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        'Period: Last 12 Months',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() => managementFilter = null),
+                  child: const Text('Clear Filter'),
                 ),
               ],
             ),
@@ -2330,6 +2435,7 @@ class _LedgerViewState extends State<LedgerView> {
       accountFilterId = '';
       categoryFilterId = '';
       dateFilter = LedgerDateFilter.all;
+      managementFilter = null;
     });
   }
 
@@ -2487,6 +2593,27 @@ class _LedgerViewState extends State<LedgerView> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class FilteredLedgerScreen extends StatelessWidget {
+  const FilteredLedgerScreen({required this.filter, super.key});
+
+  final ManagementLedgerFilter filter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Ledger'), scrolledUnderElevation: 0),
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+          child: LedgerView(initialManagementFilter: filter),
         ),
       ),
     );
@@ -3205,7 +3332,8 @@ Future<void> showDefaultTransactionDialog(
   BuildContext context, {
   String? initialAccountId,
 }) async {
-  final preferences = FinanceDataStoreScope.read(context).preferences;
+  final store = FinanceDataStoreScope.read(context);
+  final preferences = store.preferences;
   final shouldOpenTransfer = switch (preferences.defaultTransactionType) {
     DefaultTransactionType.transfer => true,
     DefaultTransactionType.lastUsed =>
@@ -3214,14 +3342,19 @@ Future<void> showDefaultTransactionDialog(
   };
 
   if (shouldOpenTransfer) {
-    await showTransferDialog(context, initialFromAccountId: initialAccountId);
+    await showTransferDialog(
+      context,
+      initialFromAccountId:
+          initialAccountId ?? resolvedDefaultTransferSourceAccountId(store),
+    );
     return;
   }
 
   await showTransactionDialog(
     context,
     initialIsExpense: isExpenseDefault(preferences),
-    initialAccountId: initialAccountId,
+    initialAccountId:
+        initialAccountId ?? resolvedDefaultTransactionAccountId(store),
   );
 }
 
@@ -3433,6 +3566,12 @@ Future<void> showTransactionDetails(
             TransactionFormDivider(),
             ScheduledTransactionDetailRow(
               icon: AppIcon.category,
+              leading: categoriesById[transaction.categoryId] == null
+                  ? null
+                  : CategoryIconBadge.category(
+                      categoriesById[transaction.categoryId]!,
+                      size: CategoryIconBadgeSize.form,
+                    ),
               label: 'Category',
               value: categoriesById[transaction.categoryId]?.name ?? 'Unknown',
             ),
@@ -3449,6 +3588,12 @@ Future<void> showTransactionDetails(
             TransactionFormDivider(),
             ScheduledTransactionDetailRow(
               icon: AppIcon.split,
+              leading: categoriesById[split.categoryId] == null
+                  ? null
+                  : CategoryIconBadge.category(
+                      categoriesById[split.categoryId]!,
+                      size: CategoryIconBadgeSize.form,
+                    ),
               label: categoriesById[split.categoryId]?.name ?? 'Split category',
               value: money(split.amountMinor, dataStore.preferences.currency),
               tabularFigures: true,
@@ -3828,6 +3973,7 @@ class SingleCategoryAllocationSection extends StatelessWidget {
   const SingleCategoryAllocationSection({
     required this.keyPrefix,
     required this.categoryName,
+    this.category,
     required this.onChooseCategory,
     required this.onSplit,
     super.key,
@@ -3835,6 +3981,7 @@ class SingleCategoryAllocationSection extends StatelessWidget {
 
   final String keyPrefix;
   final String? categoryName;
+  final v2_category.CategoryRecord? category;
   final VoidCallback onChooseCategory;
   final VoidCallback? onSplit;
 
@@ -3865,7 +4012,13 @@ class SingleCategoryAllocationSection extends StatelessWidget {
             padding: EdgeInsets.symmetric(vertical: 3),
             child: Row(
               children: [
-                TransactionFormIcon(AppIcon.category),
+                if (category case final selectedCategory?)
+                  CategoryIconBadge.category(
+                    selectedCategory,
+                    size: CategoryIconBadgeSize.form,
+                  )
+                else
+                  TransactionFormIcon(AppIcon.category),
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Text(
@@ -3992,6 +4145,18 @@ class InlineSplitAllocationSection extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
+              if (categories
+                      .where(
+                        (category) => category.id == drafts[index].categoryId,
+                      )
+                      .firstOrNull
+                  case final selectedCategory?) ...[
+                CategoryIconBadge.category(
+                  selectedCategory,
+                  size: CategoryIconBadgeSize.compact,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+              ],
               Expanded(
                 child: InkWell(
                   key: ValueKey('$keyPrefix-split-category-$index'),
@@ -5473,6 +5638,7 @@ class CategoriesView extends StatefulWidget {
 
 class _CategoriesViewState extends State<CategoriesView> {
   final Set<String> _collapsedCategoryIds = <String>{};
+  var _initializedExpansionState = false;
 
   @override
   Widget build(BuildContext context) {
@@ -5480,6 +5646,19 @@ class _CategoriesViewState extends State<CategoriesView> {
     final categories = store.categories
         .where((category) => category.isVisible)
         .toList(growable: false);
+    if (!_initializedExpansionState) {
+      final parentIds = categories
+          .map((category) => category.parentCategoryId)
+          .whereType<String>()
+          .toSet();
+      _collapsedCategoryIds.addAll(parentIds);
+      _initializedExpansionState = true;
+    }
+    final managementIndex = ManagementLedgerIndex.build(
+      transactions: store.transactions,
+      categories: store.categories,
+      now: DateTime.now(),
+    );
     final displayCategories = visibleCategoriesInDisplayOrder(
       categories,
       _collapsedCategoryIds,
@@ -5608,31 +5787,18 @@ class _CategoriesViewState extends State<CategoriesView> {
                                     horizontal: 14,
                                     vertical: 2,
                                   ),
-                                  onTap: () => showCategoryDialog(
+                                  onTap: () => showCategoryDetails(
                                     context,
-                                    categoryId: category.id,
+                                    category.id,
+                                    index: managementIndex,
                                   ),
                                   onLongPress: () =>
                                       showCategoryActions(context, category),
-                                  leading: CircleAvatar(
-                                    radius: isChild ? 14 : 18,
-                                    backgroundColor: category.colorValue == null
-                                        ? AppTheme.line.withValues(
-                                            alpha: isChild ? 0.55 : 1,
-                                          )
-                                        : isChild
-                                        ? Color(
-                                            category.colorValue!,
-                                          ).withValues(alpha: 0.18)
-                                        : Color(category.colorValue!),
-                                    child: Icon(
-                                      categoryIcon(category),
-                                      color:
-                                          isChild && category.colorValue != null
-                                          ? Color(category.colorValue!)
-                                          : AppTheme.ink,
-                                      size: isChild ? 14 : 17,
-                                    ),
+                                  leading: CategoryIconBadge.category(
+                                    category,
+                                    size: isChild
+                                        ? CategoryIconBadgeSize.compact
+                                        : CategoryIconBadgeSize.row,
                                   ),
                                   title: Text(
                                     category.name,
@@ -5668,9 +5834,17 @@ class _CategoriesViewState extends State<CategoriesView> {
                                         key: ValueKey(
                                           'category-count-${category.id}',
                                         ),
-                                        count: transactionCountForCategory(
-                                          store,
+                                        count: managementIndex.categoryCount(
                                           category.id,
+                                        ),
+                                        semanticLabel:
+                                            '${category.name}, ${managementIndex.categoryCount(category.id)} transactions in the last 12 months',
+                                        onTap: () => openManagementLedger(
+                                          context,
+                                          ManagementLedgerFilter.category(
+                                            categoryId: category.id,
+                                            label: category.name,
+                                          ),
                                         ),
                                       ),
                                       const SizedBox(width: 6),
@@ -5703,10 +5877,7 @@ class _CategoriesViewState extends State<CategoriesView> {
                                           ),
                                         )
                                       else
-                                        SizedBox(
-                                          width: 48,
-                                          child: Icon(AppIcon.chevronRight),
-                                        ),
+                                        const SizedBox(width: 48),
                                     ],
                                   ),
                                 ),
@@ -5976,9 +6147,15 @@ class _SettingsViewState extends State<SettingsView> {
             SettingsActionRow(
               icon: AppIcon.wallet,
               title: 'Manage accounts',
-              subtitle: 'Accounts, balances, and account groups',
-              onTap: () =>
-                  widget.onSelectSection?.call(FinanceSection.accounts),
+              subtitle: 'Defaults, ordering, archived accounts, and warnings',
+              onTap: () {
+                HapticFeedback.selectionClick();
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ManageAccountsScreen(),
+                  ),
+                );
+              },
             ),
             SettingsActionRow(
               icon: AppIcon.category,
@@ -6352,9 +6529,16 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
-    final payees = [...savedPayees(store)]
+    final managementIndex = ManagementLedgerIndex.build(
+      transactions: store.transactions,
+      categories: store.categories,
+      now: DateTime.now(),
+    );
+    final payees = [...managedPayees(store)]
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    final archived = archivedPayees(store);
+    final archived = archivedPayees(
+      store,
+    ).where((payee) => !isSystemGeneratedManagedPayee(payee)).toList();
     final groupedPayees = <String, List<String>>{};
     for (final payee in payees) {
       final first = payee.trim().isEmpty ? '#' : payee.trim()[0].toUpperCase();
@@ -6482,9 +6666,11 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                                 key: ValueKey(
                                   'payee-row-${payee.toLowerCase()}',
                                 ),
-                                contentPadding: const EdgeInsets.only(
-                                  left: 16,
-                                  right: 8,
+                                contentPadding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  4,
+                                  8,
+                                  4,
                                 ),
                                 dense: true,
                                 visualDensity: const VisualDensity(
@@ -6504,20 +6690,29 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                                       key: ValueKey(
                                         'payee-count-${payee.toLowerCase()}',
                                       ),
-                                      count: transactionCountForPayee(
-                                        store,
-                                        payee,
+                                      count: managementIndex
+                                          .payeeSummary(payee)
+                                          .count,
+                                      semanticLabel:
+                                          '$payee, ${managementIndex.payeeSummary(payee).count} transactions in the last 12 months',
+                                      onTap: () => openManagementLedger(
+                                        context,
+                                        ManagementLedgerFilter.payee(
+                                          payee: payee,
+                                        ),
                                       ),
-                                    ),
-                                    SizedBox(width: 6),
-                                    SizedBox(
-                                      width: 48,
-                                      child: Icon(AppIcon.chevronRight),
                                     ),
                                   ],
                                 ),
-                                onTap: () =>
-                                    showManagedPayeeActions(context, payee),
+                                onTap: () => showPayeeDetails(
+                                  context,
+                                  payee,
+                                  index: managementIndex,
+                                ),
+                                onLongPress: () {
+                                  HapticFeedback.mediumImpact();
+                                  showManagedPayeeActions(context, payee);
+                                },
                               ),
                             );
                           },
@@ -6752,6 +6947,113 @@ Future<void> showManagedPayeeActions(BuildContext context, String payee) async {
       await archiveManagedPayee(context, payee);
     case 'delete':
       await deleteManagedPayee(context, payee);
+  }
+}
+
+Future<void> openManagementLedger(
+  BuildContext context,
+  ManagementLedgerFilter filter,
+) {
+  return Navigator.of(context).push<void>(
+    MaterialPageRoute(
+      builder: (context) => FilteredLedgerScreen(filter: filter),
+    ),
+  );
+}
+
+Future<void> showPayeeDetails(
+  BuildContext context,
+  String payee, {
+  required ManagementLedgerIndex index,
+}) async {
+  final store = FinanceDataStoreScope.read(context);
+  final summary = index.payeeSummary(payee);
+  final archived = store.preferences.archivedPayeeNames.contains(
+    normalizeManagedPayee(payee),
+  );
+  final action = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => TransactionSheetFrame(
+      title: 'Payee Details',
+      actions: ScheduledTransactionDetailActions(
+        onClose: () => Navigator.pop(dialogContext),
+        onEdit: () => Navigator.pop(dialogContext, 'edit'),
+        onMarkPaid: null,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ScheduledTransactionDetailRow(
+            rowKey: const ValueKey('payee-detail-name'),
+            icon: AppIcon.payee,
+            label: 'Payee',
+            value: payee,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            rowKey: const ValueKey('payee-detail-count'),
+            icon: AppIcon.ledger,
+            label: 'Transactions · Last 12 Months',
+            value: '${summary.count}',
+            tabularFigures: true,
+          ),
+          if (summary.expenseMinor > 0) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.expense,
+              label: 'Total Spent · Last 12 Months',
+              value: money(summary.expenseMinor, store.preferences.currency),
+              valueColor: AppColors.danger,
+              tabularFigures: true,
+            ),
+          ],
+          if (summary.incomeMinor > 0) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.income,
+              label: 'Total Received · Last 12 Months',
+              value: money(summary.incomeMinor, store.preferences.currency),
+              valueColor: AppTheme.accent,
+              tabularFigures: true,
+            ),
+          ],
+          if (summary.mostRecentDate case final date?) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.calendar,
+              label: 'Most Recent Transaction',
+              value: fullMonthDateLabel(date),
+            ),
+          ],
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: archived ? AppIcon.archive : AppIcon.check,
+            label: 'Status',
+            value: archived ? 'Archived' : 'Active',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const ValueKey('payee-detail-view-transactions'),
+              onPressed: () => Navigator.pop(dialogContext, 'transactions'),
+              icon: Icon(AppIcon.ledger),
+              label: const Text('View Transactions'),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (!context.mounted) return;
+  if (action == 'edit') {
+    await renameManagedPayee(context, payee);
+  } else if (action == 'transactions') {
+    await openManagementLedger(
+      context,
+      ManagementLedgerFilter.payee(payee: payee),
+    );
   }
 }
 
@@ -7432,6 +7734,14 @@ class CategoryReportRow extends StatelessWidget {
                 decoration: BoxDecoration(color: color, shape: BoxShape.circle),
               ),
               const SizedBox(width: AppSpacing.sm),
+              CategoryIconBadge(
+                iconName: total.iconName,
+                kind: v2_category.CategoryKind.expense,
+                colorValue: total.colorValue,
+                semanticLabel: '${total.name} category',
+                size: CategoryIconBadgeSize.compact,
+              ),
+              const SizedBox(width: AppSpacing.xs),
               Expanded(
                 child: Text(
                   total.name,
@@ -9178,11 +9488,9 @@ Future<void> showBudgetDialog(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   visualDensity: const VisualDensity(vertical: -1),
-                  secondary: TransactionFormIcon(
-                    categoryIcon(categories[index]),
-                    color: categories[index].colorValue == null
-                        ? null
-                        : Color(categories[index].colorValue!),
+                  secondary: CategoryIconBadge.category(
+                    categories[index],
+                    size: CategoryIconBadgeSize.form,
                   ),
                   title: Text(categories[index].name, style: fieldValueStyle),
                   value: selectedCategoryIds.contains(categories[index].id),
@@ -10255,6 +10563,7 @@ Future<void> showFloatingAddMenu(
 
   if (!context.mounted || selected == null) return;
   HapticFeedback.selectionClick();
+  final store = FinanceDataStoreScope.read(context);
   switch (selected) {
     case 'expense':
       if (isScheduled) {
@@ -10267,7 +10576,8 @@ Future<void> showFloatingAddMenu(
         await showTransactionDialog(
           context,
           initialIsExpense: true,
-          initialAccountId: initialAccountId,
+          initialAccountId:
+              initialAccountId ?? resolvedDefaultTransactionAccountId(store),
         );
       }
     case 'income':
@@ -10281,7 +10591,8 @@ Future<void> showFloatingAddMenu(
         await showTransactionDialog(
           context,
           initialIsExpense: false,
-          initialAccountId: initialAccountId,
+          initialAccountId:
+              initialAccountId ?? resolvedDefaultTransactionAccountId(store),
         );
       }
     case 'category':
@@ -10298,7 +10609,8 @@ Future<void> showFloatingAddMenu(
       } else {
         await showTransferDialog(
           context,
-          initialFromAccountId: initialAccountId,
+          initialFromAccountId:
+              initialAccountId ?? resolvedDefaultTransferSourceAccountId(store),
         );
       }
     case 'budget':
@@ -10323,8 +10635,9 @@ Future<void> showAccountDialog(BuildContext context) async {
   var originalLoanAmountMinor = 0;
   var type = AccountType.checking;
   var openingBalanceCents = 0;
-  var includeInGroupBalance = true;
-  var includeInNetWorth = true;
+  var includeInGroupBalance =
+      dataStore.preferences.newAccountIncludeInGroupBalance;
+  var includeInNetWorth = dataStore.preferences.newAccountIncludeInNetWorth;
 
   final result =
       await showDialog<
@@ -10738,6 +11051,21 @@ Future<void> showTransferDialog(
             final selectedToAccount = accounts
                 .where((account) => account.id == toAccountId)
                 .firstOrNull;
+            final sourceCurrentBalanceMinor = selectedFromAccount == null
+                ? 0
+                : dataStore.balanceForAccount(selectedFromAccount.id);
+            final sourceBalanceWithoutExistingTransfer =
+                selectedFromAccount == null
+                ? 0
+                : sourceCurrentBalanceMinor -
+                      (transfer?.deltaForAccount(selectedFromAccount.id) ?? 0);
+            final projectedSourceBalanceMinor = selectedFromAccount == null
+                ? 0
+                : sourceBalanceWithoutExistingTransfer - amountMinor.abs();
+            final wouldOverdrawSource =
+                selectedFromAccount != null &&
+                accountIsAsset(selectedFromAccount) &&
+                projectedSourceBalanceMinor < 0;
             final mutedStyle = theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
               height: 1.18,
@@ -10770,10 +11098,37 @@ Future<void> showTransferDialog(
                       parseDateInput(date.text, DateTime.now()),
                     ));
 
-            Widget accountSubtitle(v2_account.AccountRecord account) {
-              return Text(
-                'Balance ${money(dataStore.balanceForAccount(account.id), dataStore.preferences.currency)}',
-                style: mutedStyle,
+            Widget accountSubtitle(
+              v2_account.AccountRecord account, {
+              required bool isSource,
+            }) {
+              if (!isSource || !wouldOverdrawSource) {
+                return Text(
+                  'Balance ${money(dataStore.balanceForAccount(account.id), dataStore.preferences.currency)}',
+                  style: mutedStyle,
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Balance ${money(projectedSourceBalanceMinor, dataStore.preferences.currency)}',
+                    style: mutedStyle?.copyWith(color: AppColors.danger),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Insufficient funds',
+                    key: const ValueKey('transfer-insufficient-funds'),
+                    style: mutedStyle?.copyWith(
+                      color: AppColors.danger,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Text(
+                    'This transaction would leave ${account.name} at ${money(projectedSourceBalanceMinor, dataStore.preferences.currency)}.',
+                    style: mutedStyle?.copyWith(color: AppColors.danger),
+                  ),
+                ],
               );
             }
 
@@ -10782,6 +11137,7 @@ Future<void> showTransferDialog(
               required v2_account.AccountRecord? account,
               required String placeholder,
               required VoidCallback? onTap,
+              bool isSource = false,
             }) {
               final enabled = onTap != null;
               return InkWell(
@@ -10819,7 +11175,7 @@ Future<void> showTransferDialog(
                               ),
                               if (account != null) ...[
                                 const SizedBox(height: 5),
-                                accountSubtitle(account),
+                                accountSubtitle(account, isSource: isSource),
                               ],
                             ],
                           ),
@@ -10833,7 +11189,17 @@ Future<void> showTransferDialog(
               );
             }
 
-            void saveTransferResult() {
+            Future<void> saveTransferResult() async {
+              if (wouldOverdrawSource &&
+                  dataStore.preferences.warnBeforeNegativeAssetBalance &&
+                  !await confirmAssetAccountOverdraw(
+                    context,
+                    account: selectedFromAccount,
+                    projectedBalanceMinor: projectedSourceBalanceMinor,
+                  )) {
+                return;
+              }
+              if (!context.mounted) return;
               Navigator.pop(context, (
                 fromAccountId: fromAccountId,
                 toAccountId: toAccountId,
@@ -10912,6 +11278,7 @@ Future<void> showTransferDialog(
                     rowKey: const ValueKey('transfer-from-account'),
                     account: selectedFromAccount,
                     placeholder: 'Choose account',
+                    isSource: true,
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
                       final selectedAccountId =
@@ -11329,6 +11696,7 @@ Future<void> showTransferDialog(
   await dataStore.savePreferences(
     dataStore.preferences.copyWith(
       lastUsedTransactionType: TransactionType.transfer,
+      lastUsedTransferSourceAccountId: result.fromAccountId,
     ),
   );
 }
@@ -12059,6 +12427,7 @@ Future<bool> showScheduledTransactionDialog(
                       SingleCategoryAllocationSection(
                         keyPrefix: 'scheduled',
                         categoryName: selectedCategory?.name,
+                        category: selectedCategory,
                         onChooseCategory: () => chooseScheduledSplitCategory(0),
                         onSplit: selectedCategory == null
                             ? null
@@ -12583,6 +12952,7 @@ class ScheduledTransactionDetailRow extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    this.leading,
     this.rowKey,
     this.tabularFigures = false,
     this.valueColor,
@@ -12593,6 +12963,7 @@ class ScheduledTransactionDetailRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
+  final Widget? leading;
   final bool tabularFigures;
   final Color? valueColor;
 
@@ -12603,7 +12974,7 @@ class ScheduledTransactionDetailRow extends StatelessWidget {
       key: rowKey,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        TransactionFormIcon(icon),
+        leading ?? TransactionFormIcon(icon),
         const SizedBox(width: AppSpacing.md),
         Expanded(
           child: Column(
@@ -14005,11 +14376,20 @@ Future<void> showTransactionDialog(
             final currentBalanceMinor = selectedAccount == null
                 ? 0
                 : dataStore.balanceForAccount(selectedAccount.id);
+            final balanceWithoutExistingTransaction = selectedAccount == null
+                ? 0
+                : currentBalanceMinor -
+                      (transaction?.deltaForAccount(selectedAccount.id) ?? 0);
             final previewBalanceMinor = selectedAccount == null
                 ? 0
                 : isExpense
-                ? currentBalanceMinor - amountMinor.abs()
-                : currentBalanceMinor + amountMinor.abs();
+                ? balanceWithoutExistingTransaction - amountMinor.abs()
+                : balanceWithoutExistingTransaction + amountMinor.abs();
+            final wouldOverdrawAsset =
+                selectedAccount != null &&
+                accountIsAsset(selectedAccount) &&
+                isExpense &&
+                previewBalanceMinor < 0;
             final mutedStyle = theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
               height: 1.18,
@@ -14349,7 +14729,7 @@ Future<void> showTransactionDialog(
               });
             }
 
-            void saveTransactionResult() {
+            Future<void> saveTransactionResult() async {
               recalculateAutoRemainder();
               syncPrimaryCategoryFromSplit();
               final currentCategoryIds = splitDrafts
@@ -14369,6 +14749,16 @@ Future<void> showTransactionDialog(
                   currentCategoryIds.length == splitDrafts.length &&
                   currentSplitTotal == amountMinor.abs();
               if (!splitsAreValid) return;
+              if (wouldOverdrawAsset &&
+                  dataStore.preferences.warnBeforeNegativeAssetBalance &&
+                  !await confirmAssetAccountOverdraw(
+                    context,
+                    account: selectedAccount,
+                    projectedBalanceMinor: previewBalanceMinor,
+                  )) {
+                return;
+              }
+              if (!context.mounted) return;
               Navigator.pop(context, (
                 accountId: accountId,
                 categoryId: categoryId,
@@ -14433,9 +14823,31 @@ Future<void> showTransactionDialog(
                 case v2_account.AccountType.savings:
                 case v2_account.AccountType.cash:
                 case v2_account.AccountType.otherBanking:
-                  return Text(
-                    'Balance ${money(previewBalanceMinor, dataStore.preferences.currency)}',
-                    style: mutedStyle,
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Balance ${money(previewBalanceMinor, dataStore.preferences.currency)}',
+                        style: mutedStyle?.copyWith(
+                          color: wouldOverdrawAsset ? AppColors.danger : null,
+                        ),
+                      ),
+                      if (wouldOverdrawAsset) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Insufficient funds',
+                          key: const ValueKey('transaction-insufficient-funds'),
+                          style: mutedStyle?.copyWith(
+                            color: AppColors.danger,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          'This transaction would leave ${selectedAccount.name} at ${money(previewBalanceMinor, dataStore.preferences.currency)}.',
+                          style: mutedStyle?.copyWith(color: AppColors.danger),
+                        ),
+                      ],
+                    ],
                   );
               }
             }
@@ -14734,6 +15146,7 @@ Future<void> showTransactionDialog(
                         SingleCategoryAllocationSection(
                           keyPrefix: 'transaction',
                           categoryName: selectedCategory?.name,
+                          category: selectedCategory,
                           onChooseCategory: () => chooseSplitCategory(0),
                           onSplit: selectedCategory == null
                               ? null
@@ -15078,6 +15491,7 @@ Future<void> showTransactionDialog(
       lastUsedTransactionType: result.isExpense
           ? TransactionType.expense
           : TransactionType.income,
+      lastUsedTransactionAccountId: result.accountId,
     ),
   );
 }
@@ -15165,6 +15579,7 @@ Future<String?> showCategoryDialog(
               required String value,
               required VoidCallback onTap,
               Color? iconColor,
+              Widget? leading,
             }) {
               return InkWell(
                 borderRadius: BorderRadius.circular(AppRadii.control),
@@ -15173,7 +15588,7 @@ Future<String?> showCategoryDialog(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Row(
                     children: [
-                      TransactionFormIcon(icon, color: iconColor),
+                      leading ?? TransactionFormIcon(icon, color: iconColor),
                       SizedBox(width: AppSpacing.md),
                       Expanded(child: Text(value, style: fieldValueStyle)),
                       Icon(AppIcon.chevronDown, size: AppIconSize.hero),
@@ -15292,12 +15707,21 @@ Future<String?> showCategoryDialog(
                   const TransactionFormLabel('Icon'),
                   choiceRow(
                     icon: categoryIconForName(iconName, kind),
+                    leading: CategoryIconBadge(
+                      iconName: iconName,
+                      kind: kind,
+                      colorValue: colorValue,
+                      semanticLabel: selectedIcon?.label ?? 'No icon selected',
+                      size: CategoryIconBadgeSize.form,
+                    ),
                     value: selectedIcon?.label ?? 'No icon',
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
                       final selected = await showCategoryIconPicker(
                         context,
                         selectedKey: iconName ?? categoryIconNoneKey,
+                        categoryKind: kind,
+                        categoryColorValue: colorValue,
                       );
                       if (selected != null) {
                         setDialogState(
@@ -15527,6 +15951,153 @@ Future<void> showCategoryActions(
       await FinanceDataStoreScope.read(context).deleteCategory(category.id);
   }
 }
+
+Future<void> showCategoryDetails(
+  BuildContext context,
+  String categoryId, {
+  required ManagementLedgerIndex index,
+}) async {
+  final store = FinanceDataStoreScope.read(context);
+  final category = store.categories
+      .where((item) => item.id == categoryId)
+      .firstOrNull;
+  if (category == null) return;
+  final categoriesById = {for (final item in store.categories) item.id: item};
+  final directChildren = store.categories
+      .where((item) => item.parentCategoryId == category.id && !item.isDeleted)
+      .toList(growable: false);
+  final iconLabel =
+      CategoryIconCatalog.find(category.iconName)?.label ?? 'Default';
+  final colorLabel = category.colorValue == null
+      ? 'Default'
+      : '#${category.colorValue!.toRadixString(16).padLeft(8, '0').toUpperCase()}';
+
+  final action = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => TransactionSheetFrame(
+      title: 'Category Details',
+      actions: ScheduledTransactionDetailActions(
+        onClose: () => Navigator.pop(dialogContext),
+        onEdit: () => Navigator.pop(dialogContext, 'edit'),
+        onMarkPaid: null,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ScheduledTransactionDetailRow(
+            rowKey: const ValueKey('category-detail-name'),
+            icon: categoryIcon(category),
+            leading: CategoryIconBadge.category(
+              category,
+              size: CategoryIconBadgeSize.form,
+            ),
+            label: 'Category',
+            value: category.name,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: categoryKindIcon(category.kind.name),
+            label: 'Type',
+            value: categoryKindLabel(category.kind.name),
+          ),
+          if (category.parentCategoryId case final parentId?) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.categoryTree,
+              label: 'Parent Category',
+              value: categoriesById[parentId]?.name ?? 'Unavailable',
+            ),
+          ],
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: AppIcon.categoryTree,
+            label: 'Direct Subcategories',
+            value: '${directChildren.length}',
+            tabularFigures: true,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            rowKey: const ValueKey('category-detail-count'),
+            icon: AppIcon.ledger,
+            label: 'Transactions · Last 12 Months',
+            value: '${index.categoryCount(category.id)}',
+            tabularFigures: true,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: categoryIcon(category),
+            leading: CategoryIconBadge.category(
+              category,
+              size: CategoryIconBadgeSize.form,
+            ),
+            label: 'Icon',
+            value: iconLabel,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: AppIcon.palette,
+            label: 'Color',
+            value: colorLabel,
+            valueColor: category.colorValue == null
+                ? null
+                : Color(category.colorValue!),
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: category.isArchived ? AppIcon.archive : AppIcon.check,
+            label: 'Status',
+            value: category.isArchived ? 'Archived' : 'Active',
+          ),
+          if (directChildren.isNotEmpty) ...[
+            const TransactionFormDivider(),
+            Text(
+              'Subcategories',
+              style: Theme.of(dialogContext).textTheme.labelMedium?.copyWith(
+                color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            for (final child in directChildren)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Text(
+                  child.name,
+                  style: Theme.of(dialogContext).textTheme.bodyMedium,
+                ),
+              ),
+          ],
+          const SizedBox(height: AppSpacing.sm),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const ValueKey('category-detail-view-transactions'),
+              onPressed: () => Navigator.pop(dialogContext, 'transactions'),
+              icon: Icon(AppIcon.ledger),
+              label: const Text('View Transactions'),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (!context.mounted) return;
+  if (action == 'edit') {
+    await showCategoryDialog(context, categoryId: category.id);
+  } else if (action == 'transactions') {
+    await openManagementLedger(
+      context,
+      ManagementLedgerFilter.category(
+        categoryId: category.id,
+        label: category.name,
+      ),
+    );
+  }
+}
+
+bool isSystemGeneratedManagedPayee(String payee) =>
+    normalizeManagedPayee(payee) == 'balance adjustment';
 
 IconData accountIcon(AccountType type) {
   return switch (type) {
@@ -16315,23 +16886,42 @@ List<String> savedPayees(FinanceDataStore store) {
   return payees;
 }
 
-int transactionCountForPayee(FinanceDataStore store, String payee) {
-  final normalized = payee.trim().toLowerCase();
-  return store.transactions
-      .where(
-        (transaction) =>
-            !transaction.isDeleted &&
-            transaction.payee.trim().toLowerCase() == normalized,
-      )
-      .length;
-}
+List<String> managedPayees(FinanceDataStore store) {
+  final seen = <String>{};
+  final result = <String>[];
+  final archived = store.preferences.archivedPayeeNames;
+  final deleted = store.preferences.deletedPayeeNames;
 
-int transactionCountForCategory(FinanceDataStore store, String categoryId) {
-  return store.transactions.where((transaction) {
-    if (transaction.isDeleted) return false;
-    return transaction.categoryId == categoryId ||
-        transaction.splitLines.any((line) => line.categoryId == categoryId);
-  }).length;
+  void add(String value) {
+    final payee = value.trim();
+    final normalized = normalizeManagedPayee(payee);
+    if (payee.isEmpty ||
+        isSystemGeneratedManagedPayee(payee) ||
+        archived.contains(normalized) ||
+        deleted.contains(normalized) ||
+        !seen.add(normalized)) {
+      return;
+    }
+    result.add(payee);
+  }
+
+  for (final payee in store.preferences.savedPayeeNames) {
+    add(payee);
+  }
+  final actualTransactions =
+      store.transactions
+          .where(
+            (transaction) =>
+                !transaction.isDeleted &&
+                (transaction.type == TransactionType.expense ||
+                    transaction.type == TransactionType.income),
+          )
+          .toList(growable: false)
+        ..sort((a, b) => b.date.compareTo(a.date));
+  for (final transaction in actualTransactions) {
+    add(transaction.payee);
+  }
+  return result;
 }
 
 List<String> archivedPayees(FinanceDataStore store) {
@@ -16895,14 +17485,12 @@ Future<String?> showTransactionCategoryFlow(
       ? v2_category.CategoryKind.expense
       : v2_category.CategoryKind.income;
   var currentSelection = selectedCategoryId;
-  final collapsedCategoryIds = <String>{};
 
   while (context.mounted) {
     final selection = await _showTransactionCategoryPickerSheet(
       context,
       categories: categoriesForTransactionKind(dataStore, isExpense),
       selectedCategoryId: currentSelection,
-      collapsedCategoryIds: collapsedCategoryIds,
     );
     if (!context.mounted || selection == null) return null;
     if (selection.categoryId != null) return selection.categoryId;
@@ -17052,13 +17640,14 @@ Future<String?> showTransactionCategoryCreationDialog(
           required String value,
           VoidCallback? onTap,
           Color? iconColor,
+          Widget? leading,
           Key? key,
         }) {
           final child = Padding(
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Row(
               children: [
-                TransactionFormIcon(icon, color: iconColor),
+                leading ?? TransactionFormIcon(icon, color: iconColor),
                 SizedBox(width: AppSpacing.md),
                 Expanded(child: Text(value, style: fieldValueStyle)),
                 if (onTap != null)
@@ -17160,12 +17749,21 @@ Future<String?> showTransactionCategoryCreationDialog(
               const TransactionFormLabel('Icon'),
               valueRow(
                 icon: categoryIconForName(iconName, kind),
+                leading: CategoryIconBadge(
+                  iconName: iconName,
+                  kind: kind,
+                  colorValue: colorValue,
+                  semanticLabel: selectedIcon?.label ?? 'No icon selected',
+                  size: CategoryIconBadgeSize.form,
+                ),
                 value: selectedIcon?.label ?? 'No icon',
                 onTap: () async {
                   FocusManager.instance.primaryFocus?.unfocus();
                   final selected = await showCategoryIconPicker(
                     dialogContext,
                     selectedKey: iconName ?? categoryIconNoneKey,
+                    categoryKind: kind,
+                    categoryColorValue: colorValue,
                   );
                   if (selected != null && dialogContext.mounted) {
                     setDialogState(
@@ -17248,11 +17846,22 @@ Future<_TransactionCategoryPickerResult?> _showTransactionCategoryPickerSheet(
   BuildContext context, {
   required List<v2_category.CategoryRecord> categories,
   required String selectedCategoryId,
-  required Set<String> collapsedCategoryIds,
 }) async {
   final categoriesById = {
     for (final category in categories) category.id: category,
   };
+  final collapsedCategoryIds = categories
+      .where(
+        (candidate) => categories.any(
+          (category) => category.parentCategoryId == candidate.id,
+        ),
+      )
+      .map((category) => category.id)
+      .toSet();
+  final selectedParentId = categoriesById[selectedCategoryId]?.parentCategoryId;
+  if (selectedParentId != null) {
+    collapsedCategoryIds.remove(selectedParentId);
+  }
   final result = await showModalBottomSheet<_TransactionCategoryPickerResult>(
     context: context,
     showDragHandle: true,
@@ -17287,9 +17896,6 @@ Future<_TransactionCategoryPickerResult?> _showTransactionCategoryPickerSheet(
           final isSelected = category.id == selectedCategoryId;
           final parent = categoriesById[category.parentCategoryId];
           final isChild = depth > 0;
-          final iconColor = category.colorValue == null
-              ? AppTheme.accent
-              : Color(category.colorValue!);
 
           return Semantics(
             selected: isSelected,
@@ -17336,21 +17942,12 @@ Future<_TransactionCategoryPickerResult?> _showTransactionCategoryPickerSheet(
                           ),
                         ),
                       ),
-                    Container(
-                      width: isChild ? 34 : 40,
-                      height: isChild ? 34 : 40,
-                      decoration: BoxDecoration(
-                        color: iconColor.withValues(
-                          alpha: isChild ? 0.07 : 0.09,
-                        ),
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(
-                        categoryIcon(category),
-                        size: isChild ? 18 : 21,
-                        color: iconColor.withValues(alpha: isChild ? 0.78 : 1),
-                      ),
+                    CategoryIconBadge.category(
+                      category,
+                      size: isChild
+                          ? CategoryIconBadgeSize.row
+                          : CategoryIconBadgeSize.form,
+                      selected: isSelected,
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(

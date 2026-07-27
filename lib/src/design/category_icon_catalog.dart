@@ -14,6 +14,7 @@ class AppCategoryIcon {
     required this.group,
     required this.materialIcon,
     required this.cupertinoIcon,
+    this.aliases = const [],
   });
 
   final String key;
@@ -21,6 +22,7 @@ class AppCategoryIcon {
   final String group;
   final IconData materialIcon;
   final IconData cupertinoIcon;
+  final List<String> aliases;
 
   IconData get icon => defaultTargetPlatform == TargetPlatform.iOS
       ? cupertinoIcon
@@ -31,7 +33,8 @@ class AppCategoryIcon {
     return normalized.isEmpty ||
         label.toLowerCase().contains(normalized) ||
         group.toLowerCase().contains(normalized) ||
-        key.toLowerCase().contains(normalized);
+        key.toLowerCase().contains(normalized) ||
+        aliases.any((alias) => alias.toLowerCase().contains(normalized));
   }
 }
 
@@ -94,7 +97,8 @@ abstract final class CategoryIconCatalog {
       label: 'Savings',
       group: 'Finance',
       materialIcon: Icons.savings_outlined,
-      cupertinoIcon: CupertinoIcons.money_dollar_circle,
+      cupertinoIcon: Icons.savings_outlined,
+      aliases: ['piggy bank', 'reserve', 'nest egg'],
     ),
     AppCategoryIcon(
       key: 'finance.investment',
@@ -124,6 +128,14 @@ abstract final class CategoryIconCatalog {
       materialIcon: Icons.currency_exchange_outlined,
       cupertinoIcon: CupertinoIcons.arrow_right_arrow_left,
     ),
+    AppCategoryIcon(
+      key: 'finance.cashAdvance',
+      label: 'Cash Advance',
+      group: 'Finance',
+      materialIcon: Icons.atm_outlined,
+      cupertinoIcon: Icons.atm_outlined,
+      aliases: ['cash advance', 'atm', 'withdrawal', 'cash out'],
+    ),
 
     // Food (the original Dining key is intentionally preserved).
     AppCategoryIcon(
@@ -131,7 +143,8 @@ abstract final class CategoryIconCatalog {
       label: 'Dining',
       group: 'Food',
       materialIcon: Icons.restaurant_outlined,
-      cupertinoIcon: CupertinoIcons.placemark,
+      cupertinoIcon: Icons.restaurant_outlined,
+      aliases: ['restaurant', 'meal', 'food'],
     ),
     AppCategoryIcon(
       key: 'food.groceries',
@@ -145,7 +158,8 @@ abstract final class CategoryIconCatalog {
       label: 'Coffee',
       group: 'Food',
       materialIcon: Icons.local_cafe_outlined,
-      cupertinoIcon: CupertinoIcons.cube_box,
+      cupertinoIcon: Icons.local_cafe_outlined,
+      aliases: ['cafe', 'cup', 'mug'],
     ),
     AppCategoryIcon(
       key: 'food.fast',
@@ -159,7 +173,7 @@ abstract final class CategoryIconCatalog {
       label: 'Bakery',
       group: 'Food',
       materialIcon: Icons.bakery_dining_outlined,
-      cupertinoIcon: CupertinoIcons.circle_grid_hex,
+      cupertinoIcon: Icons.bakery_dining_outlined,
     ),
     AppCategoryIcon(
       key: 'food.drink',
@@ -180,7 +194,15 @@ abstract final class CategoryIconCatalog {
       label: 'Lunch',
       group: 'Food',
       materialIcon: Icons.lunch_dining_outlined,
-      cupertinoIcon: CupertinoIcons.bag,
+      cupertinoIcon: Icons.lunch_dining_outlined,
+    ),
+    AppCategoryIcon(
+      key: 'food.tip',
+      label: 'Tip / Gratuity',
+      group: 'Food',
+      materialIcon: Icons.price_change_outlined,
+      cupertinoIcon: Icons.price_change_outlined,
+      aliases: ['tip', 'gratuity', 'service charge'],
     ),
 
     // Transportation
@@ -224,28 +246,40 @@ abstract final class CategoryIconCatalog {
       label: 'Bicycle',
       group: 'Transportation',
       materialIcon: Icons.pedal_bike_outlined,
-      cupertinoIcon: CupertinoIcons.circle_grid_hex,
+      cupertinoIcon: Icons.pedal_bike_outlined,
+      aliases: ['bike', 'cycling'],
     ),
     AppCategoryIcon(
       key: 'transport.walk',
       label: 'Walking',
       group: 'Transportation',
       materialIcon: Icons.directions_walk_outlined,
-      cupertinoIcon: CupertinoIcons.person,
+      cupertinoIcon: Icons.directions_walk_outlined,
+      aliases: ['walk', 'pedestrian'],
     ),
     AppCategoryIcon(
       key: 'transport.parking',
       label: 'Parking',
       group: 'Transportation',
       materialIcon: Icons.local_parking_outlined,
-      cupertinoIcon: CupertinoIcons.circle,
+      cupertinoIcon: Icons.local_parking_outlined,
+      aliases: ['garage', 'meter'],
     ),
     AppCategoryIcon(
       key: 'transport.toll',
       label: 'Tolls',
       group: 'Transportation',
       materialIcon: Icons.toll_outlined,
-      cupertinoIcon: CupertinoIcons.money_dollar_circle,
+      cupertinoIcon: Icons.toll_outlined,
+      aliases: ['toll', 'bridge', 'gate', 'highway fee'],
+    ),
+    AppCategoryIcon(
+      key: 'transport.truckStop',
+      label: 'Truck Stop',
+      group: 'Transportation',
+      materialIcon: Icons.local_shipping_outlined,
+      cupertinoIcon: Icons.local_shipping_outlined,
+      aliases: ['truck stop', 'travel plaza', 'fuel stop', 'rest area'],
     ),
 
     // Fuel
@@ -296,7 +330,8 @@ abstract final class CategoryIconCatalog {
       label: 'Tires & Air',
       group: 'Fuel',
       materialIcon: Icons.tire_repair_outlined,
-      cupertinoIcon: CupertinoIcons.circle,
+      cupertinoIcon: Icons.tire_repair_outlined,
+      aliases: ['tire', 'tires', 'wheel', 'air', 'inflation'],
     ),
 
     // Shopping
@@ -370,7 +405,8 @@ abstract final class CategoryIconCatalog {
       label: 'Hospital',
       group: 'Medical',
       materialIcon: Icons.local_hospital_outlined,
-      cupertinoIcon: CupertinoIcons.bandage,
+      cupertinoIcon: Icons.local_hospital_outlined,
+      aliases: ['clinic', 'emergency room'],
     ),
     AppCategoryIcon(
       key: 'medical.medicine',
@@ -390,8 +426,9 @@ abstract final class CategoryIconCatalog {
       key: 'medical.dental',
       label: 'Dental',
       group: 'Medical',
-      materialIcon: Icons.health_and_safety_outlined,
-      cupertinoIcon: CupertinoIcons.heart,
+      materialIcon: Icons.face_outlined,
+      cupertinoIcon: CupertinoIcons.smiley,
+      aliases: ['dentist', 'teeth', 'tooth'],
     ),
     AppCategoryIcon(
       key: 'medical.vision',
@@ -588,6 +625,20 @@ abstract final class CategoryIconCatalog {
       materialIcon: Icons.room_service_outlined,
       cupertinoIcon: CupertinoIcons.briefcase,
     ),
+    AppCategoryIcon(
+      key: 'business.scaleTicket',
+      label: 'Scale Ticket',
+      group: 'Business',
+      materialIcon: Icons.scale_outlined,
+      cupertinoIcon: Icons.scale_outlined,
+      aliases: [
+        'scale',
+        'scale ticket',
+        'weigh station',
+        'cat scale',
+        'truck scale',
+      ],
+    ),
 
     // Technology
     AppCategoryIcon(
@@ -739,7 +790,7 @@ abstract final class CategoryIconCatalog {
       label: 'Cruise',
       group: 'Travel',
       materialIcon: Icons.directions_boat_outlined,
-      cupertinoIcon: CupertinoIcons.location,
+      cupertinoIcon: Icons.directions_boat_outlined,
     ),
     AppCategoryIcon(
       key: 'travel.camping',
@@ -868,8 +919,9 @@ abstract final class CategoryIconCatalog {
       key: 'education.graduation',
       label: 'Graduation',
       group: 'Education',
-      materialIcon: Icons.workspace_premium_outlined,
-      cupertinoIcon: CupertinoIcons.rosette,
+      materialIcon: Icons.school_outlined,
+      cupertinoIcon: CupertinoIcons.book,
+      aliases: ['degree', 'diploma', 'commencement'],
     ),
 
     // Taxes
@@ -1031,6 +1083,14 @@ abstract final class CategoryIconCatalog {
       materialIcon: Icons.thermostat_outlined,
       cupertinoIcon: CupertinoIcons.thermometer,
     ),
+    AppCategoryIcon(
+      key: 'maintenance.tires',
+      label: 'Tires',
+      group: 'Maintenance',
+      materialIcon: Icons.tire_repair_outlined,
+      cupertinoIcon: Icons.tire_repair_outlined,
+      aliases: ['tire', 'tires', 'wheel', 'air', 'inflation'],
+    ),
 
     // Personal
     AppCategoryIcon(
@@ -1116,8 +1176,9 @@ abstract final class CategoryIconCatalog {
       key: 'goals.truck',
       label: 'Truck',
       group: 'Goals',
-      materialIcon: Icons.fire_truck_outlined,
-      cupertinoIcon: CupertinoIcons.car,
+      materialIcon: Icons.local_shipping_outlined,
+      cupertinoIcon: Icons.local_shipping_outlined,
+      aliases: ['semi', 'lorry'],
     ),
     AppCategoryIcon(
       key: 'goals.house',

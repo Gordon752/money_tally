@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
@@ -719,6 +720,87 @@ class FinanceDataStore extends ChangeNotifier {
     );
     await saveAccount(account);
     await refreshScheduledNotifications();
+  }
+
+  Future<void> restoreAccount(String accountId) async {
+    final existing = accountById(accountId);
+    if (existing.isDeleted) {
+      throw const FinanceDataValidationException(
+        'A permanently deleted account cannot be restored.',
+      );
+    }
+    final nextSortOrder = accounts
+        .where((item) => item.isVisible && item.group == existing.group)
+        .fold<int>(0, (highest, item) => max(highest, item.sortOrder + 100));
+    await saveAccount(
+      existing.copyWith(isArchived: false, sortOrder: nextSortOrder),
+    );
+    await refreshScheduledNotifications();
+  }
+
+  Future<void> reorderAccountsWithinGroup({
+    required AccountGroup group,
+    required List<String> orderedAccountIds,
+  }) async {
+    final visibleGroupAccounts = accounts
+        .where((item) => item.isVisible && item.group == group)
+        .toList(growable: false);
+    final expectedIds = visibleGroupAccounts.map((item) => item.id).toSet();
+    if (orderedAccountIds.length != expectedIds.length ||
+        orderedAccountIds.toSet().length != orderedAccountIds.length ||
+        !orderedAccountIds.every(expectedIds.contains)) {
+      throw const FinanceDataValidationException(
+        'Account order must contain every active account in the group once.',
+      );
+    }
+
+    final changedAccounts = <AccountRecord>[];
+    for (var index = 0; index < orderedAccountIds.length; index += 1) {
+      final item = accountById(orderedAccountIds[index]);
+      final sortOrder = index * 100;
+      if (item.sortOrder != sortOrder) {
+        changedAccounts.add(item.copyWith(sortOrder: sortOrder));
+      }
+    }
+    if (changedAccounts.isEmpty) return;
+
+    final changedById = {for (final item in changedAccounts) item.id: item};
+    _dataSet = _dataSet.copyWith(
+      accounts: [for (final item in accounts) changedById[item.id] ?? item],
+    );
+    await _commit(accounts: changedAccounts);
+  }
+
+  AccountLinkedRecordSummary accountLinkedRecordSummary(String accountId) {
+    return AccountLinkedRecordSummary(
+      transactionCount: transactions
+          .where(
+            (transaction) =>
+                !transaction.isDeleted &&
+                (transaction.accountId == accountId ||
+                    transaction.transferAccountId == accountId),
+          )
+          .length,
+      scheduledTransactionCount: scheduledTransactions
+          .where(
+            (scheduled) =>
+                !scheduled.isDeleted &&
+                (scheduled.accountId == accountId ||
+                    scheduled.transferAccountId == accountId),
+          )
+          .length,
+      goalFundingEventCount: goalFundingEvents
+          .where(
+            (event) => event.isActive && event.sourceAccountId == accountId,
+          )
+          .length,
+      defaultGoalCount: goals
+          .where(
+            (goal) =>
+                !goal.isDeleted && goal.defaultFundingAccountId == accountId,
+          )
+          .length,
+    );
   }
 
   Future<void> moveAccountWithinGroup({
@@ -2206,6 +2288,26 @@ class FinanceDataStore extends ChangeNotifier {
   String _newId(String prefix) {
     return '${prefix}_${DateTime.now().microsecondsSinceEpoch}';
   }
+}
+
+class AccountLinkedRecordSummary {
+  const AccountLinkedRecordSummary({
+    required this.transactionCount,
+    required this.scheduledTransactionCount,
+    required this.goalFundingEventCount,
+    required this.defaultGoalCount,
+  });
+
+  final int transactionCount;
+  final int scheduledTransactionCount;
+  final int goalFundingEventCount;
+  final int defaultGoalCount;
+
+  bool get hasLinks =>
+      transactionCount > 0 ||
+      scheduledTransactionCount > 0 ||
+      goalFundingEventCount > 0 ||
+      defaultGoalCount > 0;
 }
 
 int compareAccountDisplayOrder(

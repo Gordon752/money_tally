@@ -34,6 +34,8 @@ class CategoryReportTotal {
     required this.name,
     required this.amountMinor,
     required this.percentage,
+    this.iconName,
+    this.colorValue,
     this.isOther = false,
   });
 
@@ -41,6 +43,8 @@ class CategoryReportTotal {
   final String name;
   final int amountMinor;
   final double percentage;
+  final String? iconName;
+  final int? colorValue;
   final bool isOther;
 }
 
@@ -193,6 +197,8 @@ class MoneyReportCalculator {
           name: _categoryName(entry.key, categoriesById),
           amountMinor: entry.value,
           percentage: entry.value / expensesMinor,
+          iconName: categoriesById[entry.key]?.iconName,
+          colorValue: categoriesById[entry.key]?.colorValue,
           isOther: entry.key == _otherId,
         ),
     ];

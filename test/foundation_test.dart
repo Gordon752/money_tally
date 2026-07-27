@@ -468,6 +468,15 @@ void main() {
   test('backup codec preserves v2 data set records', () {
     const codec = BackupCodec();
     final dataSet = _dataSet().copyWith(
+      categories: [
+        for (final category in _dataSet().categories)
+          if (category.id == 'dining')
+            category.copyWith(iconName: 'fork.knife', colorValue: 0xFF0F766E)
+          else if (category.id == 'snacks')
+            category.copyWith(iconName: 'food.tip', colorValue: 0xFF7C3AED)
+          else
+            category,
+      ],
       accounts: [
         for (final account in _dataSet().accounts)
           if (account.id == 'checking')
@@ -523,6 +532,18 @@ void main() {
     expect(restored.accounts.first.creditLimitMinor, 250000);
     expect(restored.transactions.single.type, TransactionType.transfer);
     expect(restored.transactions.single.transferAccountId, 'cash');
+    expect(
+      restored.categories.singleWhere((item) => item.id == 'dining').iconName,
+      'fork.knife',
+    );
+    expect(
+      restored.categories.singleWhere((item) => item.id == 'snacks').iconName,
+      'food.tip',
+    );
+    expect(
+      restored.categories.singleWhere((item) => item.id == 'snacks').colorValue,
+      0xFF7C3AED,
+    );
     expect(restored.budgets.single.period, BudgetPeriod.weekly);
     expect(restored.budgets.single.rolloverEnabled, isTrue);
     expect(restored.budgets.single.configurationRevisions, hasLength(1));
