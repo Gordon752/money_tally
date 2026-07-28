@@ -2,6 +2,35 @@ import 'json_helpers.dart';
 import 'sync_metadata.dart';
 import 'transaction.dart';
 
+class ScheduledGoalFundingAllocation {
+  const ScheduledGoalFundingAllocation({
+    required this.id,
+    required this.goalId,
+    required this.amountMinor,
+    required this.order,
+  });
+
+  final String id;
+  final String goalId;
+  final int amountMinor;
+  final int order;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'goalId': goalId,
+    'amountMinor': amountMinor,
+    'order': order,
+  };
+
+  factory ScheduledGoalFundingAllocation.fromJson(Map<String, Object?> json) =>
+      ScheduledGoalFundingAllocation(
+        id: json['id'] as String? ?? '',
+        goalId: json['goalId'] as String? ?? '',
+        amountMinor: json['amountMinor'] as int? ?? 0,
+        order: json['order'] as int? ?? 0,
+      );
+}
+
 enum RecurrenceFrequency { once, weekly, biweekly, monthly, yearly }
 
 enum AlertPreference {
@@ -25,6 +54,7 @@ class ScheduledOccurrenceRecord {
     this.actualAmountMinor,
     this.actualPaymentDate,
     this.transactionId,
+    this.goalFundingEventId,
   });
 
   final DateTime scheduledDate;
@@ -34,6 +64,9 @@ class ScheduledOccurrenceRecord {
   final DateTime? actualPaymentDate;
   final String? transactionId;
 
+  /// Present only when this occurrence was explicitly funded as a Goal event.
+  final String? goalFundingEventId;
+
   Map<String, Object?> toJson() {
     return {
       'scheduledDate': scheduledDate.toIso8601String(),
@@ -42,6 +75,7 @@ class ScheduledOccurrenceRecord {
       'actualAmountMinor': actualAmountMinor,
       'actualPaymentDate': actualPaymentDate?.toIso8601String(),
       'transactionId': transactionId,
+      'goalFundingEventId': goalFundingEventId,
     };
   }
 
@@ -59,6 +93,7 @@ class ScheduledOccurrenceRecord {
           ? null
           : dateTimeFromJson(json['actualPaymentDate']),
       transactionId: json['transactionId'] as String?,
+      goalFundingEventId: json['goalFundingEventId'] as String?,
     );
   }
 }
@@ -77,6 +112,7 @@ class ScheduledTransactionRecord {
     this.transferAccountId,
     this.categoryId,
     this.splitLines = const [],
+    this.goalFundingAllocations = const [],
     this.endDate,
     this.alertPreference = AlertPreference.none,
     this.customAlertTimeMinutes,
@@ -93,6 +129,9 @@ class ScheduledTransactionRecord {
   final String? transferAccountId;
   final String? categoryId;
   final List<TransactionSplitLine> splitLines;
+
+  /// Allocation plan for a scheduled [TransactionType.goalFunding] record.
+  final List<ScheduledGoalFundingAllocation> goalFundingAllocations;
   final String payee;
   final String note;
   final int amountMinor;
@@ -110,14 +149,52 @@ class ScheduledTransactionRecord {
 
   bool get hasAlert => alertPreference != AlertPreference.none;
   bool get isDeleted => sync.isDeleted;
-  bool get isSplit => splitLines.isNotEmpty;
+  List<TransactionSplitLine> get effectiveCategoryAllocations {
+    return resolveEffectiveCategoryAllocations(
+      type: type,
+      categoryId: categoryId,
+      amountMinor: amountMinor,
+      splitLines: splitLines,
+    );
+  }
+
+  bool get isCategorySplit => effectiveCategoryAllocations.length > 1;
+  bool get isSplit => isCategorySplit;
 
   int get splitTotalMinor {
-    return splitLines.fold(0, (total, line) => total + line.amountMinor);
+    return effectiveCategoryAllocations.fold(
+      0,
+      (total, line) => total + line.amountMinor,
+    );
+  }
+
+  bool get hasStoredCategoryAllocationPayload {
+    return splitLines.any(
+      (line) => line.categoryId.trim().isNotEmpty && line.amountMinor != 0,
+    );
   }
 
   bool get hasValidSplitTotal {
-    return !isSplit || splitTotalMinor == amountMinor.abs();
+    return !hasStoredCategoryAllocationPayload ||
+        splitTotalMinor == amountMinor.abs();
+  }
+
+  int get goalFundingAllocationTotalMinor => goalFundingAllocations.fold(
+    0,
+    (total, allocation) => total + allocation.amountMinor.abs(),
+  );
+
+  bool get hasValidGoalFundingAllocations {
+    if (type != TransactionType.goalFunding) return true;
+    final ids = <String>{};
+    return goalFundingAllocations.isNotEmpty &&
+        goalFundingAllocations.every(
+          (allocation) =>
+              allocation.goalId.trim().isNotEmpty &&
+              allocation.amountMinor > 0 &&
+              ids.add(allocation.goalId),
+        ) &&
+        goalFundingAllocationTotalMinor == amountMinor.abs();
   }
 
   ScheduledTransactionRecord copyWith({
@@ -126,6 +203,7 @@ class ScheduledTransactionRecord {
     String? transferAccountId,
     String? categoryId,
     List<TransactionSplitLine>? splitLines,
+    List<ScheduledGoalFundingAllocation>? goalFundingAllocations,
     String? payee,
     String? note,
     int? amountMinor,
@@ -155,6 +233,8 @@ class ScheduledTransactionRecord {
           : transferAccountId ?? this.transferAccountId,
       categoryId: clearCategory ? null : categoryId ?? this.categoryId,
       splitLines: splitLines ?? this.splitLines,
+      goalFundingAllocations:
+          goalFundingAllocations ?? this.goalFundingAllocations,
       payee: payee ?? this.payee,
       note: note ?? this.note,
       amountMinor: amountMinor ?? this.amountMinor,
@@ -186,6 +266,9 @@ class ScheduledTransactionRecord {
       'transferAccountId': transferAccountId,
       'categoryId': categoryId,
       'splitLines': splitLines.map((line) => line.toJson()).toList(),
+      'goalFundingAllocations': goalFundingAllocations
+          .map((allocation) => allocation.toJson())
+          .toList(),
       'payee': payee,
       'note': note,
       'amountMinor': amountMinor,
@@ -217,6 +300,9 @@ class ScheduledTransactionRecord {
       splitLines: stringMapList(
         json['splitLines'],
       ).map(TransactionSplitLine.fromJson).toList(),
+      goalFundingAllocations: stringMapList(
+        json['goalFundingAllocations'],
+      ).map(ScheduledGoalFundingAllocation.fromJson).toList(),
       payee: json['payee'] as String? ?? '',
       note: json['note'] as String? ?? '',
       amountMinor: json['amountMinor'] as int? ?? 0,

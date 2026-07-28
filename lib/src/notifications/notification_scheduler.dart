@@ -145,12 +145,21 @@ String notificationTitleFor(ScheduledTransactionRecord scheduledTransaction) {
   return switch (scheduledTransaction.type) {
     TransactionType.income => 'Income due',
     TransactionType.transfer => 'Transfer due',
+    TransactionType.goalFunding => 'Goal funding due',
     TransactionType.adjustment => 'Balance adjustment due',
     TransactionType.expense => 'Payment due',
   };
 }
 
 String notificationBodyFor(ScheduledTransactionRecord scheduledTransaction) {
+  if (scheduledTransaction.type == TransactionType.goalFunding) {
+    final count = scheduledTransaction.goalFundingAllocations.length;
+    final amount = (scheduledTransaction.amountMinor.abs() / 100)
+        .toStringAsFixed(2);
+    return count == 1
+        ? 'Fund \$$amount to your Goal.'
+        : 'Fund \$$amount across $count Goals.';
+  }
   return scheduledTransaction.payee.trim().isEmpty
       ? 'Scheduled transaction is due.'
       : '${scheduledTransaction.payee} is due.';

@@ -282,8 +282,9 @@ class BudgetCalculator {
           !window.contains(transaction.date)) {
         continue;
       }
-      if (transaction.isSplit) {
-        final amount = transaction.splitLines
+      final allocations = transaction.effectiveCategoryAllocations;
+      if (allocations.isNotEmpty) {
+        final amount = allocations
             .where((line) => categoryIds.contains(line.categoryId))
             .fold<int>(0, (total, line) => total + line.amountMinor.abs());
         if (amount > 0) {

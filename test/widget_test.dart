@@ -1020,9 +1020,8 @@ void main() {
     expect(edited.amountMinor, 1234);
     expect(edited.note, 'Pickup order');
     expect(edited.type, v2_transaction.TransactionType.expense);
-    expect(edited.splitLines, hasLength(1));
-    expect(edited.splitLines.single.categoryId, edited.categoryId);
-    expect(edited.splitLines.single.amountMinor, 1234);
+    expect(edited.splitLines, isEmpty);
+    expect(edited.isCategorySplit, isFalse);
     expect(find.text('Walmart Grocery'), findsOneWidget);
   });
 
@@ -1650,13 +1649,11 @@ void main() {
         (item) => item.payee == 'Future utility',
       );
       expect(current.scheduledTransactionId, scheduled.id);
-      expect(current.splitLines, hasLength(1));
-      expect(current.splitLines.single.categoryId, 'dining');
-      expect(current.splitLines.single.amountMinor, 12500);
+      expect(current.splitLines, isEmpty);
+      expect(current.isCategorySplit, isFalse);
       expect(scheduled.amountMinor, 12500);
-      expect(scheduled.splitLines, hasLength(1));
-      expect(scheduled.splitLines.single.categoryId, 'dining');
-      expect(scheduled.splitLines.single.amountMinor, 12500);
+      expect(scheduled.splitLines, isEmpty);
+      expect(scheduled.isCategorySplit, isFalse);
       expect(scheduled.frequency, v2_scheduled.RecurrenceFrequency.weekly);
       expect(
         scheduled.alertPreference,
@@ -5474,8 +5471,8 @@ void main() {
     expect(paid.date, paymentDate);
     expect(paid.payee, 'Rent');
     expect(paid.categoryId, 'dining');
-    expect(paid.splitLines, hasLength(1));
-    expect(paid.splitLines.single.amountMinor, 90000);
+    expect(paid.splitLines, isEmpty);
+    expect(paid.isCategorySplit, isFalse);
     expect(paid.note, 'Occurrence note');
     expect(paid.scheduledOccurrenceDate, dueDate);
     expect(paid.scheduledPlannedAmountMinor, 25000);
@@ -6078,7 +6075,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('No goals yet'), findsOneWidget);
+    expect(find.text('No Goals yet'), findsOneWidget);
     expect(dataStore.preferences.preferredPlanSegment, PlanSegment.goals);
 
     await tester.tap(find.text('Dashboard'));
@@ -7414,7 +7411,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Plan'), findsWidgets);
-    expect(find.text('No goals yet'), findsOneWidget);
+    expect(find.text('No Goals yet'), findsOneWidget);
     final control = tester.widget<SegmentedButton<PlanSegment>>(
       find.byKey(const ValueKey('plan-segmented-control')),
     );

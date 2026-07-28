@@ -406,6 +406,107 @@ void main() {
       expect(store.goalById(goal.id).isActive, isTrue);
     });
 
+    test(
+      'complete, archive, and restore preserve Goal history and lifecycle',
+      () async {
+        final store = _store();
+        final goal = await store.createGoal(
+          name: 'Lifecycle Goal',
+          targetAmountMinor: 100000,
+          startingAmountMinor: 0,
+          targetDate: DateTime(2027, 7, 24),
+          fundingMethod: GoalFundingMethod.trackingOnly,
+        );
+        final contribution = await store.addGoalContribution(
+          goalId: goal.id,
+          amountMinor: 25000,
+          date: DateTime(2026, 7, 24),
+        );
+
+        await store.markGoalComplete(goal.id);
+        expect(store.goalById(goal.id).isCompleted, isTrue);
+        expect(store.goalById(goal.id).completedAt, isNotNull);
+        expect(store.activeGoals, isNot(contains(store.goalById(goal.id))));
+        expect(store.inactiveGoals, contains(store.goalById(goal.id)));
+
+        await store.restoreGoal(goal.id);
+        expect(store.goalById(goal.id).isActive, isTrue);
+        expect(store.goalById(goal.id).completedAt, isNull);
+        expect(store.currentGoalAmountMinor(goal.id), 25000);
+        expect(store.goalContributionById(contribution.id).isActive, isTrue);
+
+        await store.archiveGoal(goal.id);
+        expect(store.goalById(goal.id).isArchived, isTrue);
+        expect(store.goalById(goal.id).archivedAt, isNotNull);
+        expect(store.currentGoalAmountMinor(goal.id), 25000);
+      },
+    );
+
+    test(
+      'permanent Goal deletion is limited to Goals without history',
+      () async {
+        final store = _store();
+        final unused = await store.createGoal(
+          name: 'Unused',
+          targetAmountMinor: 100000,
+          startingAmountMinor: 0,
+          targetDate: null,
+          fundingMethod: GoalFundingMethod.trackingOnly,
+        );
+        expect(store.goalDeleteEligibility(unused.id).canDelete, isTrue);
+        await store.deleteGoalPermanently(unused.id);
+        expect(store.goalById(unused.id).isDeleted, isTrue);
+
+        final used = await store.createGoal(
+          name: 'Used',
+          targetAmountMinor: 100000,
+          startingAmountMinor: 0,
+          targetDate: null,
+          fundingMethod: GoalFundingMethod.trackingOnly,
+        );
+        await store.addGoalContribution(
+          goalId: used.id,
+          amountMinor: 1000,
+          date: DateTime(2026, 7, 24),
+        );
+        expect(store.goalDeleteEligibility(used.id).canDelete, isFalse);
+        expect(
+          store.deleteGoalPermanently(used.id),
+          throwsA(isA<FinanceDataValidationException>()),
+        );
+      },
+    );
+
+    test(
+      'duplicating an inactive Goal copies configuration but not history',
+      () async {
+        final store = _store();
+        final goal = await store.createGoal(
+          name: 'Original',
+          targetAmountMinor: 100000,
+          startingAmountMinor: 0,
+          targetDate: DateTime(2027, 7, 24),
+          fundingMethod: GoalFundingMethod.trackingOnly,
+        );
+        await store.addGoalContribution(
+          goalId: goal.id,
+          amountMinor: 25000,
+          date: DateTime(2026, 7, 24),
+        );
+        await store.archiveGoal(goal.id);
+
+        final duplicate = await store.duplicateGoal(goal.id);
+        expect(duplicate.id, isNot(goal.id));
+        expect(duplicate.name, 'Original Copy');
+        expect(duplicate.isActive, isTrue);
+        expect(store.currentGoalAmountMinor(duplicate.id), 0);
+        expect(
+          store.goalContributions.where((item) => item.goalId == duplicate.id),
+          isEmpty,
+        );
+      },
+    );
+
     test('funding validates balance and active source account', () async {
       final store = _store(openingBalanceMinor: 50000);
       final goal = await store.createGoal(

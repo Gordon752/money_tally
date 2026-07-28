@@ -1428,14 +1428,25 @@ class _NextScheduledRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(AppIcon.recurrence, color: AppTheme.accent),
+        Icon(
+          scheduled.type == TransactionType.goalFunding
+              ? AppIcon.goal
+              : AppIcon.recurrence,
+          color: scheduled.type == TransactionType.goalFunding
+              ? _goalBlue
+              : AppTheme.accent,
+        ),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                scheduled.payee,
+                scheduled.type == TransactionType.goalFunding
+                    ? (scheduled.goalFundingAllocations.length == 1
+                          ? 'Goal Funding'
+                          : 'Goal Funding · ${scheduled.goalFundingAllocations.length} Goals')
+                    : scheduled.payee,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -1463,6 +1474,8 @@ class _NextScheduledRow extends StatelessWidget {
           fontWeight: FontWeight.w900,
           color: scheduled.type.name == 'expense'
               ? AppTheme.rose
+              : scheduled.type == TransactionType.goalFunding
+              ? _goalBlue
               : AppTheme.ink,
           showPositiveSign: scheduled.type.name == 'income',
         ),
@@ -2924,6 +2937,7 @@ class LedgerJournalRow extends StatelessWidget {
       TransactionType.expense => -transaction.amountMinor.abs(),
       TransactionType.income => transaction.amountMinor.abs(),
       TransactionType.transfer => transaction.amountMinor.abs(),
+      TransactionType.goalFunding => transaction.amountMinor.abs(),
       TransactionType.adjustment => transaction.amountMinor,
     };
     final secondary = [
@@ -3269,7 +3283,7 @@ bool transactionMatchesLedgerFilters(
   }
   if (categoryFilterId.isNotEmpty &&
       transaction.categoryId != categoryFilterId &&
-      !transaction.splitLines.any(
+      !transaction.effectiveCategoryAllocations.any(
         (line) => line.categoryId == categoryFilterId,
       )) {
     return false;
@@ -3315,6 +3329,7 @@ String transactionTypeLabel(TransactionType type) {
     TransactionType.expense => 'Expense',
     TransactionType.income => 'Income',
     TransactionType.transfer => 'Transfer',
+    TransactionType.goalFunding => 'Goal Funding',
     TransactionType.adjustment => 'Adjustment',
   };
 }
@@ -3324,6 +3339,7 @@ IconData transactionTypeIcon(TransactionType type) {
     TransactionType.expense => AppIcon.trendDown,
     TransactionType.income => AppIcon.trendUp,
     TransactionType.transfer => AppIcon.transfer,
+    TransactionType.goalFunding => AppIcon.goal,
     TransactionType.adjustment => AppIcon.tune,
   };
 }
@@ -3485,6 +3501,7 @@ Future<void> showTransactionDetails(
     TransactionType.expense => -transaction.amountMinor.abs(),
     TransactionType.income => transaction.amountMinor.abs(),
     TransactionType.transfer => transaction.amountMinor.abs(),
+    TransactionType.goalFunding => transaction.amountMinor.abs(),
     TransactionType.adjustment => transaction.amountMinor,
   };
   final amountColor = signedAmount < 0
@@ -3584,21 +3601,23 @@ Future<void> showTransactionDetails(
               value: transaction.note,
             ),
           ],
-          for (final split in transaction.splitLines) ...[
-            TransactionFormDivider(),
-            ScheduledTransactionDetailRow(
-              icon: AppIcon.split,
-              leading: categoriesById[split.categoryId] == null
-                  ? null
-                  : CategoryIconBadge.category(
-                      categoriesById[split.categoryId]!,
-                      size: CategoryIconBadgeSize.form,
-                    ),
-              label: categoriesById[split.categoryId]?.name ?? 'Split category',
-              value: money(split.amountMinor, dataStore.preferences.currency),
-              tabularFigures: true,
-            ),
-          ],
+          if (transaction.isCategorySplit)
+            for (final split in transaction.effectiveCategoryAllocations) ...[
+              TransactionFormDivider(),
+              ScheduledTransactionDetailRow(
+                icon: AppIcon.split,
+                leading: categoriesById[split.categoryId] == null
+                    ? null
+                    : CategoryIconBadge.category(
+                        categoriesById[split.categoryId]!,
+                        size: CategoryIconBadgeSize.form,
+                      ),
+                label:
+                    categoriesById[split.categoryId]?.name ?? 'Split category',
+                value: money(split.amountMinor, dataStore.preferences.currency),
+                tabularFigures: true,
+              ),
+            ],
         ],
       ),
     ),
@@ -3746,6 +3765,7 @@ IconData transactionDetailIcon(TransactionType type) {
     TransactionType.expense => AppIcon.expense,
     TransactionType.income => AppIcon.income,
     TransactionType.transfer => AppIcon.transfer,
+    TransactionType.goalFunding => AppIcon.goal,
     TransactionType.adjustment => AppIcon.filter,
   };
 }
@@ -3803,7 +3823,8 @@ Future<void> showSplitTransactionDialog(
   }
 
   final defaultCategoryId = transaction.categoryId ?? categories.first.id;
-  final drafts = transaction.splitLines.isEmpty
+  final effectiveAllocations = transaction.effectiveCategoryAllocations;
+  final drafts = effectiveAllocations.isEmpty
       ? [
           SplitLineDraft(
             categoryId: defaultCategoryId,
@@ -3812,7 +3833,7 @@ Future<void> showSplitTransactionDialog(
           SplitLineDraft(categoryId: categories.first.id, amountMinor: 0),
         ]
       : [
-          for (final line in transaction.splitLines)
+          for (final line in effectiveAllocations)
             SplitLineDraft(
               categoryId: line.categoryId,
               amountMinor: line.amountMinor,
@@ -4397,42 +4418,12 @@ class PlanView extends StatefulWidget {
 class _PlanViewState extends State<PlanView> {
   final _budgetScrollController = ScrollController();
   final _goalScrollController = ScrollController();
-  var _completedExpanded = false;
-  var _archivedExpanded = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final storage = PageStorage.maybeOf(context);
-    _completedExpanded =
-        storage?.readState(context, identifier: 'plan-completed-expanded')
-            as bool? ??
-        _completedExpanded;
-    _archivedExpanded =
-        storage?.readState(context, identifier: 'plan-archived-expanded')
-            as bool? ??
-        _archivedExpanded;
-  }
 
   @override
   void dispose() {
     _budgetScrollController.dispose();
     _goalScrollController.dispose();
     super.dispose();
-  }
-
-  void _setCompletedExpanded(bool value) {
-    setState(() => _completedExpanded = value);
-    PageStorage.maybeOf(
-      context,
-    )?.writeState(context, value, identifier: 'plan-completed-expanded');
-  }
-
-  void _setArchivedExpanded(bool value) {
-    setState(() => _archivedExpanded = value);
-    PageStorage.maybeOf(
-      context,
-    )?.writeState(context, value, identifier: 'plan-archived-expanded');
   }
 
   @override
@@ -4486,16 +4477,7 @@ class _PlanViewState extends State<PlanView> {
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 112),
           sliver: SliverToBoxAdapter(
-            child: isGoals
-                ? GoalsPlanContent(
-                    completedExpanded: _completedExpanded,
-                    archivedExpanded: _archivedExpanded,
-                    onCompletedToggle: () =>
-                        _setCompletedExpanded(!_completedExpanded),
-                    onArchivedToggle: () =>
-                        _setArchivedExpanded(!_archivedExpanded),
-                  )
-                : const BudgetsView(),
+            child: isGoals ? const GoalsPlanContent() : const BudgetsView(),
           ),
         ),
       ],
@@ -4548,7 +4530,7 @@ extension CalendarActivityFilterPresentation on CalendarActivityFilter {
     CalendarActivityFilter.income => type == TransactionType.income,
     CalendarActivityFilter.expenses => type == TransactionType.expense,
     CalendarActivityFilter.transfers => type == TransactionType.transfer,
-    CalendarActivityFilter.goals => false,
+    CalendarActivityFilter.goals => type == TransactionType.goalFunding,
   };
 
   String get scheduledCompletedLabel => switch (this) {
@@ -4608,6 +4590,7 @@ class CalendarDayActivity {
         TransactionType.income => CalendarActivityType.income,
         TransactionType.expense => CalendarActivityType.expense,
         TransactionType.transfer => CalendarActivityType.transfer,
+        TransactionType.goalFunding => CalendarActivityType.goal,
         TransactionType.adjustment => throw StateError(
           'Adjustments are not supported scheduled calendar activities.',
         ),
@@ -4617,6 +4600,7 @@ class CalendarDayActivity {
       TransactionType.income => CalendarActivityType.income,
       TransactionType.expense => CalendarActivityType.expense,
       TransactionType.transfer => CalendarActivityType.transfer,
+      TransactionType.goalFunding => CalendarActivityType.goal,
       TransactionType.adjustment => throw StateError(
         'Adjustments are not supported calendar activities.',
       ),
@@ -4630,6 +4614,7 @@ class CalendarDayActivity {
         TransactionType.income => item.amountMinor.abs(),
         TransactionType.expense => -item.amountMinor.abs(),
         TransactionType.transfer => item.amountMinor.abs(),
+        TransactionType.goalFunding => item.amountMinor.abs(),
         TransactionType.adjustment => item.amountMinor,
       };
     }
@@ -4639,6 +4624,7 @@ class CalendarDayActivity {
         TransactionType.income => scheduled.plannedAmountMinor.abs(),
         TransactionType.expense => -scheduled.plannedAmountMinor.abs(),
         TransactionType.transfer => scheduled.plannedAmountMinor.abs(),
+        TransactionType.goalFunding => scheduled.plannedAmountMinor.abs(),
         TransactionType.adjustment => scheduled.plannedAmountMinor,
       };
     }
@@ -4794,6 +4780,7 @@ class _ScheduledViewState extends State<ScheduledView> {
     ScheduledCalendarOccurrence occurrence,
     CurrencyFormatSettings currency,
   ) {
+    final store = FinanceDataStoreScope.read(context);
     final item = occurrence.transaction;
     final dateKey = calendarDateId(occurrence.scheduledDate);
     final displayItem = item.copyWith(
@@ -4802,10 +4789,18 @@ class _ScheduledViewState extends State<ScheduledView> {
       sync: item.sync,
     );
     final isPendingOccurrence = occurrence.isPending && !item.isDeleted;
+    final needsAttention =
+        item.type == TransactionType.goalFunding &&
+        item.goalFundingAllocations.any(
+          (allocation) => !store.goals.any(
+            (goal) => goal.id == allocation.goalId && goal.isActive,
+          ),
+        );
     final row = ScheduledTransactionRow(
       key: ValueKey('scheduled-row-${item.id}-$dateKey'),
       scheduledTransaction: displayItem,
       currency: currency,
+      needsAttention: needsAttention,
       onTap: () => showScheduledTransactionDetails(
         context,
         item,
@@ -10475,7 +10470,7 @@ Future<void> showFloatingAddMenu(
 }) async {
   final isScheduled = section == FinanceSection.scheduled;
   final orderedActions = isScheduled
-      ? const ['expense', 'income', 'transfer']
+      ? const ['expense', 'income', 'transfer', 'goalFunding']
       : switch (section) {
           FinanceSection.plan when planSegment == PlanSegment.goals => const [
             'goal',
@@ -10618,7 +10613,14 @@ Future<void> showFloatingAddMenu(
     case 'goal':
       await showCreateGoalSheet(context);
     case 'goalFunding':
-      await showFundGoalsSheet(context);
+      if (isScheduled) {
+        await showScheduledGoalFundingDialog(
+          context,
+          initialDate: initialScheduledDate,
+        );
+      } else {
+        await showFundGoalsSheet(context);
+      }
     case 'scheduled':
       await showScheduledTransactionDialog(
         context,
@@ -11708,6 +11710,14 @@ Future<bool> showScheduledTransactionDialog(
   TransactionRecord? sourceTransaction,
   DateTime? initialDate,
 }) async {
+  if (existing?.type == TransactionType.goalFunding ||
+      initialType == TransactionType.goalFunding) {
+    return showScheduledGoalFundingDialog(
+      context,
+      existing: existing,
+      initialDate: initialDate,
+    );
+  }
   final dataStore = FinanceDataStoreScope.read(context);
   final isEditing = existing != null;
   final accounts = dataStore.accounts
@@ -11762,7 +11772,9 @@ Future<bool> showScheduledTransactionDialog(
       : null;
   var categoryId = existing?.categoryId ?? sourceTransaction?.categoryId;
   final initialSplitLines =
-      existing?.splitLines ?? sourceTransaction?.splitLines ?? const [];
+      existing?.effectiveCategoryAllocations ??
+      sourceTransaction?.effectiveCategoryAllocations ??
+      const [];
   final splitDrafts = initialSplitLines
       .map(
         (line) => SplitLineDraft(
@@ -11782,7 +11794,8 @@ Future<bool> showScheduledTransactionDialog(
       ),
     );
   }
-  var splitMode = initialSplitLines.length > 1;
+  var splitMode =
+      existing?.isCategorySplit ?? sourceTransaction?.isCategorySplit ?? false;
   var autofocusSecondSplitAmount = false;
   final splitSectionKey = GlobalKey();
   var firstSplitAutoRemainder = !splitMode;
@@ -12123,7 +12136,9 @@ Future<bool> showScheduledTransactionDialog(
             }
 
             List<TransactionSplitLine> buildScheduledSplitLines() {
-              if (type == TransactionType.transfer) return const [];
+              if (type == TransactionType.transfer || !splitMode) {
+                return const [];
+              }
               return [
                 for (var index = 0; index < splitDrafts.length; index++)
                   TransactionSplitLine(
@@ -12798,10 +12813,19 @@ Future<void> showScheduledTransactionDetails(
     return 'Uncategorized';
   }
 
+  String goalName(String id) {
+    for (final goal in dataStore.goals) {
+      if (goal.id == id) return goal.name;
+    }
+    return 'Unavailable Goal';
+  }
+
   final action = await showDialog<String>(
     context: context,
     builder: (dialogContext) => TransactionSheetFrame(
-      title: 'Scheduled Transaction',
+      title: item.type == TransactionType.goalFunding
+          ? 'Scheduled Goal Funding'
+          : 'Scheduled Transaction',
       actions: ScheduledTransactionDetailActions(
         onClose: () => Navigator.pop(dialogContext),
         onEdit: occurrenceRecord != null || item.isDeleted
@@ -12812,23 +12836,29 @@ Future<void> showScheduledTransactionDetails(
             : occurrenceRecord != null
             ? () => Navigator.pop(dialogContext, 'occurrenceActions')
             : null,
-        primaryLabel: occurrenceRecord == null ? 'Mark as Paid' : 'Actions',
+        primaryLabel: occurrenceRecord == null
+            ? (item.type == TransactionType.goalFunding
+                  ? 'Fund Now'
+                  : 'Mark as Paid')
+            : 'Actions',
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          ScheduledTransactionDetailRow(
-            rowKey: ValueKey('scheduled-detail-payee'),
-            icon: item.type == TransactionType.transfer
-                ? AppIcon.description
-                : AppIcon.payee,
-            label: item.type == TransactionType.transfer
-                ? 'Description'
-                : 'Payee',
-            value: item.payee,
-          ),
-          const TransactionFormDivider(),
+          if (item.type != TransactionType.goalFunding)
+            ScheduledTransactionDetailRow(
+              rowKey: ValueKey('scheduled-detail-payee'),
+              icon: item.type == TransactionType.transfer
+                  ? AppIcon.description
+                  : AppIcon.payee,
+              label: item.type == TransactionType.transfer
+                  ? 'Description'
+                  : 'Payee',
+              value: item.payee,
+            ),
+          if (item.type != TransactionType.goalFunding)
+            const TransactionFormDivider(),
           ScheduledTransactionDetailRow(
             icon: transactionTypeIcon(item.type),
             label: 'Type',
@@ -12859,7 +12889,9 @@ Future<void> showScheduledTransactionDetails(
               value:
                   occurrenceRecord.status ==
                       v2_scheduled.ScheduledOccurrenceStatus.paid
-                  ? 'Paid'
+                  ? (item.type == TransactionType.goalFunding
+                        ? 'Funded'
+                        : 'Paid')
                   : 'Skipped',
             ),
           ],
@@ -12878,12 +12910,36 @@ Future<void> showScheduledTransactionDetails(
                       ?.type ??
                   v2_account.AccountType.otherBanking,
             ),
-            label: item.type == TransactionType.transfer
+            label:
+                item.type == TransactionType.transfer ||
+                    item.type == TransactionType.goalFunding
                 ? 'From Account'
                 : 'Account',
             value: accountName(item.accountId),
           ),
-          if (item.type == TransactionType.transfer) ...[
+          if (item.type == TransactionType.goalFunding) ...[
+            TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.goal,
+              label: 'Goal allocations',
+              value:
+                  '${item.goalFundingAllocations.length} ${item.goalFundingAllocations.length == 1 ? 'Goal' : 'Goals'}',
+              valueColor: _goalBlue,
+            ),
+            for (final allocation in item.goalFundingAllocations) ...[
+              TransactionFormDivider(),
+              ScheduledTransactionDetailRow(
+                icon: AppIcon.goal,
+                label: goalName(allocation.goalId),
+                value: money(
+                  allocation.amountMinor,
+                  dataStore.preferences.currency,
+                ),
+                valueColor: _goalBlue,
+                tabularFigures: true,
+              ),
+            ],
+          ] else if (item.type == TransactionType.transfer) ...[
             TransactionFormDivider(),
             ScheduledTransactionDetailRow(
               icon: AppIcon.wallet,
@@ -12930,12 +12986,20 @@ Future<void> showScheduledTransactionDetails(
       plannedAmountMinor: editAmount,
     );
   } else if (action == 'paid' && context.mounted) {
-    await markScheduledTransactionPaid(
-      context,
-      item,
-      scheduledDate: occurrenceDate,
-      plannedAmountMinor: occurrenceAmount,
-    );
+    if (item.type == TransactionType.goalFunding) {
+      await fundScheduledGoalFunding(
+        context,
+        item,
+        scheduledDate: occurrenceDate,
+      );
+    } else {
+      await markScheduledTransactionPaid(
+        context,
+        item,
+        scheduledDate: occurrenceDate,
+        plannedAmountMinor: occurrenceAmount,
+      );
+    }
   } else if (action == 'occurrenceActions' &&
       occurrenceRecord != null &&
       context.mounted) {
@@ -13126,6 +13190,16 @@ Future<void> showCompletedScheduledOccurrenceActions(
   v2_scheduled.ScheduledOccurrenceRecord occurrence,
 ) async {
   final dataStore = FinanceDataStoreScope.read(context);
+  if (item.type == TransactionType.goalFunding) {
+    final event = dataStore.goalFundingEvents
+        .where(
+          (event) =>
+              event.id == occurrence.goalFundingEventId && event.isActive,
+        )
+        .firstOrNull;
+    if (event != null) await showGoalFundingDetails(context, event.id);
+    return;
+  }
   final transaction = transactionForScheduledOccurrence(
     dataStore,
     item,
@@ -13228,6 +13302,7 @@ Future<void> restoreScheduledTransactionAfterOccurrence(
       transferAccountId: item.transferAccountId,
       categoryId: item.categoryId,
       splitLines: item.splitLines,
+      goalFundingAllocations: item.goalFundingAllocations,
       payee: item.payee,
       note: item.note,
       amountMinor: item.amountMinor,
@@ -13313,7 +13388,11 @@ Future<void> showScheduledTransactionActions(
           if (allows('paid'))
             ListTile(
               leading: Icon(AppIcon.success),
-              title: Text('Mark as Paid'),
+              title: Text(
+                item.type == TransactionType.goalFunding
+                    ? 'Fund Now'
+                    : 'Mark as Paid',
+              ),
               onTap: () => Navigator.pop(sheetContext, 'paid'),
             ),
           if (allows('skip'))
@@ -13350,12 +13429,20 @@ Future<void> showScheduledTransactionActions(
   if (!context.mounted || action == null) return;
   switch (action) {
     case 'paid':
-      await markScheduledTransactionPaid(
-        context,
-        item,
-        scheduledDate: occurrenceDate,
-        plannedAmountMinor: occurrenceAmount,
-      );
+      if (item.type == TransactionType.goalFunding) {
+        await fundScheduledGoalFunding(
+          context,
+          item,
+          scheduledDate: occurrenceDate,
+        );
+      } else {
+        await markScheduledTransactionPaid(
+          context,
+          item,
+          scheduledDate: occurrenceDate,
+          plannedAmountMinor: occurrenceAmount,
+        );
+      }
     case 'skip':
       await skipScheduledTransactionOnce(
         context,
@@ -13406,6 +13493,7 @@ Future<void> editScheduledTransactionFromOccurrence(
     transferAccountId: item.transferAccountId,
     categoryId: item.categoryId,
     splitLines: item.splitLines,
+    goalFundingAllocations: item.goalFundingAllocations,
     payee: item.payee,
     note: item.note,
     amountMinor: plannedAmountMinor,
@@ -13455,8 +13543,8 @@ Future<void> markScheduledTransactionPaid(
   var selectedCategoryId = item.categoryId;
   final paymentSplitDrafts = item.type == TransactionType.transfer
       ? <SplitLineDraft>[]
-      : (item.splitLines.isNotEmpty
-            ? item.splitLines
+      : (item.effectiveCategoryAllocations.isNotEmpty
+            ? item.effectiveCategoryAllocations
                   .map(
                     (line) => SplitLineDraft(
                       id: line.id,
@@ -13610,7 +13698,7 @@ Future<void> markScheduledTransactionPaid(
         }
 
         List<TransactionSplitLine> buildPaymentSplitLines() {
-          if (isTransfer) return const [];
+          if (isTransfer || !item.isCategorySplit) return const [];
           return [
             for (var index = 0; index < paymentSplitDrafts.length; index++)
               TransactionSplitLine(
@@ -13919,6 +14007,79 @@ Future<void> markScheduledTransactionPaid(
   }
 }
 
+Future<void> fundScheduledGoalFunding(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item, {
+  DateTime? scheduledDate,
+}) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final occurrenceDate = scheduledDate ?? item.nextDate;
+  final account = dataStore.accounts
+      .where((account) => account.id == item.accountId)
+      .firstOrNull;
+  final goalsById = {for (final goal in dataStore.goals) goal.id: goal};
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => TransactionSheetFrame(
+      title: 'Fund Goals Now?',
+      actions: TransactionFormActions(
+        onCancel: () => Navigator.pop(dialogContext, false),
+        canSave: account != null && item.hasValidGoalFundingAllocations,
+        saveLabel: 'Fund Now',
+        onSave: () => Navigator.pop(dialogContext, true),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'This moves ${money(item.amountMinor, dataStore.preferences.currency)} from ${account?.name ?? 'the selected account'} into your Goals.',
+            style: Theme.of(dialogContext).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          for (final allocation in item.goalFundingAllocations)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+              child: Row(
+                children: [
+                  Icon(
+                    AppIcon.goal,
+                    color: _goalBlue,
+                    size: AppIconSize.compact,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      goalsById[allocation.goalId]?.name ?? 'Unavailable Goal',
+                    ),
+                  ),
+                  Text(
+                    money(
+                      allocation.amountMinor,
+                      dataStore.preferences.currency,
+                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+  try {
+    await dataStore.completeScheduledGoalFunding(
+      scheduledTransactionId: item.id,
+      occurrenceDate: occurrenceDate,
+    );
+  } on FinanceDataValidationException catch (error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(error.message)));
+  }
+}
+
 Future<TransactionRecord> completeScheduledTransactionPayment(
   FinanceDataStore dataStore,
   v2_scheduled.ScheduledTransactionRecord item, {
@@ -14034,6 +14195,8 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         scheduledOccurrenceDate: scheduledDate,
         scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
       );
+    case TransactionType.goalFunding:
+      throw StateError('Goal Funding does not create a transaction record.');
     case TransactionType.adjustment:
       throw StateError('Adjustments cannot be scheduled');
   }
@@ -14073,6 +14236,7 @@ Future<void> duplicateScheduledTransaction(
       transferAccountId: item.transferAccountId,
       categoryId: item.categoryId,
       splitLines: item.splitLines,
+      goalFundingAllocations: item.goalFundingAllocations,
       payee: '${item.payee} copy',
       note: item.note,
       amountMinor: item.amountMinor,
@@ -14272,10 +14436,10 @@ Future<void> showTransactionDialog(
       (transaction == null &&
           (initialIsExpense ?? isExpenseDefault(dataStore.preferences)));
   var categoryId = transaction?.categoryId ?? '';
-  final hasExistingSplit = (transaction?.splitLines.length ?? 0) > 1;
+  final hasExistingSplit = transaction?.isCategorySplit ?? false;
   var firstSplitAutoRemainder = !hasExistingSplit;
   final splitDrafts =
-      transaction?.splitLines
+      transaction?.effectiveCategoryAllocations
           .map(
             (line) => SplitLineDraft(
               id: line.id,
@@ -14772,7 +14936,9 @@ Future<void> showTransactionDialog(
                 ),
                 amountMinor: amountMinor.abs(),
                 isExpense: isExpense,
-                splitLines: buildSplitLines(),
+                splitLines: splitMode
+                    ? buildSplitLines()
+                    : const <TransactionSplitLine>[],
                 scheduleFutureOccurrences: scheduleFutureOccurrences,
                 firstScheduledDate: futureSchedule.parsedFirstDate(
                   DateTime.now(),

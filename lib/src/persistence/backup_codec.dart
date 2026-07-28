@@ -41,8 +41,8 @@ class BackupCodec {
     ];
 
     for (final transaction in dataSet.transactions) {
-      if (transaction.isSplit) {
-        for (final splitLine in transaction.splitLines) {
+      if (transaction.isCategorySplit) {
+        for (final splitLine in transaction.effectiveCategoryAllocations) {
           rows.add(
             _transactionCsvRow(
               transaction,
@@ -54,11 +54,14 @@ class BackupCodec {
         }
         continue;
       }
+      final effectiveCategoryId =
+          transaction.effectiveCategoryAllocations.firstOrNull?.categoryId;
       rows.add(
         _transactionCsvRow(
           transaction,
           accountsById: accountsById,
           categoriesById: categoriesById,
+          categoryIdOverride: effectiveCategoryId,
         ),
       );
     }
@@ -71,8 +74,10 @@ class BackupCodec {
     required Map<String, String> accountsById,
     required Map<String, String> categoriesById,
     TransactionSplitLine? splitLine,
+    String? categoryIdOverride,
   }) {
-    final categoryId = splitLine?.categoryId ?? transaction.categoryId;
+    final categoryId =
+        splitLine?.categoryId ?? categoryIdOverride ?? transaction.categoryId;
     final amountMinor = splitLine?.amountMinor ?? transaction.amountMinor;
     return [
       transaction.id,

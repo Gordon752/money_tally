@@ -208,7 +208,7 @@ void main() {
     );
   });
 
-  testWidgets('Goals page separates active, completed, and archived Goals', (
+  testWidgets('Goals page keeps inactive Goals on their dedicated page', (
     tester,
   ) async {
     await _setPhoneSize(tester);
@@ -222,21 +222,22 @@ void main() {
     await tester.pumpWidget(_testApp(store, const GoalsPage()));
 
     expect(find.text('Active'), findsOneWidget);
+    expect(find.text('View Inactive Goals (2)'), findsOneWidget);
+    expect(find.text('Done'), findsNothing);
+    expect(find.text('Old'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('view-inactive-goals')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Inactive Goals'), findsOneWidget);
     expect(find.text('Completed (1)'), findsOneWidget);
     expect(find.text('Archived (1)'), findsOneWidget);
-    expect(find.text('Done'), findsNothing);
-
-    await tester.tap(find.text('Completed (1)'));
-    await tester.pumpAndSettle();
     expect(find.text('Done'), findsOneWidget);
-
-    await tester.tap(find.text('Archived (1)'));
-    await tester.pumpAndSettle();
     expect(find.text('Old'), findsOneWidget);
   });
 
   testWidgets(
-    'Maintain a Balance card stays active and details omit Mark Complete',
+    'Maintain a Balance card stays active and confirms Mark Complete',
     (tester) async {
       await _setPhoneSize(tester);
       final goal = _goal(
@@ -271,7 +272,13 @@ void main() {
       expect(find.text('Goal Details'), findsOneWidget);
       expect(find.text('Maintain a Balance'), findsOneWidget);
       expect(find.text('Restore-by date'), findsOneWidget);
-      expect(find.text('Mark Complete'), findsNothing);
+      expect(find.text('Mark Complete'), findsOneWidget);
+
+      final complete = find.byKey(const ValueKey('goal-details-complete'));
+      await tester.ensureVisible(complete);
+      await tester.tap(complete);
+      await tester.pumpAndSettle();
+      expect(find.text('Complete this replenishing Goal?'), findsOneWidget);
     },
   );
 

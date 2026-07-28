@@ -28,6 +28,13 @@ String goalTypeLabel(GoalType type) {
   };
 }
 
+String goalTypeBadgeLabel(GoalType type) {
+  return switch (type) {
+    GoalType.reachTarget => 'Terminal',
+    GoalType.maintainBalance => 'Replenishing',
+  };
+}
+
 String goalDateLabel(GoalRecord goal) {
   return goal.goalType == GoalType.maintainBalance
       ? 'Restore-by date'
@@ -221,6 +228,147 @@ Future<void> openGoalsPage(BuildContext context) {
   ).push(MaterialPageRoute<void>(builder: (context) => const GoalsPage()));
 }
 
+Future<void> openInactiveGoalsPage(BuildContext context) {
+  HapticFeedback.selectionClick();
+  return Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (context) => const InactiveGoalsPage()),
+  );
+}
+
+class InactiveGoalsPage extends StatelessWidget {
+  const InactiveGoalsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = FinanceDataStoreScope.watch(context);
+    final completed = store.goals.where((goal) => goal.isCompleted).toList()
+      ..sort(
+        (left, right) => (right.completedAt ?? right.updatedDate).compareTo(
+          left.completedAt ?? left.updatedDate,
+        ),
+      );
+    final archived = store.goals.where((goal) => goal.isArchived).toList()
+      ..sort(
+        (left, right) => (right.archivedAt ?? right.updatedDate).compareTo(
+          left.archivedAt ?? left.updatedDate,
+        ),
+      );
+    return Scaffold(
+      appBar: AppBar(title: const Text('Inactive Goals')),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+          children: [
+            if (completed.isEmpty && archived.isEmpty)
+              AppCard(
+                child: Column(
+                  children: [
+                    TransactionFormIcon(AppIcon.archive),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'No inactive Goals',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      'Completed and archived Goals will appear here.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (completed.isNotEmpty) ...[
+              _InactiveGoalSection(title: 'Completed', goals: completed),
+              if (archived.isNotEmpty) const SizedBox(height: AppSpacing.md),
+            ],
+            if (archived.isNotEmpty)
+              _InactiveGoalSection(title: 'Archived', goals: archived),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InactiveGoalSection extends StatelessWidget {
+  const _InactiveGoalSection({required this.title, required this.goals});
+
+  final String title;
+  final List<GoalRecord> goals;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '$title (${goals.length})',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        for (final goal in goals) ...[
+          InactiveGoalCard(goal: goal),
+          const SizedBox(height: AppSpacing.xs),
+        ],
+      ],
+    );
+  }
+}
+
+class InactiveGoalCard extends StatelessWidget {
+  const InactiveGoalCard({required this.goal, super.key});
+
+  final GoalRecord goal;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = FinanceDataStoreScope.watch(context);
+    final metrics = store.goalMetrics(goal.id);
+    final isCompleted = goal.isCompleted;
+    final date = isCompleted ? goal.completedAt : goal.archivedAt;
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: ListTile(
+        key: ValueKey('inactive-goal-${goal.id}'),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xxs,
+        ),
+        leading: TransactionFormIcon(
+          isCompleted ? AppIcon.success : AppIcon.archive,
+          color: isCompleted ? _goalBlue : AppColors.muted,
+        ),
+        title: Text(
+          goal.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+        subtitle: Text(
+          '${money(metrics.currentAmountMinor, store.preferences.currency)} of ${money(goal.targetAmountMinor, store.preferences.currency)}\n'
+          '${isCompleted ? 'Completed' : 'Archived'}${date == null ? '' : ' ${fullMonthDateLabel(date)}'} · ${goalTypeBadgeLabel(goal.goalType)}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontFeatures: const [AppTextStyles.tabularFigures],
+          ),
+        ),
+        trailing: Icon(AppIcon.chevronRight),
+        onTap: () => showGoalDetails(context, goal.id),
+      ),
+    );
+  }
+}
+
 class GoalsPage extends StatefulWidget {
   const GoalsPage({super.key});
 
@@ -229,30 +377,14 @@ class GoalsPage extends StatefulWidget {
 }
 
 class GoalsPlanContent extends StatelessWidget {
-  const GoalsPlanContent({
-    required this.completedExpanded,
-    required this.archivedExpanded,
-    required this.onCompletedToggle,
-    required this.onArchivedToggle,
-    super.key,
-  });
-
-  final bool completedExpanded;
-  final bool archivedExpanded;
-  final VoidCallback onCompletedToggle;
-  final VoidCallback onArchivedToggle;
+  const GoalsPlanContent({super.key});
 
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final active = store.goals.where((goal) => goal.isActive).toList()
       ..sort(compareGoalUrgency);
-    final completed = store.goals.where((goal) => goal.isCompleted).toList()
-      ..sort((a, b) => b.updatedDate.compareTo(a.updatedDate));
-    final archived = store.goals.where((goal) => goal.isArchived).toList()
-      ..sort((a, b) => b.updatedDate.compareTo(a.updatedDate));
-    final hasGoals =
-        active.isNotEmpty || completed.isNotEmpty || archived.isNotEmpty;
+    final inactiveCount = store.inactiveGoals.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -290,54 +422,17 @@ class GoalsPlanContent extends StatelessWidget {
           ),
         ),
         SizedBox(height: AppSpacing.sm),
-        if (!hasGoals)
-          AppCard(
-            child: Column(
-              children: [
-                TransactionFormIcon(AppIcon.goal, color: _goalBlue),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'No goals yet',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  'Set a target and track your progress over time.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          )
+        if (active.isEmpty)
+          ActiveGoalsEmptyState(hasInactiveGoals: inactiveCount > 0)
         else ...[
           for (final goal in active) ...[
             GoalCard(goal: goal),
             const SizedBox(height: AppSpacing.sm),
           ],
-          if (completed.isNotEmpty)
-            GoalCollapsibleSection(
-              key: const ValueKey('plan-completed-goals-section'),
-              title: 'Completed',
-              count: completed.length,
-              expanded: completedExpanded,
-              onToggle: onCompletedToggle,
-              goals: completed,
-            ),
-          if (archived.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.sm),
-            GoalCollapsibleSection(
-              key: const ValueKey('plan-archived-goals-section'),
-              title: 'Archived',
-              count: archived.length,
-              expanded: archivedExpanded,
-              onToggle: onArchivedToggle,
-              goals: archived,
-            ),
-          ],
+        ],
+        if (inactiveCount > 0) ...[
+          const SizedBox(height: AppSpacing.xs),
+          InactiveGoalsNavigationRow(count: inactiveCount),
         ],
       ],
     );
@@ -345,20 +440,12 @@ class GoalsPlanContent extends StatelessWidget {
 }
 
 class _GoalsPageState extends State<GoalsPage> {
-  var _completedExpanded = false;
-  var _archivedExpanded = false;
-
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final active = store.goals.where((goal) => goal.isActive).toList()
       ..sort(compareGoalUrgency);
-    final completed = store.goals.where((goal) => goal.isCompleted).toList()
-      ..sort((a, b) => b.updatedDate.compareTo(a.updatedDate));
-    final archived = store.goals.where((goal) => goal.isArchived).toList()
-      ..sort((a, b) => b.updatedDate.compareTo(a.updatedDate));
-    final hasGoals =
-        active.isNotEmpty || completed.isNotEmpty || archived.isNotEmpty;
+    final inactiveCount = store.inactiveGoals.length;
 
     return Scaffold(
       appBar: AppBar(
@@ -378,66 +465,94 @@ class _GoalsPageState extends State<GoalsPage> {
         child: ListView(
           padding: EdgeInsets.fromLTRB(16, 12, 16, 40),
           children: [
-            if (!hasGoals)
-              AppCard(
-                child: Column(
-                  children: [
-                    TransactionFormIcon(AppIcon.goal, color: _goalBlue),
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      'No goals yet',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      'Set a target and track your progress over time.',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    SizedBox(height: AppSpacing.md),
-                    FilledButton.icon(
-                      key: ValueKey('goals-empty-create'),
-                      onPressed: () => showCreateGoalSheet(context),
-                      icon: Icon(AppIcon.add),
-                      label: const Text('Create Goal'),
-                    ),
-                  ],
-                ),
+            if (active.isEmpty)
+              ActiveGoalsEmptyState(
+                hasInactiveGoals: inactiveCount > 0,
+                showCreateButton: true,
               )
             else ...[
               for (final goal in active) ...[
                 GoalCard(goal: goal),
                 const SizedBox(height: AppSpacing.sm),
               ],
-              if (completed.isNotEmpty)
-                GoalCollapsibleSection(
-                  key: const ValueKey('completed-goals-section'),
-                  title: 'Completed',
-                  count: completed.length,
-                  expanded: _completedExpanded,
-                  onToggle: () =>
-                      setState(() => _completedExpanded = !_completedExpanded),
-                  goals: completed,
-                ),
-              if (archived.isNotEmpty) ...[
-                const SizedBox(height: AppSpacing.sm),
-                GoalCollapsibleSection(
-                  key: const ValueKey('archived-goals-section'),
-                  title: 'Archived',
-                  count: archived.length,
-                  expanded: _archivedExpanded,
-                  onToggle: () =>
-                      setState(() => _archivedExpanded = !_archivedExpanded),
-                  goals: archived,
-                ),
-              ],
+            ],
+            if (inactiveCount > 0) ...[
+              const SizedBox(height: AppSpacing.sm),
+              InactiveGoalsNavigationRow(count: inactiveCount),
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class ActiveGoalsEmptyState extends StatelessWidget {
+  const ActiveGoalsEmptyState({
+    required this.hasInactiveGoals,
+    this.showCreateButton = false,
+    super.key,
+  });
+
+  final bool hasInactiveGoals;
+  final bool showCreateButton;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Column(
+        children: [
+          TransactionFormIcon(AppIcon.goal, color: _goalBlue),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            hasInactiveGoals ? 'No active Goals' : 'No Goals yet',
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            hasInactiveGoals
+                ? 'Create a Goal to start planning, or view your completed and archived Goals.'
+                : 'Create a Goal to start saving toward something important.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (showCreateButton) ...[
+            const SizedBox(height: AppSpacing.md),
+            FilledButton.icon(
+              key: const ValueKey('goals-empty-create'),
+              onPressed: () => showCreateGoalSheet(context),
+              icon: Icon(AppIcon.add),
+              label: const Text('Create Goal'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class InactiveGoalsNavigationRow extends StatelessWidget {
+  const InactiveGoalsNavigationRow({required this.count, super.key});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: ListTile(
+        key: const ValueKey('view-inactive-goals'),
+        leading: TransactionFormIcon(AppIcon.archive),
+        title: Text(
+          'View Inactive Goals ($count)',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        trailing: Icon(AppIcon.chevronRight),
+        onTap: () => openInactiveGoalsPage(context),
       ),
     );
   }
@@ -559,6 +674,11 @@ class GoalCard extends StatelessWidget {
                   fontFeatures: const [AppTextStyles.tabularFigures],
                 ),
               ),
+              const SizedBox(height: AppSpacing.xxs),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _GoalTypeBadge(type: goal.goalType),
+              ),
               const SizedBox(height: AppSpacing.sm),
               GoalProgressBar(
                 progress: metrics.percentageComplete,
@@ -645,6 +765,33 @@ class GoalCard extends StatelessWidget {
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GoalTypeBadge extends StatelessWidget {
+  const _GoalTypeBadge({required this.type});
+
+  final GoalType type;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xs,
+        vertical: 2,
+      ),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+      ),
+      child: Text(
+        goalTypeBadgeLabel(type),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
@@ -1533,6 +1680,446 @@ Future<void> showFundGoalsSheet(
   );
 }
 
+/// The scheduled counterpart to [showFundGoalsSheet]. It deliberately stores a
+/// plan only; completing the occurrence later invokes the same Goal Funding
+/// domain operation as the manual sheet.
+Future<bool> showScheduledGoalFundingDialog(
+  BuildContext context, {
+  v2_scheduled.ScheduledTransactionRecord? existing,
+  DateTime? initialDate,
+}) async {
+  final store = FinanceDataStoreScope.read(context);
+  final eligibleGoals =
+      store.goals
+          .where(
+            (goal) =>
+                goal.isActive &&
+                goal.fundingMethod == GoalFundingMethod.accountFunded &&
+                !goal.requiresFundingMigration,
+          )
+          .toList(growable: false)
+        ..sort(compareGoalUrgency);
+  if (eligibleGoals.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Create an active account-funded Goal before scheduling funding.',
+        ),
+      ),
+    );
+    return false;
+  }
+  final accounts = store.activeAccountsInDisplayOrder;
+  if (accounts.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Add an active source account before scheduling funding.',
+        ),
+      ),
+    );
+    return false;
+  }
+
+  var accountId =
+      accounts
+          .where((account) => account.id == existing?.accountId)
+          .firstOrNull
+          ?.id ??
+      eligibleGoals
+          .where((goal) => goal.defaultFundingAccountId != null)
+          .map((goal) => goal.defaultFundingAccountId!)
+          .where((id) => accounts.any((account) => account.id == id))
+          .firstOrNull ??
+      accounts.first.id;
+  var totalAmountMinor = existing?.amountMinor.abs() ?? 0;
+  var startDate = existing?.nextDate ?? initialDate ?? DateTime.now();
+  var frequency =
+      existing?.frequency ?? v2_scheduled.RecurrenceFrequency.monthly;
+  var alertPreference =
+      existing?.alertPreference ?? v2_scheduled.AlertPreference.none;
+  var customAlertTimeMinutes = existing?.customAlertTimeMinutes ?? 9 * 60;
+  var repeatAlertUntilResolved = existing?.repeatAlertUntilResolved ?? false;
+  var isSaving = false;
+  String? errorText;
+  var draftSequence = 0;
+  final note = TextEditingController(text: existing?.note ?? '');
+  final allocations = <_GoalAllocationDraft>[
+    for (final allocation in existing?.goalFundingAllocations ?? const [])
+      _GoalAllocationDraft(id: allocation.id, goalId: allocation.goalId)
+        ..amountMinor = allocation.amountMinor,
+  ];
+  if (allocations.isEmpty) {
+    allocations.add(
+      _GoalAllocationDraft(id: 'scheduled-goal-${draftSequence++}'),
+    );
+  }
+
+  void rebalanceFirst() {
+    if (allocations.isEmpty) return;
+    final others = allocations
+        .skip(1)
+        .fold<int>(0, (total, row) => total + row.amountMinor.abs());
+    allocations.first.amountMinor = (totalAmountMinor - others)
+        .clamp(0, totalAmountMinor)
+        .toInt();
+    allocations.first.revision += 1;
+  }
+
+  final saved = await showDialog<bool>(
+    context: context,
+    useRootNavigator: false,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        final account = accounts
+            .where((item) => item.id == accountId)
+            .firstOrNull;
+        final allocated = allocations.fold<int>(
+          0,
+          (total, row) => total + row.amountMinor.abs(),
+        );
+        final remaining = totalAmountMinor - allocated;
+        final selectedGoalIds = allocations
+            .map((row) => row.goalId)
+            .whereType<String>()
+            .toSet();
+        final validRows =
+            allocations.isNotEmpty &&
+            allocations.every(
+              (row) => row.goalId != null && row.amountMinor > 0,
+            ) &&
+            selectedGoalIds.length == allocations.length;
+        final canSave =
+            account != null &&
+            totalAmountMinor > 0 &&
+            remaining == 0 &&
+            validRows;
+        return _GoalControllerOwner(
+          controllers: [note],
+          child: TransactionSheetFrame(
+            title: existing == null
+                ? 'Create Scheduled Goal Funding'
+                : 'Edit Scheduled Goal Funding',
+            actions: TransactionFormActions(
+              onCancel: () => Navigator.pop(dialogContext, false),
+              canSave: canSave,
+              isSaving: isSaving,
+              saveLabel: 'Save',
+              saveKey: const ValueKey('scheduled-goal-funding-save'),
+              onSave: () async {
+                if (isSaving || !canSave) return;
+                setDialogState(() {
+                  isSaving = true;
+                  errorText = null;
+                });
+                try {
+                  final record = v2_scheduled.ScheduledTransactionRecord(
+                    id:
+                        existing?.id ??
+                        'scheduled_goal_${DateTime.now().microsecondsSinceEpoch}',
+                    type: TransactionType.goalFunding,
+                    accountId: accountId,
+                    payee: 'Goal funding',
+                    note: note.text.trim(),
+                    amountMinor: totalAmountMinor,
+                    nextDate: DateTime(
+                      startDate.year,
+                      startDate.month,
+                      startDate.day,
+                    ),
+                    frequency: frequency,
+                    endDate: existing?.endDate,
+                    alertPreference: alertPreference,
+                    customAlertTimeMinutes: customAlertTimeMinutes,
+                    repeatAlertUntilResolved: repeatAlertUntilResolved,
+                    goalFundingAllocations: [
+                      for (
+                        var index = 0;
+                        index < allocations.length;
+                        index += 1
+                      )
+                        v2_scheduled.ScheduledGoalFundingAllocation(
+                          id: allocations[index].id.isEmpty
+                              ? 'scheduled_goal_allocation_${DateTime.now().microsecondsSinceEpoch}_$index'
+                              : allocations[index].id,
+                          goalId: allocations[index].goalId!,
+                          amountMinor: allocations[index].amountMinor.abs(),
+                          order: index,
+                        ),
+                    ],
+                    occurrences: existing?.occurrences ?? const [],
+                    lastAction:
+                        existing?.lastAction ??
+                        v2_scheduled.ScheduledAction.none,
+                    scheduledNotificationIds: const [],
+                    sync:
+                        existing?.sync ??
+                        v2_sync.SyncMetadata.fresh(deviceId: store.deviceId),
+                  );
+                  await store.saveScheduledTransaction(record);
+                  if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+                } catch (error) {
+                  if (!dialogContext.mounted) return;
+                  setDialogState(() {
+                    isSaving = false;
+                    errorText = error.toString();
+                  });
+                }
+              },
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TransactionFormLabel('From Account'),
+                PolishedFormValueRow(
+                  key: const ValueKey('scheduled-goal-funding-account'),
+                  icon: AppIcon.bank,
+                  value: account?.name ?? 'Choose account',
+                  secondary: account == null
+                      ? null
+                      : 'Balance ${money(store.balanceForAccount(account.id), store.preferences.currency)}',
+                  onTap: () async {
+                    final selected = await showTransactionAccountPicker(
+                      dialogContext,
+                      accounts: accounts,
+                      selectedAccountId: accountId,
+                    );
+                    if (selected != null) {
+                      setDialogState(() => accountId = selected);
+                    }
+                  },
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Total Amount'),
+                Row(
+                  children: [
+                    TransactionFormIcon(AppIcon.savings, color: _goalBlue),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: AmountEntryField(
+                        fieldKey: const ValueKey(
+                          'scheduled-goal-funding-total',
+                        ),
+                        initialMinor: totalAmountMinor,
+                        replaceZeroOnFirstInput: true,
+                        currency: store.preferences.currency,
+                        labelText: null,
+                        onChanged: (value) => setDialogState(() {
+                          totalAmountMinor = value.abs();
+                          rebalanceFirst();
+                        }),
+                      ),
+                    ),
+                  ],
+                ),
+                const TransactionFormDivider(),
+                Text(
+                  'Goal Allocations',
+                  style: Theme.of(dialogContext).textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                for (var index = 0; index < allocations.length; index += 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                    child: Row(
+                      key: ValueKey(allocations[index].id),
+                      children: [
+                        Expanded(
+                          flex: 6,
+                          child: InkWell(
+                            onTap: () async {
+                              final selected =
+                                  await showPolishedChoicePicker<String>(
+                                    dialogContext,
+                                    title: 'Choose Goal',
+                                    selected: allocations[index].goalId ?? '',
+                                    choices: [
+                                      for (final goal in eligibleGoals)
+                                        if (!selectedGoalIds.contains(
+                                              goal.id,
+                                            ) ||
+                                            allocations[index].goalId ==
+                                                goal.id)
+                                          PolishedChoice(
+                                            value: goal.id,
+                                            label: goal.name,
+                                            leading: Icon(
+                                              AppIcon.goal,
+                                              color: _goalBlue,
+                                            ),
+                                          ),
+                                    ],
+                                  );
+                              if (selected != null) {
+                                setDialogState(
+                                  () => allocations[index].goalId = selected,
+                                );
+                              }
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                eligibleGoals
+                                        .where(
+                                          (goal) =>
+                                              goal.id ==
+                                              allocations[index].goalId,
+                                        )
+                                        .firstOrNull
+                                        ?.name ??
+                                    'Choose Goal',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        Expanded(
+                          flex: 4,
+                          child: AmountEntryField(
+                            key: ValueKey(
+                              '${allocations[index].id}-${allocations[index].revision}',
+                            ),
+                            fieldKey: ValueKey(
+                              'scheduled-goal-funding-amount-${allocations[index].id}',
+                            ),
+                            initialMinor: allocations[index].amountMinor,
+                            replaceZeroOnFirstInput: true,
+                            currency: store.preferences.currency,
+                            labelText: null,
+                            onChanged: (value) => setDialogState(() {
+                              allocations[index].amountMinor = value.abs();
+                              if (index > 0) rebalanceFirst();
+                            }),
+                          ),
+                        ),
+                        if (allocations.length > 1)
+                          IconButton(
+                            tooltip: 'Remove Goal allocation',
+                            onPressed: () => setDialogState(() {
+                              allocations.removeAt(index);
+                              rebalanceFirst();
+                            }),
+                            icon: Icon(AppIcon.delete),
+                          ),
+                      ],
+                    ),
+                  ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: allocations.length >= eligibleGoals.length
+                        ? null
+                        : () => setDialogState(() {
+                            allocations.add(
+                              _GoalAllocationDraft(
+                                id: 'scheduled-goal-${draftSequence++}',
+                              ),
+                            );
+                            rebalanceFirst();
+                          }),
+                    icon: Icon(AppIcon.add),
+                    label: const Text('Add Goal'),
+                  ),
+                ),
+                GoalAllocationSummary(
+                  totalAmountMinor: totalAmountMinor,
+                  allocatedAmountMinor: allocated,
+                  currency: store.preferences.currency,
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Start Date'),
+                PolishedFormValueRow(
+                  icon: AppIcon.calendar,
+                  value: fullMonthDateLabel(startDate),
+                  onTap: () async {
+                    final date = await pickDateForField(
+                      dialogContext,
+                      startDate,
+                    );
+                    if (date != null) setDialogState(() => startDate = date);
+                  },
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Frequency'),
+                PolishedFormValueRow(
+                  icon: AppIcon.recurrence,
+                  value: recurrenceFrequencyLabel(frequency),
+                  onTap: () async {
+                    final selected = await showScheduledChoicePicker(
+                      dialogContext,
+                      title: 'Frequency',
+                      values: v2_scheduled.RecurrenceFrequency.values,
+                      selected: frequency,
+                      label: recurrenceFrequencyLabel,
+                    );
+                    if (selected != null) {
+                      setDialogState(() => frequency = selected);
+                    }
+                  },
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Reminder'),
+                PolishedFormValueRow(
+                  icon: alertPreference == v2_scheduled.AlertPreference.none
+                      ? AppIcon.notificationNone
+                      : AppIcon.notificationActive,
+                  value: alertPreferenceLabel(alertPreference),
+                  onTap: () async {
+                    final selected = await showScheduledChoicePicker(
+                      dialogContext,
+                      title: 'Reminder',
+                      values: v2_scheduled.AlertPreference.values,
+                      selected: alertPreference,
+                      label: alertPreferenceLabel,
+                    );
+                    if (selected != null) {
+                      setDialogState(() => alertPreference = selected);
+                    }
+                  },
+                ),
+                if (alertPreference != v2_scheduled.AlertPreference.none) ...[
+                  const TransactionFormDivider(),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Repeat until funded or skipped'),
+                    value: repeatAlertUntilResolved,
+                    onChanged: (value) =>
+                        setDialogState(() => repeatAlertUntilResolved = value),
+                  ),
+                ],
+                const TransactionFormDivider(),
+                TransactionFormLabel('Note'),
+                TextField(
+                  controller: note,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    hintText: 'Add a note (optional)',
+                  ),
+                ),
+                if (errorText != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    errorText!,
+                    style: TextStyle(
+                      color: Theme.of(dialogContext).colorScheme.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    ),
+  );
+  return saved == true;
+}
+
 class GoalAllocationSummary extends StatelessWidget {
   const GoalAllocationSummary({
     required this.totalAmountMinor,
@@ -1808,7 +2395,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Close'),
             ),
-            if (!goal.isDeleted)
+            if (goal.isActive)
               OutlinedButton(
                 key: const ValueKey('goal-details-edit'),
                 onPressed: () async {
@@ -1865,9 +2452,25 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
             ),
             GoalDetailValue(
               label: 'Status',
-              value: metrics.status.label,
+              value: goal.isCompleted
+                  ? 'Completed'
+                  : goal.isArchived
+                  ? 'Archived'
+                  : metrics.status.label,
               icon: AppIcon.insights,
             ),
+            if (goal.isCompleted && goal.completedAt != null)
+              GoalDetailValue(
+                label: 'Completed',
+                value: fullMonthDateLabel(goal.completedAt!),
+                icon: AppIcon.success,
+              ),
+            if (goal.isArchived && goal.archivedAt != null)
+              GoalDetailValue(
+                label: 'Archived',
+                value: fullMonthDateLabel(goal.archivedAt!),
+                icon: AppIcon.archive,
+              ),
             if (goal.targetDate != null)
               GoalDetailValue(
                 label: goalDateLabel(goal),
@@ -1935,30 +2538,33 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                       showGoalContributionDetails(context, contribution.id),
                 ),
             ],
-            if (!goal.isArchived) ...[
+            if (goal.isActive) ...[
               const TransactionFormDivider(),
               Row(
                 children: [
-                  if (goal.isActive && goal.goalType == GoalType.reachTarget)
-                    Expanded(
-                      child: TextButton.icon(
-                        onPressed: () async {
-                          Navigator.pop(dialogContext);
-                          final confirmed = await showGoalConfirmation(
-                            context,
-                            title: 'Mark Goal complete?',
-                            message:
-                                'This marks the Goal complete and preserves its contribution history.',
-                            confirmLabel: 'Mark Complete',
-                          );
-                          if (confirmed) {
-                            await store.markGoalComplete(goal.id);
-                          }
-                        },
-                        icon: Icon(AppIcon.success),
-                        label: const Text('Mark Complete'),
-                      ),
+                  Expanded(
+                    child: TextButton.icon(
+                      key: const ValueKey('goal-details-complete'),
+                      onPressed: () async {
+                        Navigator.pop(dialogContext);
+                        final replenishing =
+                            goal.goalType == GoalType.maintainBalance;
+                        final confirmed = await showGoalConfirmation(
+                          context,
+                          title: replenishing
+                              ? 'Complete this replenishing Goal?'
+                              : 'Mark Goal complete?',
+                          message: replenishing
+                              ? 'This Goal is designed to be maintained and replenished. Completing it will remove it from active Goals, but its history will remain available.'
+                              : 'This marks the Goal complete and preserves its contribution history.',
+                          confirmLabel: 'Mark Complete',
+                        );
+                        if (confirmed) await store.markGoalComplete(goal.id);
+                      },
+                      icon: Icon(AppIcon.success),
+                      label: const Text('Mark Complete'),
                     ),
+                  ),
                   Expanded(
                     child: TextButton.icon(
                       key: const ValueKey('goal-details-archive'),
@@ -1967,10 +2573,13 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                         final confirmed = await showGoalConfirmation(
                           context,
                           title: 'Archive Goal?',
-                          message: store.currentGoalAmountMinor(goal.id) > 0
+                          message:
+                              store.scheduledGoalFundingNeedsAttention(goal.id)
+                              ? 'This Goal has scheduled future funding. Archiving it will block those occurrences until you restore this Goal or update the schedule. Existing history remains unchanged.'
+                              : store.currentGoalAmountMinor(goal.id) > 0
                               ? 'The Goal balance will remain an asset in this archived Goal. Restore it later to manage or fund it again.'
                               : 'This preserves the Goal history and stops new funding or progress.',
-                          confirmLabel: 'Keep Balance & Archive',
+                          confirmLabel: 'Archive Goal',
                           destructive: true,
                         );
                         if (confirmed) await store.archiveGoal(goal.id);
@@ -1983,29 +2592,69 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               ),
             ] else ...[
               const TransactionFormDivider(),
-              TextButton.icon(
-                key: const ValueKey('goal-details-restore'),
-                onPressed: () async {
-                  Navigator.pop(dialogContext);
-                  final confirmed = await showGoalConfirmation(
-                    context,
-                    title: 'Restore Goal?',
-                    message:
-                        'This restores the Goal and allows new funding or progress again.',
-                    confirmLabel: 'Restore Goal',
-                  );
-                  if (!confirmed) return;
-                  try {
-                    await store.restoreArchivedGoal(goal.id);
-                  } catch (error) {
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text(error.toString())));
-                  }
-                },
-                icon: Icon(AppIcon.unarchive),
-                label: const Text('Restore Goal'),
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: AppSpacing.xs,
+                children: [
+                  TextButton.icon(
+                    key: const ValueKey('goal-details-restore'),
+                    onPressed: () async {
+                      Navigator.pop(dialogContext);
+                      final confirmed = await showGoalConfirmation(
+                        context,
+                        title: 'Restore Goal?',
+                        message:
+                            'This restores the Goal as active. Its balance and history remain unchanged; scheduled funding is not reactivated automatically.',
+                        confirmLabel: 'Restore as Active',
+                      );
+                      if (!confirmed) return;
+                      try {
+                        await store.restoreGoal(goal.id);
+                      } catch (error) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(error.toString())),
+                        );
+                      }
+                    },
+                    icon: Icon(AppIcon.unarchive),
+                    label: Text(
+                      goal.isCompleted ? 'Restore as Active' : 'Restore',
+                    ),
+                  ),
+                  TextButton.icon(
+                    key: const ValueKey('goal-details-duplicate'),
+                    onPressed: () async {
+                      Navigator.pop(dialogContext);
+                      await store.duplicateGoal(goal.id);
+                    },
+                    icon: Icon(AppIcon.copy),
+                    label: const Text('Duplicate'),
+                  ),
+                  if (store.goalDeleteEligibility(goal.id).canDelete)
+                    TextButton.icon(
+                      key: const ValueKey('goal-details-delete'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context).colorScheme.error,
+                      ),
+                      onPressed: () async {
+                        Navigator.pop(dialogContext);
+                        final confirmed = await showGoalConfirmation(
+                          context,
+                          title: 'Delete this Goal permanently?',
+                          message:
+                              'This Goal has no funding or activity history. This action cannot be undone.',
+                          confirmLabel: 'Delete Permanently',
+                          destructive: true,
+                        );
+                        if (confirmed) {
+                          await store.deleteGoalPermanently(goal.id);
+                        }
+                      },
+                      icon: Icon(AppIcon.delete),
+                      label: const Text('Delete Permanently'),
+                    ),
+                ],
               ),
             ],
           ],
@@ -2235,6 +2884,12 @@ Future<void> showGoalFundingDetails(
             value: fullMonthDateLabel(event.date),
             icon: AppIcon.calendar,
           ),
+          if (event.scheduledTransactionId != null)
+            GoalDetailValue(
+              label: 'Origin',
+              value: 'Scheduled Goal Funding',
+              icon: AppIcon.recurrence,
+            ),
           const TransactionFormDivider(),
           Text(
             'Goal Allocations',

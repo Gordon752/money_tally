@@ -124,17 +124,7 @@ class GoalCalculator {
         status: GoalProgressStatus.archived,
       );
     }
-    if (goal.goalType == GoalType.maintainBalance) {
-      return _calculateMaintainBalance(
-        goal: goal,
-        current: current,
-        target: target,
-        percentage: percentage,
-        remaining: remaining,
-        today: today,
-      );
-    }
-    if (goal.status == GoalStatus.completed || current >= target) {
+    if (goal.status == GoalStatus.completed) {
       return GoalProgressMetrics(
         currentAmountMinor: current,
         remainingAmountMinor: 0,
@@ -146,7 +136,28 @@ class GoalCalculator {
         status: GoalProgressStatus.completed,
       );
     }
-
+    if (goal.goalType == GoalType.maintainBalance) {
+      return _calculateMaintainBalance(
+        goal: goal,
+        current: current,
+        target: target,
+        percentage: percentage,
+        remaining: remaining,
+        today: today,
+      );
+    }
+    if (current >= target) {
+      return GoalProgressMetrics(
+        currentAmountMinor: current,
+        remainingAmountMinor: 0,
+        percentageComplete: percentage,
+        expectedAmountMinor: target,
+        aheadBehindMinor: current - target,
+        requiredWeeklyMinor: 0,
+        requiredMonthlyMinor: 0,
+        status: GoalProgressStatus.completed,
+      );
+    }
     final targetDate = goal.targetDate == null
         ? null
         : _dateOnly(goal.targetDate!);

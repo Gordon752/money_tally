@@ -19,6 +19,8 @@ class GoalRecord {
     this.description = '',
     this.startingAmountMinor = 0,
     this.targetDate,
+    this.completedAt,
+    this.archivedAt,
     this.defaultFundingAccountId,
     this.accentColorValue = 0xFF367BF5,
     this.reservationsReleased = false,
@@ -31,6 +33,11 @@ class GoalRecord {
   final int targetAmountMinor;
   final int startingAmountMinor;
   final DateTime? targetDate;
+
+  /// The current lifecycle transition timestamps are deliberately separate
+  /// from financial activity so an inactive Goal remains historical data.
+  final DateTime? completedAt;
+  final DateTime? archivedAt;
   final GoalStatus status;
   final GoalFundingMethod fundingMethod;
   final GoalType goalType;
@@ -43,15 +50,8 @@ class GoalRecord {
   DateTime get createdDate => sync.createdAt;
   DateTime get updatedDate => sync.updatedAt;
   bool get isDeleted => sync.isDeleted;
-  bool get isActive =>
-      !isDeleted &&
-      (status == GoalStatus.active ||
-          (goalType == GoalType.maintainBalance &&
-              status == GoalStatus.completed));
-  bool get isCompleted =>
-      !isDeleted &&
-      goalType == GoalType.reachTarget &&
-      status == GoalStatus.completed;
+  bool get isActive => !isDeleted && status == GoalStatus.active;
+  bool get isCompleted => !isDeleted && status == GoalStatus.completed;
   bool get isArchived => !isDeleted && status == GoalStatus.archived;
 
   GoalRecord copyWith({
@@ -60,6 +60,8 @@ class GoalRecord {
     int? targetAmountMinor,
     int? startingAmountMinor,
     DateTime? targetDate,
+    DateTime? completedAt,
+    DateTime? archivedAt,
     GoalStatus? status,
     GoalFundingMethod? fundingMethod,
     GoalType? goalType,
@@ -69,6 +71,8 @@ class GoalRecord {
     bool? requiresFundingMigration,
     SyncMetadata? sync,
     bool clearTargetDate = false,
+    bool clearCompletedAt = false,
+    bool clearArchivedAt = false,
     bool clearDefaultFundingAccount = false,
   }) {
     return GoalRecord(
@@ -78,6 +82,8 @@ class GoalRecord {
       targetAmountMinor: targetAmountMinor ?? this.targetAmountMinor,
       startingAmountMinor: startingAmountMinor ?? this.startingAmountMinor,
       targetDate: clearTargetDate ? null : targetDate ?? this.targetDate,
+      completedAt: clearCompletedAt ? null : completedAt ?? this.completedAt,
+      archivedAt: clearArchivedAt ? null : archivedAt ?? this.archivedAt,
       status: status ?? this.status,
       fundingMethod: fundingMethod ?? this.fundingMethod,
       goalType: goalType ?? this.goalType,
@@ -100,6 +106,8 @@ class GoalRecord {
       'targetAmountMinor': targetAmountMinor,
       'startingAmountMinor': startingAmountMinor,
       'targetDate': targetDate?.toIso8601String(),
+      'completedAt': completedAt?.toIso8601String(),
+      'archivedAt': archivedAt?.toIso8601String(),
       'status': status.name,
       'fundingMethod': fundingMethod.name,
       'goalType': goalType.name,
@@ -121,6 +129,12 @@ class GoalRecord {
       targetDate: json['targetDate'] == null
           ? null
           : dateTimeFromJson(json['targetDate']),
+      completedAt: json['completedAt'] == null
+          ? null
+          : dateTimeFromJson(json['completedAt']),
+      archivedAt: json['archivedAt'] == null
+          ? null
+          : dateTimeFromJson(json['archivedAt']),
       status: enumByName(GoalStatus.values, json['status'], GoalStatus.active),
       fundingMethod: _goalFundingMethodFromJson(json['fundingMethod']),
       goalType: enumByName(

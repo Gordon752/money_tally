@@ -31,6 +31,7 @@ class TransactionRow extends StatelessWidget {
       TransactionType.expense => -transaction.amountMinor.abs(),
       TransactionType.income => transaction.amountMinor.abs(),
       TransactionType.transfer => transaction.amountMinor.abs(),
+      TransactionType.goalFunding => transaction.amountMinor.abs(),
       TransactionType.adjustment => transaction.amountMinor,
     };
 

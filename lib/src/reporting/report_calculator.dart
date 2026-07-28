@@ -145,8 +145,9 @@ class MoneyReportCalculator {
     TransactionRecord transaction,
     Map<String, CategoryRecord> categoriesById,
   ) {
-    if (transaction.isSplit && transaction.hasValidSplitTotal) {
-      for (final line in transaction.splitLines) {
+    final allocations = transaction.effectiveCategoryAllocations;
+    if (allocations.isNotEmpty) {
+      for (final line in allocations) {
         final key = categoriesById.containsKey(line.categoryId)
             ? line.categoryId
             : _uncategorizedId;

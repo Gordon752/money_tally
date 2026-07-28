@@ -88,12 +88,10 @@ class ManagementLedgerIndex {
     for (final transaction in transactions) {
       if (!_isEligibleActualTransaction(transaction, range)) continue;
 
-      final directCategoryIds = transaction.splitLines.isNotEmpty
-          ? transaction.splitLines
-                .map((line) => line.categoryId)
-                .where((id) => id.isNotEmpty)
-                .toSet()
-          : {?transaction.categoryId};
+      final directCategoryIds = transaction.effectiveCategoryAllocations
+          .map((line) => line.categoryId)
+          .where((id) => id.isNotEmpty)
+          .toSet();
       final creditedCategories = <String>{};
       for (final categoryId in directCategoryIds) {
         var currentId = categoryId;
@@ -124,6 +122,7 @@ class ManagementLedgerIndex {
         case TransactionType.income:
           payee.incomeMinor += transaction.amountMinor.abs();
         case TransactionType.transfer:
+        case TransactionType.goalFunding:
         case TransactionType.adjustment:
           break;
       }

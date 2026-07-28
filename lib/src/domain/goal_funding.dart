@@ -47,6 +47,9 @@ class GoalFundingEventRecord {
     required this.sync,
     this.note = '',
     this.isMigrationEvent = false,
+    this.scheduledTransactionId,
+    this.scheduledOccurrenceDate,
+    this.scheduledPlannedAmountMinor,
   });
 
   final String id;
@@ -56,6 +59,9 @@ class GoalFundingEventRecord {
   final String note;
   final List<GoalFundingAllocation> allocations;
   final bool isMigrationEvent;
+  final String? scheduledTransactionId;
+  final DateTime? scheduledOccurrenceDate;
+  final int? scheduledPlannedAmountMinor;
   final SyncMetadata sync;
 
   bool get isDeleted => sync.isDeleted;
@@ -75,6 +81,9 @@ class GoalFundingEventRecord {
     String? note,
     List<GoalFundingAllocation>? allocations,
     bool? isMigrationEvent,
+    String? scheduledTransactionId,
+    DateTime? scheduledOccurrenceDate,
+    int? scheduledPlannedAmountMinor,
     SyncMetadata? sync,
   }) {
     return GoalFundingEventRecord(
@@ -85,6 +94,12 @@ class GoalFundingEventRecord {
       note: note ?? this.note,
       allocations: allocations ?? this.allocations,
       isMigrationEvent: isMigrationEvent ?? this.isMigrationEvent,
+      scheduledTransactionId:
+          scheduledTransactionId ?? this.scheduledTransactionId,
+      scheduledOccurrenceDate:
+          scheduledOccurrenceDate ?? this.scheduledOccurrenceDate,
+      scheduledPlannedAmountMinor:
+          scheduledPlannedAmountMinor ?? this.scheduledPlannedAmountMinor,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -98,6 +113,9 @@ class GoalFundingEventRecord {
       'note': note,
       'allocations': allocations.map((item) => item.toJson()).toList(),
       'isMigrationEvent': isMigrationEvent,
+      'scheduledTransactionId': scheduledTransactionId,
+      'scheduledOccurrenceDate': scheduledOccurrenceDate?.toIso8601String(),
+      'scheduledPlannedAmountMinor': scheduledPlannedAmountMinor,
       'sync': sync.toJson(),
     };
   }
@@ -113,6 +131,11 @@ class GoalFundingEventRecord {
         json['allocations'],
       ).map(GoalFundingAllocation.fromJson).toList(growable: false),
       isMigrationEvent: json['isMigrationEvent'] as bool? ?? false,
+      scheduledTransactionId: json['scheduledTransactionId'] as String?,
+      scheduledOccurrenceDate: json['scheduledOccurrenceDate'] == null
+          ? null
+          : dateTimeFromJson(json['scheduledOccurrenceDate']),
+      scheduledPlannedAmountMinor: json['scheduledPlannedAmountMinor'] as int?,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }
