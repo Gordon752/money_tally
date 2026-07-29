@@ -649,7 +649,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('undo-scheduled-payment')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Undo scheduled payment?'), findsOneWidget);
+      expect(find.text('Undo this scheduled payment?'), findsOneWidget);
       expect(find.text('Planned amount'), findsOneWidget);
       expect(find.text('Actual payment'), findsOneWidget);
       expect(find.text(r'$100.00'), findsOneWidget);
@@ -666,6 +666,27 @@ void main() {
         dataStore.scheduledTransactions.single.occurrences.single.status,
         v2_scheduled.ScheduledOccurrenceStatus.paid,
       );
+
+      await tester.longPress(ledgerRowWithText('Undo Bill'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('undo-scheduled-transaction-option')),
+        findsOneWidget,
+      );
+      expect(find.text('Undo Payment'), findsOneWidget);
+      await tester.ensureVisible(find.text('Delete'));
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('delete-scheduled-undo-action')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('delete-ledger-record-only-action')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
 
       await tester.tap(ledgerRowWithText('Undo Bill'));
       await tester.pumpAndSettle();
@@ -868,6 +889,27 @@ void main() {
     expect(ledgerRowWithText('Diner'), findsOneWidget);
     expect(ledgerRowWithText('Walmart'), findsNothing);
     expect(ledgerRowWithText('Settlement'), findsNothing);
+  });
+
+  test('scheduled undo uses type-specific labels', () {
+    expect(
+      undoScheduledTransactionLabel(v2_transaction.TransactionType.expense),
+      'Undo Payment',
+    );
+    expect(
+      undoScheduledTransactionLabel(v2_transaction.TransactionType.income),
+      'Undo Income',
+    );
+    expect(
+      undoScheduledTransactionLabel(v2_transaction.TransactionType.transfer),
+      'Undo Transfer',
+    );
+    expect(
+      undoScheduledTransactionConfirmationTitle(
+        v2_transaction.TransactionType.transfer,
+      ),
+      'Undo this scheduled transfer?',
+    );
   });
 
   testWidgets('ledger filters by account type category and date', (

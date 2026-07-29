@@ -43,6 +43,7 @@ import 'src/export/export_file_service.dart';
 import 'src/goals/goal_calculator.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
 import 'src/management/management_ledger_index.dart';
+import 'src/ledger/ledger_projection.dart';
 import 'src/notifications/local_notification_scheduler.dart';
 import 'src/notifications/notification_scheduler.dart';
 import 'src/persistence/backup_codec.dart';

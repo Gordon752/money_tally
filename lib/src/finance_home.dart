@@ -1939,33 +1939,36 @@ Future<void> showAccountGroupActions(
   final canMoveDown = groupIndex >= 0 && groupIndex < groups.length - 1;
   final action = await showModalBottomSheet<String>(
     context: context,
+    isScrollControlled: true,
     showDragHandle: true,
     builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: Icon(AppIcon.edit),
-            title: Text('Rename'),
-            onTap: () => Navigator.pop(sheetContext, 'rename'),
-          ),
-          ListTile(
-            enabled: canMoveUp,
-            leading: Icon(AppIcon.arrowUp),
-            title: Text('Move Up'),
-            onTap: canMoveUp
-                ? () => Navigator.pop(sheetContext, 'moveUp')
-                : null,
-          ),
-          ListTile(
-            enabled: canMoveDown,
-            leading: Icon(AppIcon.arrowDown),
-            title: const Text('Move Down'),
-            onTap: canMoveDown
-                ? () => Navigator.pop(sheetContext, 'moveDown')
-                : null,
-          ),
-        ],
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(AppIcon.edit),
+              title: Text('Rename'),
+              onTap: () => Navigator.pop(sheetContext, 'rename'),
+            ),
+            ListTile(
+              enabled: canMoveUp,
+              leading: Icon(AppIcon.arrowUp),
+              title: Text('Move Up'),
+              onTap: canMoveUp
+                  ? () => Navigator.pop(sheetContext, 'moveUp')
+                  : null,
+            ),
+            ListTile(
+              enabled: canMoveDown,
+              leading: Icon(AppIcon.arrowDown),
+              title: const Text('Move Down'),
+              onTap: canMoveDown
+                  ? () => Navigator.pop(sheetContext, 'moveDown')
+                  : null,
+            ),
+          ],
+        ),
       ),
     ),
   );
@@ -2044,6 +2047,7 @@ class _LedgerViewState extends State<LedgerView> {
   var accountFilterId = '';
   var categoryFilterId = '';
   var dateFilter = LedgerDateFilter.all;
+  DateTimeRange? customDateRange;
   ManagementLedgerFilter? managementFilter;
   final _collapsedMonthKeys = <String>{};
   final _monthAnchors = <String, GlobalKey>{};
@@ -2095,7 +2099,18 @@ class _LedgerViewState extends State<LedgerView> {
             now: now,
           ).transactionIdsFor(managementFilter!);
     final normalizedQuery = query.trim().toLowerCase();
-    final transactions =
+    final requestedCategoryId = categoryFilterId.isNotEmpty
+        ? categoryFilterId
+        : managementFilter?.kind == ManagementLedgerFilterKind.category
+        ? managementFilter!.value
+        : '';
+    final categoryScope = requestedCategoryId.isEmpty
+        ? null
+        : LedgerCategoryScope.fromCategory(
+            store.categories,
+            requestedCategoryId,
+          );
+    final unprojectedTransactions =
         store.transactions
             .where((transaction) => !transaction.isDeleted)
             .where(
@@ -2118,13 +2133,20 @@ class _LedgerViewState extends State<LedgerView> {
                 transaction,
                 typeFilterName: typeFilterName,
                 accountFilterId: accountFilterId,
-                categoryFilterId: categoryFilterId,
+                // Category matching is resolved by the shared allocation
+                // projection below so parent scopes and split amounts agree.
+                categoryFilterId: '',
                 dateFilter: dateFilter,
+                customDateRange: customDateRange,
                 now: now,
               ),
             )
             .toList()
           ..sort(compareTransactionsNewestFirst);
+    final transactions = projectLedgerTransactions(
+      unprojectedTransactions,
+      categoryScope: categoryScope,
+    );
     final goalFundingEvents =
         store.goalFundingEvents
             .where((event) => event.isActive)
@@ -2138,6 +2160,7 @@ class _LedgerViewState extends State<LedgerView> {
                   dateMatchesLedgerFilter(
                     event.date,
                     dateFilter: dateFilter,
+                    customDateRange: customDateRange,
                     now: now,
                   ),
             )
@@ -2182,6 +2205,8 @@ class _LedgerViewState extends State<LedgerView> {
         : categoriesById[categoryFilterId]?.name ?? 'Category';
     final selectedDateLabel = dateFilter == LedgerDateFilter.all
         ? 'Date'
+        : dateFilter == LedgerDateFilter.custom && customDateRange != null
+        ? '${shortMonthDay(customDateRange!.start)}–${shortMonthDay(customDateRange!.end)}'
         : ledgerDateFilterLabel(dateFilter);
     final activeFilterCount = [
       typeFilterName.isNotEmpty,
@@ -2189,10 +2214,13 @@ class _LedgerViewState extends State<LedgerView> {
       categoryFilterId.isNotEmpty,
       dateFilter != LedgerDateFilter.all,
     ].where((isActive) => isActive).length;
-    final transactionsByMonth = <DateTime, List<TransactionRecord>>{};
-    for (final transaction in transactions) {
-      final month = DateTime(transaction.date.year, transaction.date.month);
-      transactionsByMonth.putIfAbsent(month, () => []).add(transaction);
+    final transactionsByMonth = <DateTime, List<LedgerTransactionProjection>>{};
+    for (final projection in transactions) {
+      final month = DateTime(
+        projection.transaction.date.year,
+        projection.transaction.date.month,
+      );
+      transactionsByMonth.putIfAbsent(month, () => []).add(projection);
     }
     final fundingByMonth = <DateTime, List<GoalFundingEventRecord>>{};
     for (final event in goalFundingEvents) {
@@ -2315,8 +2343,8 @@ class _LedgerViewState extends State<LedgerView> {
                     prefixIcon: Icon(AppIcon.search, size: AppIconSize.inline),
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
+                      horizontal: 16,
+                      vertical: 9,
                     ),
                     filled: true,
                     fillColor: Theme.of(context)
@@ -2324,15 +2352,15 @@ class _LedgerViewState extends State<LedgerView> {
                         .surfaceContainerHighest
                         .withValues(alpha: 0.55),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(16),
                       borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(16),
                       borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(16),
                       borderSide: BorderSide(
                         color: Theme.of(context).colorScheme.primary,
                         width: 1.2,
@@ -2344,7 +2372,7 @@ class _LedgerViewState extends State<LedgerView> {
                 ),
               ),
             ),
-            const SizedBox(width: AppSpacing.xs),
+            const SizedBox(width: AppSpacing.sm),
             SizedBox.square(
               dimension: 44,
               child: IconButton(
@@ -2376,12 +2404,12 @@ class _LedgerViewState extends State<LedgerView> {
                       ? Theme.of(context).colorScheme.onSurfaceVariant
                       : Theme.of(context).colorScheme.onPrimaryContainer,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                 ),
               ),
             ),
-            const SizedBox(width: AppSpacing.xs),
+            const SizedBox(width: AppSpacing.sm),
             SizedBox.square(
               dimension: 44,
               child: IconButton(
@@ -2393,7 +2421,7 @@ class _LedgerViewState extends State<LedgerView> {
                     context,
                   ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                 ),
               ),
@@ -2448,6 +2476,7 @@ class _LedgerViewState extends State<LedgerView> {
       accountFilterId = '';
       categoryFilterId = '';
       dateFilter = LedgerDateFilter.all;
+      customDateRange = null;
       managementFilter = null;
     });
   }
@@ -2490,100 +2519,163 @@ class _LedgerViewState extends State<LedgerView> {
                 spacing: AppSpacing.xs,
                 runSpacing: AppSpacing.xs,
                 children: [
-                  LedgerFilterButton<String>(
+                  LedgerFilterButton(
                     buttonKey: ValueKey('ledger-type-$typeFilterName'),
                     icon: AppIcon.filter,
                     label: selectedTypeLabel,
                     isActive: typeFilterName.isNotEmpty,
-                    items: [
-                      const PopupMenuItem(value: '', child: Text('All types')),
-                      for (final type in TransactionType.values)
-                        PopupMenuItem(
-                          value: type.name,
-                          child: Text(transactionTypeLabel(type)),
-                        ),
-                    ],
-                    onSelected: (value) {
-                      setState(() => typeFilterName = value);
+                    onTap: () {
                       Navigator.pop(sheetContext);
+                      WidgetsBinding.instance.addPostFrameCallback((_) async {
+                        final value = await showLedgerSelectionSheet<String>(
+                          context: context,
+                          title: 'Filter by Type',
+                          selectedValue: typeFilterName,
+                          items: [
+                            (
+                              value: '',
+                              label: 'All types',
+                              icon: AppIcon.filter,
+                              detail: null,
+                            ),
+                            for (final type in TransactionType.values)
+                              (
+                                value: type.name,
+                                label: transactionTypeLabel(type),
+                                icon: transactionTypeIcon(type),
+                                detail: null,
+                              ),
+                          ],
+                        );
+                        if (value != null && mounted) {
+                          setState(() => typeFilterName = value);
+                        }
+                      });
                     },
                   ),
-                  LedgerFilterButton<String>(
+                  LedgerFilterButton(
                     buttonKey: ValueKey('ledger-account-$accountFilterId'),
                     icon: AppIcon.wallet,
                     label: selectedAccountLabel,
                     isActive: accountFilterId.isNotEmpty,
-                    items: [
-                      const PopupMenuItem(
-                        value: '',
-                        child: Text('All accounts'),
-                      ),
-                      for (final account in activeAccounts)
-                        PopupMenuItem(
-                          value: account.id,
-                          child: Text(account.name),
-                        ),
-                    ],
-                    onSelected: (value) {
-                      setState(() => accountFilterId = value);
+                    onTap: () {
                       Navigator.pop(sheetContext);
+                      WidgetsBinding.instance.addPostFrameCallback((_) async {
+                        final value = await showLedgerSelectionSheet<String>(
+                          context: context,
+                          title: 'Filter by Account',
+                          searchable: activeAccounts.length > 7,
+                          selectedValue: accountFilterId,
+                          items: [
+                            (
+                              value: '',
+                              label: 'All accounts',
+                              icon: AppIcon.wallet,
+                              detail: null,
+                            ),
+                            for (final account in activeAccounts)
+                              (
+                                value: account.id,
+                                label: account.name,
+                                icon: v2AccountIcon(account.type),
+                                detail: v2AccountTypeLabel(account.type),
+                              ),
+                          ],
+                        );
+                        if (value != null && mounted) {
+                          setState(() => accountFilterId = value);
+                        }
+                      });
                     },
                   ),
-                  LedgerFilterButton<String>(
+                  LedgerFilterButton(
                     buttonKey: ValueKey('ledger-category-$categoryFilterId'),
                     icon: AppIcon.category,
                     label: selectedCategoryLabel,
                     isActive: categoryFilterId.isNotEmpty,
-                    items: [
-                      const PopupMenuItem(
-                        value: '',
-                        child: Text('All categories'),
-                      ),
-                      for (final category in activeCategories)
-                        PopupMenuItem(
-                          value: category.id,
-                          child: Text(category.name),
-                        ),
-                    ],
-                    onSelected: (value) {
-                      setState(() => categoryFilterId = value);
+                    onTap: () {
                       Navigator.pop(sheetContext);
+                      WidgetsBinding.instance.addPostFrameCallback((_) async {
+                        final value = await showLedgerCategorySelectionSheet(
+                          context: context,
+                          categories: activeCategories,
+                          selectedCategoryId: categoryFilterId,
+                        );
+                        if (value != null && mounted) {
+                          setState(() => categoryFilterId = value);
+                        }
+                      });
                     },
                   ),
-                  LedgerFilterButton<LedgerDateFilter>(
+                  LedgerFilterButton(
                     buttonKey: ValueKey('ledger-date-${dateFilter.name}'),
                     icon: AppIcon.calendar,
                     label: selectedDateLabel,
                     isActive: dateFilter != LedgerDateFilter.all,
-                    items: [
-                      for (final filter in LedgerDateFilter.values)
-                        PopupMenuItem(
-                          value: filter,
-                          child: Text(ledgerDateFilterLabel(filter)),
-                        ),
-                    ],
-                    onSelected: (value) {
-                      setState(() => dateFilter = value);
+                    onTap: () {
                       Navigator.pop(sheetContext);
+                      WidgetsBinding.instance.addPostFrameCallback((_) async {
+                        final value =
+                            await showLedgerSelectionSheet<LedgerDateFilter>(
+                              context: context,
+                              title: 'Filter by Date',
+                              selectedValue: dateFilter,
+                              items: [
+                                for (final filter in LedgerDateFilter.values)
+                                  (
+                                    value: filter,
+                                    label: ledgerDateFilterLabel(filter),
+                                    icon: AppIcon.calendar,
+                                    detail: null,
+                                  ),
+                              ],
+                            );
+                        if (value == LedgerDateFilter.custom && mounted) {
+                          final range = await showDateRangePicker(
+                            context: this.context,
+                            firstDate: DateTime(2000),
+                            lastDate: DateTime(DateTime.now().year + 10),
+                            initialDateRange: null,
+                          );
+                          if (range == null || !mounted) return;
+                          setState(() {
+                            dateFilter = LedgerDateFilter.custom;
+                            customDateRange = range;
+                          });
+                        } else if (value != null && mounted) {
+                          setState(() {
+                            dateFilter = value;
+                            customDateRange = null;
+                          });
+                        }
+                      });
                     },
                   ),
                   if (visibleMonths.isNotEmpty)
-                    LedgerFilterButton<String>(
+                    LedgerFilterButton(
                       buttonKey: ValueKey('ledger-jump-month'),
                       icon: AppIcon.event,
                       label: 'Jump to month',
-                      items: [
-                        for (final month in visibleMonths)
-                          PopupMenuItem(
-                            value: ledgerMonthKey(month),
-                            child: Text(monthLabel(month)),
-                          ),
-                      ],
-                      onSelected: (value) {
+                      onTap: () {
                         Navigator.pop(sheetContext);
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) async {
+                          final value = await showLedgerSelectionSheet<String>(
+                            context: context,
+                            title: 'Jump to Month',
+                            selectedValue: '',
+                            items: [
+                              for (final month in visibleMonths)
+                                (
+                                  value: ledgerMonthKey(month),
+                                  label: monthLabel(month),
+                                  icon: AppIcon.event,
+                                  detail: null,
+                                ),
+                            ],
+                          );
+                          if (value == null || !mounted) return;
                           final anchor = _monthAnchors[value]?.currentContext;
-                          if (anchor == null) return;
+                          if (anchor == null || !anchor.mounted) return;
                           Scrollable.ensureVisible(
                             anchor,
                             duration: const Duration(milliseconds: 280),
@@ -2671,7 +2763,7 @@ class LedgerMonthSection extends StatelessWidget {
   });
 
   final DateTime month;
-  final List<TransactionRecord> transactions;
+  final List<LedgerTransactionProjection> transactions;
   final List<GoalFundingEventRecord> goalFundingEvents;
   final FinanceDataStore store;
   final Map<String, v2_account.AccountRecord> accountsById;
@@ -2683,33 +2775,33 @@ class LedgerMonthSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final income = transactions
-        .where((item) => item.type == TransactionType.income)
-        .fold(0, (total, item) => total + item.amountMinor.abs());
+        .where((item) => item.transaction.type == TransactionType.income)
+        .fold(0, (total, item) => total + item.displayedAmountMinor.abs());
     final expenses = transactions
-        .where((item) => item.type == TransactionType.expense)
-        .fold(0, (total, item) => total + item.amountMinor.abs());
+        .where((item) => item.transaction.type == TransactionType.expense)
+        .fold(0, (total, item) => total + item.displayedAmountMinor.abs());
     final adjustments = transactions
-        .where((item) => item.type == TransactionType.adjustment)
-        .fold(0, (total, item) => total + item.amountMinor);
+        .where((item) => item.transaction.type == TransactionType.adjustment)
+        .fold(0, (total, item) => total + item.displayedAmountMinor);
     final net = income - expenses + adjustments;
     final activities =
         <
             ({
               DateTime date,
-              TransactionRecord? transaction,
+              LedgerTransactionProjection? projection,
               GoalFundingEventRecord? fundingEvent,
             })
           >[
-            for (final transaction in transactions)
+            for (final projection in transactions)
               (
-                date: transaction.date,
-                transaction: transaction,
+                date: projection.transaction.date,
+                projection: projection,
                 fundingEvent: null,
               ),
             for (final fundingEvent in goalFundingEvents)
               (
                 date: fundingEvent.date,
-                transaction: null,
+                projection: null,
                 fundingEvent: fundingEvent,
               ),
           ]
@@ -2750,10 +2842,12 @@ class LedgerMonthSection extends StatelessWidget {
                         '${activities.length} ${activities.length == 1 ? 'activity' : 'activities'}',
                         style: Theme.of(context).textTheme.labelMedium
                             ?.copyWith(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w700,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant
+                                  .withValues(alpha: 0.76),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
                             ),
                       ),
                     ],
@@ -2806,28 +2900,36 @@ class LedgerMonthSection extends StatelessWidget {
                         height: 1,
                         color: Theme.of(
                           context,
-                        ).colorScheme.outlineVariant.withValues(alpha: 0.18),
+                        ).colorScheme.outlineVariant.withValues(alpha: 0.24),
                       ),
                       for (
                         var index = 0;
                         index < activities.length;
                         index++
                       ) ...[
-                        if (activities[index].transaction
-                            case final transaction?)
+                        if (activities[index].projection case final projection?)
                           LedgerJournalRow(
-                            transaction: transaction,
+                            projection: projection,
                             currency: store.preferences.currency,
                             accountName:
-                                accountsById[transaction.accountId]?.name,
-                            categoryName: transaction.categoryId == null
-                                ? null
-                                : categoriesById[transaction.categoryId]?.name,
+                                accountsById[projection.transaction.accountId]
+                                    ?.name,
+                            categoryName:
+                                projection.categoryScope?.label ??
+                                (projection.transaction.categoryId == null
+                                    ? null
+                                    : categoriesById[projection
+                                              .transaction
+                                              .categoryId]
+                                          ?.name),
                             onTap: () async {
                               onDismissFocus();
                               await showTransactionDetails(
                                 context,
-                                transaction.id,
+                                projection.transaction.id,
+                                projection: projection.isCategoryProjected
+                                    ? projection
+                                    : null,
                               );
                               if (context.mounted) onDismissFocus();
                             },
@@ -2836,7 +2938,7 @@ class LedgerMonthSection extends StatelessWidget {
                               HapticFeedback.mediumImpact();
                               await showTransactionOptions(
                                 context,
-                                transaction.id,
+                                projection.transaction.id,
                               );
                               if (context.mounted) onDismissFocus();
                             },
@@ -2861,7 +2963,7 @@ class LedgerMonthSection extends StatelessWidget {
                             indent: 62,
                             endIndent: 12,
                             color: Theme.of(context).colorScheme.outlineVariant
-                                .withValues(alpha: 0.17),
+                                .withValues(alpha: 0.24),
                           ),
                       ],
                     ],
@@ -2915,7 +3017,7 @@ class LedgerMonthMetric extends StatelessWidget {
 
 class LedgerJournalRow extends StatelessWidget {
   const LedgerJournalRow({
-    required this.transaction,
+    required this.projection,
     required this.currency,
     required this.onTap,
     required this.onLongPress,
@@ -2924,7 +3026,8 @@ class LedgerJournalRow extends StatelessWidget {
     super.key,
   });
 
-  final TransactionRecord transaction;
+  final LedgerTransactionProjection projection;
+  TransactionRecord get transaction => projection.transaction;
   final CurrencyFormatSettings currency;
   final String? accountName;
   final String? categoryName;
@@ -2933,19 +3036,24 @@ class LedgerJournalRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final signedAmount = switch (transaction.type) {
-      TransactionType.expense => -transaction.amountMinor.abs(),
-      TransactionType.income => transaction.amountMinor.abs(),
-      TransactionType.transfer => transaction.amountMinor.abs(),
-      TransactionType.goalFunding => transaction.amountMinor.abs(),
-      TransactionType.adjustment => transaction.amountMinor,
-    };
-    final secondary = [
+    final signedAmount = projection.displayedAmountMinor;
+    final secondaryDetails = [
       if (accountName != null) accountName,
       if (categoryName != null) categoryName,
-      if (transaction.isSplit) 'Split',
+      if (transaction.type == TransactionType.adjustment)
+        'Manual balance adjustment',
       if (transaction.isTransfer) 'Transfer',
     ].join(' • ');
+    final splitLabel = projection.isPartOfSplit
+        ? 'part of split'
+        : transaction.isSplit
+        ? 'split'
+        : null;
+    final secondaryStyle =
+        Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ) ??
+        const TextStyle(fontSize: 12);
 
     return Dismissible(
       key: ValueKey('ledger-swipe-${transaction.id}'),
@@ -3006,15 +3114,33 @@ class LedgerJournalRow extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (secondary.isNotEmpty) ...[
+                    if (secondaryDetails.isNotEmpty || splitLabel != null) ...[
                       const SizedBox(height: 2),
-                      Text(
-                        secondary,
+                      Text.rich(
+                        TextSpan(
+                          children: [
+                            if (secondaryDetails.isNotEmpty)
+                              TextSpan(text: secondaryDetails),
+                            if (splitLabel != null) ...[
+                              if (secondaryDetails.isNotEmpty)
+                                const TextSpan(text: ' • '),
+                              TextSpan(
+                                text: splitLabel,
+                                style: secondaryStyle.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant
+                                      .withValues(alpha: 0.68),
+                                  fontSize: (secondaryStyle.fontSize ?? 12) - 1,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                        style: secondaryStyle,
                       ),
                     ],
                   ],
@@ -3175,13 +3301,12 @@ String monthAbbreviation(int month) => const [
   'Dec',
 ][month - 1];
 
-class LedgerFilterButton<T> extends StatelessWidget {
+class LedgerFilterButton extends StatelessWidget {
   const LedgerFilterButton({
     required this.buttonKey,
     required this.icon,
     required this.label,
-    required this.items,
-    required this.onSelected,
+    required this.onTap,
     this.isActive = false,
     super.key,
   });
@@ -3189,8 +3314,7 @@ class LedgerFilterButton<T> extends StatelessWidget {
   final Key buttonKey;
   final IconData icon;
   final String label;
-  final List<PopupMenuEntry<T>> items;
-  final ValueChanged<T> onSelected;
+  final VoidCallback onTap;
   final bool isActive;
 
   @override
@@ -3204,11 +3328,10 @@ class LedgerFilterButton<T> extends StatelessWidget {
         ? AppTheme.accent
         : AppTheme.accent.withValues(alpha: 0.18);
 
-    return PopupMenuButton<T>(
+    return InkWell(
       key: buttonKey,
-      tooltip: label,
-      onSelected: onSelected,
-      itemBuilder: (context) => items,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.pill),
       child: Container(
         height: 40,
         constraints: const BoxConstraints(maxWidth: 190),
@@ -3247,6 +3370,314 @@ class LedgerFilterButton<T> extends StatelessWidget {
   }
 }
 
+/// The common mobile selection surface used by every Ledger filter.  Unlike
+/// PopupMenuButton it is scroll-safe, keyboard-safe, and does not create an
+/// anchored strip that can overflow a compact screen.
+Future<T?> showLedgerSelectionSheet<T>({
+  required BuildContext context,
+  required String title,
+  required T selectedValue,
+  required List<({T value, String label, IconData? icon, String? detail})>
+  items,
+  bool searchable = false,
+}) async {
+  var query = '';
+  return showModalBottomSheet<T>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) {
+        final visible = items
+            .where((item) {
+              if (query.trim().isEmpty) return true;
+              final needle = query.trim().toLowerCase();
+              return '${item.label} ${item.detail ?? ''}'
+                  .toLowerCase()
+                  .contains(needle);
+            })
+            .toList(growable: false);
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.76,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                    child: Text(
+                      title,
+                      style: Theme.of(sheetContext).textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  if (searchable)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: TextField(
+                        decoration: InputDecoration(
+                          hintText: 'Search',
+                          prefixIcon: Icon(AppIcon.search),
+                        ),
+                        onTapOutside: (_) =>
+                            FocusManager.instance.primaryFocus?.unfocus(),
+                        onChanged: (value) =>
+                            setSheetState(() => query = value),
+                      ),
+                    ),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                      itemCount: visible.length,
+                      separatorBuilder: (_, _) => Divider(
+                        height: 1,
+                        indent: 56,
+                        color: Theme.of(
+                          sheetContext,
+                        ).colorScheme.outlineVariant.withValues(alpha: 0.22),
+                      ),
+                      itemBuilder: (context, index) {
+                        final item = visible[index];
+                        final selected = item.value == selectedValue;
+                        return ListTile(
+                          minTileHeight: 52,
+                          leading: item.icon == null ? null : Icon(item.icon),
+                          title: Text(item.label),
+                          subtitle: item.detail == null
+                              ? null
+                              : Text(item.detail!),
+                          trailing: selected
+                              ? Icon(
+                                  AppIcon.check,
+                                  color: Theme.of(
+                                    sheetContext,
+                                  ).colorScheme.primary,
+                                )
+                              : null,
+                          onTap: () => Navigator.pop(sheetContext, item.value),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
+Future<String?> showLedgerCategorySelectionSheet({
+  required BuildContext context,
+  required List<v2_category.CategoryRecord> categories,
+  required String selectedCategoryId,
+}) async {
+  final byParent = <String, List<v2_category.CategoryRecord>>{};
+  final roots = <v2_category.CategoryRecord>[];
+  for (final category in categories) {
+    final parentId = category.parentCategoryId;
+    if (parentId == null || parentId.isEmpty) {
+      roots.add(category);
+    } else {
+      byParent.putIfAbsent(parentId, () => []).add(category);
+    }
+  }
+  for (final group in byParent.values) {
+    group.sort((a, b) => a.name.compareTo(b.name));
+  }
+  roots.sort((a, b) => a.name.compareTo(b.name));
+  final selectedParent = categories
+      .where((item) => item.id == selectedCategoryId)
+      .firstOrNull
+      ?.parentCategoryId;
+  final expanded = <String>{
+    if (selectedParent != null && selectedParent.isNotEmpty) selectedParent,
+  };
+  var query = '';
+  return showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) {
+        final needle = query.trim().toLowerCase();
+        final isSearching = needle.isNotEmpty;
+        final rows =
+            <({v2_category.CategoryRecord category, int depth})>[
+                  for (final root in roots) ...[
+                    (category: root, depth: 0),
+                    if (isSearching || expanded.contains(root.id))
+                      for (final child
+                          in byParent[root.id] ??
+                              const <v2_category.CategoryRecord>[])
+                        if (!isSearching ||
+                            child.name.toLowerCase().contains(needle) ||
+                            root.name.toLowerCase().contains(needle))
+                          (category: child, depth: 1),
+                  ],
+                ]
+                .where((row) {
+                  if (!isSearching) return true;
+                  return row.category.name.toLowerCase().contains(needle) ||
+                      (row.depth == 0 &&
+                          (byParent[row.category.id] ?? const []).any(
+                            (child) =>
+                                child.name.toLowerCase().contains(needle),
+                          ));
+                })
+                .toList(growable: false);
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetContext).height * .78,
+              ),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Filter by Category',
+                        style: Theme.of(sheetContext).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                    child: TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Search categories',
+                        prefixIcon: Icon(AppIcon.search),
+                      ),
+                      onTapOutside: (_) =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
+                      onChanged: (value) => setSheetState(() => query = value),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                      children: [
+                        ListTile(
+                          leading: Icon(AppIcon.category),
+                          title: const Text('All categories'),
+                          trailing: selectedCategoryId.isEmpty
+                              ? Icon(
+                                  AppIcon.check,
+                                  color: Theme.of(
+                                    sheetContext,
+                                  ).colorScheme.primary,
+                                )
+                              : null,
+                          onTap: () => Navigator.pop(sheetContext, ''),
+                        ),
+                        for (final row in rows)
+                          _LedgerCategoryFilterRow(
+                            category: row.category,
+                            parentName: row.depth == 0
+                                ? null
+                                : categories
+                                      .where(
+                                        (item) =>
+                                            item.id ==
+                                            row.category.parentCategoryId,
+                                      )
+                                      .firstOrNull
+                                      ?.name,
+                            depth: row.depth,
+                            hasChildren: (byParent[row.category.id] ?? const [])
+                                .isNotEmpty,
+                            expanded: expanded.contains(row.category.id),
+                            selected: selectedCategoryId == row.category.id,
+                            onToggle: () => setSheetState(() {
+                              if (!expanded.add(row.category.id)) {
+                                expanded.remove(row.category.id);
+                              }
+                            }),
+                            onSelect: () =>
+                                Navigator.pop(sheetContext, row.category.id),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
+class _LedgerCategoryFilterRow extends StatelessWidget {
+  const _LedgerCategoryFilterRow({
+    required this.category,
+    required this.parentName,
+    required this.depth,
+    required this.hasChildren,
+    required this.expanded,
+    required this.selected,
+    required this.onToggle,
+    required this.onSelect,
+  });
+  final v2_category.CategoryRecord category;
+  final String? parentName;
+  final int depth;
+  final bool hasChildren;
+  final bool expanded;
+  final bool selected;
+  final VoidCallback onToggle;
+  final VoidCallback onSelect;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    contentPadding: EdgeInsets.only(left: 16 + depth * 24.0, right: 8),
+    leading: CategoryIconBadge.category(
+      category,
+      size: CategoryIconBadgeSize.compact,
+    ),
+    title: Text(category.name),
+    subtitle: parentName == null ? null : Text(parentName!),
+    trailing: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (selected)
+          Icon(AppIcon.check, color: Theme.of(context).colorScheme.primary),
+        if (hasChildren)
+          IconButton(
+            tooltip: expanded ? 'Collapse' : 'Expand',
+            onPressed: onToggle,
+            icon: AnimatedRotation(
+              turns: expanded ? .25 : 0,
+              duration: const Duration(milliseconds: 160),
+              child: Icon(AppIcon.chevronDown),
+            ),
+          ),
+      ],
+    ),
+    onTap: onSelect,
+  );
+}
+
 bool transactionMatchesSearch(
   TransactionRecord transaction,
   String query, {
@@ -3263,7 +3694,7 @@ bool transactionMatchesSearch(
   ].whereType<String>().any((value) => value.toLowerCase().contains(query));
 }
 
-enum LedgerDateFilter { all, today, thisMonth, last30Days }
+enum LedgerDateFilter { all, today, thisMonth, last30Days, custom }
 
 bool transactionMatchesLedgerFilters(
   TransactionRecord transaction, {
@@ -3271,6 +3702,7 @@ bool transactionMatchesLedgerFilters(
   required String accountFilterId,
   required String categoryFilterId,
   required LedgerDateFilter dateFilter,
+  DateTimeRange? customDateRange,
   required DateTime now,
 }) {
   if (typeFilterName.isNotEmpty && transaction.type.name != typeFilterName) {
@@ -3303,12 +3735,29 @@ bool transactionMatchesLedgerFilters(
     LedgerDateFilter.last30Days =>
       !transactionDay.isBefore(today.subtract(const Duration(days: 30))) &&
           !transactionDay.isAfter(today),
+    LedgerDateFilter.custom =>
+      customDateRange != null &&
+          !transactionDay.isBefore(
+            DateTime(
+              customDateRange.start.year,
+              customDateRange.start.month,
+              customDateRange.start.day,
+            ),
+          ) &&
+          !transactionDay.isAfter(
+            DateTime(
+              customDateRange.end.year,
+              customDateRange.end.month,
+              customDateRange.end.day,
+            ),
+          ),
   };
 }
 
 bool dateMatchesLedgerFilter(
   DateTime date, {
   required LedgerDateFilter dateFilter,
+  DateTimeRange? customDateRange,
   required DateTime now,
 }) {
   final day = DateTime(date.year, date.month, date.day);
@@ -3321,6 +3770,22 @@ bool dateMatchesLedgerFilter(
     LedgerDateFilter.last30Days =>
       !day.isBefore(today.subtract(const Duration(days: 30))) &&
           !day.isAfter(today),
+    LedgerDateFilter.custom =>
+      customDateRange != null &&
+          !day.isBefore(
+            DateTime(
+              customDateRange.start.year,
+              customDateRange.start.month,
+              customDateRange.start.day,
+            ),
+          ) &&
+          !day.isAfter(
+            DateTime(
+              customDateRange.end.year,
+              customDateRange.end.month,
+              customDateRange.end.day,
+            ),
+          ),
   };
 }
 
@@ -3380,8 +3845,12 @@ String ledgerDateFilterLabel(LedgerDateFilter filter) {
     LedgerDateFilter.today => 'Today',
     LedgerDateFilter.thisMonth => 'This month',
     LedgerDateFilter.last30Days => 'Last 30 days',
+    LedgerDateFilter.custom => 'Custom range',
   };
 }
+
+String shortMonthDay(DateTime date) =>
+    '${monthAbbreviation(date.month)} ${date.day}';
 
 Future<void> showTransactionOptions(
   BuildContext context,
@@ -3392,65 +3861,87 @@ Future<void> showTransactionOptions(
   final transaction = dataStore.transactions.firstWhere(
     (item) => item.id == transactionId,
   );
+  final scheduledUndoTarget = dataStore.scheduledPaymentUndoTarget(
+    transaction.id,
+  );
   final action = await showModalBottomSheet<String>(
     context: context,
+    isScrollControlled: true,
     showDragHandle: true,
     builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (allowedActions == null || allowedActions.contains('edit'))
-            ListTile(
-              enabled:
-                  transaction.type == TransactionType.expense ||
-                  transaction.type == TransactionType.income ||
-                  transaction.type == TransactionType.transfer,
-              leading: Icon(AppIcon.edit),
-              title: const Text('Edit'),
-              onTap:
-                  transaction.type == TransactionType.expense ||
-                      transaction.type == TransactionType.income ||
-                      transaction.type == TransactionType.transfer
-                  ? () => Navigator.pop(sheetContext, 'edit')
-                  : null,
-            ),
-          if (allowedActions == null || allowedActions.contains('duplicate'))
-            ListTile(
-              leading: Icon(AppIcon.copy),
-              title: const Text('Duplicate'),
-              onTap: () => Navigator.pop(sheetContext, 'duplicate'),
-            ),
-          if (allowedActions == null || allowedActions.contains('split'))
-            ListTile(
-              enabled:
-                  transaction.type == TransactionType.expense ||
-                  transaction.type == TransactionType.income,
-              leading: Icon(AppIcon.split),
-              title: const Text('Split'),
-              onTap:
-                  transaction.type == TransactionType.expense ||
-                      transaction.type == TransactionType.income
-                  ? () => Navigator.pop(sheetContext, 'split')
-                  : null,
-            ),
-          if (allowedActions == null || allowedActions.contains('schedule'))
-            ListTile(
-              enabled: transaction.type != TransactionType.adjustment,
-              leading: Icon(AppIcon.recurrence),
-              title: const Text('Make Scheduled'),
-              onTap: transaction.type != TransactionType.adjustment
-                  ? () => Navigator.pop(sheetContext, 'schedule')
-                  : null,
-            ),
-          if (allowedActions == null || allowedActions.contains('delete'))
-            ListTile(
-              leading: Icon(AppIcon.delete),
-              title: const Text('Delete'),
-              textColor: AppTheme.rose,
-              iconColor: AppTheme.rose,
-              onTap: () => Navigator.pop(sheetContext, 'delete'),
-            ),
-        ],
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (allowedActions == null || allowedActions.contains('edit'))
+              ListTile(
+                enabled:
+                    transaction.type == TransactionType.expense ||
+                    transaction.type == TransactionType.income ||
+                    transaction.type == TransactionType.transfer,
+                leading: Icon(AppIcon.edit),
+                title: const Text('Edit'),
+                onTap:
+                    transaction.type == TransactionType.expense ||
+                        transaction.type == TransactionType.income ||
+                        transaction.type == TransactionType.transfer
+                    ? () => Navigator.pop(sheetContext, 'edit')
+                    : null,
+              ),
+            if (allowedActions == null || allowedActions.contains('duplicate'))
+              ListTile(
+                leading: Icon(AppIcon.copy),
+                title: const Text('Duplicate'),
+                onTap: () => Navigator.pop(sheetContext, 'duplicate'),
+              ),
+            if (allowedActions == null || allowedActions.contains('split'))
+              ListTile(
+                enabled:
+                    transaction.type == TransactionType.expense ||
+                    transaction.type == TransactionType.income,
+                leading: Icon(AppIcon.split),
+                title: const Text('Split'),
+                onTap:
+                    transaction.type == TransactionType.expense ||
+                        transaction.type == TransactionType.income
+                    ? () => Navigator.pop(sheetContext, 'split')
+                    : null,
+              ),
+            if (allowedActions == null || allowedActions.contains('schedule'))
+              ListTile(
+                enabled: transaction.type != TransactionType.adjustment,
+                leading: Icon(AppIcon.recurrence),
+                title: const Text('Make Scheduled'),
+                onTap: transaction.type != TransactionType.adjustment
+                    ? () => Navigator.pop(sheetContext, 'schedule')
+                    : null,
+              ),
+            if (scheduledUndoTarget != null)
+              ListTile(
+                key: const ValueKey('undo-scheduled-transaction-option'),
+                leading: Icon(AppIcon.undo),
+                title: Text(
+                  undoScheduledTransactionLabel(
+                    scheduledUndoTarget.scheduledTransaction.type,
+                  ),
+                ),
+                subtitle: const Text(
+                  'Restore the original scheduled occurrence',
+                ),
+                textColor: AppTheme.rose,
+                iconColor: AppTheme.rose,
+                onTap: () => Navigator.pop(sheetContext, 'undoScheduled'),
+              ),
+            if (allowedActions == null || allowedActions.contains('delete'))
+              ListTile(
+                leading: Icon(AppIcon.delete),
+                title: const Text('Delete'),
+                textColor: AppTheme.rose,
+                iconColor: AppTheme.rose,
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+          ],
+        ),
       ),
     ),
   );
@@ -3475,13 +3966,22 @@ Future<void> showTransactionOptions(
       await makeTransactionScheduled(context, transaction);
     case 'delete':
       await deleteTransaction(context, transaction);
+    case 'undoScheduled':
+      if (scheduledUndoTarget != null) {
+        await showUndoScheduledPaymentConfirmation(
+          context,
+          transactionId: transaction.id,
+          target: scheduledUndoTarget,
+        );
+      }
   }
 }
 
 Future<void> showTransactionDetails(
   BuildContext context,
-  String transactionId,
-) async {
+  String transactionId, {
+  LedgerTransactionProjection? projection,
+}) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final transaction = dataStore.transactions.firstWhere(
     (item) => item.id == transactionId,
@@ -3521,11 +4021,50 @@ Future<void> showTransactionDetails(
         onUndoScheduledPayment: undoTarget == null
             ? null
             : () => Navigator.pop(dialogContext, 'undoScheduledPayment'),
+        undoScheduledLabel: undoTarget == null
+            ? 'Undo Scheduled Transaction'
+            : undoScheduledTransactionLabel(
+                undoTarget.scheduledTransaction.type,
+              ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (projection?.isCategoryProjected ?? false) ...[
+            Container(
+              key: const ValueKey('transaction-projection-context'),
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              decoration: BoxDecoration(
+                color: Theme.of(
+                  dialogContext,
+                ).colorScheme.primaryContainer.withValues(alpha: 0.42),
+                borderRadius: BorderRadius.circular(AppRadii.control),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Viewing ${projection!.categoryScope!.label} allocation',
+                    style: Theme.of(dialogContext).textTheme.labelLarge
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${money(projection.displayedAmountMinor, dataStore.preferences.currency)} · '
+                    'Full transaction ${money(projection.originalDisplayedAmountMinor, dataStore.preferences.currency)}',
+                    style: Theme.of(dialogContext).textTheme.bodySmall
+                        ?.copyWith(
+                          color: Theme.of(
+                            dialogContext,
+                          ).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            const TransactionFormDivider(),
+          ],
           ScheduledTransactionDetailRow(
             rowKey: ValueKey('transaction-detail-payee'),
             icon: transaction.type == TransactionType.transfer
@@ -3558,6 +4097,20 @@ Future<void> showTransactionDetails(
             label: 'Date',
             value: fullMonthDateLabel(transaction.date),
           ),
+          if (undoTarget != null) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.recurrence,
+              label: 'Origin',
+              value: 'Scheduled Transaction',
+            ),
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.eventNote,
+              label: 'Scheduled date',
+              value: fullMonthDateLabel(undoTarget.occurrence.scheduledDate),
+            ),
+          ],
           const TransactionFormDivider(),
           ScheduledTransactionDetailRow(
             icon: v2AccountIcon(
@@ -3683,8 +4236,9 @@ Future<void> showUndoScheduledPaymentConfirmation(
 
         final plannedAmount = target.occurrence.plannedAmountMinor.abs();
         final actualAmount = target.transaction.amountMinor.abs();
+        final type = target.scheduledTransaction.type;
         return TransactionSheetFrame(
-          title: 'Undo scheduled payment?',
+          title: undoScheduledTransactionConfirmationTitle(type),
           actions: Row(
             children: [
               Expanded(
@@ -3709,7 +4263,11 @@ Future<void> showUndoScheduledPaymentConfirmation(
                       backgroundColor: AppTheme.rose,
                       foregroundColor: Colors.white,
                     ),
-                    child: Text(isProcessing ? 'Undoing…' : 'Undo Payment'),
+                    child: Text(
+                      isProcessing
+                          ? 'Undoing…'
+                          : undoScheduledTransactionLabel(type),
+                    ),
                   ),
                 ),
               ),
@@ -3720,9 +4278,7 @@ Future<void> showUndoScheduledPaymentConfirmation(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'This removes the generated ledger transaction, restores its '
-                'effect on the related account balance, and returns the '
-                'scheduled occurrence to unpaid status.',
+                undoScheduledTransactionConfirmationMessage(type),
                 style: Theme.of(dialogContext).textTheme.bodyLarge,
               ),
               if (plannedAmount != actualAmount) ...[
@@ -3758,6 +4314,41 @@ Future<void> showUndoScheduledPaymentConfirmation(
       },
     ),
   );
+}
+
+String undoScheduledTransactionLabel(TransactionType type) {
+  return switch (type) {
+    TransactionType.expense => 'Undo Payment',
+    TransactionType.income => 'Undo Income',
+    TransactionType.transfer => 'Undo Transfer',
+    TransactionType.goalFunding => 'Undo Goal Funding',
+    TransactionType.adjustment => 'Undo Scheduled Transaction',
+  };
+}
+
+String undoScheduledTransactionConfirmationTitle(TransactionType type) {
+  return switch (type) {
+    TransactionType.expense => 'Undo this scheduled payment?',
+    TransactionType.income => 'Undo this scheduled income?',
+    TransactionType.transfer => 'Undo this scheduled transfer?',
+    TransactionType.goalFunding => 'Undo this scheduled Goal funding?',
+    TransactionType.adjustment => 'Undo scheduled transaction?',
+  };
+}
+
+String undoScheduledTransactionConfirmationMessage(TransactionType type) {
+  return switch (type) {
+    TransactionType.expense =>
+      'This removes the generated ledger transaction, restores its effect on the related account, and returns the scheduled occurrence to unpaid status.',
+    TransactionType.income =>
+      'This removes the posted income from its account and returns the scheduled occurrence to unpaid status.',
+    TransactionType.transfer =>
+      'This returns the money to the source account, removes it from the destination account, and restores the scheduled occurrence for its original date.',
+    TransactionType.goalFunding =>
+      'This restores the source account, reverses the Goal allocations, and restores the scheduled occurrence for its original date.',
+    TransactionType.adjustment =>
+      'This reverses the generated ledger transaction and restores the scheduled occurrence.',
+  };
 }
 
 IconData transactionDetailIcon(TransactionType type) {
@@ -3799,6 +4390,90 @@ Future<void> deleteTransaction(
   TransactionRecord transaction,
 ) async {
   final dataStore = FinanceDataStoreScope.read(context);
+  final undoTarget = dataStore.scheduledPaymentUndoTarget(transaction.id);
+  if (undoTarget != null) {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'This transaction came from a scheduled occurrence.',
+                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'Undoing it restores the occurrence for its original scheduled date.',
+                  style: Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                FilledButton.icon(
+                  key: const ValueKey('delete-scheduled-undo-action'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.rose,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => Navigator.pop(sheetContext, 'undo'),
+                  icon: Icon(AppIcon.undo),
+                  label: Text(
+                    undoScheduledTransactionLabel(
+                      undoTarget.scheduledTransaction.type,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                OutlinedButton(
+                  key: const ValueKey('delete-ledger-record-only-action'),
+                  onPressed: () => Navigator.pop(sheetContext, 'deleteOnly'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.rose,
+                    side: BorderSide(
+                      color: AppTheme.rose.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: const Text('Delete Ledger Record Only'),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'This reverses the account effects but does not restore the scheduled occurrence.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                TextButton(
+                  onPressed: () => Navigator.pop(sheetContext),
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (!context.mounted || action == null) return;
+    if (action == 'undo') {
+      await showUndoScheduledPaymentConfirmation(
+        context,
+        transactionId: transaction.id,
+        target: undoTarget,
+      );
+      return;
+    }
+    if (action != 'deleteOnly') return;
+  }
   await dataStore.saveTransaction(
     transaction.copyWith(
       sync: transaction.sync.deleted(deviceId: dataStore.deviceId),
@@ -9933,92 +10608,168 @@ Future<void> showAdjustBalanceDialog(
       : currentBalanceMinor;
   var isDebtBalance = currentBalanceMinor <= 0;
 
-  final value = await showDialog<int>(
+  final value = await showModalBottomSheet<int>(
     context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setDialogState) {
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) {
         final targetBalanceMinor = isCreditCard
             ? (isDebtBalance
                   ? -enteredBalanceMinor.abs()
                   : enteredBalanceMinor.abs())
             : enteredBalanceMinor;
+        final adjustmentMinor = targetBalanceMinor - currentBalanceMinor;
         final amountStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
           color: targetBalanceMinor < 0 ? AppTheme.rose : null,
           fontFeatures: const [FontFeature.tabularFigures()],
           fontWeight: FontWeight.w900,
         );
 
-        return AlertDialog(
-          title: Text('Adjust ${account.name}'),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (isCreditCard) ...[
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.xs,
+              AppSpacing.lg,
+              MediaQuery.viewInsetsOf(sheetContext).bottom + AppSpacing.lg,
+            ),
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Adjust Balance',
+                    style: Theme.of(sheetContext).textTheme.headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    account.name,
+                    style: Theme.of(sheetContext).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Current balance: ${money(currentBalanceMinor, dataStore.preferences.currency)}',
+                    style: Theme.of(sheetContext).textTheme.bodyMedium
+                        ?.copyWith(
+                          color: Theme.of(
+                            sheetContext,
+                          ).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  if (isCreditCard) ...[
+                    DialogFieldGroup(
+                      label: 'Balance type',
+                      child: SegmentedButton<bool>(
+                        segments: [
+                          ButtonSegment<bool>(
+                            value: true,
+                            label: Text('Debt'),
+                            icon: Icon(AppIcon.expense),
+                          ),
+                          ButtonSegment<bool>(
+                            value: false,
+                            label: Text('Credit'),
+                            icon: Icon(AppIcon.income),
+                          ),
+                        ],
+                        selected: {isDebtBalance},
+                        showSelectedIcon: false,
+                        onSelectionChanged: (selection) {
+                          HapticFeedback.selectionClick();
+                          setSheetState(() => isDebtBalance = selection.first);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
                   DialogFieldGroup(
-                    label: 'Balance type',
-                    child: SegmentedButton<bool>(
-                      segments: [
-                        ButtonSegment<bool>(
-                          value: true,
-                          label: Text('Debt'),
-                          icon: Icon(AppIcon.expense),
-                        ),
-                        ButtonSegment<bool>(
-                          value: false,
-                          label: Text('Credit'),
-                          icon: Icon(AppIcon.income),
-                        ),
-                      ],
-                      selected: {isDebtBalance},
-                      showSelectedIcon: false,
-                      onSelectionChanged: (selection) {
-                        HapticFeedback.selectionClick();
-                        setDialogState(() => isDebtBalance = selection.first);
+                    label: 'New balance',
+                    child: AmountEntryField(
+                      fieldKey: const ValueKey('account-adjust-balance'),
+                      initialMinor: targetBalanceMinor,
+                      currency: dataStore.preferences.currency,
+                      labelText: null,
+                      autofocus: true,
+                      selectAllOnFocus: false,
+                      allowNegative: !isCreditCard,
+                      forceNegative: isCreditCard && isDebtBalance,
+                      keyboardType: isCreditCard
+                          ? TextInputType.number
+                          : const TextInputType.numberWithOptions(signed: true),
+                      textStyle: amountStyle,
+                      onChanged: (value) {
+                        setSheetState(() {
+                          enteredBalanceMinor = isCreditCard
+                              ? value.abs()
+                              : value;
+                        });
                       },
                     ),
                   ),
                   const SizedBox(height: AppSpacing.md),
-                ],
-                DialogFieldGroup(
-                  label: 'Target balance',
-                  child: AmountEntryField(
-                    fieldKey: const ValueKey('account-adjust-balance'),
-                    initialMinor: targetBalanceMinor,
-                    currency: dataStore.preferences.currency,
-                    labelText: null,
-                    autofocus: true,
-                    selectAllOnFocus: true,
-                    allowNegative: !isCreditCard,
-                    forceNegative: isCreditCard && isDebtBalance,
-                    keyboardType: isCreditCard
-                        ? TextInputType.number
-                        : const TextInputType.numberWithOptions(signed: true),
-                    textStyle: amountStyle,
-                    onChanged: (value) {
-                      setDialogState(() {
-                        enteredBalanceMinor = isCreditCard
-                            ? value.abs()
-                            : value;
-                      });
-                    },
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: Theme.of(sheetContext)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.42),
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Adjustment',
+                            style: Theme.of(sheetContext).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        MoneyText(
+                          amountMinor: adjustmentMinor,
+                          currency: dataStore.preferences.currency,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          showPositiveSign: adjustmentMinor > 0,
+                          color: adjustmentMinor < 0 ? AppColors.danger : null,
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: AppSpacing.lg),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(sheetContext),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: targetBalanceMinor == currentBalanceMinor
+                              ? null
+                              : () => Navigator.pop(
+                                  sheetContext,
+                                  targetBalanceMinor,
+                                ),
+                          child: const Text('Save'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, targetBalanceMinor),
-              child: const Text('Save'),
-            ),
-          ],
         );
       },
     ),
@@ -13079,6 +13830,7 @@ class ScheduledTransactionDetailActions extends StatelessWidget {
     required this.onEdit,
     required this.onMarkPaid,
     this.onUndoScheduledPayment,
+    this.undoScheduledLabel = 'Undo Scheduled Transaction',
     this.primaryLabel = 'Mark as Paid',
     super.key,
   });
@@ -13087,6 +13839,7 @@ class ScheduledTransactionDetailActions extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onMarkPaid;
   final VoidCallback? onUndoScheduledPayment;
+  final String undoScheduledLabel;
   final String primaryLabel;
 
   @override
@@ -13146,7 +13899,7 @@ class ScheduledTransactionDetailActions extends StatelessWidget {
                 side: BorderSide(color: AppTheme.rose.withValues(alpha: 0.5)),
               ),
               icon: Icon(AppIcon.undo),
-              label: const Text('Undo Scheduled Payment'),
+              label: Text(undoScheduledLabel),
             ),
           ),
         ],
@@ -13205,6 +13958,9 @@ Future<void> showCompletedScheduledOccurrenceActions(
     item,
     occurrence,
   );
+  final undoTarget = transaction == null
+      ? null
+      : dataStore.scheduledPaymentUndoTarget(transaction.id);
   final canRestore =
       item.isDeleted &&
       nextScheduledDate(item.copyWith(nextDate: occurrence.scheduledDate)) !=
@@ -13233,6 +13989,18 @@ Future<void> showCompletedScheduledOccurrenceActions(
               leading: Icon(AppIcon.restore),
               title: Text('Restore future schedule'),
               onTap: () => Navigator.pop(sheetContext, 'restoreFuture'),
+            ),
+          if (undoTarget != null)
+            ListTile(
+              key: const ValueKey('scheduled-occurrence-undo-action'),
+              leading: Icon(AppIcon.undo),
+              title: Text(undoScheduledTransactionLabel(item.type)),
+              subtitle: const Text(
+                'Restore this occurrence to its original date',
+              ),
+              textColor: AppTheme.rose,
+              iconColor: AppTheme.rose,
+              onTap: () => Navigator.pop(sheetContext, 'undoScheduled'),
             ),
           ListTile(
             leading: Icon(AppIcon.delete),
@@ -13271,6 +14039,13 @@ Future<void> showCompletedScheduledOccurrenceActions(
         context,
         item,
         occurrence,
+      );
+    case 'undoScheduled':
+      if (transaction == null || undoTarget == null) return;
+      await showUndoScheduledPaymentConfirmation(
+        context,
+        transactionId: transaction.id,
+        target: undoTarget,
       );
     case 'deleteOccurrence':
       await deleteCompletedScheduledOccurrence(
