@@ -9434,19 +9434,48 @@ class DashboardCardFlow extends StatelessWidget {
           1,
           3,
         );
-        final itemWidth =
-            (constraints.maxWidth - ((columns - 1) * AppSpacing.sm)) / columns;
-        return Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
+        if (columns == 1) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: _spacedChildren(children),
+          );
+        }
+
+        // A Wrap aligns every card in a row to that row's tallest card. On
+        // iPad and macOS, dashboard cards intentionally vary in height, so
+        // that leaves large blank areas below shorter cards. Flow each column
+        // independently while retaining the existing visual order.
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final child in children)
-              SizedBox(width: itemWidth, child: child),
+            for (var column = 0; column < columns; column++) ...[
+              if (column > 0) const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: _spacedChildren([
+                    for (
+                      var index = column;
+                      index < children.length;
+                      index += columns
+                    )
+                      children[index],
+                  ]),
+                ),
+              ),
+            ],
           ],
         );
       },
     );
   }
+
+  List<Widget> _spacedChildren(List<Widget> items) => [
+    for (var index = 0; index < items.length; index++) ...[
+      if (index > 0) const SizedBox(height: AppSpacing.sm),
+      items[index],
+    ],
+  ];
 }
 
 class MetricRow extends StatelessWidget {
