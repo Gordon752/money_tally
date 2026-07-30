@@ -28,6 +28,22 @@ class FinanceDataValidationException implements Exception {
   String toString() => message;
 }
 
+/// A transient in-app notification emitted when an active Budget crosses from
+/// comfortably funded to its configured low-remaining threshold.
+class BudgetLowAlert {
+  const BudgetLowAlert({
+    required this.budgetId,
+    required this.budgetName,
+    required this.remainingMinor,
+    required this.periodStart,
+  });
+
+  final String budgetId;
+  final String budgetName;
+  final int remainingMinor;
+  final DateTime periodStart;
+}
+
 class FinanceDataStore extends ChangeNotifier {
   factory FinanceDataStore({
     required FinanceDataSet dataSet,
@@ -117,6 +133,9 @@ class FinanceDataStore extends ChangeNotifier {
   final NotificationScheduler notificationScheduler;
   String? userId;
   final String deviceId;
+  final ValueNotifier<BudgetLowAlert?> budgetLowAlertNotifier =
+      ValueNotifier<BudgetLowAlert?>(null);
+  final List<BudgetLowAlert> _pendingBudgetLowAlerts = [];
 
   FinanceDataSet get dataSet => _dataSet;
   List<AccountRecord> get accounts => _dataSet.accounts;
@@ -2285,9 +2304,78 @@ class FinanceDataStore extends ChangeNotifier {
 
   Future<void> saveTransaction(TransactionRecord transaction) async {
     _validateTransaction(transaction);
+    final before = _dataSet;
     final updated = _upsert(transactions, transaction, (item) => item.id);
     _dataSet = _dataSet.copyWith(transactions: updated);
     await _commit(transaction: transaction);
+    _detectBudgetLowAlerts(before: before, after: _dataSet);
+  }
+
+  void dismissBudgetLowAlert() {
+    if (_pendingBudgetLowAlerts.isEmpty) return;
+    _pendingBudgetLowAlerts.removeAt(0);
+    budgetLowAlertNotifier.value = _pendingBudgetLowAlerts.firstOrNull;
+  }
+
+  void _detectBudgetLowAlerts({
+    required FinanceDataSet before,
+    required FinanceDataSet after,
+  }) {
+    final now = DateTime.now();
+    final calculator = const BudgetCalculator();
+    for (final budget in after.budgets) {
+      if (!budget.isVisible || !budget.lowBudgetAlertEnabled) continue;
+      final beforeBudget = before.budgets
+          .where((item) => item.id == budget.id)
+          .firstOrNull;
+      if (beforeBudget == null || !beforeBudget.isVisible) continue;
+
+      final previous = calculator.calculate(
+        budget: beforeBudget,
+        transactions: before.transactions,
+        categories: before.categories,
+        date: now,
+      );
+      final current = calculator.calculate(
+        budget: budget,
+        transactions: after.transactions,
+        categories: after.categories,
+        date: now,
+      );
+      if (current.configuration.amountMinor <= 0 ||
+          !_isAboveLowBudgetThreshold(beforeBudget, previous) ||
+          !_isAtOrBelowLowBudgetThreshold(budget, current)) {
+        continue;
+      }
+      _pendingBudgetLowAlerts.add(
+        BudgetLowAlert(
+          budgetId: budget.id,
+          budgetName: budget.name,
+          remainingMinor: current.remainingMinor < 0
+              ? 0
+              : current.remainingMinor,
+          periodStart: current.window.start,
+        ),
+      );
+    }
+    if (budgetLowAlertNotifier.value == null &&
+        _pendingBudgetLowAlerts.isNotEmpty) {
+      budgetLowAlertNotifier.value = _pendingBudgetLowAlerts.first;
+    }
+  }
+
+  bool _isAboveLowBudgetThreshold(
+    BudgetRecord budget,
+    BudgetPeriodResult result,
+  ) => !_isAtOrBelowLowBudgetThreshold(budget, result);
+
+  bool _isAtOrBelowLowBudgetThreshold(
+    BudgetRecord budget,
+    BudgetPeriodResult result,
+  ) {
+    if (result.availableMinor <= 0) return result.remainingMinor <= 0;
+    return result.remainingMinor * 10000 <=
+        result.availableMinor * budget.lowBudgetAlertThresholdBasisPoints;
   }
 
   Future<TransactionRecord> addExpense({

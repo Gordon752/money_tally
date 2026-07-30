@@ -61,6 +61,7 @@ class _FinanceHomeState extends State<FinanceHome> {
   var _appliedLaunchPreference = false;
   var _isScrolling = false;
   Timer? _scrollSettleTimer;
+  FinanceDataStore? _budgetAlertStore;
 
   void _setPlanSegment(PlanSegment segment) {
     if (_planSegment == segment) return;
@@ -108,8 +109,18 @@ class _FinanceHomeState extends State<FinanceHome> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final store = FinanceDataStoreScope.read(context);
+    if (_budgetAlertStore != store) {
+      _budgetAlertStore?.budgetLowAlertNotifier.removeListener(
+        _showBudgetLowAlert,
+      );
+      _budgetAlertStore = store;
+      _budgetAlertStore?.budgetLowAlertNotifier.addListener(
+        _showBudgetLowAlert,
+      );
+    }
     if (_appliedLaunchPreference) return;
-    final preferences = FinanceDataStoreScope.read(context).preferences;
+    final preferences = store.preferences;
     selected = financeSectionForLaunchScreen(preferences.launchScreen);
     _planSegment = switch (preferences.launchScreen) {
       LaunchScreen.planGoals => PlanSegment.goals,
@@ -126,10 +137,63 @@ class _FinanceHomeState extends State<FinanceHome> {
   @override
   void dispose() {
     _scrollSettleTimer?.cancel();
+    _budgetAlertStore?.budgetLowAlertNotifier.removeListener(
+      _showBudgetLowAlert,
+    );
     scheduledNotificationLaunchPayload.removeListener(
       _openScheduledFromNotification,
     );
     super.dispose();
+  }
+
+  void _showBudgetLowAlert() {
+    final store = _budgetAlertStore;
+    final alert = store?.budgetLowAlertNotifier.value;
+    if (!mounted || store == null || alert == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || store.budgetLowAlertNotifier.value != alert) return;
+      var consumed = false;
+      void consume() {
+        if (consumed) return;
+        consumed = true;
+        store.dismissBudgetLowAlert();
+      }
+
+      final controller = ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${alert.budgetName} budget is almost used up',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              Text(
+                '${money(alert.remainingMinor, store.preferences.currency)} remains for this budget period.',
+              ),
+            ],
+          ),
+          action: SnackBarAction(
+            label: 'Adjust Budget',
+            onPressed: () {
+              consume();
+              final budget = store.budgets
+                  .where((item) => item.id == alert.budgetId && item.isVisible)
+                  .firstOrNull;
+              if (budget == null) return;
+              _openPlan(PlanSegment.budgets);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  unawaited(showBudgetDialog(context, budget: budget));
+                }
+              });
+            },
+          ),
+        ),
+      );
+      unawaited(controller.closed.then((_) => consume()));
+    });
   }
 
   bool _handleScrollNotification(ScrollNotification notification) {
@@ -1618,6 +1682,7 @@ class AccountGroupCard extends StatelessWidget {
           (total, account) => total + store.balanceForAccount(account.id),
         );
     final progress = accountGroupProgress(context, store, group);
+    final showsLiabilitySummary = progress != null;
     final headerTextStyle = theme.textTheme.titleMedium?.copyWith(
       color: AppTheme.accentStrong,
       fontSize: 19,
@@ -1719,17 +1784,36 @@ class AccountGroupCard extends StatelessWidget {
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (progress != null) ...[
-                          const SizedBox(height: AppSpacing.xs),
+                        if (showsLiabilitySummary) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              top: AppSpacing.xxs,
+                              bottom: AppSpacing.sm,
+                            ),
+                            child: Text(
+                              'Total Balance',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.15,
+                              ),
+                            ),
+                          ),
                           progress,
                         ],
-                        const SizedBox(height: AppSpacing.xs),
+                        SizedBox(
+                          height: showsLiabilitySummary
+                              ? AppSpacing.md
+                              : AppSpacing.xs,
+                        ),
                         Divider(
                           height: 1,
                           color: theme.colorScheme.outlineVariant.withValues(
                             alpha: 0.55,
                           ),
                         ),
+                        if (showsLiabilitySummary)
+                          const SizedBox(height: AppSpacing.xs),
                         for (var index = 0; index < accounts.length; index++)
                           Dismissible(
                             key: ValueKey(
@@ -1877,7 +1961,7 @@ class AccountGroupProgressStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final value = progress.clamp(0.0, 1.0).toDouble();
     return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1895,13 +1979,14 @@ class AccountGroupProgressStrip extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(AppRadii.pill),
             child: SizedBox(
-              height: 5,
+              height: 4,
               child: LinearProgressIndicator(
                 value: value,
                 backgroundColor: Theme.of(
                   context,
-                ).colorScheme.outlineVariant.withValues(alpha: 0.75),
-                color: isOver ? AppColors.danger : AppColors.accent,
+                ).colorScheme.outlineVariant.withValues(alpha: 0.62),
+                color: (isOver ? AppColors.danger : AppColors.accent)
+                    .withValues(alpha: 0.82),
               ),
             ),
           ),
@@ -9783,16 +9868,40 @@ String budgetPeriodDateRange(BudgetPeriodWindow window) {
       '${window.start.year}–${months[end.month - 1]} ${end.day}, ${end.year}';
 }
 
+String budgetPeriodAnchorDescription(BudgetPeriod period, DateTime startDate) {
+  return switch (period) {
+    BudgetPeriod.weekly =>
+      'Each week begins on ${budgetWeekdayLabel(startDate.weekday)}.',
+    BudgetPeriod.biweekly => 'Each period lasts 14 days from this start date.',
+    BudgetPeriod.monthly =>
+      'Each month begins on day ${startDate.day}; shorter months use their final day.',
+    BudgetPeriod.quarterly =>
+      'Each 3-month period begins on this date; shorter months use their final day.',
+    BudgetPeriod.yearly =>
+      'Each year begins on this month and day; shorter dates use their final day.',
+  };
+}
+
+String budgetWeekdayLabel(int weekday) => const [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+][weekday - 1];
+
 class _BudgetFormResult {
   const _BudgetFormResult({
     required this.name,
     required this.amountMinor,
     required this.categoryIds,
     required this.period,
-    required this.anchorDate,
-    required this.weekStartDay,
+    required this.startDate,
     required this.rolloverEnabled,
     required this.includeSubcategories,
+    required this.lowBudgetAlertEnabled,
     required this.note,
   });
 
@@ -9800,10 +9909,10 @@ class _BudgetFormResult {
   final int amountMinor;
   final List<String> categoryIds;
   final BudgetPeriod period;
-  final DateTime anchorDate;
-  final int weekStartDay;
+  final DateTime startDate;
   final bool rolloverEnabled;
   final bool includeSubcategories;
+  final bool lowBudgetAlertEnabled;
   final String note;
 }
 
@@ -10054,10 +10163,12 @@ Future<void> showBudgetDialog(
   var amountMinor = currentConfiguration?.amountMinor ?? 0;
   final selectedCategoryIds = {...?currentConfiguration?.categoryIds};
   var period = currentConfiguration?.period ?? BudgetPeriod.monthly;
-  var anchorDate = currentConfiguration?.anchorDate ?? now;
-  var weekStartDay = currentConfiguration?.weekStartDay ?? DateTime.sunday;
+  var startDate = currentConfiguration == null
+      ? now
+      : calculator.inferredStartDate(currentConfiguration, date: now);
   var rolloverEnabled = currentConfiguration?.rolloverEnabled ?? false;
   var includeSubcategories = currentConfiguration?.includeSubcategories ?? true;
+  var lowBudgetAlertEnabled = budget?.lowBudgetAlertEnabled ?? true;
   final categories = dataStore.categories
       .where(
         (category) =>
@@ -10096,10 +10207,10 @@ Future<void> showBudgetDialog(
               amountMinor: amountMinor.abs(),
               categoryIds: selectedCategoryIds.toList(),
               period: period,
-              anchorDate: budgetDateKey(anchorDate),
-              weekStartDay: weekStartDay,
+              startDate: budgetDateKey(startDate),
               rolloverEnabled: rolloverEnabled,
               includeSubcategories: includeSubcategories,
+              lowBudgetAlertEnabled: lowBudgetAlertEnabled,
               note: note.text.trim(),
             ),
           );
@@ -10236,6 +10347,22 @@ Future<void> showBudgetDialog(
                 ),
               ],
               const TransactionFormDivider(),
+              TransactionFormLabel('Start Date'),
+              InkWell(
+                key: const ValueKey('budget-start-date'),
+                onTap: () async {
+                  final selected = await pickDateForField(context, startDate);
+                  if (selected != null) {
+                    setDialogState(() => startDate = selected);
+                  }
+                },
+                child: TransactionFormValueRow(
+                  icon: AppIcon.calendar,
+                  value: fullMonthDateLabel(startDate),
+                  trailing: Icon(AppIcon.chevronDown),
+                ),
+              ),
+              const TransactionFormDivider(),
               TransactionFormLabel('Period'),
               InkWell(
                 key: const ValueKey('budget-period'),
@@ -10254,12 +10381,7 @@ Future<void> showBudgetDialog(
                     ],
                   );
                   if (selected != null) {
-                    setDialogState(() {
-                      period = selected;
-                      if (period != BudgetPeriod.biweekly) {
-                        anchorDate = now;
-                      }
-                    });
+                    setDialogState(() => period = selected);
                   }
                 },
                 child: TransactionFormValueRow(
@@ -10269,67 +10391,13 @@ Future<void> showBudgetDialog(
                 ),
               ),
               const TransactionFormDivider(),
-              if (period == BudgetPeriod.weekly) ...[
-                TransactionFormLabel('Week starts'),
-                InkWell(
-                  key: const ValueKey('budget-week-start'),
-                  onTap: () async {
-                    final selected = await showPolishedChoicePicker(
-                      context,
-                      title: 'Week starts',
-                      selected: weekStartDay,
-                      choices: [
-                        PolishedChoice(value: DateTime.sunday, label: 'Sunday'),
-                        PolishedChoice(value: DateTime.monday, label: 'Monday'),
-                      ],
-                    );
-                    if (selected != null) {
-                      setDialogState(() => weekStartDay = selected);
-                    }
-                  },
-                  child: TransactionFormValueRow(
-                    icon: AppIcon.calendar,
-                    value: weekStartDay == DateTime.monday
-                        ? 'Monday'
-                        : 'Sunday',
-                    trailing: Icon(AppIcon.chevronDown),
-                  ),
+              Text(
+                budgetPeriodAnchorDescription(period, startDate),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
-                const TransactionFormDivider(),
-              ] else if (period == BudgetPeriod.biweekly) ...[
-                TransactionFormLabel('Period anchor'),
-                InkWell(
-                  key: const ValueKey('budget-anchor-date'),
-                  onTap: () async {
-                    final selected = await pickDateForField(
-                      context,
-                      anchorDate,
-                    );
-                    if (selected != null) {
-                      setDialogState(() => anchorDate = selected);
-                    }
-                  },
-                  child: TransactionFormValueRow(
-                    icon: AppIcon.calendar,
-                    value: fullMonthDateLabel(anchorDate),
-                    secondary: 'Each period lasts 14 days',
-                    trailing: Icon(AppIcon.chevronDown),
-                  ),
-                ),
-                const TransactionFormDivider(),
-              ] else ...[
-                TransactionFormLabel('Reset rule'),
-                TransactionFormValueRow(
-                  icon: AppIcon.recurrence,
-                  value: switch (period) {
-                    BudgetPeriod.monthly => 'First day of each month',
-                    BudgetPeriod.quarterly => 'Calendar quarters',
-                    BudgetPeriod.yearly => 'January 1',
-                    _ => period.label,
-                  },
-                ),
-                const TransactionFormDivider(),
-              ],
+              ),
+              const TransactionFormDivider(),
               SwitchListTile.adaptive(
                 key: const ValueKey('budget-rollover'),
                 contentPadding: EdgeInsets.zero,
@@ -10343,6 +10411,19 @@ Future<void> showBudgetDialog(
                 value: rolloverEnabled,
                 onChanged: (value) =>
                     setDialogState(() => rolloverEnabled = value),
+              ),
+              const TransactionFormDivider(),
+              SwitchListTile.adaptive(
+                key: const ValueKey('budget-low-alert'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Low Budget Alert',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text('Notify me when 5% remains.'),
+                value: lowBudgetAlertEnabled,
+                onChanged: (value) =>
+                    setDialogState(() => lowBudgetAlertEnabled = value),
               ),
               const TransactionFormDivider(),
               TransactionFormLabel('Note'),
@@ -10386,10 +10467,8 @@ Future<void> showBudgetDialog(
       period: result.period,
       amountMinor: result.amountMinor,
       categoryIds: result.categoryIds,
-      anchorDate: result.period == BudgetPeriod.biweekly
-          ? result.anchorDate
-          : now,
-      weekStartDay: result.weekStartDay,
+      startDate: result.startDate,
+      anchorDate: result.startDate,
       rolloverEnabled: result.rolloverEnabled,
       includeSubcategories: result.includeSubcategories,
     );
@@ -10404,10 +10483,11 @@ Future<void> showBudgetDialog(
         period: result.period,
         amountMinor: result.amountMinor,
         categoryIds: result.categoryIds,
+        startDate: configuration.startDate,
         anchorDate: configuration.anchorDate,
-        weekStartDay: result.weekStartDay,
         rolloverEnabled: result.rolloverEnabled,
         includeSubcategories: result.includeSubcategories,
+        lowBudgetAlertEnabled: result.lowBudgetAlertEnabled,
         note: result.note,
         configurationRevisions: [configuration],
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
@@ -10418,12 +10498,10 @@ Future<void> showBudgetDialog(
 
   final structuralChange =
       result.period != currentConfiguration!.period ||
-      result.weekStartDay != currentConfiguration.weekStartDay ||
-      (result.period == BudgetPeriod.biweekly &&
-          !isSameCalendarDay(
-            result.anchorDate,
-            currentConfiguration.anchorDate,
-          ));
+      !isSameCalendarDay(
+        result.startDate,
+        calculator.inferredStartDate(currentConfiguration, date: now),
+      );
   final financialChange =
       result.amountMinor != currentConfiguration.amountMinor ||
       !_sameStringSet(result.categoryIds, currentConfiguration.categoryIds) ||
@@ -10478,22 +10556,23 @@ Future<void> showBudgetDialog(
     currentConfiguration,
     now,
   );
-  final changeEffectiveDate = scope == _BudgetEditScope.nextPeriod
-      ? currentWindow.endExclusive
-      : currentWindow.start;
-  final changed = currentConfiguration.copyWith(
+  final changedDraft = currentConfiguration.copyWith(
     id: '${budget.id}_configuration_${DateTime.now().microsecondsSinceEpoch}',
-    effectiveDate: changeEffectiveDate,
     period: result.period,
     amountMinor: result.amountMinor,
     categoryIds: result.categoryIds,
-    anchorDate: result.period == BudgetPeriod.biweekly
-        ? result.anchorDate
-        : changeEffectiveDate,
-    weekStartDay: result.weekStartDay,
+    startDate: result.startDate,
+    anchorDate: result.startDate,
     rolloverEnabled: result.rolloverEnabled,
     includeSubcategories: result.includeSubcategories,
   );
+  final changeEffectiveDate = scope == _BudgetEditScope.nextPeriod
+      ? calculator.firstPeriodStartOnOrAfter(
+          changedDraft,
+          currentWindow.endExclusive,
+        )
+      : currentWindow.start;
+  final changed = changedDraft.copyWith(effectiveDate: changeEffectiveDate);
   final revisions = calculator.normalizedRevisions(budget).where((revision) {
     final effective = budgetDateKey(revision.effectiveDate);
     if (scope == _BudgetEditScope.nextPeriod) {
@@ -10528,10 +10607,12 @@ Future<void> showBudgetDialog(
       period: latest.period,
       amountMinor: latest.amountMinor,
       categoryIds: latest.categoryIds,
+      startDate: latest.startDate,
       anchorDate: latest.anchorDate,
       weekStartDay: latest.weekStartDay,
       rolloverEnabled: latest.rolloverEnabled,
       includeSubcategories: latest.includeSubcategories,
+      lowBudgetAlertEnabled: result.lowBudgetAlertEnabled,
       note: result.note,
       configurationRevisions: revisions,
     ),

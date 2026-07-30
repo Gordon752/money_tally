@@ -30,7 +30,7 @@ String goalTypeLabel(GoalType type) {
 
 String goalTypeBadgeLabel(GoalType type) {
   return switch (type) {
-    GoalType.reachTarget => 'Terminal',
+    GoalType.reachTarget => 'Target',
     GoalType.maintainBalance => 'Replenishing',
   };
 }
@@ -1070,7 +1070,7 @@ Future<void> showGoalEditor(
                   value: targetDate == null
                       ? goalType == GoalType.maintainBalance
                             ? 'No restore-by date'
-                            : 'No target date'
+                            : 'No deadline'
                       : fullMonthDateLabel(targetDate!),
                   secondary: goalType == GoalType.maintainBalance
                       ? 'Optional date to replenish a reserve below target'

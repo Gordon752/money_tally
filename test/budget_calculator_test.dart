@@ -55,6 +55,54 @@ void main() {
       );
     });
 
+    test('start date anchors weekly monthly and yearly periods', () {
+      final weekly = _configuration(
+        period: BudgetPeriod.weekly,
+        startDate: DateTime(2026, 7, 15),
+      );
+      final monthly = _configuration(
+        period: BudgetPeriod.monthly,
+        startDate: DateTime(2026, 7, 15),
+      );
+      final yearly = _configuration(
+        period: BudgetPeriod.yearly,
+        startDate: DateTime(2026, 7, 15),
+      );
+
+      expect(
+        calculator.periodWindowContaining(weekly, DateTime(2026, 7, 22)).start,
+        DateTime(2026, 7, 22),
+      );
+      expect(
+        calculator.periodWindowContaining(monthly, DateTime(2026, 8, 14)),
+        isA<BudgetPeriodWindow>()
+            .having((window) => window.start, 'start', DateTime(2026, 7, 15))
+            .having(
+              (window) => window.endExclusive,
+              'end',
+              DateTime(2026, 8, 15),
+            ),
+      );
+      expect(
+        calculator.periodWindowContaining(yearly, DateTime(2027, 7, 14)).start,
+        DateTime(2026, 7, 15),
+      );
+    });
+
+    test('anchored monthly periods clamp shorter months safely', () {
+      final configuration = _configuration(
+        period: BudgetPeriod.monthly,
+        startDate: DateTime(2026, 1, 31),
+      );
+      final window = calculator.periodWindowContaining(
+        configuration,
+        DateTime(2026, 2, 28),
+      );
+
+      expect(window.start, DateTime(2026, 2, 28));
+      expect(window.endExclusive, DateTime(2026, 3, 31));
+    });
+
     test('calendar monthly, quarterly, and yearly periods are stable', () {
       final monthly = calculator.periodWindowContaining(
         _configuration(period: BudgetPeriod.monthly),
@@ -358,6 +406,7 @@ BudgetConfigurationRevision _configuration({
   BudgetPeriod period = BudgetPeriod.monthly,
   DateTime? effectiveDate,
   DateTime? anchorDate,
+  DateTime? startDate,
   int amountMinor = 60000,
   List<String> categoryIds = const ['groceries'],
   int weekStartDay = DateTime.sunday,
@@ -371,6 +420,7 @@ BudgetConfigurationRevision _configuration({
     period: period,
     amountMinor: amountMinor,
     categoryIds: categoryIds,
+    startDate: startDate,
     anchorDate: anchorDate ?? effective,
     weekStartDay: weekStartDay,
     rolloverEnabled: rolloverEnabled,

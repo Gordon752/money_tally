@@ -168,6 +168,18 @@ class BudgetCalculator {
     DateTime date,
   ) {
     final key = budgetDateKey(date);
+    final startDate = configuration.startDate;
+    if (startDate != null) {
+      return _anchoredPeriodWindow(
+        period: configuration.period,
+        startDate: budgetDateKey(startDate),
+        date: key,
+      );
+    }
+
+    // Budgets created before Start Date retain their established calendar or
+    // week-start behavior. This avoids changing existing period totals merely
+    // because the app was upgraded.
     final anchor = budgetDateKey(configuration.anchorDate);
     return switch (configuration.period) {
       BudgetPeriod.weekly => () {
@@ -204,6 +216,89 @@ class BudgetCalculator {
         endExclusive: DateTime(key.year + 1),
       ),
     };
+  }
+
+  /// A safe display/default anchor for a legacy configuration. It preserves
+  /// the period boundary the user already has today; the value is persisted
+  /// only when that Budget is next saved.
+  DateTime inferredStartDate(
+    BudgetConfigurationRevision configuration, {
+    required DateTime date,
+  }) =>
+      configuration.startDate ??
+      periodWindowContaining(configuration, date).start;
+
+  DateTime firstPeriodStartOnOrAfter(
+    BudgetConfigurationRevision configuration,
+    DateTime date,
+  ) {
+    final window = periodWindowContaining(configuration, date);
+    return window.start.isBefore(budgetDateKey(date))
+        ? window.endExclusive
+        : window.start;
+  }
+
+  BudgetPeriodWindow _anchoredPeriodWindow({
+    required BudgetPeriod period,
+    required DateTime startDate,
+    required DateTime date,
+  }) {
+    switch (period) {
+      case BudgetPeriod.weekly:
+        return _dayIntervalWindow(startDate, date, 7);
+      case BudgetPeriod.biweekly:
+        return _dayIntervalWindow(startDate, date, 14);
+      case BudgetPeriod.monthly:
+        return _monthIntervalWindow(startDate, date, 1);
+      case BudgetPeriod.quarterly:
+        return _monthIntervalWindow(startDate, date, 3);
+      case BudgetPeriod.yearly:
+        return _monthIntervalWindow(startDate, date, 12);
+    }
+  }
+
+  BudgetPeriodWindow _dayIntervalWindow(
+    DateTime startDate,
+    DateTime date,
+    int intervalDays,
+  ) {
+    final deltaDays = date.difference(startDate).inDays;
+    final periodIndex = _floorDivide(deltaDays, intervalDays);
+    final start = startDate.add(Duration(days: periodIndex * intervalDays));
+    return BudgetPeriodWindow(
+      start: start,
+      endExclusive: start.add(Duration(days: intervalDays)),
+    );
+  }
+
+  BudgetPeriodWindow _monthIntervalWindow(
+    DateTime startDate,
+    DateTime date,
+    int intervalMonths,
+  ) {
+    final monthDifference =
+        (date.year - startDate.year) * 12 + date.month - startDate.month;
+    var periodIndex = _floorDivide(monthDifference, intervalMonths);
+    var start = _addMonthsClamped(startDate, periodIndex * intervalMonths);
+    if (start.isAfter(date)) {
+      periodIndex--;
+      start = _addMonthsClamped(startDate, periodIndex * intervalMonths);
+    }
+    return BudgetPeriodWindow(
+      start: start,
+      endExclusive: _addMonthsClamped(
+        startDate,
+        (periodIndex + 1) * intervalMonths,
+      ),
+    );
+  }
+
+  DateTime _addMonthsClamped(DateTime date, int months) {
+    final monthIndex = date.month - 1 + months;
+    final year = date.year + (monthIndex ~/ 12);
+    final month = monthIndex % 12 + 1;
+    final lastDay = DateTime(year, month + 1, 0).day;
+    return DateTime(year, month, date.day > lastDay ? lastDay : date.day);
   }
 
   List<BudgetConfigurationRevision> _normalizedRevisions(BudgetRecord budget) {
@@ -251,6 +346,9 @@ class BudgetCalculator {
   ) {
     final naturalWindow = periodWindowContaining(configuration, periodStart);
     if (naturalWindow.start.isBefore(periodStart)) {
+      return naturalWindow.endExclusive;
+    }
+    if (configuration.startDate != null) {
       return naturalWindow.endExclusive;
     }
     return switch (configuration.period) {

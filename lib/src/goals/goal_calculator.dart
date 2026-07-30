@@ -25,7 +25,7 @@ extension GoalProgressStatusLabel on GoalProgressStatus {
       GoalProgressStatus.onTrack => 'On track',
       GoalProgressStatus.behind => 'Behind',
       GoalProgressStatus.seriouslyBehind => 'Behind',
-      GoalProgressStatus.noTargetDate => 'No target date',
+      GoalProgressStatus.noTargetDate => 'No deadline',
       GoalProgressStatus.completed => 'Completed',
       GoalProgressStatus.aboveReserveTarget => 'Above reserve target',
       GoalProgressStatus.fullyFunded => 'Fully funded',
