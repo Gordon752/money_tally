@@ -113,6 +113,7 @@ class ScheduledTransactionRecord {
     this.categoryId,
     this.splitLines = const [],
     this.goalFundingAllocations = const [],
+    this.goalId,
     this.endDate,
     this.alertPreference = AlertPreference.none,
     this.customAlertTimeMinutes,
@@ -132,6 +133,10 @@ class ScheduledTransactionRecord {
 
   /// Allocation plan for a scheduled [TransactionType.goalFunding] record.
   final List<ScheduledGoalFundingAllocation> goalFundingAllocations;
+
+  /// Marks a normal scheduled transfer as Goal funding for presentation and
+  /// Goal-specific reminder language. Financially it remains a transfer.
+  final String? goalId;
   final String payee;
   final String note;
   final int amountMinor;
@@ -149,6 +154,9 @@ class ScheduledTransactionRecord {
 
   bool get hasAlert => alertPreference != AlertPreference.none;
   bool get isDeleted => sync.isDeleted;
+  bool get isGoalFunding =>
+      type == TransactionType.goalFunding ||
+      (goalId != null && goalId!.isNotEmpty);
   List<TransactionSplitLine> get effectiveCategoryAllocations {
     return resolveEffectiveCategoryAllocations(
       type: type,
@@ -204,6 +212,7 @@ class ScheduledTransactionRecord {
     String? categoryId,
     List<TransactionSplitLine>? splitLines,
     List<ScheduledGoalFundingAllocation>? goalFundingAllocations,
+    String? goalId,
     String? payee,
     String? note,
     int? amountMinor,
@@ -220,6 +229,7 @@ class ScheduledTransactionRecord {
     SyncMetadata? sync,
     bool clearTransferAccount = false,
     bool clearCategory = false,
+    bool clearGoalId = false,
     bool clearEndDate = false,
     bool clearCustomAlertTime = false,
     bool clearLastReminderScheduledAt = false,
@@ -235,6 +245,7 @@ class ScheduledTransactionRecord {
       splitLines: splitLines ?? this.splitLines,
       goalFundingAllocations:
           goalFundingAllocations ?? this.goalFundingAllocations,
+      goalId: clearGoalId ? null : goalId ?? this.goalId,
       payee: payee ?? this.payee,
       note: note ?? this.note,
       amountMinor: amountMinor ?? this.amountMinor,
@@ -269,6 +280,7 @@ class ScheduledTransactionRecord {
       'goalFundingAllocations': goalFundingAllocations
           .map((allocation) => allocation.toJson())
           .toList(),
+      'goalId': goalId,
       'payee': payee,
       'note': note,
       'amountMinor': amountMinor,
@@ -303,6 +315,7 @@ class ScheduledTransactionRecord {
       goalFundingAllocations: stringMapList(
         json['goalFundingAllocations'],
       ).map(ScheduledGoalFundingAllocation.fromJson).toList(),
+      goalId: json['goalId'] as String?,
       payee: json['payee'] as String? ?? '',
       note: json['note'] as String? ?? '',
       amountMinor: json['amountMinor'] as int? ?? 0,

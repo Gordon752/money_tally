@@ -42,6 +42,8 @@ class AccountRecord {
     this.includeInGroupBalance = true,
     this.includeInNetWorth = true,
     this.sortOrder = 0,
+    this.goalId,
+    this.isDetachedGoalAccount = false,
   });
 
   final String id;
@@ -54,11 +56,24 @@ class AccountRecord {
   final bool includeInGroupBalance;
   final bool includeInNetWorth;
   final int sortOrder;
+
+  /// A non-null value makes this an internal savings account owned by a Goal.
+  /// It deliberately remains an ordinary asset [type] so the proven account
+  /// and transaction machinery can calculate its balance without a parallel
+  /// Goal ledger.
+  final String? goalId;
+
+  /// Retains a zero-balance historical Goal account after its Goal presentation
+  /// has been permanently deleted.  Ledger history remains resolvable, while
+  /// the account never becomes an ordinary Accounts-page card.
+  final bool isDetachedGoalAccount;
   final SyncMetadata sync;
 
   AccountGroup get group => type.group;
   bool get isDeleted => sync.isDeleted;
   bool get isVisible => !isArchived && !isDeleted;
+  bool get isGoalAccount => goalId != null && goalId!.isNotEmpty;
+  bool get isInternalGoalAccount => isGoalAccount || isDetachedGoalAccount;
 
   AccountRecord copyWith({
     String? name,
@@ -70,9 +85,12 @@ class AccountRecord {
     bool? includeInGroupBalance,
     bool? includeInNetWorth,
     int? sortOrder,
+    String? goalId,
+    bool? isDetachedGoalAccount,
     SyncMetadata? sync,
     bool clearCreditLimit = false,
     bool clearOriginalLoanAmount = false,
+    bool clearGoalId = false,
   }) {
     return AccountRecord(
       id: id,
@@ -90,6 +108,9 @@ class AccountRecord {
           includeInGroupBalance ?? this.includeInGroupBalance,
       includeInNetWorth: includeInNetWorth ?? this.includeInNetWorth,
       sortOrder: sortOrder ?? this.sortOrder,
+      goalId: clearGoalId ? null : goalId ?? this.goalId,
+      isDetachedGoalAccount:
+          isDetachedGoalAccount ?? this.isDetachedGoalAccount,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -106,6 +127,8 @@ class AccountRecord {
       'includeInGroupBalance': includeInGroupBalance,
       'includeInNetWorth': includeInNetWorth,
       'sortOrder': sortOrder,
+      'goalId': goalId,
+      'isDetachedGoalAccount': isDetachedGoalAccount,
       'sync': sync.toJson(),
     };
   }
@@ -122,6 +145,8 @@ class AccountRecord {
       includeInGroupBalance: json['includeInGroupBalance'] as bool? ?? true,
       includeInNetWorth: json['includeInNetWorth'] as bool? ?? true,
       sortOrder: json['sortOrder'] as int? ?? 0,
+      goalId: json['goalId'] as String?,
+      isDetachedGoalAccount: json['isDetachedGoalAccount'] as bool? ?? false,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

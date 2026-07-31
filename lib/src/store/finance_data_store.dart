@@ -108,7 +108,7 @@ class FinanceDataStore extends ChangeNotifier {
     String deviceId = 'local',
   }) async {
     final localData = await localRepository.load();
-    return FinanceDataStore(
+    final store = FinanceDataStore(
       dataSet:
           localData ??
           const FinanceDataSet(
@@ -125,6 +125,8 @@ class FinanceDataStore extends ChangeNotifier {
       userId: userId,
       deviceId: deviceId,
     );
+    await store.migrateLegacyGoalsToAccounts();
+    return store;
   }
 
   FinanceDataSet _dataSet;
@@ -154,7 +156,7 @@ class FinanceDataStore extends ChangeNotifier {
   List<AccountRecord> get activeAccountsInDisplayOrder {
     final groupOrder = accountGroupDisplayOrderIndexes;
     return accounts
-        .where((account) => account.isVisible)
+        .where((account) => account.isVisible && !account.isInternalGoalAccount)
         .toList(growable: false)
       ..sort(
         (a, b) => compareAccountDisplayOrder(a, b, groupOrder: groupOrder),
@@ -305,7 +307,10 @@ class FinanceDataStore extends ChangeNotifier {
   int get fundedGoalAssetsMinor {
     final visibleGoalIds = {
       for (final goal in goals)
-        if (!goal.isDeleted && !goal.requiresFundingMigration) goal.id,
+        if (!goal.isDeleted &&
+            !goal.requiresFundingMigration &&
+            !goal.isAccountBacked)
+          goal.id,
     };
     return goalFundingEvents
         .where((event) => event.isActive)
@@ -349,6 +354,13 @@ class FinanceDataStore extends ChangeNotifier {
 
   int currentGoalAmountMinor(String goalId) {
     final goal = goalById(goalId);
+    final accountId = goal.accountId;
+    if (accountId != null &&
+        accounts.any(
+          (account) => account.id == accountId && !account.isDeleted,
+        )) {
+      return balanceForAccount(accountId);
+    }
     return const GoalCalculator().currentAmountMinor(
       goal,
       goalContributions,
@@ -357,10 +369,14 @@ class FinanceDataStore extends ChangeNotifier {
   }
 
   GoalProgressMetrics goalMetrics(String goalId, {DateTime? now}) {
+    final goal = goalById(goalId);
     return const GoalCalculator().calculate(
-      goalById(goalId),
+      goal,
       goalContributions,
       fundingEvents: goalFundingEvents,
+      currentAmountMinorOverride: goal.isAccountBacked
+          ? currentGoalAmountMinor(goalId)
+          : null,
       now: now,
     );
   }
@@ -666,11 +682,205 @@ class FinanceDataStore extends ChangeNotifier {
         current: _dataSet,
       );
       await replaceDataSet(merged);
+      await migrateLegacyGoalsToAccounts();
       await pushAllRecordsToRemote();
       return;
     }
 
     await pushAllRecordsToRemote();
+  }
+
+  /// Converts the former Goal-reservation/funding graph to the normal account
+  /// and transfer graph exactly once.  Generated IDs are deterministic, so a
+  /// restart or a second device can finish an interrupted migration without
+  /// duplicating money movements.
+  Future<void> migrateLegacyGoalsToAccounts() async {
+    final candidates = goals
+        .where((goal) => !goal.isDeleted && !goal.isAccountBacked)
+        .toList(growable: false);
+    if (candidates.isEmpty) return;
+
+    final activeContributions = <String, int>{};
+    for (final contribution in goalContributions) {
+      if (!contribution.isActive) continue;
+      activeContributions.update(
+        contribution.goalId,
+        (value) => value + contribution.amountMinor.abs(),
+        ifAbsent: () => contribution.amountMinor.abs(),
+      );
+    }
+    final activeAllocations = <String, int>{};
+    for (final event in goalFundingEvents.where((event) => event.isActive)) {
+      for (final allocation in event.allocations) {
+        activeAllocations.update(
+          allocation.goalId,
+          (value) => value + allocation.amountMinor.abs(),
+          ifAbsent: () => allocation.amountMinor.abs(),
+        );
+      }
+    }
+
+    final backingGoals = <GoalRecord>[];
+    for (final goal in candidates) {
+      final hasHistory =
+          (activeContributions[goal.id] ?? 0) > 0 ||
+          (activeAllocations[goal.id] ?? 0) > 0 ||
+          goal.startingAmountMinor != 0 ||
+          scheduledGoalFundingNeedsAttention(goal.id);
+      // An inactive empty/test definition remains directly deletable; creating
+      // an otherwise useless hidden account would make its cleanup harder.
+      if (!hasHistory && !goal.isActive) continue;
+      backingGoals.add(goal);
+    }
+    if (backingGoals.isEmpty) return;
+
+    final accountsToCreate = <AccountRecord>[];
+    final migratedGoals = <GoalRecord>[];
+    for (final goal in backingGoals) {
+      final accountId = 'goal_account_${goal.id}';
+      if (!accounts.any((account) => account.id == accountId)) {
+        // Contributions and starting progress had no ordinary account effect
+        // in the retired model. They become the opening balance. Account-funded
+        // events are represented below as historical standard transfers.
+        final openingBalance =
+            goal.startingAmountMinor.abs() +
+            (activeContributions[goal.id] ?? 0);
+        accountsToCreate.add(
+          AccountRecord(
+            id: accountId,
+            name: goal.name,
+            type: AccountType.savings,
+            openingBalanceMinor: openingBalance,
+            includeInGroupBalance: false,
+            includeInNetWorth: true,
+            goalId: goal.id,
+            sync: SyncMetadata.fresh(deviceId: deviceId),
+          ),
+        );
+      }
+      migratedGoals.add(
+        goal.copyWith(
+          accountId: accountId,
+          accountMigrationVersion: 1,
+          fundingMethod: GoalFundingMethod.accountFunded,
+          requiresFundingMigration: false,
+          sync: _touchAfterCurrent(goal.sync),
+        ),
+      );
+    }
+    final accountIdByGoalId = {
+      for (final goal in goals.where((goal) => goal.isAccountBacked))
+        goal.id: goal.accountId!,
+      for (final goal in migratedGoals) goal.id: goal.accountId!,
+    };
+    final transfers = <TransactionRecord>[];
+    final reclassifiedEvents = <GoalFundingEventRecord>[];
+    for (final event in goalFundingEvents.where(
+      (event) => event.isActive && !event.isMigrationEvent,
+    )) {
+      final destinations = [
+        for (final allocation in event.allocations)
+          accountIdByGoalId[allocation.goalId],
+      ];
+      // If a tombstoned/unknown Goal is referenced, retain the legacy event
+      // untouched instead of guessing a recipient account.
+      if (destinations.any((accountId) => accountId == null)) continue;
+      for (var index = 0; index < event.allocations.length; index += 1) {
+        final allocation = event.allocations[index];
+        final id = 'goal_migration_transfer_${event.id}_${allocation.id}';
+        if (transactions.any((transaction) => transaction.id == id)) continue;
+        final goal =
+            migratedGoals
+                .where((goal) => goal.id == allocation.goalId)
+                .firstOrNull ??
+            goals.where((goal) => goal.id == allocation.goalId).first;
+        transfers.add(
+          TransactionRecord(
+            id: id,
+            type: TransactionType.transfer,
+            accountId: event.sourceAccountId,
+            transferAccountId: accountIdByGoalId[allocation.goalId],
+            date: event.date,
+            payee: 'Funded ${goal.name}',
+            amountMinor: allocation.amountMinor.abs(),
+            note: event.note,
+            goalFundingEventId: event.id,
+            sync: SyncMetadata.fresh(deviceId: deviceId),
+          ),
+        );
+      }
+      reclassifiedEvents.add(event.copyWith(isMigrationEvent: true));
+    }
+    final migratedSchedules = <ScheduledTransactionRecord>[];
+    for (final schedule in scheduledTransactions.where(
+      (schedule) =>
+          !schedule.isDeleted &&
+          schedule.type == TransactionType.goalFunding &&
+          schedule.goalFundingAllocations.length == 1 &&
+          schedule.occurrences.isEmpty,
+    )) {
+      final allocation = schedule.goalFundingAllocations.single;
+      final destination = accountIdByGoalId[allocation.goalId];
+      final goal = goals
+          .where((goal) => goal.id == allocation.goalId)
+          .firstOrNull;
+      if (destination == null || goal == null) continue;
+      migratedSchedules.add(
+        schedule.copyWith(
+          type: TransactionType.transfer,
+          transferAccountId: destination,
+          goalId: goal.id,
+          goalFundingAllocations: const [],
+          payee: 'Fund ${goal.name}',
+          sync: _touchAfterCurrent(schedule.sync),
+        ),
+      );
+    }
+    if (accountsToCreate.isEmpty &&
+        migratedGoals.isEmpty &&
+        transfers.isEmpty &&
+        migratedSchedules.isEmpty) {
+      return;
+    }
+    final previous = _dataSet;
+    try {
+      _dataSet = _dataSet.copyWith(
+        accounts: [...accounts, ...accountsToCreate],
+        goals: [
+          for (final goal in goals)
+            migratedGoals
+                    .where((updated) => updated.id == goal.id)
+                    .firstOrNull ??
+                goal,
+        ],
+        transactions: [...transactions, ...transfers],
+        goalFundingEvents: [
+          for (final event in goalFundingEvents)
+            reclassifiedEvents
+                    .where((updated) => updated.id == event.id)
+                    .firstOrNull ??
+                event,
+        ],
+        scheduledTransactions: [
+          for (final schedule in scheduledTransactions)
+            migratedSchedules
+                    .where((updated) => updated.id == schedule.id)
+                    .firstOrNull ??
+                schedule,
+        ],
+      );
+      await _commit(
+        accounts: accountsToCreate,
+        transactions: transfers,
+        goalRecords: migratedGoals,
+        goalFundingEvents: reclassifiedEvents,
+        scheduledTransactions: migratedSchedules,
+      );
+    } catch (_) {
+      _dataSet = previous;
+      notifyListeners();
+      rethrow;
+    }
   }
 
   void detachRemoteSync() {
@@ -964,6 +1174,26 @@ class FinanceDataStore extends ChangeNotifier {
   }
 
   GoalDeleteEligibility goalDeleteEligibility(String goalId) {
+    final goal = goalById(goalId);
+    final goalAccountId = goal.accountId;
+    final hasPendingAccountSchedule =
+        goalAccountId != null &&
+        scheduledTransactions.any(
+          (scheduled) =>
+              !scheduled.isDeleted &&
+              (scheduled.accountId == goalAccountId ||
+                  scheduled.transferAccountId == goalAccountId),
+        );
+    if (goalAccountId != null) {
+      return GoalDeleteEligibility(
+        hasContributions: false,
+        hasFunding: false,
+        hasScheduledReference:
+            hasPendingAccountSchedule ||
+            scheduledGoalFundingNeedsAttention(goalId),
+        hasNonZeroBalance: balanceForAccount(goalAccountId) != 0,
+      );
+    }
     final hasContributions = goalContributions.any(
       (item) => item.goalId == goalId,
     );
@@ -982,6 +1212,7 @@ class FinanceDataStore extends ChangeNotifier {
       hasContributions: hasContributions,
       hasFunding: hasFunding,
       hasScheduledReference: hasScheduledReference,
+      hasNonZeroBalance: currentGoalAmountMinor(goalId) != 0,
     );
   }
 
@@ -998,11 +1229,13 @@ class FinanceDataStore extends ChangeNotifier {
 
   Future<void> saveGoal(GoalRecord goal) async {
     _validateGoal(goal);
-    final current = const GoalCalculator().currentAmountMinor(
-      goal,
-      goalContributions,
-      goalFundingEvents,
-    );
+    final current = goal.isAccountBacked
+        ? currentGoalAmountMinor(goal.id)
+        : const GoalCalculator().currentAmountMinor(
+            goal,
+            goalContributions,
+            goalFundingEvents,
+          );
     final adjusted = _goalWithDerivedLifecycleStatus(goal, current);
     _dataSet = _dataSet.copyWith(
       goals: _upsert(goals, adjusted, (item) => item.id),
@@ -1015,7 +1248,7 @@ class FinanceDataStore extends ChangeNotifier {
     required int targetAmountMinor,
     required int startingAmountMinor,
     required DateTime? targetDate,
-    required GoalFundingMethod fundingMethod,
+    GoalFundingMethod fundingMethod = GoalFundingMethod.accountFunded,
     GoalType goalType = GoalType.reachTarget,
     String? defaultFundingAccountId,
     String description = '',
@@ -1037,73 +1270,48 @@ class FinanceDataStore extends ChangeNotifier {
             : 'Choose a future target date for an incomplete Goal.',
       );
     }
-    final isAccountFunded = fundingMethod == GoalFundingMethod.accountFunded;
+    // A Goal is now always a real internal savings account.  Keep the legacy
+    // method parameter solely so older callers/data remain source compatible.
+    final goalId = _newId('goal');
+    final goalAccountId = 'goal_account_$goalId';
     final goal = GoalRecord(
-      id: _newId('goal'),
+      id: goalId,
       name: name.trim(),
       description: description.trim(),
       targetAmountMinor: targetAmountMinor.abs(),
-      startingAmountMinor: isAccountFunded ? 0 : startingAmountMinor.abs(),
+      startingAmountMinor: startingAmountMinor.abs(),
       targetDate: goalTargetDate,
       status:
           goalType == GoalType.reachTarget &&
               startingAmountMinor.abs() >= targetAmountMinor.abs()
           ? GoalStatus.completed
           : GoalStatus.active,
-      fundingMethod: fundingMethod,
+      fundingMethod: GoalFundingMethod.accountFunded,
       goalType: goalType,
-      defaultFundingAccountId: isAccountFunded ? defaultFundingAccountId : null,
+      defaultFundingAccountId: defaultFundingAccountId,
       accentColorValue: accentColorValue,
+      accountId: goalAccountId,
+      accountMigrationVersion: 1,
       sync: SyncMetadata.fresh(now: timestamp, deviceId: deviceId),
     );
     _validateGoal(goal);
-    GoalFundingEventRecord? initialFunding;
-    if (isAccountFunded && startingAmountMinor.abs() > 0) {
-      final accountId = defaultFundingAccountId;
-      final account = accounts
-          .where((item) => item.id == accountId && item.isVisible)
-          .firstOrNull;
-      if (account == null) {
-        throw const FinanceDataValidationException(
-          'Choose an active funding account.',
-        );
-      }
-      if (startingAmountMinor.abs() > balanceForAccount(account.id)) {
-        throw FinanceDataValidationException(
-          '${account.name} does not have enough available balance.',
-        );
-      }
-      final eventId = _newId('goal_funding');
-      initialFunding = GoalFundingEventRecord(
-        id: eventId,
-        sourceAccountId: account.id,
-        totalAmountMinor: startingAmountMinor.abs(),
-        date: today,
-        note: 'Starting Goal balance',
-        allocations: [
-          GoalFundingAllocation(
-            id: _newId('goal_allocation'),
-            fundingEventId: eventId,
-            goalId: goal.id,
-            amountMinor: startingAmountMinor.abs(),
-            order: 0,
-          ),
-        ],
-        sync: SyncMetadata.fresh(now: timestamp, deviceId: deviceId),
-      );
-    }
+    final goalAccount = AccountRecord(
+      id: goalAccountId,
+      name: name.trim(),
+      type: AccountType.savings,
+      openingBalanceMinor: startingAmountMinor.abs(),
+      includeInGroupBalance: false,
+      includeInNetWorth: true,
+      goalId: goal.id,
+      sync: SyncMetadata.fresh(now: timestamp, deviceId: deviceId),
+    );
     final previousDataSet = _dataSet;
     try {
       _dataSet = _dataSet.copyWith(
         goals: _upsert(goals, goal, (item) => item.id),
-        goalFundingEvents: initialFunding == null
-            ? goalFundingEvents
-            : _upsert(goalFundingEvents, initialFunding, (item) => item.id),
+        accounts: _upsert(accounts, goalAccount, (item) => item.id),
       );
-      await _commit(
-        goal: goal,
-        goalFundingEvents: initialFunding == null ? const [] : [initialFunding],
-      );
+      await _commit(goal: goal, accounts: [goalAccount]);
     } catch (_) {
       _dataSet = previousDataSet;
       notifyListeners();
@@ -1214,10 +1422,9 @@ class FinanceDataStore extends ChangeNotifier {
       final goal = goals
           .where((item) => item.id == allocation.goalId && item.isActive)
           .firstOrNull;
-      if (goal == null ||
-          goal.fundingMethod != GoalFundingMethod.accountFunded) {
+      if (goal == null || !goal.isAccountBacked) {
         throw const FinanceDataValidationException(
-          'Choose an active account-funded Goal.',
+          'Choose an active Goal with an available Goal account.',
         );
       }
       if (goal.requiresFundingMigration) {
@@ -1240,6 +1447,9 @@ class FinanceDataStore extends ChangeNotifier {
       totalAmountMinor: amount,
       date: DateTime(date.year, date.month, date.day),
       note: note.trim(),
+      // Retained only to group a multi-Goal action in existing history UI.
+      // Standard transfer records below are the sole balance source.
+      isMigrationEvent: true,
       allocations: [
         for (var index = 0; index < allocations.length; index += 1)
           GoalFundingAllocation(
@@ -1254,6 +1464,24 @@ class FinanceDataStore extends ChangeNotifier {
       ],
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
+    final transferTransactions = <TransactionRecord>[
+      for (final allocation in event.allocations)
+        TransactionRecord(
+          id: 'goal_transfer_${event.id}_${allocation.id}',
+          type: TransactionType.transfer,
+          accountId: sourceAccountId,
+          transferAccountId: goalById(allocation.goalId).accountId!,
+          date: event.date,
+          payee: 'Funded ${goalById(allocation.goalId).name}',
+          amountMinor: allocation.amountMinor,
+          note: event.note,
+          goalFundingEventId: event.id,
+          sync: SyncMetadata.fresh(deviceId: deviceId),
+        ),
+    ];
+    for (final transaction in transferTransactions) {
+      _validateTransaction(transaction);
+    }
     final allocationByGoalId = <String, int>{};
     for (final allocation in event.allocations) {
       allocationByGoalId.update(
@@ -1284,8 +1512,18 @@ class FinanceDataStore extends ChangeNotifier {
       _dataSet = _dataSet.copyWith(
         goals: nextGoals,
         goalFundingEvents: _upsert(goalFundingEvents, event, (item) => item.id),
+        transactions: [
+          ...transactions,
+          for (final transaction in transferTransactions)
+            if (!transactions.any((item) => item.id == transaction.id))
+              transaction,
+        ],
       );
-      await _commit(goalRecords: updatedGoals, goalFundingEvents: [event]);
+      await _commit(
+        goalRecords: updatedGoals,
+        goalFundingEvents: [event],
+        transactions: transferTransactions,
+      );
     } catch (_) {
       _dataSet = previousDataSet;
       notifyListeners();
@@ -1513,6 +1751,18 @@ class FinanceDataStore extends ChangeNotifier {
     final reversed = event.copyWith(
       sync: _touchAfterCurrent(event.sync).deleted(deviceId: deviceId),
     );
+    final reversedTransfers = transactions
+        .where(
+          (transaction) =>
+              !transaction.isDeleted &&
+              transaction.goalFundingEventId == event.id,
+        )
+        .map(
+          (transaction) => transaction.copyWith(
+            sync: transaction.sync.deleted(deviceId: deviceId),
+          ),
+        )
+        .toList(growable: false);
     final affectedGoalIds = event.allocations
         .map((allocation) => allocation.goalId)
         .toSet();
@@ -1615,10 +1865,18 @@ class FinanceDataStore extends ChangeNotifier {
                 restoredSchedule,
                 (item) => item.id,
               ),
+        transactions: [
+          for (final transaction in transactions)
+            reversedTransfers
+                    .where((reversed) => reversed.id == transaction.id)
+                    .firstOrNull ??
+                transaction,
+        ],
       );
       await _commit(
         goalRecords: updatedGoals,
         goalFundingEvents: [reversed],
+        transactions: reversedTransfers,
         scheduledTransaction: restoredSchedule,
       );
       if (restoredSchedule != null) {
@@ -1928,10 +2186,37 @@ class FinanceDataStore extends ChangeNotifier {
       );
     }
     final deleted = goal.copyWith(sync: goal.sync.deleted(deviceId: deviceId));
+    final goalAccount = goal.accountId == null
+        ? null
+        : accounts.where((account) => account.id == goal.accountId).firstOrNull;
+    final hasAccountHistory =
+        goalAccount != null &&
+        transactions.any(
+          (transaction) =>
+              transaction.accountId == goalAccount.id ||
+              transaction.transferAccountId == goalAccount.id,
+        );
+    final updatedAccount = goalAccount == null
+        ? null
+        : hasAccountHistory
+        ? goalAccount.copyWith(
+            clearGoalId: true,
+            isDetachedGoalAccount: true,
+            sync: goalAccount.sync.touched(deviceId: deviceId),
+          )
+        : goalAccount.copyWith(
+            sync: goalAccount.sync.deleted(deviceId: deviceId),
+          );
     _dataSet = _dataSet.copyWith(
       goals: _upsert(goals, deleted, (item) => item.id),
+      accounts: updatedAccount == null
+          ? accounts
+          : _upsert(accounts, updatedAccount, (item) => item.id),
     );
-    await _commit(goal: deleted);
+    await _commit(
+      goal: deleted,
+      accounts: updatedAccount == null ? const [] : [updatedAccount],
+    );
   }
 
   GoalRecord _goalWithDerivedLifecycleStatus(
@@ -1969,18 +2254,6 @@ class FinanceDataStore extends ChangeNotifier {
       throw const FinanceDataValidationException(
         'Goal starting amount cannot be negative.',
       );
-    }
-    if (goal.status != GoalStatus.archived &&
-        goal.fundingMethod == GoalFundingMethod.accountFunded) {
-      final accountId = goal.defaultFundingAccountId;
-      final account = accounts
-          .where((item) => item.id == accountId && item.isVisible)
-          .firstOrNull;
-      if (account == null) {
-        throw const FinanceDataValidationException(
-          'Choose an active funding account.',
-        );
-      }
     }
   }
 
@@ -2524,6 +2797,26 @@ class FinanceDataStore extends ChangeNotifier {
       }
     }
 
+    final sourceAccount = accounts.firstWhere(
+      (account) => account.id == transaction.accountId,
+    );
+    if (sourceAccount.isGoalAccount &&
+        (transaction.type == TransactionType.expense ||
+            transaction.type == TransactionType.transfer)) {
+      final existing = transactions
+          .where((item) => item.id == transaction.id && !item.isDeleted)
+          .firstOrNull;
+      final balanceBeforeEdit =
+          balanceForAccount(sourceAccount.id) -
+          (existing?.deltaForAccount(sourceAccount.id) ?? 0);
+      if (balanceBeforeEdit + transaction.deltaForAccount(sourceAccount.id) <
+          0) {
+        throw FinanceDataValidationException(
+          '${sourceAccount.name} does not have enough available Goal funds.',
+        );
+      }
+    }
+
     if (transaction.type != TransactionType.transfer &&
         transaction.type != TransactionType.adjustment &&
         transaction.type != TransactionType.goalFunding) {
@@ -2654,7 +2947,9 @@ class FinanceDataStore extends ChangeNotifier {
     List<AccountRecord> accounts = const [],
     CategoryRecord? category,
     TransactionRecord? transaction,
+    List<TransactionRecord> transactions = const [],
     ScheduledTransactionRecord? scheduledTransaction,
+    List<ScheduledTransactionRecord> scheduledTransactions = const [],
     BudgetRecord? budget,
     GoalRecord? goal,
     List<GoalRecord> goalRecords = const [],
@@ -2681,10 +2976,22 @@ class FinanceDataStore extends ChangeNotifier {
             transaction: transaction,
           );
         }
+        for (final transactionRecord in transactions) {
+          await remote.saveTransaction(
+            userId: currentUserId,
+            transaction: transactionRecord,
+          );
+        }
         if (scheduledTransaction != null) {
           await remote.saveScheduledTransaction(
             userId: currentUserId,
             scheduledTransaction: scheduledTransaction,
+          );
+        }
+        for (final scheduledTransactionRecord in scheduledTransactions) {
+          await remote.saveScheduledTransaction(
+            userId: currentUserId,
+            scheduledTransaction: scheduledTransactionRecord,
           );
         }
         if (budget != null) {
@@ -2811,14 +3118,15 @@ class GoalDeleteEligibility {
     required this.hasContributions,
     required this.hasFunding,
     required this.hasScheduledReference,
+    this.hasNonZeroBalance = false,
   });
 
   final bool hasContributions;
   final bool hasFunding;
   final bool hasScheduledReference;
+  final bool hasNonZeroBalance;
 
-  bool get canDelete =>
-      !hasContributions && !hasFunding && !hasScheduledReference;
+  bool get canDelete => !hasScheduledReference && !hasNonZeroBalance;
 }
 
 int compareAccountDisplayOrder(

@@ -105,6 +105,7 @@ class TransactionRecord {
     this.scheduledTransactionId,
     this.scheduledOccurrenceDate,
     this.scheduledPlannedAmountMinor,
+    this.goalFundingEventId,
   });
 
   final String id;
@@ -121,6 +122,7 @@ class TransactionRecord {
   final String? scheduledTransactionId;
   final DateTime? scheduledOccurrenceDate;
   final int? scheduledPlannedAmountMinor;
+  final String? goalFundingEventId;
   final SyncMetadata sync;
 
   bool get isDeleted => sync.isDeleted;
@@ -192,10 +194,12 @@ class TransactionRecord {
     String? scheduledTransactionId,
     DateTime? scheduledOccurrenceDate,
     int? scheduledPlannedAmountMinor,
+    String? goalFundingEventId,
     SyncMetadata? sync,
     bool clearTransferAccount = false,
     bool clearCategory = false,
     bool clearScheduledTransaction = false,
+    bool clearGoalFundingEvent = false,
   }) {
     return TransactionRecord(
       id: id,
@@ -220,6 +224,9 @@ class TransactionRecord {
       scheduledPlannedAmountMinor: clearScheduledTransaction
           ? null
           : scheduledPlannedAmountMinor ?? this.scheduledPlannedAmountMinor,
+      goalFundingEventId: clearGoalFundingEvent
+          ? null
+          : goalFundingEventId ?? this.goalFundingEventId,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -240,6 +247,7 @@ class TransactionRecord {
       'scheduledTransactionId': scheduledTransactionId,
       'scheduledOccurrenceDate': scheduledOccurrenceDate?.toIso8601String(),
       'scheduledPlannedAmountMinor': scheduledPlannedAmountMinor,
+      'goalFundingEventId': goalFundingEventId,
       'sync': sync.toJson(),
     };
   }
@@ -272,6 +280,7 @@ class TransactionRecord {
           ? null
           : dateTimeFromJson(json['scheduledOccurrenceDate']),
       scheduledPlannedAmountMinor: json['scheduledPlannedAmountMinor'] as int?,
+      goalFundingEventId: json['goalFundingEventId'] as String?,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

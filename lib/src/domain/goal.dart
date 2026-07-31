@@ -25,6 +25,8 @@ class GoalRecord {
     this.accentColorValue = 0xFF367BF5,
     this.reservationsReleased = false,
     this.requiresFundingMigration = false,
+    this.accountId,
+    this.accountMigrationVersion = 0,
   });
 
   final String id;
@@ -45,6 +47,12 @@ class GoalRecord {
   final int accentColorValue;
   final bool reservationsReleased;
   final bool requiresFundingMigration;
+
+  /// The internal savings account that is the single source of truth for this
+  /// Goal's balance.  Older records omit this until the deterministic
+  /// account-backed Goal migration runs.
+  final String? accountId;
+  final int accountMigrationVersion;
   final SyncMetadata sync;
 
   DateTime get createdDate => sync.createdAt;
@@ -53,6 +61,7 @@ class GoalRecord {
   bool get isActive => !isDeleted && status == GoalStatus.active;
   bool get isCompleted => !isDeleted && status == GoalStatus.completed;
   bool get isArchived => !isDeleted && status == GoalStatus.archived;
+  bool get isAccountBacked => accountId != null && accountId!.isNotEmpty;
 
   GoalRecord copyWith({
     String? name,
@@ -69,11 +78,14 @@ class GoalRecord {
     int? accentColorValue,
     bool? reservationsReleased,
     bool? requiresFundingMigration,
+    String? accountId,
+    int? accountMigrationVersion,
     SyncMetadata? sync,
     bool clearTargetDate = false,
     bool clearCompletedAt = false,
     bool clearArchivedAt = false,
     bool clearDefaultFundingAccount = false,
+    bool clearAccountId = false,
   }) {
     return GoalRecord(
       id: id,
@@ -94,6 +106,9 @@ class GoalRecord {
       reservationsReleased: reservationsReleased ?? this.reservationsReleased,
       requiresFundingMigration:
           requiresFundingMigration ?? this.requiresFundingMigration,
+      accountId: clearAccountId ? null : accountId ?? this.accountId,
+      accountMigrationVersion:
+          accountMigrationVersion ?? this.accountMigrationVersion,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -115,6 +130,8 @@ class GoalRecord {
       'accentColorValue': accentColorValue,
       'reservationsReleased': reservationsReleased,
       'requiresFundingMigration': requiresFundingMigration,
+      'accountId': accountId,
+      'accountMigrationVersion': accountMigrationVersion,
       'sync': sync.toJson(),
     };
   }
@@ -148,6 +165,8 @@ class GoalRecord {
       requiresFundingMigration:
           json['requiresFundingMigration'] as bool? ??
           json['fundingMethod'] == 'reserveFromAccount',
+      accountId: json['accountId'] as String?,
+      accountMigrationVersion: json['accountMigrationVersion'] as int? ?? 0,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

@@ -14,6 +14,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'firebase_options.dart';
 import 'src/design/app_icons.dart';
+import 'src/design/app_haptics.dart';
 import 'src/design/category_icon_catalog.dart';
 import 'src/design/design_tokens.dart';
 import 'src/design/money_format.dart';
@@ -147,11 +148,13 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
         ? migrated
         : mergeDataSetsPreferCurrent(incoming: migrated, current: localDataSet);
     await localRepository.save(dataSet);
-    return FinanceDataStore(
+    final store = FinanceDataStore(
       dataSet: dataSet,
       localRepository: localRepository,
       notificationScheduler: notificationScheduler,
     );
+    await store.migrateLegacyGoalsToAccounts();
+    return store;
   }
 
   @override

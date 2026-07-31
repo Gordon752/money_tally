@@ -66,7 +66,12 @@ class FinanceDataSet {
               total + transaction.deltaForAccount(accountId),
         );
     final goalFundingTotal = goalFundingEvents
-        .where((event) => event.isActive && event.sourceAccountId == accountId)
+        .where(
+          (event) =>
+              event.isActive &&
+              !event.isMigrationEvent &&
+              event.sourceAccountId == accountId,
+        )
         .fold<int>(0, (total, event) => total + event.totalAmountMinor.abs());
     return transactionBalance - goalFundingTotal;
   }

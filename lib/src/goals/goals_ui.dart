@@ -42,10 +42,7 @@ String goalDateLabel(GoalRecord goal) {
 }
 
 String goalFundingMethodLabel(GoalFundingMethod method) {
-  return switch (method) {
-    GoalFundingMethod.accountFunded => 'Move money from an account',
-    GoalFundingMethod.trackingOnly => 'Track progress only',
-  };
+  return 'Goal account';
 }
 
 class GoalsPreviewCard extends StatelessWidget {
@@ -364,8 +361,69 @@ class InactiveGoalCard extends StatelessWidget {
         ),
         trailing: Icon(AppIcon.chevronRight),
         onTap: () => showGoalDetails(context, goal.id),
+        onLongPress: goal.isArchived
+            ? () {
+                AppHaptics.longPressAction();
+                unawaited(showArchivedGoalActions(context, goal.id));
+              }
+            : null,
       ),
     );
+  }
+}
+
+/// Uses the same inactive-Goal actions already available from Goal Details.
+/// This is intentionally limited to archived cards: it is a quick action
+/// entry point, not a second editing surface.
+Future<void> showArchivedGoalActions(
+  BuildContext context,
+  String goalId,
+) async {
+  final store = FinanceDataStoreScope.read(context);
+  final goal = store.goals
+      .where((item) => item.id == goalId && item.isArchived)
+      .firstOrNull;
+  if (goal == null) return;
+  final eligibility = store.goalDeleteEligibility(goal.id);
+  final action = await showPolishedChoicePicker<String>(
+    context,
+    title: goal.name,
+    selected: '',
+    choices: [
+      PolishedChoice(
+        value: 'restore',
+        label: 'Restore',
+        leading: Icon(AppIcon.unarchive),
+      ),
+      PolishedChoice(
+        value: 'duplicate',
+        label: 'Duplicate',
+        leading: Icon(AppIcon.copy),
+      ),
+      if (eligibility.canDelete)
+        PolishedChoice(
+          value: 'delete',
+          label: 'Delete Permanently',
+          leading: Icon(AppIcon.delete),
+        ),
+    ],
+  );
+  if (action == null || !context.mounted) return;
+  switch (action) {
+    case 'restore':
+      await store.restoreGoal(goal.id);
+    case 'duplicate':
+      await store.duplicateGoal(goal.id);
+    case 'delete':
+      final confirmed = await showGoalConfirmation(
+        context,
+        title: 'Delete this Goal permanently?',
+        message:
+            'This Goal has no remaining balance or pending scheduled activity. Ledger history, if any, will remain available.',
+        confirmLabel: 'Delete Permanently',
+        destructive: true,
+      );
+      if (confirmed) await store.deleteGoalPermanently(goal.id);
   }
 }
 
@@ -405,13 +463,7 @@ class GoalsPlanContent extends StatelessWidget {
               Expanded(
                 child: FilledButton.icon(
                   key: const ValueKey('plan-fund-goals'),
-                  onPressed:
-                      active.any(
-                        (goal) =>
-                            goal.fundingMethod ==
-                                GoalFundingMethod.accountFunded &&
-                            !goal.requiresFundingMigration,
-                      )
+                  onPressed: active.any((goal) => goal.isAccountBacked)
                       ? () => showFundGoalsSheet(context)
                       : null,
                   icon: Icon(AppIcon.savings),
@@ -621,16 +673,11 @@ class GoalCard extends StatelessWidget {
     final store = FinanceDataStoreScope.watch(context);
     final metrics = store.goalMetrics(goal.id);
     final statusColor = goalStatusColor(metrics.status);
-    final account = goal.defaultFundingAccountId == null
+    final account = goal.accountId == null
         ? null
-        : store.accounts
-              .where((item) => item.id == goal.defaultFundingAccountId)
-              .firstOrNull;
+        : store.accounts.where((item) => item.id == goal.accountId).firstOrNull;
     final needsAttention =
-        goal.fundingMethod == GoalFundingMethod.accountFunded &&
-        (account == null ||
-            !account.isVisible ||
-            goal.requiresFundingMigration);
+        !goal.isAccountBacked || account == null || !account.isVisible;
     return Card(
       child: InkWell(
         key: ValueKey('goal-card-${goal.id}'),
@@ -700,29 +747,10 @@ class GoalCard extends StatelessWidget {
                   if (!compact && goal.isActive)
                     TextButton(
                       key: ValueKey('goal-add-contribution-${goal.id}'),
-                      onPressed: goal.requiresFundingMigration
-                          ? () => showLegacyGoalMigrationSheet(context, goal.id)
-                          : needsAttention
+                      onPressed: needsAttention
                           ? null
-                          : () =>
-                                goal.fundingMethod ==
-                                    GoalFundingMethod.accountFunded
-                                ? showFundGoalsSheet(
-                                    context,
-                                    initialGoalId: goal.id,
-                                  )
-                                : showAddGoalContributionSheet(
-                                    context,
-                                    goal.id,
-                                  ),
-                      child: Text(
-                        goal.requiresFundingMigration
-                            ? 'Convert'
-                            : goal.fundingMethod ==
-                                  GoalFundingMethod.accountFunded
-                            ? 'Fund Goal'
-                            : 'Add Progress',
-                      ),
+                          : () => showGoalActivitySheet(context, goal.id),
+                      child: const Text('Goal Activity'),
                     ),
                 ],
               ),
@@ -834,6 +862,65 @@ Future<void> showCreateGoalSheet(BuildContext context) {
   return showGoalEditor(context);
 }
 
+/// Presents only Goal-relevant money actions.  Each action delegates to the
+/// existing transfer/expense forms, so Goal balances use the exact same
+/// transaction path as every other account.
+Future<void> showGoalActivitySheet(BuildContext context, String goalId) async {
+  final store = FinanceDataStoreScope.read(context);
+  final goal = store.goals
+      .where(
+        (item) => item.id == goalId && item.isActive && item.isAccountBacked,
+      )
+      .firstOrNull;
+  if (goal == null) return;
+  final action = await showPolishedChoicePicker<String>(
+    context,
+    title: 'Goal Activity',
+    selected: '',
+    choices: [
+      PolishedChoice(
+        value: 'fund',
+        label: 'Fund Goal',
+        leading: Icon(AppIcon.savings),
+      ),
+      PolishedChoice(
+        value: 'spend',
+        label: 'Spend from Goal',
+        leading: Icon(AppIcon.expense),
+      ),
+      PolishedChoice(
+        value: 'between',
+        label: 'Transfer Between Goals',
+        leading: Icon(AppIcon.transfer),
+      ),
+      PolishedChoice(
+        value: 'withdraw',
+        label: 'Withdraw to Account',
+        leading: Icon(AppIcon.transfer),
+      ),
+    ],
+  );
+  if (action == null || !context.mounted) return;
+  switch (action) {
+    case 'fund':
+      await showFundGoalsSheet(context, initialGoalId: goal.id);
+    case 'spend':
+      await showTransactionDialog(
+        context,
+        initialIsExpense: true,
+        initialAccountId: goal.accountId,
+      );
+    case 'between':
+      await showTransferDialog(
+        context,
+        initialFromAccountId: goal.accountId,
+        includeGoalAccounts: true,
+      );
+    case 'withdraw':
+      await showTransferDialog(context, initialFromAccountId: goal.accountId);
+  }
+}
+
 Future<void> showGoalEditor(
   BuildContext context, {
   GoalRecord? initialGoal,
@@ -847,10 +934,7 @@ Future<void> showGoalEditor(
   var startingMinor = initialGoal?.startingAmountMinor ?? 0;
   var targetDate = initialGoal?.targetDate;
   var goalType = initialGoal?.goalType ?? GoalType.reachTarget;
-  var method = initialGoal?.fundingMethod ?? GoalFundingMethod.accountFunded;
-  var accountId =
-      initialGoal?.defaultFundingAccountId ??
-      store.activeAccountsInDisplayOrder.firstOrNull?.id;
+  final accountId = initialGoal?.defaultFundingAccountId;
   var isSaving = false;
   String? errorText;
 
@@ -859,10 +943,6 @@ Future<void> showGoalEditor(
     useRootNavigator: false,
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setDialogState) {
-        final activeAccounts = store.activeAccountsInDisplayOrder;
-        final account = activeAccounts
-            .where((item) => item.id == accountId)
-            .firstOrNull;
         final isEditing = initialGoal != null;
         final validDate =
             isEditing ||
@@ -875,19 +955,12 @@ Future<void> showGoalEditor(
                 DateTime.now().day + (isEditing ? 0 : 1),
               ),
             );
-        final startingAmountFits =
-            method == GoalFundingMethod.trackingOnly ||
-            account == null ||
-            isEditing ||
-            startingMinor <= store.balanceForAccount(account.id);
         final canSave =
             nameController.text.trim().isNotEmpty &&
             targetMinor > 0 &&
             startingMinor >= 0 &&
             startingMinor <= targetMinor &&
-            validDate &&
-            startingAmountFits &&
-            (method == GoalFundingMethod.trackingOnly || account != null);
+            validDate;
 
         return _GoalControllerOwner(
           controllers: [nameController, descriptionController],
@@ -911,7 +984,7 @@ Future<void> showGoalEditor(
                       targetAmountMinor: targetMinor,
                       startingAmountMinor: startingMinor,
                       targetDate: targetDate,
-                      fundingMethod: method,
+                      fundingMethod: GoalFundingMethod.accountFunded,
                       goalType: goalType,
                       defaultFundingAccountId: accountId,
                       description: descriptionController.text,
@@ -922,14 +995,14 @@ Future<void> showGoalEditor(
                         name: nameController.text.trim(),
                         description: descriptionController.text.trim(),
                         targetAmountMinor: targetMinor,
-                        startingAmountMinor: startingMinor,
+                        startingAmountMinor: initialGoal.isAccountBacked
+                            ? initialGoal.startingAmountMinor
+                            : startingMinor,
                         targetDate: targetDate,
                         goalType: goalType,
-                        fundingMethod: method,
+                        fundingMethod: GoalFundingMethod.accountFunded,
                         defaultFundingAccountId: accountId,
                         clearTargetDate: targetDate == null,
-                        clearDefaultFundingAccount:
-                            method == GoalFundingMethod.trackingOnly,
                         reservationsReleased: initialGoal.reservationsReleased,
                         sync: initialGoal.sync.touched(
                           deviceId: store.deviceId,
@@ -1095,95 +1168,6 @@ Future<void> showGoalEditor(
                     ),
                   ),
                 TransactionFormDivider(),
-                TransactionFormLabel('Funding method'),
-                PolishedFormValueRow(
-                  key: ValueKey('goal-funding-method'),
-                  icon: AppIcon.wallet,
-                  value: goalFundingMethodLabel(method),
-                  onTap: () async {
-                    final selected =
-                        await showPolishedChoicePicker<GoalFundingMethod>(
-                          dialogContext,
-                          title: 'Funding method',
-                          selected: method,
-                          choices: [
-                            for (final option in GoalFundingMethod.values)
-                              PolishedChoice(
-                                value: option,
-                                label: goalFundingMethodLabel(option),
-                                leading: Icon(
-                                  option == GoalFundingMethod.accountFunded
-                                      ? AppIcon.bank
-                                      : AppIcon.insights,
-                                ),
-                              ),
-                          ],
-                        );
-                    if (selected == null || selected == method) return;
-                    if (!dialogContext.mounted) return;
-                    if (initialGoal != null) {
-                      final hasHistory =
-                          store
-                              .activeContributionsForGoal(initialGoal.id)
-                              .isNotEmpty ||
-                          store
-                              .activeFundingEventsForGoal(initialGoal.id)
-                              .isNotEmpty ||
-                          initialGoal.startingAmountMinor > 0;
-                      if (hasHistory) {
-                        setDialogState(() {
-                          errorText =
-                              'Undo existing funding or progress before changing the funding method.';
-                        });
-                        return;
-                      }
-                    }
-                    setDialogState(() {
-                      method = selected;
-                      if (method == GoalFundingMethod.accountFunded) {
-                        accountId ??= activeAccounts.firstOrNull?.id;
-                      }
-                    });
-                  },
-                ),
-                if (method == GoalFundingMethod.accountFunded) ...[
-                  TransactionFormDivider(),
-                  TransactionFormLabel('Funding account'),
-                  PolishedFormValueRow(
-                    key: ValueKey('goal-funding-account'),
-                    icon: AppIcon.bank,
-                    value: account?.name ?? 'Choose account',
-                    secondary: account == null
-                        ? null
-                        : 'Balance ${money(store.balanceForAccount(account.id), store.preferences.currency)}',
-                    onTap: () async {
-                      final selected = await showTransactionAccountPicker(
-                        dialogContext,
-                        accounts: activeAccounts,
-                        selectedAccountId: accountId ?? '',
-                      );
-                      if (selected != null) {
-                        setDialogState(() => accountId = selected);
-                      }
-                    },
-                  ),
-                ],
-                if (!isEditing &&
-                    method == GoalFundingMethod.accountFunded &&
-                    startingMinor > 0) ...[
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    '${money(startingMinor, store.preferences.currency)} will be moved from ${account?.name ?? 'the selected account'} when this Goal is created.',
-                    key: const ValueKey('goal-starting-funding-explanation'),
-                    style: Theme.of(dialogContext).textTheme.bodySmall
-                        ?.copyWith(
-                          color: Theme.of(
-                            dialogContext,
-                          ).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                ],
-                TransactionFormDivider(),
                 TransactionFormLabel('Description'),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1207,16 +1191,6 @@ Future<void> showGoalEditor(
                   Text(
                     errorText!,
                     key: const ValueKey('goal-error'),
-                    style: TextStyle(
-                      color: Theme.of(dialogContext).colorScheme.error,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-                if (!startingAmountFits) ...[
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    'Starting amount exceeds this account’s current balance.',
                     style: TextStyle(
                       color: Theme.of(dialogContext).colorScheme.error,
                       fontWeight: FontWeight.w700,
@@ -1326,20 +1300,13 @@ Future<void> showFundGoalsSheet(
   final store = FinanceDataStoreScope.read(context);
   final eligibleGoals =
       store.goals
-          .where(
-            (goal) =>
-                goal.isActive &&
-                goal.fundingMethod == GoalFundingMethod.accountFunded &&
-                !goal.requiresFundingMigration,
-          )
+          .where((goal) => goal.isActive && goal.isAccountBacked)
           .toList(growable: false)
         ..sort(compareGoalUrgency);
   if (eligibleGoals.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Create or convert an account-funded Goal first.'),
-      ),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Create a Goal first.')));
     return;
   }
   final initialGoal = eligibleGoals
@@ -1691,12 +1658,7 @@ Future<bool> showScheduledGoalFundingDialog(
   final store = FinanceDataStoreScope.read(context);
   final eligibleGoals =
       store.goals
-          .where(
-            (goal) =>
-                goal.isActive &&
-                goal.fundingMethod == GoalFundingMethod.accountFunded &&
-                !goal.requiresFundingMigration,
-          )
+          .where((goal) => goal.isActive && goal.isAccountBacked)
           .toList(growable: false)
         ..sort(compareGoalUrgency);
   if (eligibleGoals.isEmpty) {
@@ -1784,7 +1746,7 @@ Future<bool> showScheduledGoalFundingDialog(
             .whereType<String>()
             .toSet();
         final validRows =
-            allocations.isNotEmpty &&
+            allocations.length == 1 &&
             allocations.every(
               (row) => row.goalId != null && row.amountMinor > 0,
             ) &&
@@ -1813,13 +1775,28 @@ Future<bool> showScheduledGoalFundingDialog(
                   errorText = null;
                 });
                 try {
+                  final selectedGoal = eligibleGoals
+                      .where((goal) => goal.id == allocations.single.goalId)
+                      .first;
                   final record = v2_scheduled.ScheduledTransactionRecord(
                     id:
                         existing?.id ??
                         'scheduled_goal_${DateTime.now().microsecondsSinceEpoch}',
-                    type: TransactionType.goalFunding,
+                    // New schedules are normal scheduled transfers. Legacy
+                    // multi-allocation schedules remain readable until the
+                    // user intentionally replaces them.
+                    type: existing?.type == TransactionType.goalFunding
+                        ? TransactionType.goalFunding
+                        : TransactionType.transfer,
                     accountId: accountId,
-                    payee: 'Goal funding',
+                    transferAccountId:
+                        existing?.type == TransactionType.goalFunding
+                        ? null
+                        : selectedGoal.accountId,
+                    goalId: existing?.type == TransactionType.goalFunding
+                        ? null
+                        : selectedGoal.id,
+                    payee: 'Fund ${selectedGoal.name}',
                     note: note.text.trim(),
                     amountMinor: totalAmountMinor,
                     nextDate: DateTime(
@@ -1832,21 +1809,25 @@ Future<bool> showScheduledGoalFundingDialog(
                     alertPreference: alertPreference,
                     customAlertTimeMinutes: customAlertTimeMinutes,
                     repeatAlertUntilResolved: repeatAlertUntilResolved,
-                    goalFundingAllocations: [
-                      for (
-                        var index = 0;
-                        index < allocations.length;
-                        index += 1
-                      )
-                        v2_scheduled.ScheduledGoalFundingAllocation(
-                          id: allocations[index].id.isEmpty
-                              ? 'scheduled_goal_allocation_${DateTime.now().microsecondsSinceEpoch}_$index'
-                              : allocations[index].id,
-                          goalId: allocations[index].goalId!,
-                          amountMinor: allocations[index].amountMinor.abs(),
-                          order: index,
-                        ),
-                    ],
+                    goalFundingAllocations:
+                        existing?.type == TransactionType.goalFunding
+                        ? [
+                            for (
+                              var index = 0;
+                              index < allocations.length;
+                              index += 1
+                            )
+                              v2_scheduled.ScheduledGoalFundingAllocation(
+                                id: allocations[index].id.isEmpty
+                                    ? 'scheduled_goal_allocation_${DateTime.now().microsecondsSinceEpoch}_$index'
+                                    : allocations[index].id,
+                                goalId: allocations[index].goalId!,
+                                amountMinor: allocations[index].amountMinor
+                                    .abs(),
+                                order: index,
+                              ),
+                          ]
+                        : const [],
                     occurrences: existing?.occurrences ?? const [],
                     lastAction:
                         existing?.lastAction ??
@@ -1914,7 +1895,7 @@ Future<bool> showScheduledGoalFundingDialog(
                 ),
                 const TransactionFormDivider(),
                 Text(
-                  'Goal Allocations',
+                  'Goal',
                   style: Theme.of(dialogContext).textTheme.titleMedium
                       ?.copyWith(fontWeight: FontWeight.w900),
                 ),
@@ -1995,35 +1976,9 @@ Future<bool> showScheduledGoalFundingDialog(
                             }),
                           ),
                         ),
-                        if (allocations.length > 1)
-                          IconButton(
-                            tooltip: 'Remove Goal allocation',
-                            onPressed: () => setDialogState(() {
-                              allocations.removeAt(index);
-                              rebalanceFirst();
-                            }),
-                            icon: Icon(AppIcon.delete),
-                          ),
                       ],
                     ),
                   ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: allocations.length >= eligibleGoals.length
-                        ? null
-                        : () => setDialogState(() {
-                            allocations.add(
-                              _GoalAllocationDraft(
-                                id: 'scheduled-goal-${draftSequence++}',
-                              ),
-                            );
-                            rebalanceFirst();
-                          }),
-                    icon: Icon(AppIcon.add),
-                    label: const Text('Add Goal'),
-                  ),
-                ),
                 GoalAllocationSummary(
                   totalAmountMinor: totalAmountMinor,
                   allocatedAmountMinor: allocated,
@@ -2178,8 +2133,8 @@ Future<void> showAddGoalContributionSheet(
   final store = FinanceDataStoreScope.read(context);
   final goal = store.goalById(goalId);
   if (!goal.isActive) return;
-  if (goal.fundingMethod == GoalFundingMethod.accountFunded) {
-    await showFundGoalsSheet(context, initialGoalId: goal.id);
+  if (goal.isAccountBacked) {
+    await showGoalActivitySheet(context, goal.id);
     return;
   }
   final metrics = store.goalMetrics(goalId);
@@ -2376,14 +2331,25 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
     useRootNavigator: false,
     builder: (dialogContext) {
       final metrics = store.goalMetrics(goal.id);
+      final goalTransactions = goal.accountId == null
+          ? const <TransactionRecord>[]
+          : (store.transactions
+                .where(
+                  (transaction) =>
+                      !transaction.isDeleted &&
+                      (transaction.accountId == goal.accountId ||
+                          transaction.transferAccountId == goal.accountId),
+                )
+                .toList()
+              ..sort((left, right) => right.date.compareTo(left.date)));
       final contributions = [...store.activeContributionsForGoal(goal.id)]
         ..sort((a, b) => b.date.compareTo(a.date));
       final fundingEvents = [...store.activeFundingEventsForGoal(goal.id)]
         ..sort((a, b) => b.date.compareTo(a.date));
-      final account = goal.defaultFundingAccountId == null
+      final account = goal.accountId == null
           ? null
           : store.accounts
-                .where((item) => item.id == goal.defaultFundingAccountId)
+                .where((item) => item.id == goal.accountId)
                 .firstOrNull;
       return TransactionSheetFrame(
         title: 'Goal Details',
@@ -2409,22 +2375,9 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                 key: const ValueKey('goal-details-add-contribution'),
                 onPressed: () async {
                   Navigator.pop(dialogContext);
-                  if (goal.requiresFundingMigration) {
-                    await showLegacyGoalMigrationSheet(context, goal.id);
-                  } else if (goal.fundingMethod ==
-                      GoalFundingMethod.accountFunded) {
-                    await showFundGoalsSheet(context, initialGoalId: goal.id);
-                  } else {
-                    await showAddGoalContributionSheet(context, goal.id);
-                  }
+                  await showGoalActivitySheet(context, goal.id);
                 },
-                child: Text(
-                  goal.requiresFundingMigration
-                      ? 'Convert'
-                      : goal.fundingMethod == GoalFundingMethod.accountFunded
-                      ? 'Fund Goal'
-                      : 'Add Progress',
-                ),
+                child: const Text('Goal Activity'),
               ),
           ],
         ),
@@ -2500,10 +2453,8 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               icon: AppIcon.adjustment,
             ),
             GoalDetailValue(
-              label: 'Funding',
-              value: account == null
-                  ? goalFundingMethodLabel(goal.fundingMethod)
-                  : '${goalFundingMethodLabel(goal.fundingMethod)} · ${account.name}',
+              label: 'Goal account',
+              value: account == null ? 'Unavailable' : account.name,
               icon: AppIcon.wallet,
             ),
             if (goal.description.trim().isNotEmpty)
@@ -2519,12 +2470,39 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                 dialogContext,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
             ),
-            if (contributions.isEmpty && fundingEvents.isEmpty)
+            if (goalTransactions.isEmpty &&
+                contributions.isEmpty &&
+                fundingEvents.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
                 child: Text('No activity yet'),
               )
             else ...[
+              for (final transaction in goalTransactions.take(20))
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    transaction.type == TransactionType.expense
+                        ? AppIcon.expense
+                        : AppIcon.transfer,
+                    color: transaction.type == TransactionType.expense
+                        ? AppColors.danger
+                        : _goalBlue,
+                  ),
+                  title: Text(
+                    transaction.payee.isEmpty
+                        ? transaction.type == TransactionType.expense
+                              ? 'Spent from Goal'
+                              : 'Goal transfer'
+                        : transaction.payee,
+                  ),
+                  subtitle: Text(fullMonthDateLabel(transaction.date)),
+                  trailing: Text(
+                    money(transaction.amountMinor, store.preferences.currency),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  onTap: () => showTransactionDetails(context, transaction.id),
+                ),
               for (final event in fundingEvents.take(20))
                 GoalFundingHistoryRow(
                   event: event,
@@ -2643,7 +2621,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                           context,
                           title: 'Delete this Goal permanently?',
                           message:
-                              'This Goal has no funding or activity history. This action cannot be undone.',
+                              'This Goal has no remaining balance or pending scheduled activity. Ledger history, if any, will remain available.',
                           confirmLabel: 'Delete Permanently',
                           destructive: true,
                         );

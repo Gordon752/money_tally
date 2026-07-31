@@ -49,13 +49,15 @@ class FinanceDataBootstrapper {
     String? userId,
     String deviceId = 'local',
   }) async {
-    return FinanceDataStore(
+    final store = FinanceDataStore(
       dataSet: await loadDataSet(),
       localRepository: localRepository,
       remoteRepository: remoteRepository,
       userId: userId,
       deviceId: deviceId,
     );
+    await store.migrateLegacyGoalsToAccounts();
+    return store;
   }
 }
 

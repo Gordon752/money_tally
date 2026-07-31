@@ -103,11 +103,14 @@ class GoalCalculator {
     GoalRecord goal,
     Iterable<GoalContributionRecord> contributions, {
     Iterable<GoalFundingEventRecord> fundingEvents = const [],
+    int? currentAmountMinorOverride,
     DateTime? now,
   }) {
     final anchor = now ?? DateTime.now();
     final today = _dateOnly(anchor);
-    final current = currentAmountMinor(goal, contributions, fundingEvents);
+    final current =
+        currentAmountMinorOverride ??
+        currentAmountMinor(goal, contributions, fundingEvents);
     final target = goal.targetAmountMinor.abs();
     final remaining = (target - current).clamp(0, target).toInt();
     final percentage = target == 0 ? 0.0 : current / target;

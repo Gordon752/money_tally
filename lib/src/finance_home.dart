@@ -1715,7 +1715,7 @@ class AccountGroupCard extends StatelessWidget {
                   );
                 },
                 onLongPress: () {
-                  HapticFeedback.mediumImpact();
+                  AppHaptics.longPressAction();
                   showAccountGroupActions(context, group);
                 },
                 child: Padding(
@@ -1872,10 +1872,10 @@ class AccountGroupCard extends StatelessWidget {
                                   : () => onOpenLedgerForAccount!(
                                       accounts[index].id,
                                     ),
-                              onLongPress: () => showAccountOptions(
-                                context,
-                                accounts[index].id,
-                              ),
+                              onLongPress: () {
+                                AppHaptics.longPressAction();
+                                showAccountOptions(context, accounts[index].id);
+                              },
                             ),
                           ),
                       ],
@@ -3020,7 +3020,7 @@ class LedgerMonthSection extends StatelessWidget {
                             },
                             onLongPress: () async {
                               onDismissFocus();
-                              HapticFeedback.mediumImpact();
+                              AppHaptics.longPressAction();
                               await showTransactionOptions(
                                 context,
                                 projection.transaction.id,
@@ -5569,6 +5569,7 @@ class _ScheduledViewState extends State<ScheduledView> {
         occurrenceRecord: occurrence.isPending ? null : occurrence.record,
       ),
       onLongPress: () {
+        AppHaptics.longPressAction();
         if (!occurrence.isPending) {
           unawaited(
             showCompletedScheduledOccurrenceActions(
@@ -6547,8 +6548,10 @@ class _CategoriesViewState extends State<CategoriesView> {
                                     category.id,
                                     index: managementIndex,
                                   ),
-                                  onLongPress: () =>
-                                      showCategoryActions(context, category),
+                                  onLongPress: () {
+                                    AppHaptics.longPressAction();
+                                    showCategoryActions(context, category);
+                                  },
                                   leading: CategoryIconBadge.category(
                                     category,
                                     size: isChild
@@ -7465,7 +7468,7 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                                   index: managementIndex,
                                 ),
                                 onLongPress: () {
-                                  HapticFeedback.mediumImpact();
+                                  AppHaptics.longPressAction();
                                   showManagedPayeeActions(context, payee);
                                 },
                               ),
@@ -9739,7 +9742,7 @@ class BudgetProgressRow extends StatelessWidget {
       child: InkWell(
         onTap: () => showBudgetDetails(context, budget),
         onLongPress: () {
-          HapticFeedback.mediumImpact();
+          AppHaptics.longPressAction();
           showBudgetActions(context, budget);
         },
         child: Padding(
@@ -11834,12 +11837,20 @@ Future<void> showTransferDialog(
   BuildContext context, {
   String? initialFromAccountId,
   TransactionRecord? transfer,
+  bool includeGoalAccounts = false,
   bool initialScheduleFutureOccurrences = false,
   FutureScheduleDraft? initialFutureSchedule,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final accounts = dataStore.accounts
-      .where((account) => account.isVisible)
+      .where(
+        (account) =>
+            account.isVisible &&
+            (includeGoalAccounts ||
+                !account.isInternalGoalAccount ||
+                account.id == initialFromAccountId ||
+                account.id == transfer?.accountId),
+      )
       .toList(growable: false);
   if (accounts.length < 2) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -15289,7 +15300,20 @@ Future<void> showTransactionDialog(
   FutureScheduleDraft? initialFutureSchedule,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
-  final activeAccounts = dataStore.activeAccountsInDisplayOrder;
+  final activeAccounts = [...dataStore.activeAccountsInDisplayOrder];
+  // Goal spending is intentionally launched from Goal Details. The internal
+  // Goal account stays hidden from ordinary global account pickers, but must
+  // remain available to that contextual expense form.
+  final contextualAccountId = transaction?.accountId ?? initialAccountId;
+  if (contextualAccountId != null &&
+      !activeAccounts.any((account) => account.id == contextualAccountId)) {
+    final contextual = dataStore.accounts
+        .where(
+          (account) => account.id == contextualAccountId && account.isVisible,
+        )
+        .firstOrNull;
+    if (contextual != null) activeAccounts.add(contextual);
+  }
   if (activeAccounts.isEmpty) return;
   final payeeOptions = savedPayees(dataStore);
   final payee = TextEditingController(text: transaction?.payee ?? '');
