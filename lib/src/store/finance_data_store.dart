@@ -368,6 +368,21 @@ class FinanceDataStore extends ChangeNotifier {
     );
   }
 
+  /// A Goal is usable when its linked hidden account still exists. The account
+  /// is intentionally not an ordinary Accounts-page item, so visibility in
+  /// the main account UI must never be used as a health signal here.
+  bool hasUsableGoalAccount(String goalId) {
+    final goal = goalById(goalId);
+    final accountId = goal.accountId;
+    return accountId != null &&
+        accounts.any(
+          (account) =>
+              account.id == accountId &&
+              !account.isDeleted &&
+              account.goalId == goal.id,
+        );
+  }
+
   GoalProgressMetrics goalMetrics(String goalId, {DateTime? now}) {
     final goal = goalById(goalId);
     return const GoalCalculator().calculate(
@@ -695,6 +710,31 @@ class FinanceDataStore extends ChangeNotifier {
   /// restart or a second device can finish an interrupted migration without
   /// duplicating money movements.
   Future<void> migrateLegacyGoalsToAccounts() async {
+    // Account-backed Goals no longer use the reservation migration flag. Clear
+    // stale flags as part of an idempotent load/sync migration so users never
+    // see a permanent legacy-repair state after the account is valid.
+    final reconciledGoals = goals
+        .where((goal) => goal.isAccountBacked && goal.requiresFundingMigration)
+        .map(
+          (goal) => goal.copyWith(
+            requiresFundingMigration: false,
+            sync: _touchAfterCurrent(goal.sync),
+          ),
+        )
+        .toList(growable: false);
+    if (reconciledGoals.isNotEmpty) {
+      _dataSet = _dataSet.copyWith(
+        goals: [
+          for (final goal in goals)
+            reconciledGoals
+                    .where((candidate) => candidate.id == goal.id)
+                    .firstOrNull ??
+                goal,
+        ],
+      );
+      await _commit(goalRecords: reconciledGoals);
+    }
+
     final candidates = goals
         .where((goal) => !goal.isDeleted && !goal.isAccountBacked)
         .toList(growable: false);
@@ -1178,20 +1218,17 @@ class FinanceDataStore extends ChangeNotifier {
     final goalAccountId = goal.accountId;
     final hasPendingAccountSchedule =
         goalAccountId != null &&
-        scheduledTransactions.any(
-          (scheduled) =>
-              !scheduled.isDeleted &&
-              (scheduled.accountId == goalAccountId ||
-                  scheduled.transferAccountId == goalAccountId),
-        );
+        _hasPendingScheduledActivityForAccount(goalAccountId);
     if (goalAccountId != null) {
+      final balance = balanceForAccount(goalAccountId);
       return GoalDeleteEligibility(
         hasContributions: false,
         hasFunding: false,
         hasScheduledReference:
             hasPendingAccountSchedule ||
             scheduledGoalFundingNeedsAttention(goalId),
-        hasNonZeroBalance: balanceForAccount(goalAccountId) != 0,
+        hasNonZeroBalance: balance != 0,
+        remainingBalanceMinor: balance,
       );
     }
     final hasContributions = goalContributions.any(
@@ -1213,6 +1250,7 @@ class FinanceDataStore extends ChangeNotifier {
       hasFunding: hasFunding,
       hasScheduledReference: hasScheduledReference,
       hasNonZeroBalance: currentGoalAmountMinor(goalId) != 0,
+      remainingBalanceMinor: currentGoalAmountMinor(goalId),
     );
   }
 
@@ -1220,10 +1258,31 @@ class FinanceDataStore extends ChangeNotifier {
     return scheduledTransactions.any(
       (scheduled) =>
           !scheduled.isDeleted &&
-          scheduled.type == TransactionType.goalFunding &&
+          scheduled.isGoalFunding &&
           scheduled.goalFundingAllocations.any(
             (allocation) => allocation.goalId == goalId,
-          ),
+          ) &&
+          firstUnresolvedScheduledDate(scheduled, today: DateTime.now()) !=
+              null,
+    );
+  }
+
+  bool goalHasPendingScheduledActivity(String goalId) {
+    final goal = goalById(goalId);
+    final accountId = goal.accountId;
+    return (accountId != null &&
+            _hasPendingScheduledActivityForAccount(accountId)) ||
+        scheduledGoalFundingNeedsAttention(goalId);
+  }
+
+  bool _hasPendingScheduledActivityForAccount(String accountId) {
+    final today = DateTime.now();
+    return scheduledTransactions.any(
+      (scheduled) =>
+          !scheduled.isDeleted &&
+          (scheduled.accountId == accountId ||
+              scheduled.transferAccountId == accountId) &&
+          firstUnresolvedScheduledDate(scheduled, today: today) != null,
     );
   }
 
@@ -1425,11 +1484,6 @@ class FinanceDataStore extends ChangeNotifier {
       if (goal == null || !goal.isAccountBacked) {
         throw const FinanceDataValidationException(
           'Choose an active Goal with an available Goal account.',
-        );
-      }
-      if (goal.requiresFundingMigration) {
-        throw FinanceDataValidationException(
-          '${goal.name} must convert its previous reservations first.',
         );
       }
       allocationTotal += allocation.amountMinor;
@@ -1766,6 +1820,29 @@ class FinanceDataStore extends ChangeNotifier {
     final affectedGoalIds = event.allocations
         .map((allocation) => allocation.goalId)
         .toSet();
+    // Funding undo is a transfer reversal.  It cannot be allowed to remove
+    // money that has subsequently been spent from a Goal account: doing so
+    // would manufacture a negative Goal balance and leave the ordinary
+    // expense appearing broken.  Check each affected hidden account before
+    // writing any tombstones so the operation is atomic and retry-safe.
+    for (final goalId in affectedGoalIds) {
+      final goal = goals.where((item) => item.id == goalId).firstOrNull;
+      final goalAccountId = goal?.accountId;
+      if (goalAccountId == null) continue;
+      final reversedIncomingMinor = reversedTransfers
+          .where(
+            (transaction) => transaction.transferAccountId == goalAccountId,
+          )
+          .fold<int>(
+            0,
+            (total, transaction) => total + transaction.amountMinor.abs(),
+          );
+      if (balanceForAccount(goalAccountId) - reversedIncomingMinor < 0) {
+        throw FinanceDataValidationException(
+          'Cannot undo this Goal funding because ${goal?.name ?? 'this Goal'} has money that was already spent. Delete or edit the related Goal activity first.',
+        );
+      }
+    }
     final updatedGoals = <GoalRecord>[
       for (final goalId in affectedGoalIds)
         if (goals.where((goal) => goal.id == goalId).firstOrNull
@@ -2193,8 +2270,9 @@ class FinanceDataStore extends ChangeNotifier {
         goalAccount != null &&
         transactions.any(
           (transaction) =>
-              transaction.accountId == goalAccount.id ||
-              transaction.transferAccountId == goalAccount.id,
+              !transaction.isDeleted &&
+              (transaction.accountId == goalAccount.id ||
+                  transaction.transferAccountId == goalAccount.id),
         );
     final updatedAccount = goalAccount == null
         ? null
@@ -3111,20 +3189,23 @@ class AccountLinkedRecordSummary {
       defaultGoalCount > 0;
 }
 
-/// Permanent Goal deletion is intentionally limited to unused definitions.
-/// Historical records—including tombstones—are links and therefore block it.
+/// A Goal presentation may be removed after its money and live schedule work
+/// have been resolved. Historical ledger records remain audit data and do not
+/// themselves keep a zero-balance Goal trapped on the inactive screen.
 class GoalDeleteEligibility {
   const GoalDeleteEligibility({
     required this.hasContributions,
     required this.hasFunding,
     required this.hasScheduledReference,
     this.hasNonZeroBalance = false,
+    this.remainingBalanceMinor = 0,
   });
 
   final bool hasContributions;
   final bool hasFunding;
   final bool hasScheduledReference;
   final bool hasNonZeroBalance;
+  final int remainingBalanceMinor;
 
   bool get canDelete => !hasScheduledReference && !hasNonZeroBalance;
 }

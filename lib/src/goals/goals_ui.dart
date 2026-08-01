@@ -37,7 +37,7 @@ String goalTypeBadgeLabel(GoalType type) {
 
 String goalDateLabel(GoalRecord goal) {
   return goal.goalType == GoalType.maintainBalance
-      ? 'Restore-by date'
+      ? 'Replenish by date'
       : 'Target date';
 }
 
@@ -673,11 +673,7 @@ class GoalCard extends StatelessWidget {
     final store = FinanceDataStoreScope.watch(context);
     final metrics = store.goalMetrics(goal.id);
     final statusColor = goalStatusColor(metrics.status);
-    final account = goal.accountId == null
-        ? null
-        : store.accounts.where((item) => item.id == goal.accountId).firstOrNull;
-    final needsAttention =
-        !goal.isAccountBacked || account == null || !account.isVisible;
+    final needsAttention = !store.hasUsableGoalAccount(goal.id);
     return Card(
       child: InkWell(
         key: ValueKey('goal-card-${goal.id}'),
@@ -737,7 +733,9 @@ class GoalCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      needsAttention ? 'Needs attention' : metrics.status.label,
+                      needsAttention
+                          ? 'Goal account unavailable'
+                          : metrics.status.label,
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: needsAttention ? AppColors.danger : statusColor,
                         fontWeight: FontWeight.w900,
@@ -757,7 +755,7 @@ class GoalCard extends StatelessWidget {
               if (!compact) ...[
                 if (goal.targetDate != null)
                   Text(
-                    '${goal.goalType == GoalType.maintainBalance ? 'Restore by' : 'Target'}: ${fullMonthDateLabel(goal.targetDate!)}',
+                    '${goal.goalType == GoalType.maintainBalance ? 'Replenish by' : 'Target'}: ${fullMonthDateLabel(goal.targetDate!)}',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -780,16 +778,6 @@ class GoalCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                Text(
-                  account == null
-                      ? goalFundingMethodLabel(goal.fundingMethod)
-                      : '${goalFundingMethodLabel(goal.fundingMethod)} · ${account.name}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
               ],
             ],
           ),
@@ -1134,7 +1122,7 @@ Future<void> showGoalEditor(
                 const TransactionFormDivider(),
                 TransactionFormLabel(
                   goalType == GoalType.maintainBalance
-                      ? 'Restore-by date'
+                      ? 'Replenish by date'
                       : 'Target date',
                 ),
                 PolishedFormValueRow(
@@ -1142,11 +1130,11 @@ Future<void> showGoalEditor(
                   icon: AppIcon.calendar,
                   value: targetDate == null
                       ? goalType == GoalType.maintainBalance
-                            ? 'No restore-by date'
+                            ? 'No replenishment deadline'
                             : 'No deadline'
                       : fullMonthDateLabel(targetDate!),
                   secondary: goalType == GoalType.maintainBalance
-                      ? 'Optional date to replenish a reserve below target'
+                      ? 'Optional date to replenish this balance below its target'
                       : 'Optional date to reach the target amount',
                   onTap: () async {
                     final selected = await pickDateForField(
@@ -1576,7 +1564,10 @@ Future<void> showFundGoalsSheet(
                             rebalanceFirst();
                           }),
                     icon: Icon(AppIcon.add),
-                    label: const Text('Add Goal'),
+                    label: const Text(
+                      'Add Goal',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
                   ),
                 ),
                 GoalAllocationSummary(
@@ -2342,15 +2333,17 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                 )
                 .toList()
               ..sort((left, right) => right.date.compareTo(left.date)));
-      final contributions = [...store.activeContributionsForGoal(goal.id)]
-        ..sort((a, b) => b.date.compareTo(a.date));
-      final fundingEvents = [...store.activeFundingEventsForGoal(goal.id)]
-        ..sort((a, b) => b.date.compareTo(a.date));
-      final account = goal.accountId == null
-          ? null
-          : store.accounts
-                .where((item) => item.id == goal.accountId)
-                .firstOrNull;
+      // Legacy records remain available for unmigrated data only. Once a Goal
+      // has its linked account, the ordinary transaction ledger is the sole
+      // user-visible activity history.
+      final contributions = goal.isAccountBacked
+          ? const <GoalContributionRecord>[]
+          : ([...store.activeContributionsForGoal(goal.id)]
+              ..sort((a, b) => b.date.compareTo(a.date)));
+      final fundingEvents = goal.isAccountBacked
+          ? const <GoalFundingEventRecord>[]
+          : ([...store.activeFundingEventsForGoal(goal.id)]
+              ..sort((a, b) => b.date.compareTo(a.date)));
       return TransactionSheetFrame(
         title: 'Goal Details',
         actions: Wrap(
@@ -2441,7 +2434,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               ),
             GoalDetailValue(
               label: goal.goalType == GoalType.maintainBalance
-                  ? 'Reserve position'
+                  ? 'Reserve balance'
                   : 'Ahead / behind',
               value: goal.goalType == GoalType.maintainBalance
                   ? metrics.aheadBehindMinor >= 0
@@ -2452,11 +2445,6 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                   : '${money(metrics.aheadBehindMinor.abs(), store.preferences.currency)} behind',
               icon: AppIcon.adjustment,
             ),
-            GoalDetailValue(
-              label: 'Goal account',
-              value: account == null ? 'Unavailable' : account.name,
-              icon: AppIcon.wallet,
-            ),
             if (goal.description.trim().isNotEmpty)
               GoalDetailValue(
                 label: 'Description',
@@ -2465,7 +2453,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               ),
             const TransactionFormDivider(),
             Text(
-              'Funding and progress history',
+              'Activity',
               style: Theme.of(
                 dialogContext,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
@@ -2479,29 +2467,41 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               )
             else ...[
               for (final transaction in goalTransactions.take(20))
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    transaction.type == TransactionType.expense
-                        ? AppIcon.expense
-                        : AppIcon.transfer,
-                    color: transaction.type == TransactionType.expense
-                        ? AppColors.danger
-                        : _goalBlue,
+                LedgerJournalRow(
+                  projection: LedgerTransactionProjection(
+                    transaction: transaction,
+                    // Goal activity is an account-specific view. A transfer
+                    // into a Goal is positive here; a transfer out is
+                    // negative, regardless of which side owns the original
+                    // transaction record.
+                    displayedAmountMinor: transaction.deltaForAccount(
+                      goal.accountId!,
+                    ),
+                    matchingAllocations: const [],
                   ),
-                  title: Text(
-                    transaction.payee.isEmpty
-                        ? transaction.type == TransactionType.expense
-                              ? 'Spent from Goal'
-                              : 'Goal transfer'
-                        : transaction.payee,
+                  currency: store.preferences.currency,
+                  accountName: goalTransactionCounterpartyName(
+                    transaction,
+                    goal.accountId!,
+                    store.accounts,
                   ),
-                  subtitle: Text(fullMonthDateLabel(transaction.date)),
-                  trailing: Text(
-                    money(transaction.amountMinor, store.preferences.currency),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  onTap: () => showTransactionDetails(context, transaction.id),
+                  categoryName: transaction.categoryId == null
+                      ? null
+                      : store.categories
+                            .where(
+                              (category) =>
+                                  category.id == transaction.categoryId,
+                            )
+                            .firstOrNull
+                            ?.name,
+                  onTap: () =>
+                      showTransactionDetails(dialogContext, transaction.id),
+                  onLongPress: () {
+                    AppHaptics.longPressAction();
+                    unawaited(
+                      showTransactionOptions(dialogContext, transaction.id),
+                    );
+                  },
                 ),
               for (final event in fundingEvents.take(20))
                 GoalFundingHistoryRow(
@@ -2632,6 +2632,19 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                       icon: Icon(AppIcon.delete),
                       label: const Text('Delete Permanently'),
                     ),
+                  if (!store.goalDeleteEligibility(goal.id).canDelete)
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.xs),
+                      child: Text(
+                        goalDeletionBlockedMessage(
+                          store.goalDeleteEligibility(goal.id),
+                          store.preferences.currency,
+                        ),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ],
@@ -2640,6 +2653,37 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
       );
     },
   );
+}
+
+String goalDeletionBlockedMessage(
+  GoalDeleteEligibility eligibility,
+  CurrencyFormatSettings currency,
+) {
+  if (eligibility.hasNonZeroBalance) {
+    if (eligibility.remainingBalanceMinor < 0) {
+      return 'This Goal is ${money(eligibility.remainingBalanceMinor.abs(), currency)} below zero. Resolve or delete the related transactions before deleting this Goal.';
+    }
+    return 'Withdraw the remaining ${money(eligibility.remainingBalanceMinor.abs(), currency)} before deleting this Goal.';
+  }
+  if (eligibility.hasScheduledReference) {
+    return 'Cancel the pending scheduled transfer before deleting this Goal.';
+  }
+  return 'This Goal cannot be deleted yet.';
+}
+
+String? goalTransactionCounterpartyName(
+  TransactionRecord transaction,
+  String goalAccountId,
+  Iterable<v2_account.AccountRecord> accounts,
+) {
+  if (transaction.type != TransactionType.transfer) return null;
+  final counterpartyId = transaction.accountId == goalAccountId
+      ? transaction.transferAccountId
+      : transaction.accountId;
+  return accounts
+      .where((account) => account.id == counterpartyId)
+      .firstOrNull
+      ?.name;
 }
 
 class GoalDetailValue extends StatelessWidget {

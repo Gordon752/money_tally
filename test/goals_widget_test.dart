@@ -6,6 +6,7 @@ import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/goal.dart';
 import 'package:money_tally/src/domain/goal_funding.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
+import 'package:money_tally/src/domain/transaction.dart';
 import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
@@ -526,6 +527,157 @@ void main() {
       expect(find.text('Goal Details'), findsNothing);
     },
   );
+
+  testWidgets(
+    'ordinary Goal-account expense opens the standard transaction details',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final sync = v2_sync.SyncMetadata.fresh(now: DateTime(2026, 7, 30));
+      final goal = _goal(
+        id: 'goal-test',
+        name: 'test',
+        startingAmountMinor: 10000,
+      ).copyWith(accountId: 'goal-account', accountMigrationVersion: 1);
+      final store = FinanceDataStore(
+        dataSet: FinanceDataSet(
+          accounts: [
+            v2_account.AccountRecord(
+              id: 'checking',
+              name: 'Checking',
+              type: v2_account.AccountType.checking,
+              openingBalanceMinor: 250000,
+              sync: sync,
+            ),
+            v2_account.AccountRecord(
+              id: 'goal-account',
+              name: 'test',
+              type: v2_account.AccountType.savings,
+              openingBalanceMinor: 10000,
+              goalId: goal.id,
+              includeInGroupBalance: false,
+              sync: sync,
+            ),
+          ],
+          categories: const [],
+          transactions: [
+            TransactionRecord(
+              id: 'loves-expense',
+              type: TransactionType.expense,
+              accountId: 'goal-account',
+              categoryId: 'maintenance',
+              date: DateTime(2026, 7, 30),
+              payee: "Love's",
+              amountMinor: 10000,
+              sync: sync,
+            ),
+          ],
+          scheduledTransactions: const [],
+          budgets: const [],
+          goals: [goal],
+          preferences: const UserPreferences(),
+        ),
+      );
+      await tester.pumpWidget(
+        _testApp(
+          store,
+          Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => showGoalDetails(context, goal.id),
+              child: const Text('Open details'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open details'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Love's"));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Transaction Details'), findsOneWidget);
+      expect(find.text("Love's"), findsWidgets);
+
+      await tester.tap(find.text('Close').last);
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text("Love's"));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'global Ledger routes a hidden Goal-account expense to standard details',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final sync = v2_sync.SyncMetadata.fresh(now: DateTime(2026, 7, 30));
+      final goal = _goal(
+        id: 'global-goal-test',
+        name: 'test',
+        startingAmountMinor: 10000,
+      ).copyWith(accountId: 'global-goal-account', accountMigrationVersion: 1);
+      final store = FinanceDataStore(
+        dataSet: FinanceDataSet(
+          accounts: [
+            v2_account.AccountRecord(
+              id: 'checking',
+              name: 'Checking',
+              type: v2_account.AccountType.checking,
+              openingBalanceMinor: 250000,
+              sync: sync,
+            ),
+            v2_account.AccountRecord(
+              id: 'global-goal-account',
+              name: 'test',
+              type: v2_account.AccountType.savings,
+              openingBalanceMinor: 10000,
+              goalId: goal.id,
+              includeInGroupBalance: false,
+              sync: sync,
+            ),
+          ],
+          categories: const [],
+          transactions: [
+            TransactionRecord(
+              id: 'global-loves-expense',
+              type: TransactionType.expense,
+              accountId: 'global-goal-account',
+              categoryId: 'maintenance',
+              date: DateTime(2026, 7, 30),
+              payee: "Love's",
+              amountMinor: 10000,
+              sync: sync,
+            ),
+          ],
+          scheduledTransactions: const [],
+          budgets: const [],
+          goals: [goal],
+          preferences: const UserPreferences(),
+        ),
+      );
+      await tester.pumpWidget(_testApp(store, const LedgerView()));
+
+      await tester.tap(find.text("Love's"));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Transaction Details'), findsOneWidget);
+    },
+  );
+
+  test('negative Goal deletion guidance explains the required resolution', () {
+    expect(
+      goalDeletionBlockedMessage(
+        const GoalDeleteEligibility(
+          hasContributions: false,
+          hasFunding: false,
+          hasScheduledReference: false,
+          hasNonZeroBalance: true,
+          remainingBalanceMinor: -10000,
+        ),
+        const UserPreferences().currency,
+      ),
+      'This Goal is \$100.00 below zero. Resolve or delete the related transactions before deleting this Goal.',
+    );
+  });
 
   testWidgets('missing Goal lookup reports safely without opening a barrier', (
     tester,

@@ -12,6 +12,8 @@ class TransactionRow extends StatelessWidget {
     this.categoryName,
     this.accountName,
     this.dateLabel,
+    this.displayAmountMinor,
+    this.showPositiveSign,
     this.onTap,
     this.onLongPress,
     super.key,
@@ -22,18 +24,22 @@ class TransactionRow extends StatelessWidget {
   final String? categoryName;
   final String? accountName;
   final String? dateLabel;
+  final int? displayAmountMinor;
+  final bool? showPositiveSign;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
-    final signedAmount = switch (transaction.type) {
-      TransactionType.expense => -transaction.amountMinor.abs(),
-      TransactionType.income => transaction.amountMinor.abs(),
-      TransactionType.transfer => transaction.amountMinor.abs(),
-      TransactionType.goalFunding => transaction.amountMinor.abs(),
-      TransactionType.adjustment => transaction.amountMinor,
-    };
+    final signedAmount =
+        displayAmountMinor ??
+        switch (transaction.type) {
+          TransactionType.expense => -transaction.amountMinor.abs(),
+          TransactionType.income => transaction.amountMinor.abs(),
+          TransactionType.transfer => transaction.amountMinor.abs(),
+          TransactionType.goalFunding => transaction.amountMinor.abs(),
+          TransactionType.adjustment => transaction.amountMinor,
+        };
 
     return InkWell(
       onTap: onTap,
@@ -74,7 +80,9 @@ class TransactionRow extends StatelessWidget {
               currency: currency,
               fontSize: 19,
               fontWeight: FontWeight.w700,
-              showPositiveSign: transaction.type == TransactionType.income,
+              showPositiveSign:
+                  showPositiveSign ??
+                  transaction.type == TransactionType.income,
               color: signedAmount < 0
                   ? AppColors.danger
                   : Theme.of(context).colorScheme.onSurface,
