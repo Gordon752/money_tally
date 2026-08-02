@@ -427,6 +427,124 @@ Future<void> showArchivedGoalActions(
   }
 }
 
+/// Archiving is optional organization, not a prerequisite for removing an
+/// empty Goal. Active cards use this same long-press action language as
+/// account and Ledger rows.
+Future<void> showActiveGoalActions(BuildContext context, String goalId) async {
+  final store = FinanceDataStoreScope.read(context);
+  final goal = store.goals
+      .where((item) => item.id == goalId && item.isActive)
+      .firstOrNull;
+  if (goal == null) return;
+
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              0,
+              AppSpacing.lg,
+              AppSpacing.xs,
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Goal Actions',
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: Icon(AppIcon.savings),
+            title: const Text('Goal Activity'),
+            onTap: () => Navigator.pop(sheetContext, 'activity'),
+          ),
+          ListTile(
+            leading: Icon(AppIcon.edit),
+            title: const Text('Edit'),
+            onTap: () => Navigator.pop(sheetContext, 'edit'),
+          ),
+          ListTile(
+            leading: Icon(AppIcon.archive),
+            title: const Text('Archive'),
+            onTap: () => Navigator.pop(sheetContext, 'archive'),
+          ),
+          ListTile(
+            leading: Icon(AppIcon.delete),
+            title: const Text('Delete'),
+            textColor: Theme.of(sheetContext).colorScheme.error,
+            iconColor: Theme.of(sheetContext).colorScheme.error,
+            onTap: () => Navigator.pop(sheetContext, 'delete'),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          TextButton(
+            onPressed: () => Navigator.pop(sheetContext),
+            child: const Text('Cancel'),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+        ],
+      ),
+    ),
+  );
+  if (action == null || !context.mounted) return;
+
+  switch (action) {
+    case 'activity':
+      await showGoalActivitySheet(context, goal.id);
+    case 'edit':
+      await showGoalEditor(context, initialGoal: goal);
+    case 'archive':
+      final confirmed = await showGoalConfirmation(
+        context,
+        title: 'Archive Goal?',
+        message:
+            'This hides the Goal from active planning. Its balance and activity remain unchanged.',
+        confirmLabel: 'Archive Goal',
+        destructive: true,
+      );
+      if (confirmed) await store.archiveGoal(goal.id);
+    case 'delete':
+      final eligibility = store.goalDeleteEligibility(goal.id);
+      if (!eligibility.canDelete) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Goal can’t be deleted yet'),
+            content: Text(
+              goalDeletionBlockedMessage(
+                eligibility,
+                store.preferences.currency,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+      final confirmed = await showGoalConfirmation(
+        context,
+        title: 'Delete this Goal permanently?',
+        message:
+            'This Goal has no remaining balance or pending scheduled activity. Ledger history, if any, will remain available.',
+        confirmLabel: 'Delete Permanently',
+        destructive: true,
+      );
+      if (confirmed) await store.deleteGoalPermanently(goal.id);
+  }
+}
+
 class GoalsPage extends StatefulWidget {
   const GoalsPage({super.key});
 
@@ -679,6 +797,12 @@ class GoalCard extends StatelessWidget {
         key: ValueKey('goal-card-${goal.id}'),
         borderRadius: BorderRadius.circular(AppRadii.card),
         onTap: () => showGoalDetails(context, goal.id),
+        onLongPress: goal.isActive
+            ? () {
+                AppHaptics.longPressAction();
+                unawaited(showActiveGoalActions(context, goal.id));
+              }
+            : null,
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Column(
@@ -872,6 +996,11 @@ Future<void> showGoalActivitySheet(BuildContext context, String goalId) async {
         leading: Icon(AppIcon.savings),
       ),
       PolishedChoice(
+        value: 'scheduleFunding',
+        label: 'Schedule Funding',
+        leading: Icon(AppIcon.schedule),
+      ),
+      PolishedChoice(
         value: 'spend',
         label: 'Spend from Goal',
         leading: Icon(AppIcon.expense),
@@ -892,6 +1021,8 @@ Future<void> showGoalActivitySheet(BuildContext context, String goalId) async {
   switch (action) {
     case 'fund':
       await showFundGoalsSheet(context, initialGoalId: goal.id);
+    case 'scheduleFunding':
+      await showScheduledGoalFundingDialog(context, initialGoalId: goal.id);
     case 'spend':
       await showTransactionDialog(
         context,
@@ -919,7 +1050,6 @@ Future<void> showGoalEditor(
     text: initialGoal?.description ?? '',
   );
   var targetMinor = initialGoal?.targetAmountMinor ?? 0;
-  var startingMinor = initialGoal?.startingAmountMinor ?? 0;
   var targetDate = initialGoal?.targetDate;
   var goalType = initialGoal?.goalType ?? GoalType.reachTarget;
   final accountId = initialGoal?.defaultFundingAccountId;
@@ -935,7 +1065,6 @@ Future<void> showGoalEditor(
         final validDate =
             isEditing ||
             targetDate == null ||
-            startingMinor >= targetMinor ||
             !targetDate!.isBefore(
               DateTime(
                 DateTime.now().year,
@@ -946,8 +1075,6 @@ Future<void> showGoalEditor(
         final canSave =
             nameController.text.trim().isNotEmpty &&
             targetMinor > 0 &&
-            startingMinor >= 0 &&
-            startingMinor <= targetMinor &&
             validDate;
 
         return _GoalControllerOwner(
@@ -970,7 +1097,9 @@ Future<void> showGoalEditor(
                     await store.createGoal(
                       name: nameController.text,
                       targetAmountMinor: targetMinor,
-                      startingAmountMinor: startingMinor,
+                      // New Goals never create money. Funding begins with an
+                      // ordinary transfer from a visible source account.
+                      startingAmountMinor: 0,
                       targetDate: targetDate,
                       fundingMethod: GoalFundingMethod.accountFunded,
                       goalType: goalType,
@@ -983,9 +1112,6 @@ Future<void> showGoalEditor(
                         name: nameController.text.trim(),
                         description: descriptionController.text.trim(),
                         targetAmountMinor: targetMinor,
-                        startingAmountMinor: initialGoal.isAccountBacked
-                            ? initialGoal.startingAmountMinor
-                            : startingMinor,
                         targetDate: targetDate,
                         goalType: goalType,
                         fundingMethod: GoalFundingMethod.accountFunded,
@@ -1097,24 +1223,6 @@ Future<void> showGoalEditor(
                         labelText: null,
                         onChanged: (value) =>
                             setDialogState(() => targetMinor = value.abs()),
-                      ),
-                    ),
-                  ],
-                ),
-                TransactionFormDivider(),
-                TransactionFormLabel('Starting amount'),
-                Row(
-                  children: [
-                    TransactionFormIcon(AppIcon.savings),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: AmountEntryField(
-                        fieldKey: const ValueKey('goal-starting-amount'),
-                        initialMinor: startingMinor,
-                        currency: store.preferences.currency,
-                        labelText: null,
-                        onChanged: (value) =>
-                            setDialogState(() => startingMinor = value.abs()),
                       ),
                     ),
                   ],
@@ -1462,7 +1570,7 @@ Future<void> showFundGoalsSheet(
                       key: ValueKey(allocations[index].id),
                       children: [
                         Expanded(
-                          flex: 6,
+                          flex: 10,
                           child: InkWell(
                             key: ValueKey(
                               'fund-goals-goal-${allocations[index].id}',
@@ -1519,7 +1627,7 @@ Future<void> showFundGoalsSheet(
                         ),
                         const SizedBox(width: AppSpacing.xs),
                         Expanded(
-                          flex: 4,
+                          flex: 10,
                           child: AmountEntryField(
                             key: ValueKey(
                               '${allocations[index].id}-${allocations[index].revision}',
@@ -1531,6 +1639,14 @@ Future<void> showFundGoalsSheet(
                             replaceZeroOnFirstInput: true,
                             currency: store.preferences.currency,
                             labelText: null,
+                            decoration: const InputDecoration(
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.never,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: AppSpacing.sm,
+                                vertical: AppSpacing.sm,
+                              ),
+                            ),
                             onChanged: (value) => setDialogState(() {
                               allocations[index].amountMinor = value.abs();
                               if (index > 0) rebalanceFirst();
@@ -1538,13 +1654,21 @@ Future<void> showFundGoalsSheet(
                           ),
                         ),
                         if (allocations.length > 1)
-                          IconButton(
-                            tooltip: 'Remove Goal allocation',
-                            onPressed: () => setDialogState(() {
-                              allocations.removeAt(index);
-                              rebalanceFirst();
-                            }),
-                            icon: Icon(AppIcon.expense),
+                          SizedBox(
+                            width: 40,
+                            child: IconButton(
+                              padding: const EdgeInsets.all(AppSpacing.xxs),
+                              constraints: const BoxConstraints(
+                                minWidth: 40,
+                                minHeight: 40,
+                              ),
+                              tooltip: 'Remove Goal allocation',
+                              onPressed: () => setDialogState(() {
+                                allocations.removeAt(index);
+                                rebalanceFirst();
+                              }),
+                              icon: Icon(AppIcon.expense),
+                            ),
                           ),
                       ],
                     ),
@@ -1645,6 +1769,7 @@ Future<bool> showScheduledGoalFundingDialog(
   BuildContext context, {
   v2_scheduled.ScheduledTransactionRecord? existing,
   DateTime? initialDate,
+  String? initialGoalId,
 }) async {
   final store = FinanceDataStoreScope.read(context);
   final eligibleGoals =
@@ -1704,7 +1829,12 @@ Future<bool> showScheduledGoalFundingDialog(
   ];
   if (allocations.isEmpty) {
     allocations.add(
-      _GoalAllocationDraft(id: 'scheduled-goal-${draftSequence++}'),
+      _GoalAllocationDraft(
+        id: 'scheduled-goal-${draftSequence++}',
+        goalId: eligibleGoals.any((goal) => goal.id == initialGoalId)
+            ? initialGoalId
+            : null,
+      ),
     );
   }
 

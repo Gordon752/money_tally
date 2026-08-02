@@ -86,6 +86,207 @@ void main() {
     expect(store.goals.single.goalType, GoalType.reachTarget);
   });
 
+  testWidgets('new Goals start at zero without a Starting Balance field', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    await tester.pumpWidget(
+      _testApp(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showCreateGoalSheet(context),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Starting amount'), findsNothing);
+    expect(find.byKey(const ValueKey('goal-starting-amount')), findsNothing);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('goal-name')),
+      'Emergency Fund',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('goal-target-amount')),
+      '50000',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('goal-save')));
+    await tester.pumpAndSettle();
+
+    final goal = store.goals.single;
+    expect(goal.startingAmountMinor, 0);
+    expect(store.currentGoalAmountMinor(goal.id), 0);
+    expect(store.balanceForAccount(goal.accountId!), 0);
+  });
+
+  testWidgets(
+    'active Goal long press exposes actions and can delete directly',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final store = _store();
+      final goal = await store.createGoal(
+        name: 'Temporary Goal',
+        targetAmountMinor: 50000,
+        startingAmountMinor: 0,
+        targetDate: null,
+      );
+      await tester.pumpWidget(_testApp(store, GoalCard(goal: goal)));
+
+      await tester.longPress(find.byKey(ValueKey('goal-card-${goal.id}')));
+      await tester.pumpAndSettle();
+      expect(find.text('Goal Actions'), findsOneWidget);
+      expect(find.text('Goal Activity'), findsWidgets);
+      expect(find.text('Archive'), findsOneWidget);
+      expect(find.text('Delete'), findsOneWidget);
+
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete this Goal permanently?'), findsOneWidget);
+      await tester.tap(find.text('Delete Permanently'));
+      await tester.pumpAndSettle();
+      expect(store.goalById(goal.id).isDeleted, isTrue);
+    },
+  );
+
+  testWidgets(
+    'Goal Activity schedules funding with the current Goal selected',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final store = _store();
+      final goal = await store.createGoal(
+        name: 'Emergency Fund',
+        targetAmountMinor: 50000,
+        startingAmountMinor: 0,
+        targetDate: null,
+      );
+      await tester.pumpWidget(
+        _testApp(
+          store,
+          Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => showGoalActivitySheet(context, goal.id),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(find.text('Schedule Funding'), findsOneWidget);
+
+      await tester.tap(find.text('Schedule Funding'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Create Scheduled Goal Funding'), findsOneWidget);
+      expect(find.text('Emergency Fund'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('scheduled-goal-funding-total')),
+        '10000',
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('scheduled-goal-funding-save')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(store.scheduledTransactions, hasLength(1));
+      final schedule = store.scheduledTransactions.single;
+      expect(schedule.type, TransactionType.transfer);
+      expect(schedule.goalId, goal.id);
+      expect(schedule.transferAccountId, goal.accountId);
+    },
+  );
+
+  testWidgets('active Goal delete explains a remaining-balance block', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Funded Goal',
+      targetAmountMinor: 50000,
+      startingAmountMinor: 0,
+      targetDate: null,
+    );
+    await store.fundGoals(
+      sourceAccountId: 'checking',
+      totalAmountMinor: 10000,
+      date: DateTime(2026, 8, 1),
+      allocations: [
+        GoalFundingAllocation(
+          id: 'funded-goal-allocation',
+          fundingEventId: '',
+          goalId: goal.id,
+          amountMinor: 10000,
+          order: 0,
+        ),
+      ],
+    );
+    await tester.pumpWidget(_testApp(store, GoalCard(goal: goal)));
+
+    await tester.longPress(find.byKey(ValueKey('goal-card-${goal.id}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Goal can’t be deleted yet'), findsOneWidget);
+    expect(
+      find.text('Withdraw the remaining \$100.00 before deleting this Goal.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Goal allocation amount keeps fifty thousand dollars visible', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Emergency Fund',
+      targetAmountMinor: 10000000,
+      startingAmountMinor: 0,
+      targetDate: null,
+    );
+    await tester.pumpWidget(
+      _testApp(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () =>
+                showFundGoalsSheet(context, initialGoalId: goal.id),
+            child: const Text('Open funding'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open funding'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('fund-goals-total')),
+      '5000000',
+    );
+    await tester.pump();
+
+    final amountField = find.byKey(
+      const ValueKey('fund-goals-amount-goal-allocation-draft-0'),
+    );
+    expect(tester.getSize(amountField).width, greaterThanOrEqualTo(165));
+    expect(
+      tester.widget<TextField>(amountField).controller!.text,
+      r'$50,000.00',
+    );
+  });
+
   testWidgets('Create Goal selects Maintain a Balance and updates date label', (
     tester,
   ) async {
