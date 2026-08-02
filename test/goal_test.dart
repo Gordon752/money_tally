@@ -204,7 +204,7 @@ void main() {
         final goal = await store.createGoal(
           name: 'Emergency Fund',
           targetAmountMinor: 1000000,
-          startingAmountMinor: 10000,
+          startingAmountMinor: 0,
           targetDate: DateTime(2027, 7, 24),
           fundingMethod: GoalFundingMethod.accountFunded,
           defaultFundingAccountId: 'checking',
@@ -218,11 +218,13 @@ void main() {
           allocations: [_allocation(goal.id, 50000)],
         );
 
-        expect(store.currentGoalAmountMinor(goal.id), 60000);
-        expect(store.balanceForAccount('checking'), 190000);
-        expect(store.fundedGoalAssetsMinor, 60000);
+        expect(store.currentGoalAmountMinor(goal.id), 50000);
+        expect(store.balanceForAccount('checking'), 200000);
+        // Account-backed Goal balances now participate through the linked
+        // hidden account, not the retired standalone Goal-assets bucket.
+        expect(store.fundedGoalAssetsMinor, 0);
         expect(store.netWorthMinor, netWorthBefore);
-        expect(store.transactions, isEmpty);
+        expect(store.transactions, hasLength(1));
       },
     );
 
@@ -333,25 +335,30 @@ void main() {
       },
     );
 
-    test('tracking-only progress has no account effect', () async {
-      final store = _store();
-      final goal = await store.createGoal(
-        name: 'Outside Savings',
-        targetAmountMinor: 100000,
-        startingAmountMinor: 10000,
-        targetDate: null,
-        fundingMethod: GoalFundingMethod.trackingOnly,
-      );
-      await store.addGoalContribution(
-        goalId: goal.id,
-        amountMinor: 25000,
-        date: DateTime(2026, 7, 24),
-      );
-
-      expect(store.currentGoalAmountMinor(goal.id), 35000);
-      expect(store.balanceForAccount('checking'), 250000);
-      expect(store.netWorthMinor, 250000);
-    });
+    test(
+      'legacy direct contributions are rejected for account-backed Goals',
+      () async {
+        final store = _store();
+        final goal = await store.createGoal(
+          name: 'Outside Savings',
+          targetAmountMinor: 100000,
+          startingAmountMinor: 0,
+          targetDate: null,
+          fundingMethod: GoalFundingMethod.accountFunded,
+        );
+        expect(
+          store.addGoalContribution(
+            goalId: goal.id,
+            amountMinor: 25000,
+            date: DateTime(2026, 7, 24),
+          ),
+          throwsA(isA<FinanceDataValidationException>()),
+        );
+        expect(store.currentGoalAmountMinor(goal.id), 0);
+        expect(store.balanceForAccount('checking'), 250000);
+        expect(store.netWorthMinor, 250000);
+      },
+    );
 
     test('undo reverses the exact whole funding event once', () async {
       final store = _store();
@@ -415,12 +422,13 @@ void main() {
           targetAmountMinor: 100000,
           startingAmountMinor: 0,
           targetDate: DateTime(2027, 7, 24),
-          fundingMethod: GoalFundingMethod.trackingOnly,
+          fundingMethod: GoalFundingMethod.accountFunded,
         );
-        final contribution = await store.addGoalContribution(
-          goalId: goal.id,
-          amountMinor: 25000,
+        final funding = await store.fundGoals(
+          sourceAccountId: 'checking',
           date: DateTime(2026, 7, 24),
+          totalAmountMinor: 25000,
+          allocations: [_allocation(goal.id, 25000)],
         );
 
         await store.markGoalComplete(goal.id);
@@ -433,7 +441,7 @@ void main() {
         expect(store.goalById(goal.id).isActive, isTrue);
         expect(store.goalById(goal.id).completedAt, isNull);
         expect(store.currentGoalAmountMinor(goal.id), 25000);
-        expect(store.goalContributionById(contribution.id).isActive, isTrue);
+        expect(store.goalFundingEventById(funding.id).isActive, isTrue);
 
         await store.archiveGoal(goal.id);
         expect(store.goalById(goal.id).isArchived, isTrue);
@@ -451,7 +459,7 @@ void main() {
           targetAmountMinor: 100000,
           startingAmountMinor: 0,
           targetDate: null,
-          fundingMethod: GoalFundingMethod.trackingOnly,
+          fundingMethod: GoalFundingMethod.accountFunded,
         );
         expect(store.goalDeleteEligibility(unused.id).canDelete, isTrue);
         await store.deleteGoalPermanently(unused.id);
@@ -462,11 +470,12 @@ void main() {
           targetAmountMinor: 100000,
           startingAmountMinor: 0,
           targetDate: null,
-          fundingMethod: GoalFundingMethod.trackingOnly,
+          fundingMethod: GoalFundingMethod.accountFunded,
         );
-        await store.addGoalContribution(
-          goalId: used.id,
-          amountMinor: 1000,
+        await store.fundGoals(
+          sourceAccountId: 'checking',
+          totalAmountMinor: 1000,
+          allocations: [_allocation(used.id, 1000)],
           date: DateTime(2026, 7, 24),
         );
         expect(store.goalDeleteEligibility(used.id).canDelete, isFalse);
@@ -486,11 +495,12 @@ void main() {
           targetAmountMinor: 100000,
           startingAmountMinor: 0,
           targetDate: DateTime(2027, 7, 24),
-          fundingMethod: GoalFundingMethod.trackingOnly,
+          fundingMethod: GoalFundingMethod.accountFunded,
         );
-        await store.addGoalContribution(
-          goalId: goal.id,
-          amountMinor: 25000,
+        await store.fundGoals(
+          sourceAccountId: 'checking',
+          totalAmountMinor: 25000,
+          allocations: [_allocation(goal.id, 25000)],
           date: DateTime(2026, 7, 24),
         );
         await store.archiveGoal(goal.id);
@@ -568,7 +578,7 @@ void main() {
     });
 
     test(
-      'guided account migration debits once and preserves Goal progress',
+      'guided account migration preserves the legacy account and Goal value',
       () async {
         final legacyGoal = GoalRecord.fromJson({
           'id': 'legacy-goal',
@@ -602,8 +612,8 @@ void main() {
 
         expect(store.goalById(legacyGoal.id).requiresFundingMigration, isFalse);
         expect(store.currentGoalAmountMinor(legacyGoal.id), 25000);
-        expect(store.balanceForAccount('checking'), 225000);
-        expect(store.netWorthMinor, 250000);
+        expect(store.balanceForAccount('checking'), 250000);
+        expect(store.netWorthMinor, 275000);
         expect(store.goalFundingEvents, hasLength(1));
         expect(
           store.goalContributionById(legacyContribution.id).isDeleted,
@@ -611,7 +621,7 @@ void main() {
         );
 
         await store.migrateLegacyGoalToAccountFunding(legacyGoal.id);
-        expect(store.balanceForAccount('checking'), 225000);
+        expect(store.balanceForAccount('checking'), 250000);
         expect(store.goalFundingEvents, hasLength(1));
       },
     );
@@ -735,34 +745,40 @@ void main() {
       },
     );
 
-    test('goals and contributions survive local restart', () async {
-      SharedPreferences.setMockInitialValues({});
-      const repository = LocalFinanceDataSetRepository(
-        storageKey: 'goal_restart_test',
-      );
-      final store = _store(localRepository: repository);
-      final goal = await store.createGoal(
-        name: 'Restart Goal',
-        targetAmountMinor: 100000,
-        startingAmountMinor: 5000,
-        targetDate: null,
-        fundingMethod: GoalFundingMethod.trackingOnly,
-      );
-      final contribution = await store.addGoalContribution(
-        goalId: goal.id,
-        amountMinor: 10000,
-        date: DateTime(2026, 7, 24),
-        note: 'Persist me',
-      );
+    test(
+      'Goals and ordinary funding transfers survive local restart',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        const repository = LocalFinanceDataSetRepository(
+          storageKey: 'goal_restart_test',
+        );
+        final store = _store(localRepository: repository);
+        final goal = await store.createGoal(
+          name: 'Restart Goal',
+          targetAmountMinor: 100000,
+          startingAmountMinor: 0,
+          targetDate: null,
+          fundingMethod: GoalFundingMethod.accountFunded,
+        );
+        final funding = await store.fundGoals(
+          sourceAccountId: 'checking',
+          totalAmountMinor: 10000,
+          allocations: [_allocation(goal.id, 10000)],
+          date: DateTime(2026, 7, 24),
+          note: 'Persist me',
+        );
 
-      final restored = await FinanceDataStore.load(localRepository: repository);
+        final restored = await FinanceDataStore.load(
+          localRepository: repository,
+        );
 
-      expect(restored.goalById(goal.id).name, 'Restart Goal');
-      expect(restored.goalContributionById(contribution.id).note, 'Persist me');
-      expect(restored.currentGoalAmountMinor(goal.id), 15000);
-    });
+        expect(restored.goalById(goal.id).name, 'Restart Goal');
+        expect(restored.goalFundingEventById(funding.id).note, 'Persist me');
+        expect(restored.currentGoalAmountMinor(goal.id), 10000);
+      },
+    );
 
-    test('undone contribution tombstone survives restart', () async {
+    test('undone Goal funding tombstone survives restart', () async {
       SharedPreferences.setMockInitialValues({});
       const repository = LocalFinanceDataSetRepository(
         storageKey: 'goal_undo_restart_test',
@@ -773,18 +789,19 @@ void main() {
         targetAmountMinor: 100000,
         startingAmountMinor: 0,
         targetDate: null,
-        fundingMethod: GoalFundingMethod.trackingOnly,
+        fundingMethod: GoalFundingMethod.accountFunded,
       );
-      final contribution = await store.addGoalContribution(
-        goalId: goal.id,
-        amountMinor: 10000,
+      final funding = await store.fundGoals(
+        sourceAccountId: 'checking',
+        totalAmountMinor: 10000,
+        allocations: [_allocation(goal.id, 10000)],
         date: DateTime(2026, 7, 24),
       );
-      await store.undoGoalContribution(contribution.id);
+      await store.undoGoalFunding(funding.id);
 
       final restored = await FinanceDataStore.load(localRepository: repository);
 
-      expect(restored.goalContributionById(contribution.id).isDeleted, isTrue);
+      expect(restored.goalFundingEventById(funding.id).isDeleted, isTrue);
       expect(restored.currentGoalAmountMinor(goal.id), 0);
     });
 

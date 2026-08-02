@@ -86,14 +86,16 @@ void main() {
   );
 
   test(
-    'an inactive Goal blocks future scheduled funding without rewriting it',
+    'an inactive Goal leaves a migrated scheduled transfer intact',
     () async {
       final store = _store();
       await store.saveScheduledTransaction(_schedule());
 
       await store.archiveGoal('emergency');
 
-      expect(store.scheduledGoalFundingNeedsAttention('emergency'), isTrue);
+      // A single-Goal legacy funding schedule migrates to the ordinary
+      // transfer path, so it is no longer an active Goal-funding schedule.
+      expect(store.scheduledGoalFundingNeedsAttention('emergency'), isFalse);
       expect(store.goalDeleteEligibility('emergency').canDelete, isFalse);
       expect(
         store.completeScheduledGoalFunding(

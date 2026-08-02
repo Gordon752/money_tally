@@ -142,6 +142,8 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
+  static const _initialSyncRetryDelay = Duration(milliseconds: 900);
+
   var _localOnly = false;
   var _isSigningIn = false;
   var _syncLabel = 'Synced';
@@ -149,10 +151,6 @@ class _AuthGateState extends State<AuthGate> {
   String? _authError;
   String? _syncingUid;
   String? _syncedUid;
-  FinanceStore? _listeningStore;
-  FinanceRemoteRepository? _listeningRemoteRepository;
-  String? _listeningUserId;
-  Timer? _pushDebounce;
   late final Stream<MoneyTallyUser?> _authStateStream;
 
   @override
@@ -163,14 +161,12 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   void dispose() {
-    _detachStoreSync();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     if (_localOnly) {
-      _detachStoreSync();
       FinanceDataStoreScope.read(context).detachRemoteSync();
       _syncedUid = null;
       _syncingUid = null;
@@ -187,7 +183,6 @@ class _AuthGateState extends State<AuthGate> {
           return const _FullScreenProgress(message: 'Checking sign-in');
         }
         if (user == null) {
-          _detachStoreSync();
           FinanceDataStoreScope.read(context).detachRemoteSync();
           _syncedUid = null;
           _syncingUid = null;
@@ -199,10 +194,9 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        final store = FinanceStoreScope.read(context);
         final dataStore = FinanceDataStoreScope.read(context);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _syncIfNeeded(user, store, dataStore);
+          if (mounted) _syncIfNeeded(user, dataStore);
         });
         return FinanceHome(
           syncLabel: user.isLocalOnly ? 'Local only' : _syncLabel,
@@ -210,9 +204,7 @@ class _AuthGateState extends State<AuthGate> {
               ? null
               : '${shortDate(_lastSuccessfulSyncAt!.toLocal())} '
                     '${TimeOfDay.fromDateTime(_lastSuccessfulSyncAt!.toLocal()).format(context)}',
-          onSyncNow: user.isLocalOnly
-              ? null
-              : () => _syncNow(user, store, dataStore),
+          onSyncNow: user.isLocalOnly ? null : () => _syncNow(user, dataStore),
           onSignOut: user.isLocalOnly ? null : widget.authService.signOut,
         );
       },
@@ -239,46 +231,24 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  void _syncIfNeeded(
-    MoneyTallyUser user,
-    FinanceStore store,
-    FinanceDataStore dataStore,
-  ) {
-    final remoteRepository = widget.remoteRepository;
+  void _syncIfNeeded(MoneyTallyUser user, FinanceDataStore dataStore) {
     final recordRepository = widget.recordRepository;
-    if (user.isLocalOnly ||
-        (remoteRepository == null && recordRepository == null)) {
+    if (user.isLocalOnly || recordRepository == null) {
       return;
     }
     if (_syncedUid == user.uid || _syncingUid == user.uid) return;
 
     _syncingUid = user.uid;
-    unawaited(
-      _syncUser(user.uid, remoteRepository, recordRepository, store, dataStore),
-    );
+    unawaited(_syncUser(user.uid, recordRepository, dataStore));
   }
 
   Future<void> _syncUser(
     String userId,
-    FinanceRemoteRepository? remoteRepository,
     FinanceRecordRepository? recordRepository,
-    FinanceStore store,
-    FinanceDataStore dataStore,
-  ) async {
+    FinanceDataStore dataStore, {
+    bool retryAfterTransientFailure = true,
+  }) async {
     try {
-      // The tombstone-aware record repository supersedes the legacy snapshot.
-      if (remoteRepository != null && recordRepository == null) {
-        final pulled = await store.pullSnapshot(
-          remoteRepository: remoteRepository,
-          userId: userId,
-        );
-        if (!pulled) {
-          await store.pushSnapshot(
-            remoteRepository: remoteRepository,
-            userId: userId,
-          );
-        }
-      }
       if (recordRepository != null) {
         await dataStore.attachRemoteSync(
           remoteRepository: recordRepository,
@@ -292,12 +262,25 @@ class _AuthGateState extends State<AuthGate> {
         _syncLabel = 'Synced';
         _lastSuccessfulSyncAt = DateTime.now();
       });
-      if (remoteRepository != null && recordRepository == null) {
-        _attachStoreSync(userId, remoteRepository, store);
-      }
     } on Exception catch (error, stackTrace) {
       debugPrint('Cloud record sync failed: $error');
       debugPrintStack(stackTrace: stackTrace);
+      // On a cold start Firebase Auth can publish the restored user shortly
+      // before Firestore has a usable session token. Retry once while keeping
+      // the in-progress state; a persistent error still reaches the normal
+      // Sync issue state below.
+      if (retryAfterTransientFailure && _syncingUid == userId) {
+        await Future<void>.delayed(_initialSyncRetryDelay);
+        if (mounted && _syncingUid == userId) {
+          return _syncUser(
+            userId,
+            recordRepository,
+            dataStore,
+            retryAfterTransientFailure: false,
+          );
+        }
+        return;
+      }
       if (!mounted) return;
       setState(() {
         _syncingUid = null;
@@ -306,75 +289,14 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  Future<void> _syncNow(
-    MoneyTallyUser user,
-    FinanceStore store,
-    FinanceDataStore dataStore,
-  ) async {
+  Future<void> _syncNow(MoneyTallyUser user, FinanceDataStore dataStore) async {
     if (_syncingUid != null) return;
     setState(() {
       _syncedUid = null;
       _syncingUid = user.uid;
       _syncLabel = 'Syncing';
     });
-    await _syncUser(
-      user.uid,
-      widget.remoteRepository,
-      widget.recordRepository,
-      store,
-      dataStore,
-    );
-  }
-
-  void _attachStoreSync(
-    String userId,
-    FinanceRemoteRepository remoteRepository,
-    FinanceStore store,
-  ) {
-    if (_listeningUserId == userId && _listeningStore == store) return;
-    _detachStoreSync();
-    _listeningUserId = userId;
-    _listeningRemoteRepository = remoteRepository;
-    _listeningStore = store;
-    store.addListener(_queuePush);
-  }
-
-  void _detachStoreSync() {
-    _pushDebounce?.cancel();
-    _pushDebounce = null;
-    _listeningStore?.removeListener(_queuePush);
-    _listeningStore = null;
-    _listeningRemoteRepository = null;
-    _listeningUserId = null;
-  }
-
-  void _queuePush() {
-    _pushDebounce?.cancel();
-    _pushDebounce = Timer(const Duration(milliseconds: 800), _pushLocalChanges);
-  }
-
-  Future<void> _pushLocalChanges() async {
-    final store = _listeningStore;
-    final remoteRepository = _listeningRemoteRepository;
-    final userId = _listeningUserId;
-    if (store == null || remoteRepository == null || userId == null) return;
-
-    try {
-      await store.pushSnapshot(
-        remoteRepository: remoteRepository,
-        userId: userId,
-      );
-      if (mounted && _syncLabel != 'Synced') {
-        setState(() {
-          _syncLabel = 'Synced';
-          _lastSuccessfulSyncAt = DateTime.now();
-        });
-      }
-    } on Exception catch (error, stackTrace) {
-      debugPrint('Cloud snapshot sync failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      if (mounted) setState(() => _syncLabel = 'Sync issue');
-    }
+    await _syncUser(user.uid, widget.recordRepository, dataStore);
   }
 }
 
@@ -394,87 +316,144 @@ class SignInView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark
+        ? TrackmarkBrandPalette.deepGreen
+        : TrackmarkBrandPalette.ivory;
+    final primaryText = isDark
+        ? TrackmarkBrandPalette.warmWhite
+        : TrackmarkBrandPalette.deepGreen;
+    final secondaryText = isDark
+        ? TrackmarkBrandPalette.paleGold
+        : TrackmarkBrandPalette.deepGreen.withValues(alpha: 0.72);
     return Scaffold(
+      backgroundColor: background,
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Icon(
-                    AppIcon.wallet,
-                    color: AppTheme.accent,
-                    size: AppIconSize.brand,
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Money Tally',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppTheme.ink,
-                      fontSize: 34,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Sign in to keep your accounts, ledgers, budgets, and scheduled transactions synced across iPhone, iPad, and Mac.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppTheme.ink.withValues(alpha: 0.7),
-                      height: 1.35,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-                  FilledButton.icon(
-                    onPressed: isSigningIn ? null : onAppleSignIn,
-                    icon: isSigningIn
-                        ? SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(AppIcon.apple),
-                    label: Text(
-                      isSigningIn ? 'Signing in' : 'Sign in with Apple',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: isSigningIn ? null : onContinueLocal,
-                    child: const Text('Continue local-only'),
-                  ),
-                  if (errorMessage != null) ...[
-                    const SizedBox(height: 16),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: AppTheme.rose.withValues(alpha: 0.08),
-                        border: Border.all(
-                          color: AppTheme.rose.withValues(alpha: 0.3),
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 30),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Align(
+                alignment: const Alignment(0, -0.30),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 390),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: TrackmarkBrandLockup(
+                          bright: isDark,
+                          markSize: 160,
+                          wordmarkSize: 32,
                         ),
-                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text(
-                          errorMessage!,
+                      const SizedBox(height: 46),
+                      Text(
+                        'Manage your money with confidence.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: primaryText,
+                          height: 1.3,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'Securely sync your data across your Apple devices.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: secondaryText,
+                          height: 1.42,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 44),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(56),
+                          backgroundColor: isDark
+                              ? TrackmarkBrandPalette.warmWhite
+                              : TrackmarkBrandPalette.deepGreen,
+                          foregroundColor: isDark
+                              ? TrackmarkBrandPalette.deepGreen
+                              : TrackmarkBrandPalette.ivory,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: isSigningIn ? null : onAppleSignIn,
+                        icon: isSigningIn
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(AppIcon.apple),
+                        label: Text(
+                          isSigningIn ? 'Signing in' : 'Sign in with Apple',
                           style: const TextStyle(
-                            color: AppTheme.rose,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            height: 1.3,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                ],
+                      const SizedBox(height: 14),
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(56),
+                          foregroundColor: primaryText,
+                          side: BorderSide(
+                            color: isDark
+                                ? TrackmarkBrandPalette.paleGold
+                                : TrackmarkBrandPalette.deepGreen,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: isSigningIn ? null : onContinueLocal,
+                        child: const Text(
+                          'Continue Local-Only',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (errorMessage != null) ...[
+                        const SizedBox(height: 16),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: AppTheme.rose.withValues(alpha: 0.08),
+                            border: Border.all(
+                              color: AppTheme.rose.withValues(alpha: 0.3),
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(
+                              errorMessage!,
+                              style: const TextStyle(
+                                color: AppTheme.rose,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
           ),

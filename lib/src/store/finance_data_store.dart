@@ -51,6 +51,7 @@ class FinanceDataStore extends ChangeNotifier {
     FinanceRecordRepository? remoteRepository,
     NotificationScheduler notificationScheduler =
         const NoopNotificationScheduler(),
+    bool preferRemoteOnFirstSync = false,
     String? userId,
     String deviceId = 'local',
   }) {
@@ -59,6 +60,7 @@ class FinanceDataStore extends ChangeNotifier {
       localRepository: localRepository,
       remoteRepository: remoteRepository,
       notificationScheduler: notificationScheduler,
+      preferRemoteOnFirstSync: preferRemoteOnFirstSync,
       userId: userId,
       deviceId: deviceId,
     );
@@ -69,6 +71,7 @@ class FinanceDataStore extends ChangeNotifier {
     this.localRepository,
     this.remoteRepository,
     this.notificationScheduler = const NoopNotificationScheduler(),
+    this.preferRemoteOnFirstSync = false,
     this.userId,
     this.deviceId = 'local',
   });
@@ -133,6 +136,7 @@ class FinanceDataStore extends ChangeNotifier {
   final LocalFinanceDataSetRepository? localRepository;
   FinanceRecordRepository? remoteRepository;
   final NotificationScheduler notificationScheduler;
+  bool preferRemoteOnFirstSync;
   String? userId;
   final String deviceId;
   final ValueNotifier<BudgetLowAlert?> budgetLowAlertNotifier =
@@ -683,6 +687,20 @@ class FinanceDataStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A JSON backup is already a v2 data set. Its successful restoration forms
+  /// a new v2 authority boundary, even when the older backup predates the
+  /// one-time legacy-import marker.
+  Future<void> restoreBackupDataSet(FinanceDataSet dataSet) {
+    preferRemoteOnFirstSync = false;
+    return replaceDataSet(
+      dataSet.copyWith(
+        preferences: dataSet.preferences.copyWith(
+          legacyV1MigrationCompleted: true,
+        ),
+      ),
+    );
+  }
+
   Future<void> attachRemoteSync({
     required FinanceRecordRepository remoteRepository,
     required String userId,
@@ -692,17 +710,24 @@ class FinanceDataStore extends ChangeNotifier {
 
     final remoteDataSet = await remoteRepository.loadDataSet(userId);
     if (financeDataSetHasRecords(remoteDataSet)) {
-      final merged = mergeFinanceDataSetsPreferCurrent(
-        incoming: remoteDataSet,
-        current: _dataSet,
-      );
+      final merged = preferRemoteOnFirstSync
+          ? mergeFinanceDataSetsPreferIncoming(
+              incoming: remoteDataSet,
+              current: _dataSet,
+            )
+          : mergeFinanceDataSetsPreferCurrent(
+              incoming: remoteDataSet,
+              current: _dataSet,
+            );
       await replaceDataSet(merged);
+      preferRemoteOnFirstSync = false;
       await migrateLegacyGoalsToAccounts();
       await pushAllRecordsToRemote();
       return;
     }
 
     await pushAllRecordsToRemote();
+    preferRemoteOnFirstSync = false;
   }
 
   /// Converts the former Goal-reservation/funding graph to the normal account
@@ -3372,6 +3397,60 @@ FinanceDataSet mergeFinanceDataSetsPreferCurrent({
   );
 }
 
+/// Used only for the first cloud sync after a local v1 import. The remote
+/// data set is already v2, so it is authoritative for every matching record;
+/// locally imported legacy records may only fill missing IDs.
+FinanceDataSet mergeFinanceDataSetsPreferIncoming({
+  required FinanceDataSet incoming,
+  required FinanceDataSet current,
+}) {
+  return incoming.copyWith(
+    accounts: mergeFinanceRecordsPreferIncoming(
+      incoming: incoming.accounts,
+      current: current.accounts,
+      idOf: (item) => item.id,
+    ),
+    categories: mergeFinanceRecordsPreferIncoming(
+      incoming: incoming.categories,
+      current: current.categories,
+      idOf: (item) => item.id,
+    ),
+    transactions: mergeFinanceRecordsPreferIncoming(
+      incoming: incoming.transactions,
+      current: current.transactions,
+      idOf: (item) => item.id,
+    ),
+    scheduledTransactions: mergeFinanceRecordsPreferIncoming(
+      incoming: incoming.scheduledTransactions,
+      current: current.scheduledTransactions,
+      idOf: (item) => item.id,
+    ),
+    budgets: mergeFinanceRecordsPreferIncoming(
+      incoming: incoming.budgets,
+      current: current.budgets,
+      idOf: (item) => item.id,
+    ),
+    goals: mergeFinanceRecordsPreferIncoming(
+      incoming: incoming.goals,
+      current: current.goals,
+      idOf: (item) => item.id,
+    ),
+    goalContributions: mergeFinanceRecordsPreferIncoming(
+      incoming: incoming.goalContributions,
+      current: current.goalContributions,
+      idOf: (item) => item.id,
+    ),
+    goalFundingEvents: mergeFinanceRecordsPreferIncoming(
+      incoming: incoming.goalFundingEvents,
+      current: current.goalFundingEvents,
+      idOf: (item) => item.id,
+    ),
+    preferences: incoming.preferences.copyWith(
+      legacyV1MigrationCompleted: true,
+    ),
+  );
+}
+
 List<T> mergeFinanceRecordsPreferCurrent<T>({
   required List<T> incoming,
   required List<T> current,
@@ -3390,6 +3469,19 @@ List<T> mergeFinanceRecordsPreferCurrent<T>({
         )
       else
         item,
+    for (final item in current)
+      if (!incomingIds.contains(idOf(item))) item,
+  ];
+}
+
+List<T> mergeFinanceRecordsPreferIncoming<T>({
+  required List<T> incoming,
+  required List<T> current,
+  required String Function(T item) idOf,
+}) {
+  final incomingIds = incoming.map(idOf).toSet();
+  return [
+    ...incoming,
     for (final item in current)
       if (!incomingIds.contains(idOf(item))) item,
   ];

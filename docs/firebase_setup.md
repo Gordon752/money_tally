@@ -1,6 +1,6 @@
 # Firebase Setup
 
-Money Tally is configured for Firebase project `money-tally-gordonbowles`.
+Trackmark Money is configured for Firebase project `money-tally-gordonbowles`.
 
 ## One-time login
 
@@ -18,7 +18,7 @@ export PATH="$PATH":"$HOME/.pub-cache/bin"
 
 ## Project configuration
 
-From the Money Tally project root:
+From the Trackmark Money project root:
 
 ```sh
 flutterfire configure \
@@ -64,7 +64,7 @@ The initial implementation stores a full finance snapshot per user. This is simp
 
 ## Authentication
 
-Money Tally is wired for Firebase Authentication with Sign in with Apple.
+Trackmark Money is wired for Firebase Authentication with Sign in with Apple.
 
 Firebase Console setup:
 

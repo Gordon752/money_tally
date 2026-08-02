@@ -579,7 +579,7 @@ class PageHeader extends StatelessWidget {
             children: [
               const Expanded(
                 child: Text(
-                  'Money Tally',
+                  trackmarkMoneyName,
                   style: TextStyle(
                     color: AppTheme.accent,
                     fontSize: 12,
@@ -6984,7 +6984,7 @@ class _SettingsViewState extends State<SettingsView> {
               builder: (rowContext) => SettingsActionRow(
                 icon: AppIcon.backup,
                 title: 'Export Backup',
-                subtitle: 'Share or copy a complete Money Tally backup',
+                subtitle: 'Share or copy a complete Trackmark Money backup',
                 trailingText: _sharingExport == _ExportKind.backup
                     ? 'Sharing…'
                     : null,
@@ -7044,8 +7044,8 @@ class _SettingsViewState extends State<SettingsView> {
             : backupExportFileName(createdAt),
         mimeType: kind == _ExportKind.csv ? 'text/csv' : 'application/json',
         shareTitle: kind == _ExportKind.csv
-            ? 'Money Tally transactions'
-            : 'Money Tally backup',
+            ? 'Trackmark Money transactions'
+            : 'Trackmark Money backup',
         sharePositionOrigin: sharePositionOrigin,
       );
     } catch (_) {
@@ -7102,7 +7102,7 @@ Future<_ExportAction?> _showExportActionSheet(
             title: isCsv ? 'Share CSV File' : 'Share Backup File',
             subtitle: isCsv
                 ? 'Create a CSV file and open the phone’s share sheet'
-                : 'Create a Money Tally backup file and open the phone’s '
+                : 'Create a Trackmark Money backup file and open the phone’s '
                       'share sheet',
             onTap: () => Navigator.of(sheetContext).pop(_ExportAction.share),
           ),
@@ -9118,7 +9118,7 @@ Future<void> restoreJsonBackupFromClipboard(BuildContext context) async {
 
   try {
     final restored = const BackupCodec().decodeJson(rawJson);
-    await store.replaceDataSet(restored);
+    await store.restoreBackupDataSet(restored);
     await store.refreshScheduledNotifications();
     if (!context.mounted) return;
     ScaffoldMessenger.of(
@@ -11494,7 +11494,6 @@ Future<void> showFloatingAddMenu(
 }
 
 Future<void> showAccountDialog(BuildContext context) async {
-  final store = FinanceStoreScope.watch(context);
   final dataStore = FinanceDataStoreScope.read(context);
   final name = TextEditingController();
   var creditLimitMinor = 0;
@@ -11755,82 +11754,29 @@ Future<void> showAccountDialog(BuildContext context) async {
     AccountType.loan => -result.openingBalanceCents.abs(),
     _ => result.openingBalanceCents,
   };
-  final account = store.addAccount(
-    name: result.name,
-    type: result.type,
-    balanceCents: normalizedOpeningBalanceCents,
-  );
-  if (!context.mounted) return;
-  await saveLegacyAccountToV2(
-    context,
-    account,
-    dataStore: dataStore,
-    creditLimitMinor: result.creditLimitMinor,
-    originalLoanAmountMinor: result.originalLoanAmountMinor,
-    updateCreditLimit: true,
-    updateOriginalLoanAmount: true,
-    includeInGroupBalance: result.includeInGroupBalance,
-    includeInNetWorth: result.includeInNetWorth,
-  );
-}
-
-Future<void> saveLegacyAccountToV2(
-  BuildContext context,
-  Account account, {
-  FinanceDataStore? dataStore,
-  int? creditLimitMinor,
-  int? originalLoanAmountMinor,
-  bool updateCreditLimit = false,
-  bool updateOriginalLoanAmount = false,
-  bool? includeInGroupBalance,
-  bool? includeInNetWorth,
-}) async {
-  final targetStore = dataStore ?? FinanceDataStoreScope.read(context);
-  v2_account.AccountRecord record;
-  try {
-    record = targetStore
-        .accountById(account.id)
-        .copyWith(
-          name: account.name,
-          type: v2AccountTypeFor(account.type),
-          creditLimitMinor: updateCreditLimit ? creditLimitMinor : null,
-          originalLoanAmountMinor: updateOriginalLoanAmount
-              ? originalLoanAmountMinor
-              : null,
-          clearCreditLimit:
-              account.type != AccountType.creditCard ||
-              (updateCreditLimit && creditLimitMinor == null),
-          clearOriginalLoanAmount:
-              account.type != AccountType.loan ||
-              (updateOriginalLoanAmount && originalLoanAmountMinor == null),
-          isArchived: account.isArchived,
-          includeInGroupBalance: includeInGroupBalance,
-          includeInNetWorth: includeInNetWorth,
-        );
-  } on StateError {
-    final v2Type = v2AccountTypeFor(account.type);
-    final nextSortOrder = targetStore.activeAccountsInDisplayOrder
-        .where((item) => item.group == v2Type.group)
-        .fold(0, (highest, item) => max(highest, item.sortOrder + 100));
-    record = v2_account.AccountRecord(
-      id: account.id,
-      name: account.name,
+  final v2Type = v2AccountTypeFor(result.type);
+  final nextSortOrder = dataStore.activeAccountsInDisplayOrder
+      .where((item) => item.group == v2Type.group)
+      .fold(0, (highest, item) => max(highest, item.sortOrder + 100));
+  await dataStore.saveAccount(
+    v2_account.AccountRecord(
+      id: 'account_${DateTime.now().microsecondsSinceEpoch}',
+      name: result.name,
       type: v2Type,
-      openingBalanceMinor: account.balanceCents,
+      openingBalanceMinor: normalizedOpeningBalanceCents,
       creditLimitMinor: v2Type == v2_account.AccountType.creditCard
-          ? creditLimitMinor
+          ? result.creditLimitMinor
           : null,
       originalLoanAmountMinor: v2Type == v2_account.AccountType.loan
-          ? originalLoanAmountMinor ?? account.balanceCents.abs()
+          ? result.originalLoanAmountMinor ??
+                normalizedOpeningBalanceCents.abs()
           : null,
-      isArchived: account.isArchived,
-      includeInGroupBalance: includeInGroupBalance ?? true,
-      includeInNetWorth: includeInNetWorth ?? true,
+      includeInGroupBalance: result.includeInGroupBalance,
+      includeInNetWorth: result.includeInNetWorth,
       sortOrder: nextSortOrder,
-      sync: v2_sync.SyncMetadata.fresh(),
-    );
-  }
-  await targetStore.saveAccount(record);
+      sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
+    ),
+  );
 }
 
 Future<void> showTransferDialog(
@@ -16577,7 +16523,6 @@ Future<String?> showCategoryDialog(
   String? categoryId,
   v2_category.CategoryKind? initialKind,
 }) async {
-  final legacyStore = FinanceStoreScope.read(context);
   final dataStore = FinanceDataStoreScope.read(context);
   final existingCategory = categoryId == null
       ? null
@@ -16866,12 +16811,7 @@ Future<String?> showCategoryDialog(
       ? null
       : result.parentCategoryId;
   if (existingCategory == null) {
-    final legacyCategory = legacyStore.addCategory(
-      result.name,
-      kind: legacyCategoryKindFor(result.kind),
-    );
-    final categoryId =
-        legacyCategory?.id ?? 'cat_${DateTime.now().microsecondsSinceEpoch}';
+    final categoryId = 'cat_${DateTime.now().microsecondsSinceEpoch}';
     await dataStore.saveCategory(
       v2_category.CategoryRecord(
         id: categoryId,
@@ -16886,11 +16826,6 @@ Future<String?> showCategoryDialog(
     return categoryId;
   }
 
-  try {
-    legacyStore.renameCategory(existingCategory.id, result.name);
-  } on StateError {
-    // V2-only categories are expected while category management is migrated.
-  }
   await dataStore.saveCategory(
     existingCategory.copyWith(
       name: result.name,

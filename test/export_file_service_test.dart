@@ -28,7 +28,7 @@ void main() {
         content: 'transaction_id,amount\nexpense-1,12.50',
         fileName: 'money_tally_transactions_2026-07-23.csv',
         mimeType: 'text/csv',
-        shareTitle: 'Money Tally transactions',
+        shareTitle: 'Trackmark Money transactions',
         sharePositionOrigin: origin,
       );
 

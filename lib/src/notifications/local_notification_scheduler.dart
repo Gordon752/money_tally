@@ -87,7 +87,7 @@ class LocalNotificationScheduler implements NotificationScheduler {
       android: AndroidNotificationDetails(
         'scheduled_transactions',
         'Scheduled transactions',
-        channelDescription: 'Money Tally payment and income reminders',
+        channelDescription: 'Trackmark Money payment and income reminders',
         importance: Importance.high,
         priority: Priority.high,
       ),

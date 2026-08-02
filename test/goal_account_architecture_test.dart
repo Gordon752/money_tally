@@ -269,6 +269,17 @@ void main() {
               openingBalanceMinor: 100000,
               sync: sync,
             ),
+            AccountRecord(
+              id: 'discover',
+              name: 'Discover',
+              type: AccountType.creditCard,
+              openingBalanceMinor: -12345,
+              creditLimitMinor: 650000,
+              includeInGroupBalance: false,
+              includeInNetWorth: false,
+              sortOrder: 300,
+              sync: sync,
+            ),
           ],
           categories: const [],
           transactions: const [],
@@ -281,6 +292,7 @@ void main() {
       );
       final balanceBefore = store.balanceForAccount('checking');
       final netWorthBefore = store.netWorthMinor;
+      final unrelatedAccountBefore = store.accountById('discover').toJson();
 
       await store.migrateLegacyGoalsToAccounts();
       final migrated = store.goalById('legacy-goal');
@@ -291,6 +303,7 @@ void main() {
       expect(store.goalFundingEvents.single.isMigrationEvent, isTrue);
       expect(store.transactions, hasLength(1));
       expect(store.hasUsableGoalAccount(migrated.id), isTrue);
+      expect(store.accountById('discover').toJson(), unrelatedAccountBefore);
       expect(
         store.goalDeleteEligibility(migrated.id).remainingBalanceMinor,
         25000,

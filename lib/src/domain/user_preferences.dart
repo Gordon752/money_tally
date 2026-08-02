@@ -55,6 +55,7 @@ class UserPreferences {
     this.savedPayeeNames = const [],
     this.archivedPayeeNames = const {},
     this.deletedPayeeNames = const {},
+    this.legacyV1MigrationCompleted = false,
   });
 
   final LaunchScreen launchScreen;
@@ -81,6 +82,11 @@ class UserPreferences {
   final Set<String> archivedPayeeNames;
   final Set<String> deletedPayeeNames;
 
+  /// Marks the one-time import from the retired v1 snapshot as complete.
+  /// This lives with the v2 data set so local persistence, backups, and sync
+  /// all retain the same migration boundary.
+  final bool legacyV1MigrationCompleted;
+
   UserPreferences copyWith({
     LaunchScreen? launchScreen,
     PlanSegment? preferredPlanSegment,
@@ -105,6 +111,7 @@ class UserPreferences {
     List<String>? savedPayeeNames,
     Set<String>? archivedPayeeNames,
     Set<String>? deletedPayeeNames,
+    bool? legacyV1MigrationCompleted,
   }) {
     return UserPreferences(
       launchScreen: launchScreen ?? this.launchScreen,
@@ -147,6 +154,8 @@ class UserPreferences {
       savedPayeeNames: savedPayeeNames ?? this.savedPayeeNames,
       archivedPayeeNames: archivedPayeeNames ?? this.archivedPayeeNames,
       deletedPayeeNames: deletedPayeeNames ?? this.deletedPayeeNames,
+      legacyV1MigrationCompleted:
+          legacyV1MigrationCompleted ?? this.legacyV1MigrationCompleted,
     );
   }
 
@@ -175,6 +184,7 @@ class UserPreferences {
       'savedPayeeNames': savedPayeeNames,
       'archivedPayeeNames': archivedPayeeNames.toList()..sort(),
       'deletedPayeeNames': deletedPayeeNames.toList()..sort(),
+      'legacyV1MigrationCompleted': legacyV1MigrationCompleted,
     };
   }
 
@@ -269,6 +279,8 @@ class UserPreferences {
               .map((value) => value.toLowerCase())
               .toSet() ??
           const {},
+      legacyV1MigrationCompleted:
+          json['legacyV1MigrationCompleted'] as bool? ?? false,
     );
   }
 }

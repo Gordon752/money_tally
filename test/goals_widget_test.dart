@@ -38,7 +38,7 @@ void main() {
     },
   );
 
-  testWidgets('Create Goal validates and persists a funded Goal', (
+  testWidgets('Create Goal validates and persists an unfunded Goal', (
     tester,
   ) async {
     await _setPhoneSize(tester);
@@ -82,7 +82,8 @@ void main() {
     expect(store.goals, hasLength(1));
     expect(store.goals.single.name, 'Emergency Fund');
     expect(store.goals.single.fundingMethod, GoalFundingMethod.accountFunded);
-    expect(store.goals.single.defaultFundingAccountId, 'checking');
+    expect(store.goals.single.defaultFundingAccountId, isNull);
+    expect(store.goals.single.accountId, isNotNull);
     expect(store.goals.single.goalType, GoalType.reachTarget);
   });
 
@@ -313,8 +314,8 @@ void main() {
     await tester.tap(find.text('Maintain a Balance').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Restore-by date'), findsOneWidget);
-    expect(find.text('No restore-by date'), findsOneWidget);
+    expect(find.text('Replenish by date'), findsOneWidget);
+    expect(find.text('No replenishment deadline'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('goal-name')),
       'Truck Maintenance',
@@ -442,15 +443,14 @@ void main() {
     'Maintain a Balance card stays active and confirms Mark Complete',
     (tester) async {
       await _setPhoneSize(tester);
-      final goal = _goal(
-        id: 'reserve',
+      final store = _store();
+      final goal = await store.createGoal(
         name: 'Truck Maintenance',
         goalType: GoalType.maintainBalance,
         startingAmountMinor: 100000,
         targetAmountMinor: 100000,
         targetDate: DateTime(2027, 6, 20),
       );
-      final store = _store(goals: [goal]);
       await tester.pumpWidget(_testApp(store, const GoalsPage()));
 
       expect(find.text('Truck Maintenance'), findsOneWidget);
@@ -473,7 +473,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Goal Details'), findsOneWidget);
       expect(find.text('Maintain a Balance'), findsOneWidget);
-      expect(find.text('Restore-by date'), findsOneWidget);
+      expect(find.text('Replenish by date'), findsOneWidget);
       expect(find.text('Mark Complete'), findsOneWidget);
 
       final complete = find.byKey(const ValueKey('goal-details-complete'));
@@ -538,18 +538,18 @@ void main() {
     expect(store.goalContributionById(contribution.id).isDeleted, isTrue);
   });
 
-  testWidgets('account-funded Goal opens the dedicated Fund Goals sheet', (
+  testWidgets('Goal Activity opens the dedicated Fund Goals sheet', (
     tester,
   ) async {
     await _setPhoneSize(tester);
-    final goal = _goal(
-      id: 'funded-goal',
+    final store = _store();
+    final goal = await store.createGoal(
       name: 'Emergency Fund',
-      fundingMethod: GoalFundingMethod.accountFunded,
+      startingAmountMinor: 0,
       defaultFundingAccountId: 'checking',
       targetAmountMinor: 1000000,
+      targetDate: null,
     );
-    final store = _store(goals: [goal]);
     await tester.pumpWidget(
       _testApp(
         store,
@@ -565,6 +565,10 @@ void main() {
     await tester.tap(find.text('Contribute'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Goal Activity'), findsOneWidget);
+    await tester.tap(find.text('Fund Goal'));
+    await tester.pumpAndSettle();
+
     expect(tester.takeException(), isNull);
     expect(find.text('Fund Goals'), findsWidgets);
     expect(find.text('Emergency Fund'), findsOneWidget);
@@ -577,14 +581,14 @@ void main() {
     tester,
   ) async {
     await _setPhoneSize(tester);
-    final goal = _goal(
-      id: 'funding-goal',
+    final store = _store();
+    final goal = await store.createGoal(
       name: 'Emergency Fund',
-      fundingMethod: GoalFundingMethod.accountFunded,
+      startingAmountMinor: 0,
       defaultFundingAccountId: 'checking',
       targetAmountMinor: 1000000,
+      targetDate: null,
     );
-    final store = _store(goals: [goal]);
     await tester.pumpWidget(
       _testApp(
         store,
@@ -702,26 +706,22 @@ void main() {
     'Goal Details opens and closes in the nested app navigator without errors',
     (tester) async {
       await _setPhoneSize(tester);
-      final goal = _goal(
-        id: 'details',
+      final store = _store();
+      final goal = await store.createGoal(
         name: 'Emergency Fund',
-        fundingMethod: GoalFundingMethod.accountFunded,
-        defaultFundingAccountId: 'missing-account',
+        startingAmountMinor: 0,
+        targetAmountMinor: 100000,
         targetDate: DateTime(2027, 8, 20),
       );
-      final store = _store(goals: [goal]);
       await tester.pumpWidget(_testApp(store, GoalCard(goal: goal)));
 
-      await tester.tap(find.byKey(const ValueKey('goal-card-details')));
+      await tester.tap(find.byKey(ValueKey('goal-card-${goal.id}')));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
       expect(find.text('Goal Details'), findsOneWidget);
-      expect(find.text('Move money from an account'), findsWidgets);
-      expect(
-        find.text('Based on the remaining amount and target date'),
-        findsOneWidget,
-      );
+      expect(find.text('Emergency Fund'), findsWidgets);
+      expect(find.text('Goal Activity'), findsWidgets);
 
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
