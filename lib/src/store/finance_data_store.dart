@@ -214,7 +214,22 @@ class FinanceDataStore extends ChangeNotifier {
     if (account.type != AccountType.creditCard || creditLimit == null) {
       return null;
     }
-    return creditLimit - creditUsedMinorForAccount(accountId);
+    return creditLimit - balanceForAccount(accountId).abs();
+  }
+
+  int creditAvailableMinorForGroup(AccountGroup group) {
+    if (group != AccountGroup.creditCards) return 0;
+    return accounts
+        .where(
+          (account) =>
+              account.isVisible &&
+              account.includeInGroupBalance &&
+              account.type == AccountType.creditCard,
+        )
+        .fold(0, (total, account) {
+          final limit = account.creditLimitMinor ?? 0;
+          return total + limit - balanceForAccount(account.id).abs();
+        });
   }
 
   int creditLimitMinorForGroup(AccountGroup group) {

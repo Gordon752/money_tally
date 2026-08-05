@@ -551,6 +551,49 @@ void main() {
     expect(find.textContaining('Checking'), findsWidgets);
   });
 
+  testWidgets('collapsed ledger month retains its compact summary', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MoneyTallyApp());
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+
+    final compactSummary = find.byWidgetPredicate(
+      (widget) =>
+          widget.runtimeType.toString() == 'LedgerMonthlyCompactSummary',
+    );
+    expect(compactSummary, findsNothing);
+    expect(find.text('Walmart'), findsWidgets);
+
+    await tester.tap(find.text(monthLabel(DateTime.now())).first);
+    await tester.pumpAndSettle();
+
+    expect(compactSummary, findsOneWidget);
+    expect(find.text('Walmart'), findsNothing);
+    expect(
+      find.descendant(of: compactSummary, matching: find.text('Income')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: compactSummary, matching: find.text('Expenses')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: compactSummary, matching: find.text('Net')),
+      findsOneWidget,
+    );
+  });
+
+  test('transaction date parsing preserves the recorded time', () {
+    final savedAt = DateTime(2026, 8, 4, 20, 42, 17, 321, 654);
+
+    final parsed = parseTransactionDateInput('8/12/26', savedAt);
+
+    expect(parsed, DateTime(2026, 8, 12, 20, 42, 17, 321, 654));
+    expect(parseDateInput('8/12/26', savedAt), DateTime(2026, 8, 12));
+  });
+
   testWidgets('ledger tap opens transaction details before editing', (
     tester,
   ) async {
@@ -3491,7 +3534,65 @@ void main() {
     final account = dataStore.accountById('card');
     expect(account.creditLimitMinor, 250000);
     expect(dataStore.creditAvailableMinorForAccount('card'), 206178);
-    expect(find.text(r'Credit used $438.22 of $2,500.00'), findsWidgets);
+    expect(find.text(r'Credit Available $2,061.78 of $2,500.00'), findsWidgets);
+  });
+
+  testWidgets('enabled credit card shows additive Credit Insights preview', (
+    tester,
+  ) async {
+    final account = v2_account.AccountRecord(
+      id: 'credit-insights',
+      name: 'Credit Card',
+      type: v2_account.AccountType.creditCard,
+      openingBalanceMinor: 0,
+      creditLimitMinor: 170000,
+      interestEstimationEnabled: true,
+      annualPercentageRate: 29.99,
+      statementClosingDay: 15,
+      paymentDueDay: 7,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AccountCard(account: account, balanceMinor: -113786),
+        ),
+      ),
+    );
+
+    expect(find.text(r'Credit Available $562.14 of $1,700.00'), findsOneWidget);
+    expect(find.text('Credit Insights'), findsOneWidget);
+    expect(find.text('29.99%'), findsOneWidget);
+    expect(find.text('Projected Statement'), findsOneWidget);
+    expect(find.text('Estimated Interest'), findsOneWidget);
+  });
+
+  testWidgets('Credit Insights hides estimates when APR is unavailable', (
+    tester,
+  ) async {
+    final account = v2_account.AccountRecord(
+      id: 'credit-insights-without-apr',
+      name: 'Credit Card',
+      type: v2_account.AccountType.creditCard,
+      openingBalanceMinor: 0,
+      creditLimitMinor: 170000,
+      interestEstimationEnabled: true,
+      statementClosingDay: 15,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AccountCard(account: account, balanceMinor: -113786),
+        ),
+      ),
+    );
+
+    expect(find.text('Credit Insights'), findsOneWidget);
+    expect(find.text('Projected Statement'), findsNothing);
+    expect(find.text('Estimated Interest'), findsNothing);
   });
 
   testWidgets('account long press can add expense for selected account', (

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../credit/credit_insights_calculator.dart';
 import '../../domain/account.dart';
 import '../../domain/money.dart';
 import '../design_tokens.dart';
@@ -93,6 +94,15 @@ class AccountCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.sm),
               _AccountMetricBar(metric: metric),
             ],
+            if (account.type == AccountType.creditCard &&
+                account.interestEstimationEnabled) ...[
+              const SizedBox(height: AppSpacing.md),
+              _CreditInsightsPreview(
+                account: account,
+                currentBalanceMinor: balanceMinor,
+                currency: currency,
+              ),
+            ],
           ],
         ),
       ),
@@ -108,10 +118,11 @@ class AccountCard extends StatelessWidget {
         final limit = account.creditLimitMinor;
         if (limit == null || limit <= 0) return null;
         final used = balanceMinor.isNegative ? balanceMinor.abs() : 0;
+        final available = limit - balanceMinor.abs();
         final progress = (used / limit).clamp(0.0, 1.0).toDouble();
         return _AccountMetric(
           label:
-              'Credit used ${formatter.formatMinor(used)} of ${formatter.formatMinor(limit)}',
+              'Credit Available ${formatter.formatMinor(available)} of ${formatter.formatMinor(limit)}',
           progress: progress,
           isOver: used > limit,
         );
@@ -146,6 +157,128 @@ class AccountCard extends StatelessWidget {
       'loans' => 'Loans',
       _ => groupName,
     };
+  }
+}
+
+class _CreditInsightsPreview extends StatelessWidget {
+  const _CreditInsightsPreview({
+    required this.account,
+    required this.currentBalanceMinor,
+    required this.currency,
+  });
+
+  final AccountRecord account;
+  final int currentBalanceMinor;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final formatter = MoneyFormatter(currency);
+    final estimate = const CreditInsightsCalculator().calculate(
+      currentBalanceMinor: currentBalanceMinor,
+      annualPercentageRate: account.annualPercentageRate,
+      statementClosingDay: account.statementClosingDay,
+    );
+    return Container(
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Credit Insights',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          _CreditInsightRow(
+            label: 'APR',
+            value: account.annualPercentageRate == null
+                ? '–'
+                : '${account.annualPercentageRate!.toStringAsFixed(2)}%',
+          ),
+          _CreditInsightRow(
+            label: 'Statement Closes',
+            value: _statementCloseLabel(estimate),
+          ),
+          if (estimate.hasInterestEstimate) ...[
+            const SizedBox(height: AppSpacing.xxs),
+            _CreditInsightRow(
+              label: 'Projected Statement',
+              value: formatter.formatMinor(estimate.projectedStatementMinor!),
+            ),
+            _CreditInsightRow(
+              label: 'Estimated Interest',
+              value:
+                  '≈ ${formatter.formatMinor(estimate.estimatedInterestMinor!)}',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _statementCloseLabel(CreditInsightsEstimate estimate) {
+    final closing = estimate.nextStatementClosingDate;
+    final days = estimate.daysUntilStatementClosing;
+    if (closing == null || days == null) return '–';
+    const monthNames = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    final suffix = days == 0 ? 'today' : '$days ${days == 1 ? 'day' : 'days'}';
+    return '${monthNames[closing.month - 1]} ${closing.day} ($suffix)';
+  }
+}
+
+class _CreditInsightRow extends StatelessWidget {
+  const _CreditInsightRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [AppTextStyles.tabularFigures],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

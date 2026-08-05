@@ -2610,11 +2610,25 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                     matchingAllocations: const [],
                   ),
                   currency: store.preferences.currency,
-                  accountName: goalTransactionCounterpartyName(
-                    transaction,
-                    goal.accountId!,
-                    store.accounts,
-                  ),
+                  account:
+                      goalTransactionCounterpartyAccount(
+                        transaction,
+                        goal.accountId!,
+                        store.accounts,
+                      ) ??
+                      store.accounts
+                          .where(
+                            (account) => account.id == transaction.accountId,
+                          )
+                          .firstOrNull,
+                  category: transaction.categoryId == null
+                      ? null
+                      : store.categories
+                            .where(
+                              (category) =>
+                                  category.id == transaction.categoryId,
+                            )
+                            .firstOrNull,
                   categoryName: transaction.categoryId == null
                       ? null
                       : store.categories
@@ -2801,7 +2815,7 @@ String goalDeletionBlockedMessage(
   return 'This Goal cannot be deleted yet.';
 }
 
-String? goalTransactionCounterpartyName(
+v2_account.AccountRecord? goalTransactionCounterpartyAccount(
   TransactionRecord transaction,
   String goalAccountId,
   Iterable<v2_account.AccountRecord> accounts,
@@ -2810,10 +2824,7 @@ String? goalTransactionCounterpartyName(
   final counterpartyId = transaction.accountId == goalAccountId
       ? transaction.transferAccountId
       : transaction.accountId;
-  return accounts
-      .where((account) => account.id == counterpartyId)
-      .firstOrNull
-      ?.name;
+  return accounts.where((account) => account.id == counterpartyId).firstOrNull;
 }
 
 class GoalDetailValue extends StatelessWidget {

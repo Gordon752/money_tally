@@ -37,6 +37,10 @@ class AccountRecord {
     required this.openingBalanceMinor,
     required this.sync,
     this.creditLimitMinor,
+    this.interestEstimationEnabled = false,
+    this.annualPercentageRate,
+    this.statementClosingDay,
+    this.paymentDueDay,
     this.originalLoanAmountMinor,
     this.isArchived = false,
     this.includeInGroupBalance = true,
@@ -51,6 +55,14 @@ class AccountRecord {
   final AccountType type;
   final int openingBalanceMinor;
   final int? creditLimitMinor;
+
+  /// Optional credit-card metadata for the future Credit Insights estimate.
+  /// These values are intentionally descriptive only in this phase; no
+  /// balance, transaction, or interest calculations depend on them.
+  final bool interestEstimationEnabled;
+  final double? annualPercentageRate;
+  final int? statementClosingDay;
+  final int? paymentDueDay;
   final int? originalLoanAmountMinor;
   final bool isArchived;
   final bool includeInGroupBalance;
@@ -80,6 +92,10 @@ class AccountRecord {
     AccountType? type,
     int? openingBalanceMinor,
     int? creditLimitMinor,
+    bool? interestEstimationEnabled,
+    double? annualPercentageRate,
+    int? statementClosingDay,
+    int? paymentDueDay,
     int? originalLoanAmountMinor,
     bool? isArchived,
     bool? includeInGroupBalance,
@@ -89,6 +105,7 @@ class AccountRecord {
     bool? isDetachedGoalAccount,
     SyncMetadata? sync,
     bool clearCreditLimit = false,
+    bool clearCreditInsights = false,
     bool clearOriginalLoanAmount = false,
     bool clearGoalId = false,
   }) {
@@ -100,6 +117,18 @@ class AccountRecord {
       creditLimitMinor: clearCreditLimit
           ? null
           : creditLimitMinor ?? this.creditLimitMinor,
+      interestEstimationEnabled: clearCreditInsights
+          ? false
+          : interestEstimationEnabled ?? this.interestEstimationEnabled,
+      annualPercentageRate: clearCreditInsights
+          ? null
+          : annualPercentageRate ?? this.annualPercentageRate,
+      statementClosingDay: clearCreditInsights
+          ? null
+          : statementClosingDay ?? this.statementClosingDay,
+      paymentDueDay: clearCreditInsights
+          ? null
+          : paymentDueDay ?? this.paymentDueDay,
       originalLoanAmountMinor: clearOriginalLoanAmount
           ? null
           : originalLoanAmountMinor ?? this.originalLoanAmountMinor,
@@ -122,6 +151,10 @@ class AccountRecord {
       'type': type.name,
       'openingBalanceMinor': openingBalanceMinor,
       'creditLimitMinor': creditLimitMinor,
+      'interestEstimationEnabled': interestEstimationEnabled,
+      'annualPercentageRate': annualPercentageRate,
+      'statementClosingDay': statementClosingDay,
+      'paymentDueDay': paymentDueDay,
       'originalLoanAmountMinor': originalLoanAmountMinor,
       'isArchived': isArchived,
       'includeInGroupBalance': includeInGroupBalance,
@@ -140,6 +173,11 @@ class AccountRecord {
       type: enumByName(AccountType.values, json['type'], AccountType.checking),
       openingBalanceMinor: json['openingBalanceMinor'] as int? ?? 0,
       creditLimitMinor: json['creditLimitMinor'] as int?,
+      interestEstimationEnabled:
+          json['interestEstimationEnabled'] as bool? ?? false,
+      annualPercentageRate: (json['annualPercentageRate'] as num?)?.toDouble(),
+      statementClosingDay: json['statementClosingDay'] as int?,
+      paymentDueDay: json['paymentDueDay'] as int?,
       originalLoanAmountMinor: json['originalLoanAmountMinor'] as int?,
       isArchived: json['isArchived'] as bool? ?? false,
       includeInGroupBalance: json['includeInGroupBalance'] as bool? ?? true,

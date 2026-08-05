@@ -1691,6 +1691,7 @@ class AccountGroupCard extends StatelessWidget {
 
     return AppCard(
       padding: EdgeInsets.zero,
+      borderRadius: 12,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.md,
@@ -1918,9 +1919,10 @@ Widget? accountGroupProgress(
       final limit = store.creditLimitMinorForGroup(group);
       if (limit <= 0) return null;
       final used = store.creditUsedMinorForGroup(group);
+      final available = store.creditAvailableMinorForGroup(group);
       return AccountGroupProgressStrip(
         label:
-            'Credit used ${money(used, store.preferences.currency)} of ${money(limit, store.preferences.currency)}',
+            'Credit Available ${money(available, store.preferences.currency)} of ${money(limit, store.preferences.currency)}',
         progress: used / limit,
         isOver: used > limit,
       );
@@ -2833,6 +2835,58 @@ String ledgerDayContext(DateTime date) {
   };
 }
 
+DateTime ledgerCalendarDay(DateTime date) {
+  final local = date.toLocal();
+  return DateTime(local.year, local.month, local.day);
+}
+
+String ledgerFriendlyDayLabel(DateTime date, DateTime now) {
+  final day = ledgerCalendarDay(date);
+  final today = ledgerCalendarDay(now);
+  if (day == today) return 'Today';
+  if (day == today.subtract(const Duration(days: 1))) return 'Yesterday';
+  const weekdays = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
+  const months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+  return '${weekdays[day.weekday - 1]}, ${months[day.month - 1]} ${day.day}';
+}
+
+String? ledgerTransactionTimeLabel(BuildContext context, DateTime date) {
+  final local = date.toLocal();
+  // Existing date-only records normalize to midnight. Do not invent a time
+  // label for those transactions.
+  if (local.hour == 0 &&
+      local.minute == 0 &&
+      local.second == 0 &&
+      local.millisecond == 0 &&
+      local.microsecond == 0) {
+    return null;
+  }
+  return MaterialLocalizations.of(
+    context,
+  ).formatTimeOfDay(TimeOfDay.fromDateTime(local));
+}
+
 class LedgerMonthSection extends StatelessWidget {
   const LedgerMonthSection({
     required this.month,
@@ -2891,6 +2945,22 @@ class LedgerMonthSection extends StatelessWidget {
               ),
           ]
           ..sort((left, right) => right.date.compareTo(left.date));
+    final activitiesByDay =
+        <
+          DateTime,
+          List<
+            ({
+              DateTime date,
+              LedgerTransactionProjection? projection,
+              GoalFundingEventRecord? fundingEvent,
+            })
+          >
+        >{};
+    for (final activity in activities) {
+      activitiesByDay
+          .putIfAbsent(ledgerCalendarDay(activity.date), () => [])
+          .add(activity);
+    }
     final reduceMotion = MediaQuery.of(context).disableAnimations;
 
     return AppCard(
@@ -2899,10 +2969,10 @@ class LedgerMonthSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
-            borderRadius: BorderRadius.circular(AppRadii.card),
+            borderRadius: BorderRadius.circular(12),
             onTap: onToggle,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 13, 16, 12),
+              padding: const EdgeInsets.fromLTRB(16, 13, 16, 13),
               child: Column(
                 children: [
                   Row(
@@ -2930,40 +3000,22 @@ class LedgerMonthSection extends StatelessWidget {
                               color: Theme.of(context)
                                   .colorScheme
                                   .onSurfaceVariant
-                                  .withValues(alpha: 0.76),
+                                  .withValues(alpha: 0.68),
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                             ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: AppSpacing.sm),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: LedgerMonthMetric(
-                          label: 'Income',
-                          amountMinor: income,
-                          currency: store.preferences.currency,
-                        ),
-                      ),
-                      Expanded(
-                        child: LedgerMonthMetric(
-                          label: 'Expenses',
-                          amountMinor: -expenses,
-                          currency: store.preferences.currency,
-                        ),
-                      ),
-                      Expanded(
-                        child: LedgerMonthMetric(
-                          label: 'Net',
-                          amountMinor: net,
-                          currency: store.preferences.currency,
-                          showPositiveSign: true,
-                        ),
-                      ),
-                    ],
-                  ),
+                  if (isCollapsed) ...[
+                    const SizedBox(height: AppSpacing.xs),
+                    LedgerMonthlyCompactSummary(
+                      incomeMinor: income,
+                      expensesMinor: expenses,
+                      netMinor: net,
+                      currency: store.preferences.currency,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -2979,79 +3031,31 @@ class LedgerMonthSection extends StatelessWidget {
             alignment: Alignment.topCenter,
             child: isCollapsed
                 ? const SizedBox.shrink()
-                : Column(
-                    children: [
-                      Divider(
-                        height: 1,
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.outlineVariant.withValues(alpha: 0.24),
-                      ),
-                      for (
-                        var index = 0;
-                        index < activities.length;
-                        index++
-                      ) ...[
-                        if (activities[index].projection case final projection?)
-                          LedgerJournalRow(
-                            projection: projection,
-                            currency: store.preferences.currency,
-                            accountName:
-                                accountsById[projection.transaction.accountId]
-                                    ?.name,
-                            categoryName:
-                                projection.categoryScope?.label ??
-                                (projection.transaction.categoryId == null
-                                    ? null
-                                    : categoriesById[projection
-                                              .transaction
-                                              .categoryId]
-                                          ?.name),
-                            onTap: () async {
-                              onDismissFocus();
-                              await showTransactionDetails(
-                                context,
-                                projection.transaction.id,
-                                projection: projection.isCategoryProjected
-                                    ? projection
-                                    : null,
-                              );
-                              if (context.mounted) onDismissFocus();
-                            },
-                            onLongPress: () async {
-                              onDismissFocus();
-                              AppHaptics.longPressAction();
-                              await showTransactionOptions(
-                                context,
-                                projection.transaction.id,
-                              );
-                              if (context.mounted) onDismissFocus();
-                            },
-                          )
-                        else
-                          GoalFundingLedgerRow(
-                            event: activities[index].fundingEvent!,
-                            accountName:
-                                accountsById[activities[index]
-                                        .fundingEvent!
-                                        .sourceAccountId]
-                                    ?.name,
-                            currency: store.preferences.currency,
-                            onTap: () => showGoalFundingDetails(
-                              context,
-                              activities[index].fundingEvent!.id,
-                            ),
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    child: Column(
+                      children: [
+                        LedgerMonthlySummary(
+                          incomeMinor: income,
+                          expensesMinor: expenses,
+                          netMinor: net,
+                          currency: store.preferences.currency,
+                        ),
+                        const SizedBox(height: 14),
+                        for (final entry in activitiesByDay.entries) ...[
+                          _LedgerDayCard(
+                            date: entry.key,
+                            activities: entry.value,
+                            store: store,
+                            accountsById: accountsById,
+                            categoriesById: categoriesById,
+                            onDismissFocus: onDismissFocus,
                           ),
-                        if (index != activities.length - 1)
-                          Divider(
-                            height: 1,
-                            indent: 62,
-                            endIndent: 12,
-                            color: Theme.of(context).colorScheme.outlineVariant
-                                .withValues(alpha: 0.24),
-                          ),
+                          if (entry.key != activitiesByDay.entries.last.key)
+                            const SizedBox(height: 14),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
           ),
         ],
@@ -3060,42 +3064,364 @@ class LedgerMonthSection extends StatelessWidget {
   }
 }
 
-class LedgerMonthMetric extends StatelessWidget {
-  const LedgerMonthMetric({
+class _LedgerDayCard extends StatelessWidget {
+  const _LedgerDayCard({
+    required this.date,
+    required this.activities,
+    required this.store,
+    required this.accountsById,
+    required this.categoriesById,
+    required this.onDismissFocus,
+  });
+
+  final DateTime date;
+  final List<
+    ({
+      DateTime date,
+      LedgerTransactionProjection? projection,
+      GoalFundingEventRecord? fundingEvent,
+    })
+  >
+  activities;
+  final FinanceDataStore store;
+  final Map<String, v2_account.AccountRecord> accountsById;
+  final Map<String, v2_category.CategoryRecord> categoriesById;
+  final VoidCallback onDismissFocus;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final borderRadius = BorderRadius.circular(19);
+    final dayNet = activities.fold<int>(
+      0,
+      (total, activity) =>
+          total +
+          (activity.projection?.displayedAmountMinor ??
+              -activity.fundingEvent!.totalAmountMinor.abs()),
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: borderRadius,
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(
+            alpha: theme.brightness == Brightness.dark ? 0.38 : 0.46,
+          ),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: Column(
+          children: [
+            LedgerDaySectionHeader(
+              date: date,
+              netAmountMinor: dayNet,
+              currency: store.preferences.currency,
+            ),
+            for (var index = 0; index < activities.length; index++) ...[
+              if (activities[index].projection case final projection?)
+                LedgerJournalRow(
+                  projection: projection,
+                  currency: store.preferences.currency,
+                  showDateContext: false,
+                  account: accountsById[projection.transaction.accountId],
+                  category:
+                      categoriesById[projection.categoryScope?.categoryId ??
+                          projection.transaction.categoryId],
+                  categoryName:
+                      projection.categoryScope?.label ??
+                      (projection.transaction.categoryId == null
+                          ? null
+                          : categoriesById[projection.transaction.categoryId]
+                                ?.name),
+                  onTap: () async {
+                    onDismissFocus();
+                    await showTransactionDetails(
+                      context,
+                      projection.transaction.id,
+                      projection: projection.isCategoryProjected
+                          ? projection
+                          : null,
+                    );
+                    if (context.mounted) onDismissFocus();
+                  },
+                  onLongPress: () async {
+                    onDismissFocus();
+                    AppHaptics.longPressAction();
+                    await showTransactionOptions(
+                      context,
+                      projection.transaction.id,
+                    );
+                    if (context.mounted) onDismissFocus();
+                  },
+                )
+              else
+                GoalFundingLedgerRow(
+                  event: activities[index].fundingEvent!,
+                  showDateContext: false,
+                  account:
+                      accountsById[activities[index]
+                          .fundingEvent!
+                          .sourceAccountId],
+                  currency: store.preferences.currency,
+                  onTap: () => showGoalFundingDetails(
+                    context,
+                    activities[index].fundingEvent!.id,
+                  ),
+                ),
+              if (index != activities.length - 1)
+                Divider(
+                  height: 1,
+                  indent: 58,
+                  endIndent: 16,
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.12,
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class LedgerMonthlySummary extends StatelessWidget {
+  const LedgerMonthlySummary({
+    required this.incomeMinor,
+    required this.expensesMinor,
+    required this.netMinor,
+    required this.currency,
+    super.key,
+  });
+
+  final int incomeMinor;
+  final int expensesMinor;
+  final int netMinor;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 11),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.24,
+        ),
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _LedgerMonthlySummaryMetric(
+              label: 'Income',
+              amountMinor: incomeMinor,
+              currency: currency,
+              color: AppTheme.accent,
+            ),
+          ),
+          _LedgerMonthlySummaryDivider(color: theme.colorScheme.outlineVariant),
+          Expanded(
+            child: _LedgerMonthlySummaryMetric(
+              label: 'Expenses',
+              amountMinor: -expensesMinor,
+              currency: currency,
+              color: AppColors.danger,
+            ),
+          ),
+          _LedgerMonthlySummaryDivider(color: theme.colorScheme.outlineVariant),
+          Expanded(
+            child: _LedgerMonthlySummaryMetric(
+              label: 'Net',
+              amountMinor: netMinor,
+              currency: currency,
+              showPositiveSign: netMinor > 0,
+              color: netMinor < 0 ? AppColors.danger : AppTheme.accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class LedgerMonthlyCompactSummary extends StatelessWidget {
+  const LedgerMonthlyCompactSummary({
+    required this.incomeMinor,
+    required this.expensesMinor,
+    required this.netMinor,
+    required this.currency,
+    super.key,
+  });
+
+  final int incomeMinor;
+  final int expensesMinor;
+  final int netMinor;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.18,
+        ),
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.14),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _LedgerMonthlySummaryMetric(
+              label: 'Income',
+              amountMinor: incomeMinor,
+              currency: currency,
+              color: AppTheme.accent,
+              compact: true,
+            ),
+          ),
+          _LedgerMonthlySummaryDivider(
+            color: theme.colorScheme.outlineVariant,
+            compact: true,
+          ),
+          Expanded(
+            child: _LedgerMonthlySummaryMetric(
+              label: 'Expenses',
+              amountMinor: -expensesMinor,
+              currency: currency,
+              color: AppColors.danger,
+              compact: true,
+            ),
+          ),
+          _LedgerMonthlySummaryDivider(
+            color: theme.colorScheme.outlineVariant,
+            compact: true,
+          ),
+          Expanded(
+            child: _LedgerMonthlySummaryMetric(
+              label: 'Net',
+              amountMinor: netMinor,
+              currency: currency,
+              showPositiveSign: netMinor > 0,
+              color: netMinor < 0 ? AppColors.danger : AppTheme.accent,
+              compact: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LedgerMonthlySummaryDivider extends StatelessWidget {
+  const _LedgerMonthlySummaryDivider({
+    required this.color,
+    this.compact = false,
+  });
+
+  final Color color;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: compact ? 27 : 32,
+      color: color.withValues(alpha: 0.38),
+    );
+  }
+}
+
+class _LedgerMonthlySummaryMetric extends StatelessWidget {
+  const _LedgerMonthlySummaryMetric({
     required this.label,
     required this.amountMinor,
     required this.currency,
+    required this.color,
     this.showPositiveSign = false,
-    super.key,
+    this.compact = false,
   });
 
   final String label;
   final int amountMinor;
   final CurrencyFormatSettings currency;
+  final Color color;
   final bool showPositiveSign;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
             color: Theme.of(context).colorScheme.onSurfaceVariant,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.15,
           ),
         ),
-        const SizedBox(height: 2),
+        SizedBox(height: compact ? 1 : 2),
         MoneyText(
           amountMinor: amountMinor,
           currency: currency,
-          fontSize: 14,
+          fontSize: compact ? 13 : 15,
           fontWeight: FontWeight.w800,
-          showPositiveSign: showPositiveSign && amountMinor > 0,
-          color: amountMinor < 0 ? AppColors.danger : null,
+          showPositiveSign: showPositiveSign,
+          color: color,
         ),
       ],
+    );
+  }
+}
+
+class LedgerDaySectionHeader extends StatelessWidget {
+  const LedgerDaySectionHeader({
+    required this.date,
+    required this.netAmountMinor,
+    required this.currency,
+    super.key,
+  });
+
+  final DateTime date;
+  final int netAmountMinor;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 17, 16, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              ledgerFriendlyDayLabel(date, DateTime.now()),
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.1,
+              ),
+            ),
+          ),
+          MoneyText(
+            amountMinor: netAmountMinor,
+            currency: currency,
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            showPositiveSign: netAmountMinor > 0,
+            color: netAmountMinor < 0 ? AppColors.danger : null,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -3106,16 +3432,20 @@ class LedgerJournalRow extends StatelessWidget {
     required this.currency,
     required this.onTap,
     required this.onLongPress,
-    this.accountName,
+    this.account,
+    this.category,
     this.categoryName,
+    this.showDateContext = true,
     super.key,
   });
 
   final LedgerTransactionProjection projection;
   TransactionRecord get transaction => projection.transaction;
   final CurrencyFormatSettings currency;
-  final String? accountName;
+  final v2_account.AccountRecord? account;
+  final v2_category.CategoryRecord? category;
   final String? categoryName;
+  final bool showDateContext;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -3123,17 +3453,14 @@ class LedgerJournalRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final signedAmount = projection.displayedAmountMinor;
     final secondaryDetails = [
-      if (accountName != null) accountName,
+      if (account != null) account!.name,
       if (categoryName != null) categoryName,
       if (transaction.type == TransactionType.adjustment)
         'Manual balance adjustment',
       if (transaction.isTransfer) 'Transfer',
     ].join(' • ');
-    final splitLabel = projection.isPartOfSplit
-        ? 'part of split'
-        : transaction.isSplit
-        ? 'split'
-        : null;
+    final hasSplit = projection.isPartOfSplit || transaction.isSplit;
+    final timeLabel = ledgerTransactionTimeLabel(context, transaction.date);
     final secondaryStyle =
         Theme.of(context).textTheme.bodySmall?.copyWith(
           color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -3171,21 +3498,39 @@ class LedgerJournalRow extends StatelessWidget {
         onTap: onTap,
         onLongPress: onLongPress,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(
-                width: 38,
-                child: Text(
-                  '${transaction.date.day}\n${ledgerDayContext(transaction.date)}',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w800,
-                    height: 1.1,
+              if (showDateContext) ...[
+                SizedBox(
+                  width: 38,
+                  child: Text(
+                    '${transaction.date.day}\n${ledgerDayContext(transaction.date)}',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                      height: 1.1,
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(width: AppSpacing.sm),
+              ],
+              if (category != null)
+                CategoryIconBadge.category(
+                  category!,
+                  size: CategoryIconBadgeSize.row,
+                )
+              else
+                _LedgerIconBadge(
+                  icon: account == null
+                      ? AppIcon.receipt
+                      : v2AccountIcon(account!.type),
+                  semanticLabel: account == null
+                      ? 'Transaction'
+                      : '${account!.name} account',
+                ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Column(
@@ -3196,53 +3541,121 @@ class LedgerJournalRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontSize: 18,
                         fontWeight: FontWeight.w700,
+                        letterSpacing: -0.15,
                       ),
                     ),
-                    if (secondaryDetails.isNotEmpty || splitLabel != null) ...[
-                      const SizedBox(height: 2),
-                      Text.rich(
-                        TextSpan(
-                          children: [
-                            if (secondaryDetails.isNotEmpty)
-                              TextSpan(text: secondaryDetails),
-                            if (splitLabel != null) ...[
-                              if (secondaryDetails.isNotEmpty)
-                                const TextSpan(text: ' • '),
-                              TextSpan(
-                                text: splitLabel,
-                                style: secondaryStyle.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant
-                                      .withValues(alpha: 0.68),
-                                  fontSize: (secondaryStyle.fontSize ?? 12) - 1,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ],
+                    if (secondaryDetails.isNotEmpty || hasSplit) ...[
+                      const SizedBox(height: 5),
+                      if (secondaryDetails.isNotEmpty)
+                        Text(
+                          secondaryDetails,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: secondaryStyle,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: secondaryStyle,
+                    ],
+                    // This auxiliary position intentionally supports a future
+                    // Pending/Cleared status without changing row data today.
+                    if (timeLabel != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        timeLabel,
+                        style: secondaryStyle.copyWith(
+                          fontSize: 11,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.78),
+                        ),
                       ),
                     ],
                   ],
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              MoneyText(
-                amountMinor: signedAmount,
-                currency: currency,
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-                showPositiveSign: transaction.type == TransactionType.income,
-                color: signedAmount < 0 ? AppColors.danger : null,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: MoneyText(
+                      amountMinor: signedAmount,
+                      currency: currency,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      showPositiveSign:
+                          transaction.type == TransactionType.income,
+                      color: signedAmount < 0 ? AppColors.danger : null,
+                    ),
+                  ),
+                  if (hasSplit) ...[
+                    const SizedBox(height: 5),
+                    const _LedgerSplitCapsule(),
+                  ],
+                ],
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LedgerSplitCapsule extends StatelessWidget {
+  const _LedgerSplitCapsule();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.56),
+        ),
+      ),
+      child: Text(
+        'Split',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _LedgerIconBadge extends StatelessWidget {
+  const _LedgerIconBadge({
+    required this.icon,
+    required this.semanticLabel,
+    this.color,
+  });
+
+  final IconData icon;
+  final String semanticLabel;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final identityColor = color ?? Theme.of(context).colorScheme.primary;
+    return Semantics(
+      image: true,
+      label: semanticLabel,
+      child: Container(
+        width: 34,
+        height: 34,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: identityColor.withValues(alpha: 0.10),
+          shape: BoxShape.circle,
+          border: Border.all(color: identityColor.withValues(alpha: 0.15)),
+        ),
+        child: Icon(icon, size: 17, color: identityColor.withValues(alpha: .9)),
       ),
     );
   }
@@ -3253,13 +3666,15 @@ class GoalFundingLedgerRow extends StatelessWidget {
     required this.event,
     required this.currency,
     required this.onTap,
-    this.accountName,
+    this.account,
+    this.showDateContext = true,
     super.key,
   });
 
   final GoalFundingEventRecord event;
   final CurrencyFormatSettings currency;
-  final String? accountName;
+  final v2_account.AccountRecord? account;
+  final bool showDateContext;
   final VoidCallback onTap;
 
   @override
@@ -3273,27 +3688,37 @@ class GoalFundingLedgerRow extends StatelessWidget {
       final count => '$count Goals',
     };
     final secondary = [
-      if (accountName != null) accountName,
+      if (account != null) account!.name,
       allocationSummary,
     ].join(' • ');
+    final timeLabel = ledgerTransactionTimeLabel(context, event.date);
 
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 38,
-              child: Text(
-                '${event.date.day}\n${ledgerDayContext(event.date)}',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w800,
-                  height: 1.1,
+            if (showDateContext) ...[
+              SizedBox(
+                width: 38,
+                child: Text(
+                  '${event.date.day}\n${ledgerDayContext(event.date)}',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
+                  ),
                 ),
               ),
+              const SizedBox(width: AppSpacing.sm),
+            ],
+            _LedgerIconBadge(
+              icon: AppIcon.goal,
+              semanticLabel: 'Goal funding',
+              color: Colors.blue.shade700,
             ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
@@ -3305,10 +3730,12 @@ class GoalFundingLedgerRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontSize: 18,
                       fontWeight: FontWeight.w700,
+                      letterSpacing: -0.15,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 5),
                   Text(
                     secondary,
                     maxLines: 1,
@@ -3317,16 +3744,31 @@ class GoalFundingLedgerRow extends StatelessWidget {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                  if (timeLabel != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      timeLabel,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontSize: 11,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.78),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
-            MoneyText(
-              amountMinor: -event.totalAmountMinor.abs(),
-              currency: currency,
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-              color: Colors.blue.shade700,
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: MoneyText(
+                amountMinor: -event.totalAmountMinor.abs(),
+                currency: currency,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: Colors.blue.shade700,
+              ),
             ),
           ],
         ),
@@ -9437,16 +9879,29 @@ class AppCard extends StatelessWidget {
     required this.child,
     this.title,
     this.padding = const EdgeInsets.all(16),
+    this.borderRadius,
     super.key,
   });
 
   final String? title;
   final Widget child;
   final EdgeInsetsGeometry padding;
+  final double? borderRadius;
 
   @override
   Widget build(BuildContext context) {
+    final inheritedShape = Theme.of(context).cardTheme.shape;
+    final shape = borderRadius == null
+        ? null
+        : inheritedShape is RoundedRectangleBorder
+        ? inheritedShape.copyWith(
+            borderRadius: BorderRadius.circular(borderRadius!),
+          )
+        : RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(borderRadius!),
+          );
     return Card(
+      shape: shape,
       child: Padding(
         padding: padding,
         child: title == null
@@ -11072,9 +11527,257 @@ Future<void> showChangeAccountTypeDialog(
     account.copyWith(
       type: selectedType,
       clearCreditLimit: selectedType != v2_account.AccountType.creditCard,
+      clearCreditInsights: selectedType != v2_account.AccountType.creditCard,
       clearOriginalLoanAmount: selectedType != v2_account.AccountType.loan,
     ),
   );
+}
+
+Future<void> showCreditInsightsInfoDialog(BuildContext context) {
+  return showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('About Credit Insights'),
+      content: const Text(
+        'Credit Insights estimates your upcoming interest using your APR, '
+        'statement closing date, and recorded transactions.\n\n'
+        'If your transactions are entered accurately, the estimate will '
+        'generally be close. Actual interest may differ because card issuers '
+        'may use different calculation methods.\n\n'
+        'Credit Insights is designed to help you understand your credit card '
+        'costs and projected statement balance. It is an estimate and should '
+        'not replace your card issuer’s official statement.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+}
+
+class CreditInsightsFormSection extends StatelessWidget {
+  const CreditInsightsFormSection({
+    required this.enabled,
+    required this.onEnabledChanged,
+    required this.aprController,
+    required this.statementClosingDayController,
+    required this.paymentDueDayController,
+    required this.fieldValueStyle,
+    required this.fieldHintStyle,
+    required this.decoration,
+    super.key,
+  });
+
+  final bool enabled;
+  final ValueChanged<bool> onEnabledChanged;
+  final TextEditingController aprController;
+  final TextEditingController statementClosingDayController;
+  final TextEditingController paymentDueDayController;
+  final TextStyle? fieldValueStyle;
+  final TextStyle? fieldHintStyle;
+  final InputDecoration decoration;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      key: const ValueKey('credit-insights-fields'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(child: TransactionFormLabel('Credit Insights')),
+            IconButton(
+              tooltip: 'About Credit Insights',
+              icon: Icon(AppIcon.info, size: AppIconSize.inline),
+              onPressed: () => showCreditInsightsInfoDialog(context),
+            ),
+          ],
+        ),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          secondary: TransactionFormIcon(AppIcon.insights),
+          title: Text('Enable Credit Insights', style: fieldValueStyle),
+          value: enabled,
+          onChanged: onEnabledChanged,
+        ),
+        AnimatedSize(
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 165),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: enabled
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const TransactionFormDivider(),
+                    _CreditInsightsTextField(
+                      label: 'APR (%)',
+                      controller: aprController,
+                      hintText: '29.99',
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      fieldValueStyle: fieldValueStyle,
+                      fieldHintStyle: fieldHintStyle,
+                      decoration: decoration,
+                    ),
+                    const TransactionFormDivider(),
+                    _CreditInsightsTextField(
+                      label: 'Statement Closing Day (1–31)',
+                      controller: statementClosingDayController,
+                      hintText: '15',
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      fieldValueStyle: fieldValueStyle,
+                      fieldHintStyle: fieldHintStyle,
+                      decoration: decoration,
+                    ),
+                    const TransactionFormDivider(),
+                    _CreditInsightsTextField(
+                      label: 'Payment Due Day (1–31)',
+                      controller: paymentDueDayController,
+                      hintText: '7',
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      fieldValueStyle: fieldValueStyle,
+                      fieldHintStyle: fieldHintStyle,
+                      decoration: decoration,
+                    ),
+                  ],
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+}
+
+class _CreditInsightsTextField extends StatelessWidget {
+  const _CreditInsightsTextField({
+    required this.label,
+    required this.controller,
+    required this.hintText,
+    required this.keyboardType,
+    required this.fieldValueStyle,
+    required this.fieldHintStyle,
+    required this.decoration,
+    this.inputFormatters,
+  });
+
+  final String label;
+  final TextEditingController controller;
+  final String hintText;
+  final TextInputType keyboardType;
+  final TextStyle? fieldValueStyle;
+  final TextStyle? fieldHintStyle;
+  final InputDecoration decoration;
+  final List<TextInputFormatter>? inputFormatters;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        TransactionFormIcon(AppIcon.numbers),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: fieldValueStyle),
+              TextField(
+                controller: controller,
+                keyboardType: keyboardType,
+                inputFormatters: inputFormatters,
+                decoration: decoration.copyWith(
+                  hintText: hintText,
+                  hintStyle: fieldHintStyle,
+                ),
+                style: fieldValueStyle,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+({double apr, int statementClosingDay, int paymentDueDay})?
+validCreditInsightsValues({
+  required bool enabled,
+  required TextEditingController aprController,
+  required TextEditingController statementClosingDayController,
+  required TextEditingController paymentDueDayController,
+}) {
+  if (!enabled) return (apr: 0, statementClosingDay: 0, paymentDueDay: 0);
+  final apr = double.tryParse(aprController.text.trim());
+  final statementDay = int.tryParse(statementClosingDayController.text.trim());
+  final dueDay = int.tryParse(paymentDueDayController.text.trim());
+  if (apr == null ||
+      apr < 0 ||
+      statementDay == null ||
+      statementDay < 1 ||
+      statementDay > 31 ||
+      dueDay == null ||
+      dueDay < 1 ||
+      dueDay > 31) {
+    return null;
+  }
+  return (apr: apr, statementClosingDay: statementDay, paymentDueDay: dueDay);
+}
+
+Future<void> showCreditInsightsValidationDialog(BuildContext context) {
+  return showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Complete Credit Insights'),
+      content: const Text(
+        'Enter an APR and valid statement closing and payment due days from 1 to 31.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Owns form controllers for the lifetime of a dialog route.  The route can
+/// remain mounted for its exit animation after [showDialog] has returned, so
+/// disposing from the route subtree avoids a text field observing a disposed
+/// controller during that final transition.
+class _AccountFormControllerScope extends StatefulWidget {
+  const _AccountFormControllerScope({
+    required this.controllers,
+    required this.child,
+  });
+
+  final List<TextEditingController> controllers;
+  final Widget child;
+
+  @override
+  State<_AccountFormControllerScope> createState() =>
+      _AccountFormControllerScopeState();
+}
+
+class _AccountFormControllerScopeState
+    extends State<_AccountFormControllerScope> {
+  @override
+  void dispose() {
+    for (final controller in widget.controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 Future<void> showEditAccountDialog(
@@ -11083,7 +11786,17 @@ Future<void> showEditAccountDialog(
 ) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final name = TextEditingController(text: account.name);
+  final annualPercentageRate = TextEditingController(
+    text: account.annualPercentageRate?.toStringAsFixed(2) ?? '',
+  );
+  final statementClosingDay = TextEditingController(
+    text: account.statementClosingDay?.toString() ?? '',
+  );
+  final paymentDueDay = TextEditingController(
+    text: account.paymentDueDay?.toString() ?? '',
+  );
   var creditLimitMinor = account.creditLimitMinor ?? 0;
+  var interestEstimationEnabled = account.interestEstimationEnabled;
   var originalLoanAmountMinor = account.originalLoanAmountMinor ?? 0;
   var type = account.type;
   var includeInGroupBalance = account.includeInGroupBalance;
@@ -11095,218 +11808,280 @@ Future<void> showEditAccountDialog(
           String name,
           v2_account.AccountType type,
           int? creditLimitMinor,
+          bool interestEstimationEnabled,
+          double? annualPercentageRate,
+          int? statementClosingDay,
+          int? paymentDueDay,
           int? originalLoanAmountMinor,
           bool includeInGroupBalance,
           bool includeInNetWorth,
         })
       >(
         context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) {
-            final theme = Theme.of(context);
-            final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
-              fontSize: 17,
-              fontWeight: FontWeight.w400,
-              letterSpacing: 0,
-              height: 1.15,
-            );
-            final fieldHintStyle = fieldValueStyle?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            );
-            const borderlessDecoration = InputDecoration(
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.symmetric(vertical: 8),
-            );
+        builder: (context) => _AccountFormControllerScope(
+          controllers: [
+            name,
+            annualPercentageRate,
+            statementClosingDay,
+            paymentDueDay,
+          ],
+          child: StatefulBuilder(
+            builder: (context, setDialogState) {
+              final theme = Theme.of(context);
+              final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
+                fontSize: 17,
+                fontWeight: FontWeight.w400,
+                letterSpacing: 0,
+                height: 1.15,
+              );
+              final fieldHintStyle = fieldValueStyle?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              );
+              const borderlessDecoration = InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 8),
+              );
 
-            void saveAccountResult() {
-              Navigator.pop(context, (
-                name: name.text.trim().isEmpty
-                    ? account.name
-                    : name.text.trim(),
-                type: type,
-                creditLimitMinor: type == v2_account.AccountType.creditCard
-                    ? optionalPositiveMinor(creditLimitMinor)
-                    : null,
-                originalLoanAmountMinor: type == v2_account.AccountType.loan
-                    ? optionalPositiveMinor(originalLoanAmountMinor)
-                    : null,
-                includeInGroupBalance: includeInGroupBalance,
-                includeInNetWorth: includeInNetWorth,
-              ));
-            }
+              void saveAccountResult() {
+                final insights = validCreditInsightsValues(
+                  enabled:
+                      type == v2_account.AccountType.creditCard &&
+                      interestEstimationEnabled,
+                  aprController: annualPercentageRate,
+                  statementClosingDayController: statementClosingDay,
+                  paymentDueDayController: paymentDueDay,
+                );
+                if (insights == null) {
+                  unawaited(showCreditInsightsValidationDialog(context));
+                  return;
+                }
+                Navigator.pop(context, (
+                  name: name.text.trim().isEmpty
+                      ? account.name
+                      : name.text.trim(),
+                  type: type,
+                  creditLimitMinor: type == v2_account.AccountType.creditCard
+                      ? optionalPositiveMinor(creditLimitMinor)
+                      : null,
+                  interestEstimationEnabled:
+                      type == v2_account.AccountType.creditCard &&
+                      interestEstimationEnabled,
+                  annualPercentageRate:
+                      type == v2_account.AccountType.creditCard &&
+                          interestEstimationEnabled
+                      ? insights.apr
+                      : null,
+                  statementClosingDay:
+                      type == v2_account.AccountType.creditCard &&
+                          interestEstimationEnabled
+                      ? insights.statementClosingDay
+                      : null,
+                  paymentDueDay:
+                      type == v2_account.AccountType.creditCard &&
+                          interestEstimationEnabled
+                      ? insights.paymentDueDay
+                      : null,
+                  originalLoanAmountMinor: type == v2_account.AccountType.loan
+                      ? optionalPositiveMinor(originalLoanAmountMinor)
+                      : null,
+                  includeInGroupBalance: includeInGroupBalance,
+                  includeInNetWorth: includeInNetWorth,
+                ));
+              }
 
-            return TransactionSheetFrame(
-              title: 'Edit Account',
-              actions: TransactionFormActions(
-                onCancel: () => Navigator.pop(context),
-                onSave: saveAccountResult,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TransactionFormLabel('Name'),
-                  Row(
-                    children: [
-                      TransactionFormIcon(AppIcon.wallet),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: TextField(
-                          controller: name,
-                          decoration: borderlessDecoration.copyWith(
-                            hintText: 'Account name',
-                            hintStyle: fieldHintStyle,
+              return TransactionSheetFrame(
+                title: 'Edit Account',
+                actions: TransactionFormActions(
+                  onCancel: () => Navigator.pop(context),
+                  onSave: saveAccountResult,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TransactionFormLabel('Name'),
+                    Row(
+                      children: [
+                        TransactionFormIcon(AppIcon.wallet),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: TextField(
+                            controller: name,
+                            decoration: borderlessDecoration.copyWith(
+                              hintText: 'Account name',
+                              hintStyle: fieldHintStyle,
+                            ),
+                            textCapitalization: TextCapitalization.words,
+                            textInputAction: TextInputAction.done,
+                            style: fieldValueStyle,
+                            autofocus: true,
                           ),
-                          textCapitalization: TextCapitalization.words,
-                          textInputAction: TextInputAction.done,
-                          style: fieldValueStyle,
-                          autofocus: true,
+                        ),
+                      ],
+                    ),
+                    const TransactionFormDivider(),
+                    const TransactionFormLabel('Type'),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      onTap: () async {
+                        FocusManager.instance.primaryFocus?.unfocus();
+                        final selectedType = await showV2AccountTypePicker(
+                          context,
+                          selected: type,
+                        );
+                        if (selectedType != null) {
+                          setDialogState(() => type = selectedType);
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            TransactionFormIcon(v2AccountIcon(type)),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Text(
+                                v2AccountTypeLabel(type),
+                                style: fieldValueStyle,
+                              ),
+                            ),
+                            Icon(AppIcon.chevronDown, size: AppIconSize.hero),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Type'),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(AppRadii.control),
-                    onTap: () async {
-                      FocusManager.instance.primaryFocus?.unfocus();
-                      final selectedType = await showV2AccountTypePicker(
-                        context,
-                        selected: type,
-                      );
-                      if (selectedType != null) {
-                        setDialogState(() => type = selectedType);
-                      }
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Row(
-                        children: [
-                          TransactionFormIcon(v2AccountIcon(type)),
-                          const SizedBox(width: AppSpacing.md),
-                          Expanded(
-                            child: Text(
-                              v2AccountTypeLabel(type),
-                              style: fieldValueStyle,
+                    ),
+                    AnimatedSwitcher(
+                      duration: MediaQuery.of(context).disableAnimations
+                          ? Duration.zero
+                          : const Duration(milliseconds: 165),
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: SizeTransition(
+                          sizeFactor: animation,
+                          alignment: Alignment.topCenter,
+                          child: child,
+                        ),
+                      ),
+                      child: type == v2_account.AccountType.creditCard
+                          ? Column(
+                              key: const ValueKey('credit-limit-field'),
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                TransactionFormDivider(),
+                                TransactionFormLabel('Credit limit'),
+                                Row(
+                                  children: [
+                                    TransactionFormIcon(AppIcon.creditCard),
+                                    const SizedBox(width: AppSpacing.md),
+                                    Expanded(
+                                      child: AmountEntryField(
+                                        fieldKey: const ValueKey(
+                                          'account-credit-limit',
+                                        ),
+                                        initialMinor: creditLimitMinor,
+                                        currency:
+                                            dataStore.preferences.currency,
+                                        labelText: null,
+                                        keyboardType: TextInputType.number,
+                                        decoration: borderlessDecoration,
+                                        textStyle: fieldValueStyle,
+                                        onChanged: (value) =>
+                                            creditLimitMinor = value.abs(),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const TransactionFormDivider(),
+                                CreditInsightsFormSection(
+                                  enabled: interestEstimationEnabled,
+                                  onEnabledChanged: (value) => setDialogState(
+                                    () => interestEstimationEnabled = value,
+                                  ),
+                                  aprController: annualPercentageRate,
+                                  statementClosingDayController:
+                                      statementClosingDay,
+                                  paymentDueDayController: paymentDueDay,
+                                  fieldValueStyle: fieldValueStyle,
+                                  fieldHintStyle: fieldHintStyle,
+                                  decoration: borderlessDecoration,
+                                ),
+                              ],
+                            )
+                          : type == v2_account.AccountType.loan
+                          ? Column(
+                              key: const ValueKey('loan-amount-field'),
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const TransactionFormDivider(),
+                                TransactionFormLabel('Original loan amount'),
+                                Row(
+                                  children: [
+                                    TransactionFormIcon(AppIcon.loan),
+                                    const SizedBox(width: AppSpacing.md),
+                                    Expanded(
+                                      child: AmountEntryField(
+                                        fieldKey: const ValueKey(
+                                          'account-original-loan-amount',
+                                        ),
+                                        initialMinor: originalLoanAmountMinor,
+                                        currency:
+                                            dataStore.preferences.currency,
+                                        labelText: null,
+                                        keyboardType: TextInputType.number,
+                                        decoration: borderlessDecoration,
+                                        textStyle: fieldValueStyle,
+                                        onChanged: (value) =>
+                                            originalLoanAmountMinor = value
+                                                .abs(),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            )
+                          : const SizedBox.shrink(
+                              key: ValueKey('no-account-extra-field'),
                             ),
-                          ),
-                          Icon(AppIcon.chevronDown, size: AppIconSize.hero),
-                        ],
+                    ),
+                    TransactionFormDivider(),
+                    TransactionFormLabel('Balance options'),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: TransactionFormIcon(AppIcon.bank),
+                      title: Text(
+                        'Include in group balance',
+                        style: fieldValueStyle,
+                      ),
+                      value: includeInGroupBalance,
+                      onChanged: (value) =>
+                          setDialogState(() => includeInGroupBalance = value),
+                    ),
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant.withValues(
+                        alpha: 0.38,
                       ),
                     ),
-                  ),
-                  AnimatedSwitcher(
-                    duration: MediaQuery.of(context).disableAnimations
-                        ? Duration.zero
-                        : const Duration(milliseconds: 165),
-                    transitionBuilder: (child, animation) => FadeTransition(
-                      opacity: animation,
-                      child: SizeTransition(
-                        sizeFactor: animation,
-                        alignment: Alignment.topCenter,
-                        child: child,
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: TransactionFormIcon(AppIcon.pieChart),
+                      title: Text(
+                        'Include in net worth',
+                        style: fieldValueStyle,
                       ),
+                      value: includeInNetWorth,
+                      onChanged: (value) =>
+                          setDialogState(() => includeInNetWorth = value),
                     ),
-                    child: type == v2_account.AccountType.creditCard
-                        ? Column(
-                            key: const ValueKey('credit-limit-field'),
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              TransactionFormDivider(),
-                              TransactionFormLabel('Credit limit'),
-                              Row(
-                                children: [
-                                  TransactionFormIcon(AppIcon.creditCard),
-                                  const SizedBox(width: AppSpacing.md),
-                                  Expanded(
-                                    child: AmountEntryField(
-                                      fieldKey: const ValueKey(
-                                        'account-credit-limit',
-                                      ),
-                                      initialMinor: creditLimitMinor,
-                                      currency: dataStore.preferences.currency,
-                                      labelText: null,
-                                      keyboardType: TextInputType.number,
-                                      decoration: borderlessDecoration,
-                                      textStyle: fieldValueStyle,
-                                      onChanged: (value) =>
-                                          creditLimitMinor = value.abs(),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          )
-                        : type == v2_account.AccountType.loan
-                        ? Column(
-                            key: const ValueKey('loan-amount-field'),
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const TransactionFormDivider(),
-                              TransactionFormLabel('Original loan amount'),
-                              Row(
-                                children: [
-                                  TransactionFormIcon(AppIcon.loan),
-                                  const SizedBox(width: AppSpacing.md),
-                                  Expanded(
-                                    child: AmountEntryField(
-                                      fieldKey: const ValueKey(
-                                        'account-original-loan-amount',
-                                      ),
-                                      initialMinor: originalLoanAmountMinor,
-                                      currency: dataStore.preferences.currency,
-                                      labelText: null,
-                                      keyboardType: TextInputType.number,
-                                      decoration: borderlessDecoration,
-                                      textStyle: fieldValueStyle,
-                                      onChanged: (value) =>
-                                          originalLoanAmountMinor = value.abs(),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          )
-                        : const SizedBox.shrink(
-                            key: ValueKey('no-account-extra-field'),
-                          ),
-                  ),
-                  TransactionFormDivider(),
-                  TransactionFormLabel('Balance options'),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    secondary: TransactionFormIcon(AppIcon.bank),
-                    title: Text(
-                      'Include in group balance',
-                      style: fieldValueStyle,
-                    ),
-                    value: includeInGroupBalance,
-                    onChanged: (value) =>
-                        setDialogState(() => includeInGroupBalance = value),
-                  ),
-                  Divider(
-                    height: 1,
-                    indent: 56,
-                    color: theme.colorScheme.outlineVariant.withValues(
-                      alpha: 0.38,
-                    ),
-                  ),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    secondary: TransactionFormIcon(AppIcon.pieChart),
-                    title: Text('Include in net worth', style: fieldValueStyle),
-                    value: includeInNetWorth,
-                    onChanged: (value) =>
-                        setDialogState(() => includeInNetWorth = value),
-                  ),
-                ],
-              ),
-            );
-          },
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       );
 
@@ -11316,8 +12091,13 @@ Future<void> showEditAccountDialog(
       name: result.name,
       type: result.type,
       creditLimitMinor: result.creditLimitMinor,
+      interestEstimationEnabled: result.interestEstimationEnabled,
+      annualPercentageRate: result.annualPercentageRate,
+      statementClosingDay: result.statementClosingDay,
+      paymentDueDay: result.paymentDueDay,
       originalLoanAmountMinor: result.originalLoanAmountMinor,
       clearCreditLimit: result.creditLimitMinor == null,
+      clearCreditInsights: result.type != v2_account.AccountType.creditCard,
       clearOriginalLoanAmount: result.originalLoanAmountMinor == null,
       includeInGroupBalance: result.includeInGroupBalance,
       includeInNetWorth: result.includeInNetWorth,
@@ -11496,7 +12276,11 @@ Future<void> showFloatingAddMenu(
 Future<void> showAccountDialog(BuildContext context) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final name = TextEditingController();
+  final annualPercentageRate = TextEditingController();
+  final statementClosingDay = TextEditingController();
+  final paymentDueDay = TextEditingController();
   var creditLimitMinor = 0;
+  var interestEstimationEnabled = false;
   var originalLoanAmountMinor = 0;
   var type = AccountType.checking;
   var openingBalanceCents = 0;
@@ -11511,239 +12295,301 @@ Future<void> showAccountDialog(BuildContext context) async {
           AccountType type,
           int openingBalanceCents,
           int? creditLimitMinor,
+          bool interestEstimationEnabled,
+          double? annualPercentageRate,
+          int? statementClosingDay,
+          int? paymentDueDay,
           int? originalLoanAmountMinor,
           bool includeInGroupBalance,
           bool includeInNetWorth,
         })
       >(
         context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) {
-            final theme = Theme.of(context);
-            final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
-              fontSize: 17,
-              fontWeight: FontWeight.w400,
-              letterSpacing: 0,
-              height: 1.15,
-            );
-            final fieldHintStyle = fieldValueStyle?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            );
-            const borderlessDecoration = InputDecoration(
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.symmetric(vertical: 8),
-            );
+        builder: (context) => _AccountFormControllerScope(
+          controllers: [
+            name,
+            annualPercentageRate,
+            statementClosingDay,
+            paymentDueDay,
+          ],
+          child: StatefulBuilder(
+            builder: (context, setDialogState) {
+              final theme = Theme.of(context);
+              final fieldValueStyle = theme.textTheme.titleMedium?.copyWith(
+                fontSize: 17,
+                fontWeight: FontWeight.w400,
+                letterSpacing: 0,
+                height: 1.15,
+              );
+              final fieldHintStyle = fieldValueStyle?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              );
+              const borderlessDecoration = InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 8),
+              );
 
-            void saveAccountResult() {
-              Navigator.pop(context, (
-                name: name.text.trim().isEmpty
-                    ? accountTypeLabel(type)
-                    : name.text.trim(),
-                type: type,
-                openingBalanceCents: openingBalanceCents,
-                creditLimitMinor: type == AccountType.creditCard
-                    ? optionalPositiveMinor(creditLimitMinor)
-                    : null,
-                originalLoanAmountMinor: type == AccountType.loan
-                    ? optionalPositiveMinor(originalLoanAmountMinor)
-                    : null,
-                includeInGroupBalance: includeInGroupBalance,
-                includeInNetWorth: includeInNetWorth,
-              ));
-            }
+              void saveAccountResult() {
+                final insights = validCreditInsightsValues(
+                  enabled:
+                      type == AccountType.creditCard &&
+                      interestEstimationEnabled,
+                  aprController: annualPercentageRate,
+                  statementClosingDayController: statementClosingDay,
+                  paymentDueDayController: paymentDueDay,
+                );
+                if (insights == null) {
+                  unawaited(showCreditInsightsValidationDialog(context));
+                  return;
+                }
+                Navigator.pop(context, (
+                  name: name.text.trim().isEmpty
+                      ? accountTypeLabel(type)
+                      : name.text.trim(),
+                  type: type,
+                  openingBalanceCents: openingBalanceCents,
+                  creditLimitMinor: type == AccountType.creditCard
+                      ? optionalPositiveMinor(creditLimitMinor)
+                      : null,
+                  interestEstimationEnabled:
+                      type == AccountType.creditCard &&
+                      interestEstimationEnabled,
+                  annualPercentageRate:
+                      type == AccountType.creditCard &&
+                          interestEstimationEnabled
+                      ? insights.apr
+                      : null,
+                  statementClosingDay:
+                      type == AccountType.creditCard &&
+                          interestEstimationEnabled
+                      ? insights.statementClosingDay
+                      : null,
+                  paymentDueDay:
+                      type == AccountType.creditCard &&
+                          interestEstimationEnabled
+                      ? insights.paymentDueDay
+                      : null,
+                  originalLoanAmountMinor: type == AccountType.loan
+                      ? optionalPositiveMinor(originalLoanAmountMinor)
+                      : null,
+                  includeInGroupBalance: includeInGroupBalance,
+                  includeInNetWorth: includeInNetWorth,
+                ));
+              }
 
-            return TransactionSheetFrame(
-              title: 'Add Account',
-              actions: TransactionFormActions(
-                onCancel: () => Navigator.pop(context),
-                onSave: saveAccountResult,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TransactionFormLabel('Name'),
-                  Row(
-                    children: [
-                      TransactionFormIcon(AppIcon.wallet),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: TextField(
-                          controller: name,
-                          decoration: borderlessDecoration.copyWith(
-                            hintText: 'Account name',
-                            hintStyle: fieldHintStyle,
-                          ),
-                          textCapitalization: TextCapitalization.words,
-                          textInputAction: TextInputAction.next,
-                          style: fieldValueStyle,
-                          autofocus: true,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const TransactionFormDivider(),
-                  const TransactionFormLabel('Type'),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(AppRadii.control),
-                    onTap: () async {
-                      FocusManager.instance.primaryFocus?.unfocus();
-                      final selectedType = await showAccountTypePicker(
-                        context,
-                        selected: type,
-                      );
-                      if (selectedType != null) {
-                        setDialogState(() => type = selectedType);
-                      }
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Row(
-                        children: [
-                          TransactionFormIcon(accountIcon(type)),
-                          const SizedBox(width: AppSpacing.md),
-                          Expanded(
-                            child: Text(
-                              accountTypeLabel(type),
-                              style: fieldValueStyle,
+              return TransactionSheetFrame(
+                title: 'Add Account',
+                actions: TransactionFormActions(
+                  onCancel: () => Navigator.pop(context),
+                  onSave: saveAccountResult,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TransactionFormLabel('Name'),
+                    Row(
+                      children: [
+                        TransactionFormIcon(AppIcon.wallet),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: TextField(
+                            controller: name,
+                            decoration: borderlessDecoration.copyWith(
+                              hintText: 'Account name',
+                              hintStyle: fieldHintStyle,
                             ),
+                            textCapitalization: TextCapitalization.words,
+                            textInputAction: TextInputAction.next,
+                            style: fieldValueStyle,
+                            autofocus: true,
                           ),
-                          Icon(AppIcon.chevronDown, size: AppIconSize.hero),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ),
-                  AnimatedSwitcher(
-                    duration: MediaQuery.of(context).disableAnimations
-                        ? Duration.zero
-                        : const Duration(milliseconds: 165),
-                    transitionBuilder: (child, animation) => FadeTransition(
-                      opacity: animation,
-                      child: SizeTransition(
-                        sizeFactor: animation,
-                        alignment: Alignment.topCenter,
-                        child: child,
-                      ),
-                    ),
-                    child: type == AccountType.creditCard
-                        ? Column(
-                            key: const ValueKey('credit-limit-field'),
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              TransactionFormDivider(),
-                              TransactionFormLabel('Credit limit'),
-                              Row(
-                                children: [
-                                  TransactionFormIcon(AppIcon.creditCard),
-                                  const SizedBox(width: AppSpacing.md),
-                                  Expanded(
-                                    child: AmountEntryField(
-                                      fieldKey: const ValueKey(
-                                        'account-credit-limit',
-                                      ),
-                                      initialMinor: creditLimitMinor,
-                                      currency: dataStore.preferences.currency,
-                                      labelText: null,
-                                      keyboardType: TextInputType.number,
-                                      decoration: borderlessDecoration,
-                                      textStyle: fieldValueStyle,
-                                      onChanged: (value) =>
-                                          creditLimitMinor = value.abs(),
-                                    ),
-                                  ),
-                                ],
+                    const TransactionFormDivider(),
+                    const TransactionFormLabel('Type'),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      onTap: () async {
+                        FocusManager.instance.primaryFocus?.unfocus();
+                        final selectedType = await showAccountTypePicker(
+                          context,
+                          selected: type,
+                        );
+                        if (selectedType != null) {
+                          setDialogState(() => type = selectedType);
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            TransactionFormIcon(accountIcon(type)),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Text(
+                                accountTypeLabel(type),
+                                style: fieldValueStyle,
                               ),
-                            ],
-                          )
-                        : type == AccountType.loan
-                        ? Column(
-                            key: const ValueKey('loan-amount-field'),
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const TransactionFormDivider(),
-                              TransactionFormLabel('Original loan amount'),
-                              Row(
-                                children: [
-                                  TransactionFormIcon(AppIcon.loan),
-                                  const SizedBox(width: AppSpacing.md),
-                                  Expanded(
-                                    child: AmountEntryField(
-                                      fieldKey: const ValueKey(
-                                        'account-original-loan-amount',
-                                      ),
-                                      initialMinor: originalLoanAmountMinor,
-                                      currency: dataStore.preferences.currency,
-                                      labelText: null,
-                                      keyboardType: TextInputType.number,
-                                      decoration: borderlessDecoration,
-                                      textStyle: fieldValueStyle,
-                                      onChanged: (value) =>
-                                          originalLoanAmountMinor = value.abs(),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          )
-                        : const SizedBox.shrink(
-                            key: ValueKey('no-account-extra-field'),
-                          ),
-                  ),
-                  TransactionFormDivider(),
-                  TransactionFormLabel('Opening balance'),
-                  Row(
-                    children: [
-                      TransactionFormIcon(AppIcon.money),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: AmountEntryField(
-                          initialMinor: openingBalanceCents,
-                          currency: dataStore.preferences.currency,
-                          labelText: null,
-                          allowNegative: true,
-                          keyboardType: TextInputType.number,
-                          decoration: borderlessDecoration,
-                          textStyle: fieldValueStyle,
-                          onChanged: (value) => openingBalanceCents = value,
+                            ),
+                            Icon(AppIcon.chevronDown, size: AppIconSize.hero),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                  TransactionFormDivider(),
-                  TransactionFormLabel('Balance options'),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    secondary: TransactionFormIcon(AppIcon.bank),
-                    title: Text(
-                      'Include in group balance',
-                      style: fieldValueStyle,
                     ),
-                    value: includeInGroupBalance,
-                    onChanged: (value) =>
-                        setDialogState(() => includeInGroupBalance = value),
-                  ),
-                  Divider(
-                    height: 1,
-                    indent: 56,
-                    color: theme.colorScheme.outlineVariant.withValues(
-                      alpha: 0.38,
+                    AnimatedSwitcher(
+                      duration: MediaQuery.of(context).disableAnimations
+                          ? Duration.zero
+                          : const Duration(milliseconds: 165),
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: SizeTransition(
+                          sizeFactor: animation,
+                          alignment: Alignment.topCenter,
+                          child: child,
+                        ),
+                      ),
+                      child: type == AccountType.creditCard
+                          ? Column(
+                              key: const ValueKey('credit-limit-field'),
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                TransactionFormDivider(),
+                                TransactionFormLabel('Credit limit'),
+                                Row(
+                                  children: [
+                                    TransactionFormIcon(AppIcon.creditCard),
+                                    const SizedBox(width: AppSpacing.md),
+                                    Expanded(
+                                      child: AmountEntryField(
+                                        fieldKey: const ValueKey(
+                                          'account-credit-limit',
+                                        ),
+                                        initialMinor: creditLimitMinor,
+                                        currency:
+                                            dataStore.preferences.currency,
+                                        labelText: null,
+                                        keyboardType: TextInputType.number,
+                                        decoration: borderlessDecoration,
+                                        textStyle: fieldValueStyle,
+                                        onChanged: (value) =>
+                                            creditLimitMinor = value.abs(),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const TransactionFormDivider(),
+                                CreditInsightsFormSection(
+                                  enabled: interestEstimationEnabled,
+                                  onEnabledChanged: (value) => setDialogState(
+                                    () => interestEstimationEnabled = value,
+                                  ),
+                                  aprController: annualPercentageRate,
+                                  statementClosingDayController:
+                                      statementClosingDay,
+                                  paymentDueDayController: paymentDueDay,
+                                  fieldValueStyle: fieldValueStyle,
+                                  fieldHintStyle: fieldHintStyle,
+                                  decoration: borderlessDecoration,
+                                ),
+                              ],
+                            )
+                          : type == AccountType.loan
+                          ? Column(
+                              key: const ValueKey('loan-amount-field'),
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const TransactionFormDivider(),
+                                TransactionFormLabel('Original loan amount'),
+                                Row(
+                                  children: [
+                                    TransactionFormIcon(AppIcon.loan),
+                                    const SizedBox(width: AppSpacing.md),
+                                    Expanded(
+                                      child: AmountEntryField(
+                                        fieldKey: const ValueKey(
+                                          'account-original-loan-amount',
+                                        ),
+                                        initialMinor: originalLoanAmountMinor,
+                                        currency:
+                                            dataStore.preferences.currency,
+                                        labelText: null,
+                                        keyboardType: TextInputType.number,
+                                        decoration: borderlessDecoration,
+                                        textStyle: fieldValueStyle,
+                                        onChanged: (value) =>
+                                            originalLoanAmountMinor = value
+                                                .abs(),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            )
+                          : const SizedBox.shrink(
+                              key: ValueKey('no-account-extra-field'),
+                            ),
                     ),
-                  ),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    secondary: TransactionFormIcon(AppIcon.pieChart),
-                    title: Text('Include in net worth', style: fieldValueStyle),
-                    value: includeInNetWorth,
-                    onChanged: (value) =>
-                        setDialogState(() => includeInNetWorth = value),
-                  ),
-                ],
-              ),
-            );
-          },
+                    TransactionFormDivider(),
+                    TransactionFormLabel('Opening balance'),
+                    Row(
+                      children: [
+                        TransactionFormIcon(AppIcon.money),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: AmountEntryField(
+                            initialMinor: openingBalanceCents,
+                            currency: dataStore.preferences.currency,
+                            labelText: null,
+                            allowNegative: true,
+                            keyboardType: TextInputType.number,
+                            decoration: borderlessDecoration,
+                            textStyle: fieldValueStyle,
+                            onChanged: (value) => openingBalanceCents = value,
+                          ),
+                        ),
+                      ],
+                    ),
+                    TransactionFormDivider(),
+                    TransactionFormLabel('Balance options'),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: TransactionFormIcon(AppIcon.bank),
+                      title: Text(
+                        'Include in group balance',
+                        style: fieldValueStyle,
+                      ),
+                      value: includeInGroupBalance,
+                      onChanged: (value) =>
+                          setDialogState(() => includeInGroupBalance = value),
+                    ),
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant.withValues(
+                        alpha: 0.38,
+                      ),
+                    ),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: TransactionFormIcon(AppIcon.pieChart),
+                      title: Text(
+                        'Include in net worth',
+                        style: fieldValueStyle,
+                      ),
+                      value: includeInNetWorth,
+                      onChanged: (value) =>
+                          setDialogState(() => includeInNetWorth = value),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       );
 
@@ -11766,6 +12612,24 @@ Future<void> showAccountDialog(BuildContext context) async {
       openingBalanceMinor: normalizedOpeningBalanceCents,
       creditLimitMinor: v2Type == v2_account.AccountType.creditCard
           ? result.creditLimitMinor
+          : null,
+      interestEstimationEnabled:
+          v2Type == v2_account.AccountType.creditCard &&
+          result.interestEstimationEnabled,
+      annualPercentageRate:
+          v2Type == v2_account.AccountType.creditCard &&
+              result.interestEstimationEnabled
+          ? result.annualPercentageRate
+          : null,
+      statementClosingDay:
+          v2Type == v2_account.AccountType.creditCard &&
+              result.interestEstimationEnabled
+          ? result.statementClosingDay
+          : null,
+      paymentDueDay:
+          v2Type == v2_account.AccountType.creditCard &&
+              result.interestEstimationEnabled
+          ? result.paymentDueDay
           : null,
       originalLoanAmountMinor: v2Type == v2_account.AccountType.loan
           ? result.originalLoanAmountMinor ??
@@ -12026,7 +12890,10 @@ Future<void> showTransferDialog(
                 payee: description.text.trim().isEmpty
                     ? 'Transfer'
                     : description.text.trim(),
-                date: parseDateInput(date.text, DateTime.now()),
+                date: parseTransactionDateInput(
+                  date.text,
+                  transfer?.date ?? DateTime.now(),
+                ),
                 note: note.text.trim(),
                 amountMinor: amountMinor.abs(),
                 scheduleFutureOccurrences: scheduleFutureOccurrences,
@@ -15785,7 +16652,7 @@ Future<void> showTransactionDialog(
                     ? 'Transaction'
                     : payee.text.trim(),
                 note: note.text.trim(),
-                date: parseDateInput(
+                date: parseTransactionDateInput(
                   date.text,
                   transaction?.date ?? DateTime.now(),
                 ),
@@ -19184,6 +20051,26 @@ DateTime parseDateInput(String value, DateTime fallback) {
     return DateTime(fallback.year, fallback.month, fallback.day);
   }
   return DateTime(parsed.year, parsed.month, parsed.day);
+}
+
+/// Parses the user-selected transaction day without discarding its time.
+///
+/// The transaction forms intentionally present a date-only field. Existing
+/// transactions retain their recorded time when edited, while newly created
+/// transactions retain the time at which the form is saved. Date-only domain
+/// values continue to use [parseDateInput] and remain normalized to midnight.
+DateTime parseTransactionDateInput(String value, DateTime timeSource) {
+  final day = parseDateInput(value, timeSource);
+  return DateTime(
+    day.year,
+    day.month,
+    day.day,
+    timeSource.hour,
+    timeSource.minute,
+    timeSource.second,
+    timeSource.millisecond,
+    timeSource.microsecond,
+  );
 }
 
 bool isSameCalendarDay(DateTime left, DateTime right) {

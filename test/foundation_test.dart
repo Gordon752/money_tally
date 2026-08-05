@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:money_tally/src/credit/credit_insights_calculator.dart';
 import 'package:money_tally/src/domain/account.dart';
 import 'package:money_tally/src/domain/budget.dart';
 import 'package:money_tally/src/domain/category.dart';
@@ -414,11 +415,98 @@ void main() {
     expect(store.creditAvailableMinorForAccount('card'), 150000);
     expect(store.creditUsedMinorForGroup(AccountGroup.creditCards), 75000);
     expect(store.creditLimitMinorForGroup(AccountGroup.creditCards), 200000);
+    expect(
+      store.creditAvailableMinorForGroup(AccountGroup.creditCards),
+      125000,
+    );
 
     expect(store.remainingLoanMinorForAccount('loan'), 1000000);
     expect(store.loanPaidDownMinorForAccount('loan'), 500000);
     expect(store.remainingLoanMinorForGroup(AccountGroup.loans), 1000000);
     expect(store.originalLoanAmountMinorForGroup(AccountGroup.loans), 1500000);
+  });
+
+  test('credit insights account metadata is optional and round-trips', () {
+    final account = AccountRecord(
+      id: 'card',
+      name: 'Credit Card',
+      type: AccountType.creditCard,
+      openingBalanceMinor: -50000,
+      creditLimitMinor: 200000,
+      interestEstimationEnabled: true,
+      annualPercentageRate: 29.99,
+      statementClosingDay: 15,
+      paymentDueDay: 7,
+      sync: SyncMetadata.fresh(now: DateTime(2026, 8, 4)),
+    );
+
+    final restored = AccountRecord.fromJson(account.toJson());
+    expect(restored.interestEstimationEnabled, isTrue);
+    expect(restored.annualPercentageRate, 29.99);
+    expect(restored.statementClosingDay, 15);
+    expect(restored.paymentDueDay, 7);
+
+    final olderRecord = AccountRecord.fromJson({
+      ...account.toJson(),
+      'interestEstimationEnabled': null,
+      'annualPercentageRate': null,
+      'statementClosingDay': null,
+      'paymentDueDay': null,
+    });
+    expect(olderRecord.interestEstimationEnabled, isFalse);
+    expect(olderRecord.annualPercentageRate, isNull);
+    expect(olderRecord.statementClosingDay, isNull);
+    expect(olderRecord.paymentDueDay, isNull);
+  });
+
+  test(
+    'credit insights estimates simple interest through next statement close',
+    () {
+      const calculator = CreditInsightsCalculator();
+      final estimate = calculator.calculate(
+        currentBalanceMinor: -100000,
+        annualPercentageRate: 36,
+        statementClosingDay: 15,
+        today: DateTime(2026, 8, 5),
+      );
+
+      expect(estimate.nextStatementClosingDate, DateTime(2026, 8, 15));
+      expect(estimate.daysUntilStatementClosing, 10);
+      expect(estimate.estimatedInterestMinor, 986);
+      expect(estimate.projectedStatementMinor, -100986);
+    },
+  );
+
+  test('credit insights closing date handles passed and shortened months', () {
+    const calculator = CreditInsightsCalculator();
+
+    expect(
+      calculator.nextStatementClosingDate(
+        statementClosingDay: 15,
+        today: DateTime(2026, 8, 16),
+      ),
+      DateTime(2026, 9, 15),
+    );
+    expect(
+      calculator.nextStatementClosingDate(
+        statementClosingDay: 31,
+        today: DateTime(2026, 2, 1),
+      ),
+      DateTime(2026, 2, 28),
+    );
+  });
+
+  test('credit insights returns zero interest without a revolving balance', () {
+    const calculator = CreditInsightsCalculator();
+    final estimate = calculator.calculate(
+      currentBalanceMinor: 0,
+      annualPercentageRate: 29.99,
+      statementClosingDay: 15,
+      today: DateTime(2026, 8, 5),
+    );
+
+    expect(estimate.estimatedInterestMinor, 0);
+    expect(estimate.projectedStatementMinor, 0);
   });
 
   test('split transactions must match the parent amount', () async {
