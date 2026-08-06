@@ -3562,7 +3562,7 @@ void main() {
     );
 
     expect(find.text(r'Credit Available $562.14 of $1,700.00'), findsOneWidget);
-    expect(find.text('Credit Insights'), findsOneWidget);
+    expect(find.text('Next Statement'), findsOneWidget);
     expect(find.text('29.99%'), findsOneWidget);
     expect(find.text('Projected Statement'), findsOneWidget);
     expect(find.text('Estimated Interest'), findsOneWidget);
@@ -3590,9 +3590,135 @@ void main() {
       ),
     );
 
-    expect(find.text('Credit Insights'), findsOneWidget);
+    expect(find.text('APR'), findsOneWidget);
     expect(find.text('Projected Statement'), findsNothing);
     expect(find.text('Estimated Interest'), findsNothing);
+  });
+
+  testWidgets(
+    'Credit Insights setup uses guidance and advances keyboard focus',
+    (tester) async {
+      final apr = TextEditingController();
+      final statementDay = TextEditingController();
+      final paymentDay = TextEditingController();
+      addTearDown(apr.dispose);
+      addTearDown(statementDay.dispose);
+      addTearDown(paymentDay.dispose);
+      var enabled = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => CreditInsightsFormSection(
+                enabled: enabled,
+                onEnabledChanged: (value) => setState(() => enabled = value),
+                aprController: apr,
+                statementClosingDayController: statementDay,
+                paymentDueDayController: paymentDay,
+                fieldValueStyle: Theme.of(context).textTheme.bodyLarge,
+                fieldHintStyle: Theme.of(context).textTheme.bodyLarge,
+                decoration: const InputDecoration(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Enable Credit Insights'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('APR'), findsOneWidget);
+      expect(find.text('Statement Closing Day'), findsOneWidget);
+      expect(find.text('Payment Due Day'), findsOneWidget);
+      expect(find.text('Enter APR (%)'), findsOneWidget);
+      expect(find.text('Enter day (1–31)'), findsNWidgets(2));
+      expect(find.text('29.99'), findsNothing);
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('credit-insights-apr')),
+            )
+            .focusNode!
+            .hasFocus,
+        isTrue,
+      );
+
+      tester.testTextInput.receiveAction(TextInputAction.next);
+      await tester.pump();
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(
+                const ValueKey('credit-insights-statement-closing-day'),
+              ),
+            )
+            .focusNode!
+            .hasFocus,
+        isTrue,
+      );
+
+      tester.testTextInput.receiveAction(TextInputAction.next);
+      await tester.pump();
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('credit-insights-payment-due-day')),
+            )
+            .focusNode!
+            .hasFocus,
+        isTrue,
+      );
+
+      tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('credit-insights-payment-due-day')),
+            )
+            .focusNode!
+            .hasFocus,
+        isFalse,
+      );
+    },
+  );
+
+  testWidgets('Credit Insights setup preserves existing saved values', (
+    tester,
+  ) async {
+    final apr = TextEditingController(text: '28.49');
+    final statementDay = TextEditingController(text: '15');
+    final paymentDay = TextEditingController(text: '7');
+    addTearDown(apr.dispose);
+    addTearDown(statementDay.dispose);
+    addTearDown(paymentDay.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => CreditInsightsFormSection(
+              enabled: true,
+              onEnabledChanged: (_) {},
+              aprController: apr,
+              statementClosingDayController: statementDay,
+              paymentDueDayController: paymentDay,
+              fieldValueStyle: Theme.of(context).textTheme.bodyLarge,
+              fieldHintStyle: Theme.of(context).textTheme.bodyLarge,
+              decoration: const InputDecoration(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(apr.text, '28.49');
+    expect(statementDay.text, '15');
+    expect(paymentDay.text, '7');
+    expect(find.text('28.49'), findsOneWidget);
+    expect(find.text('15'), findsOneWidget);
+    expect(find.text('7'), findsOneWidget);
   });
 
   testWidgets('account long press can add expense for selected account', (
@@ -5500,6 +5626,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ListTile, 'Delete'));
     await tester.pumpAndSettle();
+    expect(find.text('Delete Scheduled Transaction?'), findsOneWidget);
+    await tester.tap(find.text('Delete Schedule'));
+    await tester.pumpAndSettle();
 
     final ended = dataStore.scheduledTransactions.singleWhere(
       (item) => item.id == 'sched-future-delete',
@@ -5925,6 +6054,23 @@ void main() {
     await tester.longPress(find.text('Rent'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete Scheduled Transaction?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(
+      dataStore.scheduledTransactions
+          .singleWhere((item) => item.id == 'sched-rent')
+          .isDeleted,
+      isFalse,
+    );
+
+    await tester.longPress(find.text('Rent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete Schedule'));
     await tester.pumpAndSettle();
 
     final original = dataStore.scheduledTransactions.singleWhere(

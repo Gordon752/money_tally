@@ -1689,16 +1689,22 @@ class AccountGroupCard extends StatelessWidget {
       fontWeight: FontWeight.w700,
     );
 
+    if (group == v2_account.AccountGroup.creditCards) {
+      return _buildCreditCardGroup(
+        context,
+        isCollapsed: isCollapsed,
+        label: label,
+        balanceMinor: balanceMinor,
+        progress: progress,
+        headerTextStyle: headerTextStyle,
+      );
+    }
+
     return AppCard(
       padding: EdgeInsets.zero,
       borderRadius: 12,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md,
-          AppSpacing.sm,
-          AppSpacing.md,
-          AppSpacing.sm,
-        ),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1719,55 +1725,13 @@ class AccountGroupCard extends StatelessWidget {
                   AppHaptics.longPressAction();
                   showAccountGroupActions(context, group);
                 },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      AnimatedRotation(
-                        turns: isCollapsed ? -0.25 : 0,
-                        duration: MediaQuery.of(context).disableAnimations
-                            ? Duration.zero
-                            : Duration(milliseconds: 160),
-                        curve: Curves.easeOutCubic,
-                        child: Icon(
-                          AppIcon.dropdown,
-                          color: theme.colorScheme.onSurfaceVariant,
-                          size: AppIconSize.action,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.xs),
-                      Expanded(
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: headerTextStyle,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Container(
-                        height: 28,
-                        constraints: const BoxConstraints(minWidth: 112),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        alignment: Alignment.centerRight,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest,
-                          border: Border.all(
-                            color: theme.colorScheme.outlineVariant,
-                          ),
-                          borderRadius: BorderRadius.circular(AppRadii.pill),
-                        ),
-                        child: MoneyText(
-                          amountMinor: balanceMinor,
-                          currency: store.preferences.currency,
-                          color: balanceMinor < 0 ? AppColors.danger : null,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
+                child: _AccountGroupSummaryRow(
+                  group: group,
+                  label: label,
+                  balanceMinor: balanceMinor,
+                  currency: store.preferences.currency,
+                  isCollapsed: isCollapsed,
+                  headerTextStyle: headerTextStyle,
                 ),
               ),
             ),
@@ -1887,6 +1851,281 @@ class AccountGroupCard extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildCreditCardGroup(
+    BuildContext context, {
+    required bool isCollapsed,
+    required String label,
+    required int balanceMinor,
+    required Widget? progress,
+    required TextStyle? headerTextStyle,
+  }) {
+    final animationsDisabled = MediaQuery.of(context).disableAnimations;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppCard(
+          padding: EdgeInsets.zero,
+          borderRadius: 14,
+          child: Tooltip(
+            message: isCollapsed ? 'Expand $label' : 'Collapse $label',
+            child: InkWell(
+              key: ValueKey('account-group-${group.name}'),
+              borderRadius: BorderRadius.circular(14),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                toggleAccountGroupCollapsed(
+                  context,
+                  group,
+                  isCollapsed: isCollapsed,
+                );
+              },
+              onLongPress: () {
+                AppHaptics.longPressAction();
+                showAccountGroupActions(context, group);
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _AccountGroupSummaryRow(
+                      group: group,
+                      label: label,
+                      balanceMinor: balanceMinor,
+                      currency: store.preferences.currency,
+                      isCollapsed: isCollapsed,
+                      headerTextStyle: headerTextStyle,
+                    ),
+                    AnimatedSize(
+                      duration: animationsDisabled
+                          ? Duration.zero
+                          : const Duration(milliseconds: 175),
+                      reverseDuration: animationsDisabled
+                          ? Duration.zero
+                          : const Duration(milliseconds: 145),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topCenter,
+                      child: isCollapsed || progress == null
+                          ? const SizedBox.shrink()
+                          : Padding(
+                              padding: const EdgeInsets.only(
+                                top: AppSpacing.sm,
+                              ),
+                              child: progress,
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: animationsDisabled
+              ? Duration.zero
+              : const Duration(milliseconds: 175),
+          reverseDuration: animationsDisabled
+              ? Duration.zero
+              : const Duration(milliseconds: 145),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: isCollapsed
+              ? const SizedBox.shrink()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: AppSpacing.xs),
+                    for (var index = 0; index < accounts.length; index++) ...[
+                      _buildCreditCardAccount(context, accounts[index]),
+                      if (index != accounts.length - 1)
+                        const SizedBox(height: AppSpacing.xs),
+                    ],
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCreditCardAccount(
+    BuildContext context,
+    v2_account.AccountRecord account,
+  ) {
+    const radius = 14.0;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Dismissible(
+        key: ValueKey('account-swipe-${account.id}'),
+        direction: DismissDirection.horizontal,
+        dismissThresholds: const {
+          DismissDirection.startToEnd: 0.22,
+          DismissDirection.endToStart: 0.22,
+        },
+        background: SwipeActionBackground(
+          alignment: Alignment.centerLeft,
+          icon: AppIcon.transfer,
+          label: 'Expense  Income  Transfer',
+        ),
+        secondaryBackground: SwipeActionBackground(
+          alignment: Alignment.centerRight,
+          icon: AppIcon.edit,
+          label: 'Edit  Archive  Delete',
+          destructive: true,
+        ),
+        confirmDismiss: (direction) async {
+          HapticFeedback.selectionClick();
+          await showAccountOptions(
+            context,
+            account.id,
+            allowedActions: direction == DismissDirection.startToEnd
+                ? const {'expense', 'income', 'transfer'}
+                : const {'edit', 'archive', 'delete'},
+          );
+          return false;
+        },
+        child: AccountCard(
+          account: account,
+          balanceMinor: store.balanceForAccount(account.id),
+          currency: store.preferences.currency,
+          subtitle: lastAccountActivitySubtitle(store, account.id),
+          balanceFontSize: 17,
+          framed: true,
+          borderRadius: radius,
+          showNavigationChevron: true,
+          metricLeadingIndent: 58,
+          padding: const EdgeInsets.all(AppSpacing.md),
+          leading: _CreditCardAccountBadge(accountName: account.name),
+          onTap: onOpenLedgerForAccount == null
+              ? null
+              : () => onOpenLedgerForAccount!(account.id),
+          onLongPress: () {
+            AppHaptics.longPressAction();
+            showAccountOptions(context, account.id);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _AccountGroupSummaryRow extends StatelessWidget {
+  const _AccountGroupSummaryRow({
+    required this.group,
+    required this.label,
+    required this.balanceMinor,
+    required this.currency,
+    required this.isCollapsed,
+    required this.headerTextStyle,
+  });
+
+  final v2_account.AccountGroup group;
+  final String label;
+  final int balanceMinor;
+  final CurrencyFormatSettings currency;
+  final bool isCollapsed;
+  final TextStyle? headerTextStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final animationsDisabled = MediaQuery.of(context).disableAnimations;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 46,
+          height: 46,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.55,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.62),
+            ),
+          ),
+          child: Icon(
+            accountGroupIcon(group.name),
+            color: theme.colorScheme.onSurfaceVariant,
+            size: AppIconSize.action,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: headerTextStyle,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        MoneyText(
+          amountMinor: balanceMinor,
+          currency: currency,
+          color: balanceMinor < 0 ? AppColors.danger : null,
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+        ),
+        const SizedBox(width: AppSpacing.xs),
+        AnimatedRotation(
+          turns: isCollapsed ? -0.25 : 0,
+          duration: animationsDisabled
+              ? Duration.zero
+              : const Duration(milliseconds: 160),
+          curve: Curves.easeOutCubic,
+          child: Icon(
+            AppIcon.dropdown,
+            color: theme.colorScheme.onSurfaceVariant,
+            size: AppIconSize.action,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CreditCardAccountBadge extends StatelessWidget {
+  const _CreditCardAccountBadge({required this.accountName});
+
+  final String accountName;
+
+  @override
+  Widget build(BuildContext context) {
+    final words = accountName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList(growable: false);
+    final initial = words.isEmpty
+        ? 'C'
+        : words.length == 1
+        ? words.first.characters.first.toUpperCase()
+        : words
+              .take(2)
+              .map((word) => word.characters.first)
+              .join()
+              .toUpperCase();
+    return Container(
+      width: 46,
+      height: 46,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppTheme.accent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.18)),
+      ),
+      child: Text(
+        initial,
+        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+          color: AppTheme.accentStrong,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
 }
 
 String lastAccountActivitySubtitle(FinanceDataStore store, String accountId) {
@@ -1925,6 +2164,7 @@ Widget? accountGroupProgress(
             'Credit Available ${money(available, store.preferences.currency)} of ${money(limit, store.preferences.currency)}',
         progress: used / limit,
         isOver: used > limit,
+        showPercentage: true,
       );
     case v2_account.AccountGroup.loans:
       final original = store.originalLoanAmountMinorForGroup(group);
@@ -1952,12 +2192,14 @@ class AccountGroupProgressStrip extends StatelessWidget {
     required this.label,
     required this.progress,
     this.isOver = false,
+    this.showPercentage = false,
     super.key,
   });
 
   final String label;
   final double progress;
   final bool isOver;
+  final bool showPercentage;
 
   @override
   Widget build(BuildContext context) {
@@ -1978,19 +2220,40 @@ class AccountGroupProgressStrip extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.xxs),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            child: SizedBox(
-              height: 4,
-              child: LinearProgressIndicator(
-                value: value,
-                backgroundColor: Theme.of(
-                  context,
-                ).colorScheme.outlineVariant.withValues(alpha: 0.62),
-                color: (isOver ? AppColors.danger : AppColors.accent)
-                    .withValues(alpha: 0.82),
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                  child: SizedBox(
+                    height: 4,
+                    child: LinearProgressIndicator(
+                      value: value,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.outlineVariant.withValues(alpha: 0.62),
+                      color: (isOver ? AppColors.danger : AppColors.accent)
+                          .withValues(alpha: 0.82),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              if (showPercentage) ...[
+                const SizedBox(width: AppSpacing.sm),
+                SizedBox(
+                  width: 38,
+                  child: Text(
+                    '${(value * 100).round()}%',
+                    textAlign: TextAlign.right,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: isOver ? AppColors.danger : AppTheme.accentStrong,
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [AppTextStyles.tabularFigures],
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),
@@ -3176,7 +3439,7 @@ class _LedgerDayCard extends StatelessWidget {
                   indent: 58,
                   endIndent: 16,
                   color: theme.colorScheme.outlineVariant.withValues(
-                    alpha: 0.12,
+                    alpha: 0.135,
                   ),
                 ),
             ],
@@ -3452,15 +3715,16 @@ class LedgerJournalRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final signedAmount = projection.displayedAmountMinor;
-    final secondaryDetails = [
+    final timeLabel = ledgerTransactionTimeLabel(context, transaction.date);
+    final metadataDetails = [
       if (account != null) account!.name,
       if (categoryName != null) categoryName,
       if (transaction.type == TransactionType.adjustment)
         'Manual balance adjustment',
       if (transaction.isTransfer) 'Transfer',
+      ?timeLabel,
     ].join(' • ');
     final hasSplit = projection.isPartOfSplit || transaction.isSplit;
-    final timeLabel = ledgerTransactionTimeLabel(context, transaction.date);
     final secondaryStyle =
         Theme.of(context).textTheme.bodySmall?.copyWith(
           color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -3497,104 +3761,98 @@ class LedgerJournalRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (showDateContext) ...[
-                SizedBox(
-                  width: 38,
-                  child: Text(
-                    '${transaction.date.day}\n${ledgerDayContext(transaction.date)}',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w800,
-                      height: 1.1,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-              ],
-              if (category != null)
-                CategoryIconBadge.category(
-                  category!,
-                  size: CategoryIconBadgeSize.row,
-                )
-              else
-                _LedgerIconBadge(
-                  icon: account == null
-                      ? AppIcon.receipt
-                      : v2AccountIcon(account!.type),
-                  semanticLabel: account == null
-                      ? 'Transaction'
-                      : '${account!.name} account',
-                ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      transaction.payee,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.15,
+        child: SizedBox(
+          height: 72,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (showDateContext) ...[
+                  SizedBox(
+                    width: 38,
+                    child: Text(
+                      '${transaction.date.day}\n${ledgerDayContext(transaction.date)}',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w800,
+                        height: 1.1,
                       ),
                     ),
-                    if (secondaryDetails.isNotEmpty || hasSplit) ...[
-                      const SizedBox(height: 5),
-                      if (secondaryDetails.isNotEmpty)
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
+                if (category != null)
+                  CategoryIconBadge.category(
+                    category!,
+                    size: CategoryIconBadgeSize.row,
+                  )
+                else
+                  _LedgerIconBadge(
+                    icon: account == null
+                        ? AppIcon.receipt
+                        : v2AccountIcon(account!.type),
+                    semanticLabel: account == null
+                        ? 'Transaction'
+                        : '${account!.name} account',
+                  ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        transaction.payee,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.15,
+                        ),
+                      ),
+                      if (metadataDetails.isNotEmpty) ...[
+                        const SizedBox(height: 3),
                         Text(
-                          secondaryDetails,
+                          metadataDetails,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: secondaryStyle,
                         ),
+                      ],
                     ],
-                    // This auxiliary position intentionally supports a future
-                    // Pending/Cleared status without changing row data today.
-                    if (timeLabel != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        timeLabel,
-                        style: secondaryStyle.copyWith(
-                          fontSize: 11,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant
-                              .withValues(alpha: 0.78),
-                        ),
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 1),
-                    child: MoneyText(
+                const SizedBox(width: AppSpacing.sm),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    MoneyText(
                       amountMinor: signedAmount,
                       currency: currency,
-                      fontSize: 17,
+                      fontSize: 16,
                       fontWeight: FontWeight.w800,
                       showPositiveSign:
                           transaction.type == TransactionType.income,
                       color: signedAmount < 0 ? AppColors.danger : null,
                     ),
-                  ),
-                  if (hasSplit) ...[
-                    const SizedBox(height: 5),
-                    const _LedgerSplitCapsule(),
+                    const SizedBox(height: 3),
+                    SizedBox(
+                      height: 18,
+                      child: hasSplit
+                          ? const Align(
+                              alignment: Alignment.centerRight,
+                              child: _LedgerSplitCapsule(),
+                            )
+                          : null,
+                    ),
                   ],
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3609,20 +3867,22 @@ class _LedgerSplitCapsule extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.8),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.16,
+        ),
         borderRadius: BorderRadius.circular(99),
         border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.56),
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.44),
         ),
       ),
       child: Text(
-        'Split',
+        'split',
         style: theme.textTheme.labelSmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
           fontSize: 10,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -3687,90 +3947,88 @@ class GoalFundingLedgerRow extends StatelessWidget {
       1 => '1 Goal',
       final count => '$count Goals',
     };
-    final secondary = [
+    final timeLabel = ledgerTransactionTimeLabel(context, event.date);
+    final metadataDetails = [
       if (account != null) account!.name,
       allocationSummary,
+      ?timeLabel,
     ].join(' • ');
-    final timeLabel = ledgerTransactionTimeLabel(context, event.date);
 
     return InkWell(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (showDateContext) ...[
-              SizedBox(
-                width: 38,
-                child: Text(
-                  '${event.date.day}\n${ledgerDayContext(event.date)}',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w800,
-                    height: 1.1,
+      child: SizedBox(
+        height: 72,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (showDateContext) ...[
+                SizedBox(
+                  width: 38,
+                  child: Text(
+                    '${event.date.day}\n${ledgerDayContext(event.date)}',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                      height: 1.1,
+                    ),
                   ),
                 ),
+                const SizedBox(width: AppSpacing.sm),
+              ],
+              _LedgerIconBadge(
+                icon: AppIcon.goal,
+                semanticLabel: 'Goal funding',
+                color: Colors.blue.shade700,
               ),
               const SizedBox(width: AppSpacing.sm),
-            ],
-            _LedgerIconBadge(
-              icon: AppIcon.goal,
-              semanticLabel: 'Goal funding',
-              color: Colors.blue.shade700,
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Funded Goals',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.15,
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Funded Goals',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.15,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    secondary,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  if (timeLabel != null) ...[
                     const SizedBox(height: 3),
                     Text(
-                      timeLabel,
+                      metadataDetails,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontSize: 11,
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.78),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  MoneyText(
+                    amountMinor: -event.totalAmountMinor.abs(),
+                    currency: currency,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.blue.shade700,
+                  ),
+                  const SizedBox(height: 3),
+                  const SizedBox(height: 18),
                 ],
               ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Padding(
-              padding: const EdgeInsets.only(top: 1),
-              child: MoneyText(
-                amountMinor: -event.totalAmountMinor.abs(),
-                currency: currency,
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-                color: Colors.blue.shade700,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -11558,7 +11816,7 @@ Future<void> showCreditInsightsInfoDialog(BuildContext context) {
   );
 }
 
-class CreditInsightsFormSection extends StatelessWidget {
+class CreditInsightsFormSection extends StatefulWidget {
   const CreditInsightsFormSection({
     required this.enabled,
     required this.onEnabledChanged,
@@ -11581,6 +11839,42 @@ class CreditInsightsFormSection extends StatelessWidget {
   final InputDecoration decoration;
 
   @override
+  State<CreditInsightsFormSection> createState() =>
+      _CreditInsightsFormSectionState();
+}
+
+class _CreditInsightsFormSectionState extends State<CreditInsightsFormSection> {
+  final _aprFocusNode = FocusNode(debugLabel: 'credit-insights-apr');
+  final _statementDayFocusNode = FocusNode(
+    debugLabel: 'credit-insights-statement-day',
+  );
+  final _paymentDueDayFocusNode = FocusNode(
+    debugLabel: 'credit-insights-payment-due-day',
+  );
+
+  @override
+  void didUpdateWidget(CreditInsightsFormSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.enabled && widget.enabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.enabled) _aprFocusNode.requestFocus();
+      });
+    } else if (oldWidget.enabled && !widget.enabled) {
+      _aprFocusNode.unfocus();
+      _statementDayFocusNode.unfocus();
+      _paymentDueDayFocusNode.unfocus();
+    }
+  }
+
+  @override
+  void dispose() {
+    _aprFocusNode.dispose();
+    _statementDayFocusNode.dispose();
+    _paymentDueDayFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       key: const ValueKey('credit-insights-fields'),
@@ -11599,9 +11893,9 @@ class CreditInsightsFormSection extends StatelessWidget {
         SwitchListTile.adaptive(
           contentPadding: EdgeInsets.zero,
           secondary: TransactionFormIcon(AppIcon.insights),
-          title: Text('Enable Credit Insights', style: fieldValueStyle),
-          value: enabled,
-          onChanged: onEnabledChanged,
+          title: Text('Enable Credit Insights', style: widget.fieldValueStyle),
+          value: widget.enabled,
+          onChanged: widget.onEnabledChanged,
         ),
         AnimatedSize(
           duration: MediaQuery.of(context).disableAnimations
@@ -11609,43 +11903,60 @@ class CreditInsightsFormSection extends StatelessWidget {
               : const Duration(milliseconds: 165),
           curve: Curves.easeOutCubic,
           alignment: Alignment.topCenter,
-          child: enabled
+          child: widget.enabled
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const TransactionFormDivider(),
                     _CreditInsightsTextField(
-                      label: 'APR (%)',
-                      controller: aprController,
-                      hintText: '29.99',
+                      fieldKey: const ValueKey('credit-insights-apr'),
+                      label: 'APR',
+                      controller: widget.aprController,
+                      focusNode: _aprFocusNode,
+                      hintText: 'Enter APR (%)',
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      fieldValueStyle: fieldValueStyle,
-                      fieldHintStyle: fieldHintStyle,
-                      decoration: decoration,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) => _statementDayFocusNode.requestFocus(),
+                      fieldValueStyle: widget.fieldValueStyle,
+                      fieldHintStyle: widget.fieldHintStyle,
+                      decoration: widget.decoration,
                     ),
                     const TransactionFormDivider(),
                     _CreditInsightsTextField(
-                      label: 'Statement Closing Day (1–31)',
-                      controller: statementClosingDayController,
-                      hintText: '15',
+                      fieldKey: const ValueKey(
+                        'credit-insights-statement-closing-day',
+                      ),
+                      label: 'Statement Closing Day',
+                      controller: widget.statementClosingDayController,
+                      focusNode: _statementDayFocusNode,
+                      hintText: 'Enter day (1–31)',
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      fieldValueStyle: fieldValueStyle,
-                      fieldHintStyle: fieldHintStyle,
-                      decoration: decoration,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) =>
+                          _paymentDueDayFocusNode.requestFocus(),
+                      fieldValueStyle: widget.fieldValueStyle,
+                      fieldHintStyle: widget.fieldHintStyle,
+                      decoration: widget.decoration,
                     ),
                     const TransactionFormDivider(),
                     _CreditInsightsTextField(
-                      label: 'Payment Due Day (1–31)',
-                      controller: paymentDueDayController,
-                      hintText: '7',
+                      fieldKey: const ValueKey(
+                        'credit-insights-payment-due-day',
+                      ),
+                      label: 'Payment Due Day',
+                      controller: widget.paymentDueDayController,
+                      focusNode: _paymentDueDayFocusNode,
+                      hintText: 'Enter day (1–31)',
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      fieldValueStyle: fieldValueStyle,
-                      fieldHintStyle: fieldHintStyle,
-                      decoration: decoration,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _paymentDueDayFocusNode.unfocus(),
+                      fieldValueStyle: widget.fieldValueStyle,
+                      fieldHintStyle: widget.fieldHintStyle,
+                      decoration: widget.decoration,
                     ),
                   ],
                 )
@@ -11658,20 +11969,28 @@ class CreditInsightsFormSection extends StatelessWidget {
 
 class _CreditInsightsTextField extends StatelessWidget {
   const _CreditInsightsTextField({
+    required this.fieldKey,
     required this.label,
     required this.controller,
+    required this.focusNode,
     required this.hintText,
     required this.keyboardType,
+    required this.textInputAction,
+    required this.onSubmitted,
     required this.fieldValueStyle,
     required this.fieldHintStyle,
     required this.decoration,
     this.inputFormatters,
   });
 
+  final Key fieldKey;
   final String label;
   final TextEditingController controller;
+  final FocusNode focusNode;
   final String hintText;
   final TextInputType keyboardType;
+  final TextInputAction textInputAction;
+  final ValueChanged<String> onSubmitted;
   final TextStyle? fieldValueStyle;
   final TextStyle? fieldHintStyle;
   final InputDecoration decoration;
@@ -11689,8 +12008,12 @@ class _CreditInsightsTextField extends StatelessWidget {
             children: [
               Text(label, style: fieldValueStyle),
               TextField(
+                key: fieldKey,
                 controller: controller,
+                focusNode: focusNode,
                 keyboardType: keyboardType,
+                textInputAction: textInputAction,
+                onSubmitted: onSubmitted,
                 inputFormatters: inputFormatters,
                 decoration: decoration.copyWith(
                   hintText: hintText,
@@ -15967,6 +16290,30 @@ Future<void> deleteScheduledTransaction(
   v2_scheduled.ScheduledTransactionRecord item, {
   DateTime? fromDate,
 }) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete Scheduled Transaction?'),
+      content: const Text(
+        'This will permanently delete this recurring transaction and all future scheduled occurrences.\n\n'
+        'Past transactions that have already been completed will not be affected.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('confirm-delete-scheduled-transaction'),
+          onPressed: () => Navigator.pop(dialogContext, true),
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.rose),
+          child: const Text('Delete Schedule'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+
   final dataStore = FinanceDataStoreScope.read(context);
   if (fromDate != null && fromDate.isAfter(item.nextDate)) {
     final cutoff = DateTime(

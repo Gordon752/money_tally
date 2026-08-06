@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../credit/credit_insights_calculator.dart';
 import '../../domain/account.dart';
 import '../../domain/money.dart';
+import '../app_icons.dart';
 import '../design_tokens.dart';
 import '../money_format.dart';
 import 'money_text.dart';
@@ -19,6 +20,9 @@ class AccountCard extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.framed = true,
+    this.showNavigationChevron = false,
+    this.borderRadius,
+    this.metricLeadingIndent = 0,
     this.padding = const EdgeInsets.all(AppSpacing.md),
     super.key,
   });
@@ -33,6 +37,9 @@ class AccountCard extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool framed;
+  final bool showNavigationChevron;
+  final double? borderRadius;
+  final double metricLeadingIndent;
   final EdgeInsetsGeometry padding;
 
   @override
@@ -88,11 +95,22 @@ class AccountCard extends StatelessWidget {
                   fontSize: balanceFontSize,
                   fontWeight: FontWeight.w700,
                 ),
+                if (showNavigationChevron) ...[
+                  const SizedBox(width: AppSpacing.xs),
+                  Icon(
+                    AppIcon.chevronRight,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ],
               ],
             ),
             if (metric != null) ...[
               const SizedBox(height: AppSpacing.sm),
-              _AccountMetricBar(metric: metric),
+              Padding(
+                padding: EdgeInsets.only(left: metricLeadingIndent),
+                child: _AccountMetricBar(metric: metric),
+              ),
             ],
             if (account.type == AccountType.creditCard &&
                 account.interestEstimationEnabled) ...[
@@ -108,7 +126,17 @@ class AccountCard extends StatelessWidget {
       ),
     );
     if (!framed) return content;
-    return Card(child: content);
+    final inheritedShape = Theme.of(context).cardTheme.shape;
+    final shape = borderRadius == null
+        ? null
+        : inheritedShape is RoundedRectangleBorder
+        ? inheritedShape.copyWith(
+            borderRadius: BorderRadius.circular(borderRadius!),
+          )
+        : RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(borderRadius!),
+          );
+    return Card(shape: shape, clipBehavior: Clip.antiAlias, child: content);
   }
 
   _AccountMetric? _accountMetric() {
@@ -125,6 +153,7 @@ class AccountCard extends StatelessWidget {
               'Credit Available ${formatter.formatMinor(available)} of ${formatter.formatMinor(limit)}',
           progress: progress,
           isOver: used > limit,
+          showPercentage: true,
         );
       case AccountType.loan:
         final original = account.originalLoanAmountMinor;
@@ -192,94 +221,174 @@ class _CreditInsightsPreview extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Credit Insights',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _CreditInsightMetric(
+                  label: 'APR',
+                  value: account.annualPercentageRate == null
+                      ? '–'
+                      : '${account.annualPercentageRate!.toStringAsFixed(2)}%',
+                ),
+              ),
+              const _CreditInsightDivider(),
+              Expanded(
+                child: _CreditInsightMetric(
+                  label: 'Next Statement',
+                  value: _statementCloseDateLabel(estimate),
+                  supporting: _statementCloseDaysLabel(estimate),
+                ),
+              ),
+              if (estimate.hasInterestEstimate) ...[
+                const _CreditInsightDivider(),
+                Expanded(
+                  child: _CreditInsightMetric(
+                    label: 'Estimated Interest',
+                    value:
+                        '≈ ${formatter.formatMinor(estimate.estimatedInterestMinor!)}',
+                  ),
+                ),
+                const _CreditInsightDivider(),
+                Expanded(
+                  child: _CreditInsightMetric(
+                    label: 'Projected Statement',
+                    value:
+                        '≈ ${formatter.formatMinor(estimate.projectedStatementMinor!)}',
+                    valueColor: estimate.projectedStatementMinor! < 0
+                        ? AppColors.danger
+                        : null,
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: AppSpacing.xs),
-          _CreditInsightRow(
-            label: 'APR',
-            value: account.annualPercentageRate == null
-                ? '–'
-                : '${account.annualPercentageRate!.toStringAsFixed(2)}%',
-          ),
-          _CreditInsightRow(
-            label: 'Statement Closes',
-            value: _statementCloseLabel(estimate),
-          ),
-          if (estimate.hasInterestEstimate) ...[
-            const SizedBox(height: AppSpacing.xxs),
-            _CreditInsightRow(
-              label: 'Projected Statement',
-              value: formatter.formatMinor(estimate.projectedStatementMinor!),
-            ),
-            _CreditInsightRow(
-              label: 'Estimated Interest',
-              value:
-                  '≈ ${formatter.formatMinor(estimate.estimatedInterestMinor!)}',
-            ),
-          ],
         ],
       ),
     );
   }
 
-  String _statementCloseLabel(CreditInsightsEstimate estimate) {
+  String _statementCloseDateLabel(CreditInsightsEstimate estimate) {
     final closing = estimate.nextStatementClosingDate;
-    final days = estimate.daysUntilStatementClosing;
-    if (closing == null || days == null) return '–';
+    if (closing == null) return '–';
     const monthNames = [
-      'January',
-      'February',
-      'March',
-      'April',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
       'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
-    final suffix = days == 0 ? 'today' : '$days ${days == 1 ? 'day' : 'days'}';
-    return '${monthNames[closing.month - 1]} ${closing.day} ($suffix)';
+    return '${monthNames[closing.month - 1]} ${closing.day}, ${closing.year}';
+  }
+
+  String? _statementCloseDaysLabel(CreditInsightsEstimate estimate) {
+    final days = estimate.daysUntilStatementClosing;
+    if (days == null) return null;
+    if (days == 0) return 'Today';
+    return '$days ${days == 1 ? 'day' : 'days'}';
   }
 }
 
-class _CreditInsightRow extends StatelessWidget {
-  const _CreditInsightRow({required this.label, required this.value});
+class _CreditInsightMetric extends StatelessWidget {
+  const _CreditInsightMetric({
+    required this.label,
+    required this.value,
+    this.supporting,
+    this.valueColor,
+  });
 
   final String label;
   final String value;
+  final String? supporting;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+          SizedBox(
+            width: double.infinity,
+            height: 16,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: 10,
+                  height: 1,
+                ),
               ),
             ),
           ),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              fontFeatures: const [AppTextStyles.tabularFigures],
+          const SizedBox(height: AppSpacing.xxs),
+          SizedBox(
+            width: double.infinity,
+            height: 22,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                maxLines: 1,
+                softWrap: false,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: valueColor,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: const [AppTextStyles.tabularFigures],
+                ),
+              ),
             ),
+          ),
+          const SizedBox(height: 2),
+          SizedBox(
+            width: double.infinity,
+            height: 16,
+            child: supporting == null
+                ? null
+                : FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      supporting!,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontFeatures: const [AppTextStyles.tabularFigures],
+                      ),
+                    ),
+                  ),
           ),
         ],
       ),
     );
   }
+}
+
+class _CreditInsightDivider extends StatelessWidget {
+  const _CreditInsightDivider();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 1,
+    height: 52,
+    color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.45),
+  );
 }
 
 class _AccountMetric {
@@ -287,11 +396,13 @@ class _AccountMetric {
     required this.label,
     required this.progress,
     this.isOver = false,
+    this.showPercentage = false,
   });
 
   final String label;
   final double progress;
   final bool isOver;
+  final bool showPercentage;
 }
 
 class _AccountMetricBar extends StatelessWidget {
@@ -316,18 +427,39 @@ class _AccountMetricBar extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.xxs),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-          child: SizedBox(
-            height: 5,
-            child: LinearProgressIndicator(
-              value: progress,
-              backgroundColor: Theme.of(
-                context,
-              ).colorScheme.surfaceContainerHighest,
-              color: metric.isOver ? AppColors.danger : AppColors.accent,
+        Row(
+          children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+                child: SizedBox(
+                  height: 5,
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
+                    color: metric.isOver ? AppColors.danger : AppColors.accent,
+                  ),
+                ),
+              ),
             ),
-          ),
+            if (metric.showPercentage) ...[
+              const SizedBox(width: AppSpacing.xs),
+              SizedBox(
+                width: 36,
+                child: Text(
+                  '${(progress * 100).round()}%',
+                  textAlign: TextAlign.right,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: metric.isOver ? AppColors.danger : AppColors.accent,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: const [AppTextStyles.tabularFigures],
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ],
     );
