@@ -2165,6 +2165,7 @@ Widget? accountGroupProgress(
         progress: used / limit,
         isOver: used > limit,
         showPercentage: true,
+        isCreditUtilization: true,
       );
     case v2_account.AccountGroup.loans:
       final original = store.originalLoanAmountMinorForGroup(group);
@@ -2193,6 +2194,7 @@ class AccountGroupProgressStrip extends StatelessWidget {
     required this.progress,
     this.isOver = false,
     this.showPercentage = false,
+    this.isCreditUtilization = false,
     super.key,
   });
 
@@ -2200,10 +2202,19 @@ class AccountGroupProgressStrip extends StatelessWidget {
   final double progress;
   final bool isOver;
   final bool showPercentage;
+  final bool isCreditUtilization;
 
   @override
   Widget build(BuildContext context) {
     final value = progress.clamp(0.0, 1.0).toDouble();
+    final fillColor = isCreditUtilization
+        ? creditUtilizationFillColor(
+            progress,
+            brightness: Theme.of(context).brightness,
+          )
+        : isOver
+        ? AppColors.danger
+        : AppColors.accent;
     return Padding(
       padding: EdgeInsets.zero,
       child: Column(
@@ -2232,21 +2243,24 @@ class AccountGroupProgressStrip extends StatelessWidget {
                       backgroundColor: Theme.of(
                         context,
                       ).colorScheme.outlineVariant.withValues(alpha: 0.62),
-                      color: (isOver ? AppColors.danger : AppColors.accent)
-                          .withValues(alpha: 0.82),
+                      color: fillColor.withValues(alpha: 0.82),
                     ),
                   ),
                 ),
               ),
               if (showPercentage) ...[
                 const SizedBox(width: AppSpacing.sm),
-                SizedBox(
-                  width: 38,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minWidth: creditUtilizationLabelMinWidth,
+                  ),
                   child: Text(
-                    '${(value * 100).round()}%',
+                    '${(progress * 100).round()}% utilized',
+                    maxLines: 1,
+                    softWrap: false,
                     textAlign: TextAlign.right,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: isOver ? AppColors.danger : AppTheme.accentStrong,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w700,
                       fontFeatures: const [AppTextStyles.tabularFigures],
                     ),
@@ -3722,7 +3736,6 @@ class LedgerJournalRow extends StatelessWidget {
       if (transaction.type == TransactionType.adjustment)
         'Manual balance adjustment',
       if (transaction.isTransfer) 'Transfer',
-      ?timeLabel,
     ].join(' • ');
     final hasSplit = projection.isPartOfSplit || transaction.isSplit;
     final secondaryStyle =
@@ -3815,10 +3828,9 @@ class LedgerJournalRow extends StatelessWidget {
                       ),
                       if (metadataDetails.isNotEmpty) ...[
                         const SizedBox(height: 3),
-                        Text(
-                          metadataDetails,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        _LedgerMetadataLine(
+                          details: metadataDetails,
+                          timeLabel: timeLabel,
                           style: secondaryStyle,
                         ),
                       ],
@@ -3826,36 +3838,82 @@ class LedgerJournalRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    MoneyText(
-                      amountMinor: signedAmount,
-                      currency: currency,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      showPositiveSign:
-                          transaction.type == TransactionType.income,
-                      color: signedAmount < 0 ? AppColors.danger : null,
-                    ),
-                    const SizedBox(height: 3),
-                    SizedBox(
-                      height: 18,
-                      child: hasSplit
-                          ? const Align(
-                              alignment: Alignment.centerRight,
-                              child: _LedgerSplitCapsule(),
-                            )
-                          : null,
-                    ),
-                  ],
+                SizedBox(
+                  width: 104,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      MoneyText(
+                        amountMinor: signedAmount,
+                        currency: currency,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        showPositiveSign:
+                            transaction.type == TransactionType.income,
+                        color: signedAmount < 0 ? AppColors.danger : null,
+                      ),
+                      const SizedBox(height: 3),
+                      SizedBox(
+                        height: 18,
+                        child: hasSplit
+                            ? const Align(
+                                alignment: Alignment.centerRight,
+                                child: _LedgerSplitCapsule(),
+                              )
+                            : null,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _LedgerMetadataLine extends StatelessWidget {
+  const _LedgerMetadataLine({
+    required this.details,
+    required this.timeLabel,
+    required this.style,
+  });
+
+  final String details;
+  final String? timeLabel;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            details,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.left,
+            style: style,
+          ),
+        ),
+        if (timeLabel != null) ...[
+          const SizedBox(width: 6),
+          SizedBox(
+            width: 74,
+            child: Text(
+              timeLabel!,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.clip,
+              textAlign: TextAlign.right,
+              style: style,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -3951,7 +4009,6 @@ class GoalFundingLedgerRow extends StatelessWidget {
     final metadataDetails = [
       if (account != null) account!.name,
       allocationSummary,
-      ?timeLabel,
     ].join(' • ');
 
     return InkWell(
@@ -4000,32 +4057,38 @@ class GoalFundingLedgerRow extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 3),
-                    Text(
-                      metadataDetails,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    _LedgerMetadataLine(
+                      details: metadataDetails,
+                      timeLabel: timeLabel,
+                      style:
+                          Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ) ??
+                          const TextStyle(fontSize: 12),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  MoneyText(
-                    amountMinor: -event.totalAmountMinor.abs(),
-                    currency: currency,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.blue.shade700,
-                  ),
-                  const SizedBox(height: 3),
-                  const SizedBox(height: 18),
-                ],
+              SizedBox(
+                width: 104,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    MoneyText(
+                      amountMinor: -event.totalAmountMinor.abs(),
+                      currency: currency,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.blue.shade700,
+                    ),
+                    const SizedBox(height: 3),
+                    const SizedBox(height: 18),
+                  ],
+                ),
               ),
             ],
           ),
@@ -6179,6 +6242,8 @@ class _ScheduledViewState extends State<ScheduledView> {
   var _calendarCollapsed = false;
   var _activityFilter = CalendarActivityFilter.all;
   final Map<String, GlobalKey> _dateAnchors = {};
+  Timer? _dayHighlightTimer;
+  String? _highlightedDateKey;
   late DateTime _visibleMonth = DateTime(
     DateTime.now().year,
     DateTime.now().month,
@@ -6211,9 +6276,15 @@ class _ScheduledViewState extends State<ScheduledView> {
   }
 
   void _selectDate(DateTime date) {
+    _dayHighlightTimer?.cancel();
     setState(() {
       _selectedDate = date;
       _visibleMonth = DateTime(date.year, date.month);
+      _highlightedDateKey = _dateKey(date);
+    });
+    _dayHighlightTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (!mounted || _highlightedDateKey != _dateKey(date)) return;
+      setState(() => _highlightedDateKey = null);
     });
     widget.onSelectedDateChanged?.call(date);
     _scrollToDate(date);
@@ -6231,8 +6302,15 @@ class _ScheduledViewState extends State<ScheduledView> {
       _dateAnchors.clear();
       _visibleMonth = nextMonth;
       _selectedDate = nextSelectedDate;
+      _highlightedDateKey = null;
     });
     widget.onSelectedDateChanged?.call(nextSelectedDate);
+  }
+
+  @override
+  void dispose() {
+    _dayHighlightTimer?.cancel();
+    super.dispose();
   }
 
   Widget _buildOccurrenceRow(
@@ -6249,6 +6327,25 @@ class _ScheduledViewState extends State<ScheduledView> {
       sync: item.sync,
     );
     final isPendingOccurrence = occurrence.isPending && !item.isDeleted;
+    final sourceAccount = store.accounts
+        .where((account) => account.id == item.accountId)
+        .firstOrNull;
+    final category = store.categories
+        .where((category) => category.id == item.categoryId)
+        .firstOrNull;
+    final destinationAccount = store.accounts
+        .where((account) => account.id == item.transferAccountId)
+        .firstOrNull;
+    final metadata = switch (item.type) {
+      TransactionType.transfer => [
+        sourceAccount?.name,
+        destinationAccount == null
+            ? 'Transfer'
+            : 'To ${destinationAccount.name}',
+      ],
+      TransactionType.goalFunding => [sourceAccount?.name, 'Goal Funding'],
+      _ => [sourceAccount?.name, category?.name],
+    }.whereType<String>().where((value) => value.isNotEmpty).join(' • ');
     final needsAttention =
         item.type == TransactionType.goalFunding &&
         item.goalFundingAllocations.any(
@@ -6261,6 +6358,7 @@ class _ScheduledViewState extends State<ScheduledView> {
       scheduledTransaction: displayItem,
       currency: currency,
       needsAttention: needsAttention,
+      metadata: metadata.isEmpty ? null : metadata,
       onTap: () => showScheduledTransactionDetails(
         context,
         item,
@@ -6323,6 +6421,93 @@ class _ScheduledViewState extends State<ScheduledView> {
         return false;
       },
       child: row,
+    );
+  }
+
+  Widget _buildDayCard(
+    BuildContext context,
+    DateTime date,
+    List<ScheduledCalendarOccurrence> occurrences,
+    CurrencyFormatSettings currency,
+  ) {
+    final theme = Theme.of(context);
+    final dateKey = _dateKey(date);
+    final isHighlighted = _highlightedDateKey == dateKey;
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    final today = DateTime.now();
+    final tomorrow = DateTime(today.year, today.month, today.day + 1);
+    final heading = isSameCalendarDay(date, today)
+        ? 'Today'
+        : isSameCalendarDay(date, tomorrow)
+        ? 'Tomorrow'
+        : ledgerFriendlyDayLabel(date, today);
+
+    return KeyedSubtree(
+      key: _dateAnchors.putIfAbsent(dateKey, () => GlobalKey()),
+      child: AnimatedContainer(
+        key: ValueKey('scheduled-day-card-$dateKey'),
+        duration: reduceMotion
+            ? Duration.zero
+            : isHighlighted
+            ? const Duration(milliseconds: 220)
+            : const Duration(milliseconds: 650),
+        curve: isHighlighted ? Curves.easeOutCubic : Curves.easeOut,
+        decoration: BoxDecoration(
+          color: isHighlighted
+              ? AppTheme.accent.withValues(
+                  alpha: theme.brightness == Brightness.dark ? 0.15 : 0.07,
+                )
+              : theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: isHighlighted
+                ? AppTheme.accent.withValues(alpha: 0.72)
+                : theme.colorScheme.outlineVariant.withValues(alpha: 0.62),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Material(
+          color: Colors.transparent,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                child: Text(
+                  heading,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppTheme.accent,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Divider(
+                height: 1,
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
+              ),
+              for (var index = 0; index < occurrences.length; index++) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _buildOccurrenceRow(
+                    context,
+                    occurrences[index],
+                    currency,
+                  ),
+                ),
+                if (index < occurrences.length - 1)
+                  Divider(
+                    height: 1,
+                    indent: 16,
+                    endIndent: 16,
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.14,
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -6436,34 +6621,27 @@ class _ScheduledViewState extends State<ScheduledView> {
                       ),
                     )
                   else
-                    for (final date in activityDates) ...[
-                      Padding(
-                        key: _dateAnchors.putIfAbsent(
-                          _dateKey(date),
-                          () => GlobalKey(),
-                        ),
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            shortDate(date),
-                            style: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(
-                                  color: AppTheme.muted,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                          ),
-                        ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      child: Column(
+                        children: [
+                          for (
+                            var index = 0;
+                            index < activityDates.length;
+                            index++
+                          ) ...[
+                            if (index > 0) const SizedBox(height: 14),
+                            _buildDayCard(
+                              context,
+                              activityDates[index],
+                              groupedOccurrences[activityDates[index]] ??
+                                  const <ScheduledCalendarOccurrence>[],
+                              store.preferences.currency,
+                            ),
+                          ],
+                        ],
                       ),
-                      for (final occurrence
-                          in groupedOccurrences[date] ??
-                              const <ScheduledCalendarOccurrence>[])
-                        _buildOccurrenceRow(
-                          context,
-                          occurrence,
-                          store.preferences.currency,
-                        ),
-                    ],
+                    ),
                 ],
               ),
             ),
@@ -15573,26 +15751,22 @@ Future<void> markScheduledTransactionPaid(
   final payee = TextEditingController(text: item.payee);
   final note = TextEditingController(text: item.note);
   var selectedCategoryId = item.categoryId;
-  final paymentSplitDrafts = item.type == TransactionType.transfer
-      ? <SplitLineDraft>[]
-      : (item.effectiveCategoryAllocations.isNotEmpty
-            ? item.effectiveCategoryAllocations
-                  .map(
-                    (line) => SplitLineDraft(
-                      id: line.id,
-                      categoryId: line.categoryId,
-                      amountMinor: line.amountMinor,
-                      noteText: line.note,
-                    ),
-                  )
-                  .toList()
-            : <SplitLineDraft>[
-                SplitLineDraft(
-                  id: 'split_${DateTime.now().microsecondsSinceEpoch}_0',
-                  categoryId: item.categoryId ?? '',
-                  amountMinor: occurrenceAmount.abs(),
-                ),
-              ]);
+  // Effective allocations are also the calculation source for a normal
+  // single-category schedule. Only materialize editable split rows when the
+  // schedule is a genuine category split.
+  final paymentSplitDrafts =
+      item.type != TransactionType.transfer && item.isCategorySplit
+      ? item.effectiveCategoryAllocations
+            .map(
+              (line) => SplitLineDraft(
+                id: line.id,
+                categoryId: line.categoryId,
+                amountMinor: line.amountMinor,
+                noteText: line.note,
+              ),
+            )
+            .toList()
+      : <SplitLineDraft>[];
   var isSubmitting = false;
   String? errorMessage;
 
@@ -15615,7 +15789,7 @@ Future<void> markScheduledTransactionPaid(
             draft.categoryId = '';
           }
         }
-        if (!isTransfer && paymentSplitDrafts.isNotEmpty) {
+        if (item.isCategorySplit && paymentSplitDrafts.isNotEmpty) {
           selectedCategoryId = paymentSplitDrafts.first.categoryId.isEmpty
               ? null
               : paymentSplitDrafts.first.categoryId;
@@ -15628,9 +15802,14 @@ Future<void> markScheduledTransactionPaid(
             .map((line) => line.categoryId)
             .where((id) => id.isNotEmpty)
             .toSet();
+        final categorySelectionIsValid =
+            selectedCategoryId != null &&
+            categories.any((category) => category.id == selectedCategoryId);
         final splitIsBalanced =
             isTransfer ||
-            (paymentSplitDrafts.isNotEmpty &&
+            (!item.isCategorySplit && categorySelectionIsValid) ||
+            (item.isCategorySplit &&
+                paymentSplitDrafts.isNotEmpty &&
                 paymentSplitDrafts.every(
                   (line) => line.categoryId.isNotEmpty && line.amountMinor > 0,
                 ) &&
@@ -15729,6 +15908,18 @@ Future<void> markScheduledTransactionPaid(
           });
         }
 
+        Future<void> choosePaymentCategory() async {
+          FocusManager.instance.primaryFocus?.unfocus();
+          final selectedId = await showTransactionCategoryFlow(
+            dialogContext,
+            dataStore: dataStore,
+            isExpense: item.type == TransactionType.expense,
+            selectedCategoryId: selectedCategoryId ?? '',
+          );
+          if (selectedId == null || !dialogContext.mounted) return;
+          setDialogState(() => selectedCategoryId = selectedId);
+        }
+
         List<TransactionSplitLine> buildPaymentSplitLines() {
           if (isTransfer || !item.isCategorySplit) return const [];
           return [
@@ -15752,6 +15943,7 @@ Future<void> markScheduledTransactionPaid(
             errorMessage = null;
           });
           try {
+            final completionTime = DateTime.now();
             final paymentItem = isTransfer
                 ? item
                 : item.copyWith(
@@ -15764,7 +15956,10 @@ Future<void> markScheduledTransactionPaid(
               scheduledDate: occurrenceDate,
               plannedAmountMinor: occurrenceAmount,
               actualAmountMinor: actualAmountMinor.abs(),
-              paymentDate: parseDateInput(paymentDate.text, DateTime.now()),
+              paymentDate: parseTransactionDateInput(
+                paymentDate.text,
+                completionTime,
+              ),
               payee: payee.text.trim().isEmpty
                   ? scheduledPayeeFallback(item.type)
                   : payee.text.trim(),
@@ -15952,40 +16147,55 @@ Future<void> markScheduledTransactionPaid(
               ),
               if (!isTransfer) ...[
                 const TransactionFormDivider(),
-                InlineSplitAllocationSection(
-                  keyPrefix: 'mark-paid',
-                  drafts: paymentSplitDrafts,
-                  categories: categories,
-                  currency: dataStore.preferences.currency,
-                  totalMinor: actualAmountMinor.abs(),
-                  firstAutoRemainder: false,
-                  onChooseCategory: choosePaymentSplitCategory,
-                  onAmountChanged: (index, value) => setDialogState(
-                    () => paymentSplitDrafts[index].amountMinor = value.abs(),
+                if (item.isCategorySplit)
+                  InlineSplitAllocationSection(
+                    keyPrefix: 'mark-paid',
+                    drafts: paymentSplitDrafts,
+                    categories: categories,
+                    currency: dataStore.preferences.currency,
+                    totalMinor: actualAmountMinor.abs(),
+                    firstAutoRemainder: false,
+                    onChooseCategory: choosePaymentSplitCategory,
+                    onAmountChanged: (index, value) => setDialogState(
+                      () => paymentSplitDrafts[index].amountMinor = value.abs(),
+                    ),
+                    onAdd: () => setDialogState(() {
+                      final currentTotal = paymentSplitDrafts.fold<int>(
+                        0,
+                        (total, line) => total + line.amountMinor.abs(),
+                      );
+                      final remainder = actualAmountMinor.abs() - currentTotal;
+                      paymentSplitDrafts.add(
+                        SplitLineDraft(
+                          id: 'split_${DateTime.now().microsecondsSinceEpoch}_${paymentSplitDrafts.length}',
+                          categoryId: '',
+                          amountMinor: remainder > 0 ? remainder : 0,
+                        ),
+                      );
+                    }),
+                    onRemove: (index) => setDialogState(() {
+                      paymentSplitDrafts[index].note.dispose();
+                      paymentSplitDrafts.removeAt(index);
+                      selectedCategoryId = paymentSplitDrafts.isEmpty
+                          ? null
+                          : paymentSplitDrafts.first.categoryId.isEmpty
+                          ? null
+                          : paymentSplitDrafts.first.categoryId;
+                    }),
+                  )
+                else
+                  SingleCategoryAllocationSection(
+                    keyPrefix: 'mark-paid',
+                    categoryName: categories
+                        .where((category) => category.id == selectedCategoryId)
+                        .firstOrNull
+                        ?.name,
+                    category: categories
+                        .where((category) => category.id == selectedCategoryId)
+                        .firstOrNull,
+                    onChooseCategory: choosePaymentCategory,
+                    onSplit: null,
                   ),
-                  onAdd: () => setDialogState(() {
-                    final currentTotal = paymentSplitDrafts.fold<int>(
-                      0,
-                      (total, line) => total + line.amountMinor.abs(),
-                    );
-                    final remainder = actualAmountMinor.abs() - currentTotal;
-                    paymentSplitDrafts.add(
-                      SplitLineDraft(
-                        id: 'split_${DateTime.now().microsecondsSinceEpoch}_${paymentSplitDrafts.length}',
-                        categoryId: '',
-                        amountMinor: remainder > 0 ? remainder : 0,
-                      ),
-                    );
-                  }),
-                  onRemove: (index) => setDialogState(() {
-                    paymentSplitDrafts[index].note.dispose();
-                    paymentSplitDrafts.removeAt(index);
-                    selectedCategoryId =
-                        paymentSplitDrafts.first.categoryId.isEmpty
-                        ? null
-                        : paymentSplitDrafts.first.categoryId;
-                  }),
-                ),
               ],
               TransactionFormDivider(),
               TransactionFormLabel('Notes'),

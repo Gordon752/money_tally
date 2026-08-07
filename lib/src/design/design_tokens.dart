@@ -15,6 +15,8 @@ class AppRadii {
   static const double pill = 999;
 }
 
+const double creditUtilizationLabelMinWidth = 96;
+
 class AppColors {
   static const Color ink = Color(0xFF17211F);
   static const Color muted = Color(0xFF61706C);
@@ -29,6 +31,23 @@ class AppColors {
   static const Color warning = Color(0xFFD69D2F);
   static const Color danger = Color(0xFFC8585B);
   static const Color info = Color(0xFF5378BD);
+  static const Color creditUtilizationHealthy = Color(0xFF1A564A);
+  static const Color creditUtilizationModerate = Color(0xFFC47C0E);
+  static const Color creditUtilizationHigh = Color(0xFF9E2F3A);
+}
+
+Color creditUtilizationFillColor(
+  double utilization, {
+  required Brightness brightness,
+}) {
+  final base = utilization <= 0.30
+      ? AppColors.creditUtilizationHealthy
+      : utilization < 0.70
+      ? AppColors.creditUtilizationModerate
+      : AppColors.creditUtilizationHigh;
+  return brightness == Brightness.dark
+      ? Color.lerp(base, Colors.white, 0.12)!
+      : base;
 }
 
 class AppTextStyles {

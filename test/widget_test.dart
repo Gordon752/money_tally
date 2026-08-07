@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/design/app_icons.dart';
+import 'package:money_tally/src/design/design_tokens.dart';
 import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/design/widgets/category_icon_badge.dart';
@@ -1128,6 +1129,9 @@ void main() {
       amountMinor: 5000,
       note: 'Original note',
     );
+    final originalDate = dataStore.transactions
+        .singleWhere((transaction) => transaction.payee == 'ATM cash')
+        .date;
 
     await tester.pumpWidget(
       MoneyTallyApp(store: legacyStore, dataStore: dataStore),
@@ -1187,8 +1191,7 @@ void main() {
     expect(edited.transferAccountId, 'cash');
     expect(edited.categoryId, isNull);
     expect(edited.amountMinor, 7500);
-    final today = DateTime.now();
-    expect(edited.date, DateTime(today.year, today.month, today.day));
+    expect(edited.date, originalDate);
     expect(edited.note, 'Updated note');
     expect(find.text('Cash refill'), findsOneWidget);
   });
@@ -2511,7 +2514,10 @@ void main() {
       (item) => item.payee == 'Hardware Store',
     );
     final now = DateTime.now();
-    expect(transaction.date, DateTime(now.year, now.month, 4));
+    expect(
+      DateUtils.dateOnly(transaction.date),
+      DateTime(now.year, now.month, 4),
+    );
     expect(transaction.amountMinor, 4599);
     expect(transaction.note, 'Paint and fasteners');
   });
@@ -2770,7 +2776,7 @@ void main() {
     expect(transfer.accountId, checking.id);
     expect(transfer.transferAccountId, cash.id);
     expect(transfer.payee, 'Savings transfer');
-    expect(transfer.date, transferDate);
+    expect(DateUtils.dateOnly(transfer.date), transferDate);
     expect(transfer.note, 'ATM cash');
     expect(
       dataStore.preferences.lastUsedTransactionType,
@@ -3540,6 +3546,11 @@ void main() {
   testWidgets('enabled credit card shows additive Credit Insights preview', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(393, 852);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     final account = v2_account.AccountRecord(
       id: 'credit-insights',
       name: 'Credit Card',
@@ -3566,6 +3577,76 @@ void main() {
     expect(find.text('29.99%'), findsOneWidget);
     expect(find.text('Projected Statement'), findsOneWidget);
     expect(find.text('Estimated Interest'), findsOneWidget);
+    expect(find.text('67% utilized'), findsOneWidget);
+
+    final utilizationBox = tester.renderObject<RenderBox>(
+      find.text('67% utilized'),
+    );
+    expect(
+      utilizationBox.size.width,
+      greaterThanOrEqualTo(creditUtilizationLabelMinWidth),
+    );
+
+    final nextStatementLabel = tester.widget<Text>(find.text('Next Statement'));
+    final estimatedInterestLabel = tester.widget<Text>(
+      find.text('Estimated Interest'),
+    );
+    final projectedStatementLabel = tester.widget<Text>(
+      find.text('Projected Statement'),
+    );
+    for (final label in [estimatedInterestLabel, projectedStatementLabel]) {
+      expect(label.style?.fontSize, nextStatementLabel.style?.fontSize);
+      expect(label.style?.fontWeight, nextStatementLabel.style?.fontWeight);
+      expect(label.style?.color, nextStatementLabel.style?.color);
+      expect(label.style?.height, nextStatementLabel.style?.height);
+    }
+
+    expect(
+      tester
+          .widget<Expanded>(
+            find
+                .ancestor(of: find.text('APR'), matching: find.byType(Expanded))
+                .first,
+          )
+          .flex,
+      16,
+    );
+    expect(
+      tester
+          .widget<Expanded>(
+            find
+                .ancestor(
+                  of: find.text('Projected Statement'),
+                  matching: find.byType(Expanded),
+                )
+                .first,
+          )
+          .flex,
+      30,
+    );
+  });
+
+  test('credit utilization color thresholds use the unrounded ratio', () {
+    expect(
+      creditUtilizationFillColor(0, brightness: Brightness.light),
+      AppColors.creditUtilizationHealthy,
+    );
+    expect(
+      creditUtilizationFillColor(0.30, brightness: Brightness.light),
+      AppColors.creditUtilizationHealthy,
+    );
+    expect(
+      creditUtilizationFillColor(0.301, brightness: Brightness.light),
+      AppColors.creditUtilizationModerate,
+    );
+    expect(
+      creditUtilizationFillColor(0.699, brightness: Brightness.light),
+      AppColors.creditUtilizationModerate,
+    );
+    expect(
+      creditUtilizationFillColor(0.70, brightness: Brightness.light),
+      AppColors.creditUtilizationHigh,
+    );
   });
 
   testWidgets('Credit Insights hides estimates when APR is unavailable', (
@@ -3644,7 +3725,7 @@ void main() {
         isTrue,
       );
 
-      tester.testTextInput.receiveAction(TextInputAction.next);
+      await tester.testTextInput.receiveAction(TextInputAction.next);
       await tester.pump();
       expect(
         tester
@@ -3658,7 +3739,7 @@ void main() {
         isTrue,
       );
 
-      tester.testTextInput.receiveAction(TextInputAction.next);
+      await tester.testTextInput.receiveAction(TextInputAction.next);
       await tester.pump();
       expect(
         tester
@@ -3670,7 +3751,7 @@ void main() {
         isTrue,
       );
 
-      tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
       expect(
         tester
@@ -3945,7 +4026,10 @@ void main() {
     await tester.tap(scheduledFirst);
     await tester.pumpAndSettle();
 
-    expect(find.text(_shortMonthDayYear(scheduledMonth)), findsOneWidget);
+    expect(
+      find.text(ledgerFriendlyDayLabel(scheduledMonth, DateTime.now())),
+      findsOneWidget,
+    );
     expect(find.text('Rent'), findsOneWidget);
     expect(find.text('Electric'), findsOneWidget);
     expect(find.text('Internet'), findsOneWidget);
@@ -5181,6 +5265,73 @@ void main() {
     expect(find.text('Edit Scheduled Transaction'), findsOneWidget);
   });
 
+  testWidgets(
+    'scheduled occurrences share date cards and calendar highlights the card',
+    (tester) async {
+      final legacyStore = FinanceStore.seeded();
+      final now = DateTime.now();
+      final date = DateTime(now.year, now.month, now.day);
+      final dataSet = const V1SnapshotMigrator()
+          .migrate(legacyStore.snapshot().toJson())
+          .copyWith(
+            scheduledTransactions: [
+              rentSchedule(nextDate: date),
+              scheduledExpense(
+                id: 'sched-utilities',
+                payee: 'Utilities',
+                amountMinor: 12500,
+                nextDate: date,
+              ),
+            ],
+          );
+
+      await tester.pumpWidget(
+        MoneyTallyApp(
+          store: legacyStore,
+          dataStore: FinanceDataStore(dataSet: dataSet),
+        ),
+      );
+      await tester.tap(find.text('Scheduled').last);
+      await tester.pumpAndSettle();
+
+      final cardKey = ValueKey('scheduled-day-card-${calendarDateId(date)}');
+      final card = find.byKey(cardKey);
+      expect(card, findsOneWidget);
+      expect(
+        find.descendant(of: card, matching: find.text('Rent')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('Utilities')),
+        findsOneWidget,
+      );
+
+      final initialDecoration =
+          tester.widget<AnimatedContainer>(card).decoration as BoxDecoration;
+      await tester.tap(
+        find.byKey(
+          ValueKey(
+            'scheduled-calendar-day-${date.year}-${date.month}-${date.day}',
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 260));
+      final highlightedDecoration =
+          tester.widget<AnimatedContainer>(card).decoration as BoxDecoration;
+      expect(highlightedDecoration.color, isNot(initialDecoration.color));
+
+      await tester.pump(const Duration(milliseconds: 1600));
+      expect(
+        tester.widget<AnimatedContainer>(card).duration,
+        const Duration(milliseconds: 650),
+      );
+      await tester.pump(const Duration(milliseconds: 700));
+      final restoredDecoration =
+          tester.widget<AnimatedContainer>(card).decoration as BoxDecoration;
+      expect(restoredDecoration.color, initialDecoration.color);
+    },
+  );
+
   testWidgets('scheduled edit loads splits and requires amount rebalance', (
     tester,
   ) async {
@@ -5341,10 +5492,10 @@ void main() {
     final confirm = find.widgetWithText(FilledButton, 'Confirm');
     expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
     await tester.ensureVisible(
-      find.byKey(const ValueKey('mark-paid-split-category-0')),
+      find.byKey(const ValueKey('mark-paid-category')),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('mark-paid-split-category-0')));
+    await tester.tap(find.byKey(const ValueKey('mark-paid-category')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add New Category'));
     await tester.pumpAndSettle();
@@ -5677,11 +5828,17 @@ void main() {
 
     expect(find.text('Mark as Paid'), findsOneWidget);
     expect(find.text(r'$250.00'), findsWidgets);
-    expect(find.text('Today'), findsOneWidget);
+    expect(find.text('Today'), findsWidgets);
     final amountField = tester.widget<TextField>(
       find.byKey(const ValueKey('mark-paid-actual-amount')),
     );
     expect(amountField.controller!.text, r'$250.00');
+    expect(find.text('Split Categories'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('mark-paid-single-category-field')),
+      findsOneWidget,
+    );
+    expect(find.text('Dining'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('mark-paid-actual-amount')),
       '0',
@@ -5695,33 +5852,15 @@ void main() {
     );
     await tester.enterText(
       find.byKey(const ValueKey('mark-paid-actual-amount')),
-      '10000',
+      '90000',
     );
     await tester.pumpAndSettle();
     expect(
       tester
           .widget<FilledButton>(find.widgetWithText(FilledButton, 'Confirm'))
           .onPressed,
-      isNull,
+      isNotNull,
     );
-    await tester.enterText(
-      find.byKey(const ValueKey('mark-paid-actual-amount')),
-      '90000',
-    );
-    await tester.pumpAndSettle();
-    final confirmBeforeRebalance = find.widgetWithText(FilledButton, 'Confirm');
-    expect(
-      tester.widget<FilledButton>(confirmBeforeRebalance).onPressed,
-      isNull,
-    );
-    final paidSplitSection = find.byKey(
-      const ValueKey('mark-paid-split-category-field'),
-    );
-    final paidSplitAmounts = find.descendant(
-      of: paidSplitSection,
-      matching: find.byType(TextField),
-    );
-    await tester.enterText(paidSplitAmounts.at(0), '90000');
     await tester.enterText(
       find.byKey(const ValueKey('mark-paid-note')),
       'Occurrence note',
@@ -5752,7 +5891,15 @@ void main() {
     final paid = paidTransactions.single;
     expect(paid.type, v2_transaction.TransactionType.expense);
     expect(paid.amountMinor, 90000);
-    expect(paid.date, paymentDate);
+    expect(isSameCalendarDay(paid.date, paymentDate), isTrue);
+    expect(paid.date, isNot(paymentDate));
+    expect(
+      ledgerTransactionTimeLabel(
+        tester.element(find.byType(Scaffold).first),
+        paid.date,
+      ),
+      isNotNull,
+    );
     expect(paid.payee, 'Rent');
     expect(paid.categoryId, 'dining');
     expect(paid.splitLines, isEmpty);
@@ -5778,7 +5925,7 @@ void main() {
     );
     expect(scheduled.occurrences.single.plannedAmountMinor, 25000);
     expect(scheduled.occurrences.single.actualAmountMinor, 90000);
-    expect(scheduled.occurrences.single.actualPaymentDate, paymentDate);
+    expect(scheduled.occurrences.single.actualPaymentDate, paid.date);
     expect(scheduler.scheduledIds, contains('sched-rent'));
     expect(
       tester
@@ -5838,6 +5985,11 @@ void main() {
     await tester.tap(find.text('Mark as Paid'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Split Categories'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('mark-paid-single-category-field')),
+      findsNothing,
+    );
     expect(find.text('Dining'), findsOneWidget);
     expect(find.text('Snacks'), findsOneWidget);
     expect(find.text('Balanced'), findsOneWidget);
@@ -7781,24 +7933,6 @@ String _monthYearLabel(DateTime date) {
     'December',
   ];
   return '${months[date.month - 1]} ${date.year}';
-}
-
-String _shortMonthDayYear(DateTime date) {
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return '${months[date.month - 1]} ${date.day}, ${date.year}';
 }
 
 class FakeRemoteFinanceRepository implements FinanceRemoteRepository {

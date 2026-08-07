@@ -154,6 +154,7 @@ class AccountCard extends StatelessWidget {
           progress: progress,
           isOver: used > limit,
           showPercentage: true,
+          isCreditUtilization: true,
         );
       case AccountType.loan:
         final original = account.originalLoanAmountMinor;
@@ -225,6 +226,7 @@ class _CreditInsightsPreview extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
+                flex: 16,
                 child: _CreditInsightMetric(
                   label: 'APR',
                   value: account.annualPercentageRate == null
@@ -234,6 +236,7 @@ class _CreditInsightsPreview extends StatelessWidget {
               ),
               const _CreditInsightDivider(),
               Expanded(
+                flex: 26,
                 child: _CreditInsightMetric(
                   label: 'Next Statement',
                   value: _statementCloseDateLabel(estimate),
@@ -243,6 +246,7 @@ class _CreditInsightsPreview extends StatelessWidget {
               if (estimate.hasInterestEstimate) ...[
                 const _CreditInsightDivider(),
                 Expanded(
+                  flex: 28,
                   child: _CreditInsightMetric(
                     label: 'Estimated Interest',
                     value:
@@ -251,13 +255,11 @@ class _CreditInsightsPreview extends StatelessWidget {
                 ),
                 const _CreditInsightDivider(),
                 Expanded(
+                  flex: 30,
                   child: _CreditInsightMetric(
                     label: 'Projected Statement',
                     value:
                         '≈ ${formatter.formatMinor(estimate.projectedStatementMinor!)}',
-                    valueColor: estimate.projectedStatementMinor! < 0
-                        ? AppColors.danger
-                        : null,
                   ),
                 ),
               ],
@@ -301,37 +303,33 @@ class _CreditInsightMetric extends StatelessWidget {
     required this.label,
     required this.value,
     this.supporting,
-    this.valueColor,
   });
 
   final String label;
   final String value;
   final String? supporting;
-  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: double.infinity,
             height: 16,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                label,
-                maxLines: 1,
-                softWrap: false,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontSize: 10,
-                  height: 1,
-                ),
+            child: Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.clip,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontSize: 9.5,
+                fontWeight: FontWeight.w500,
+                height: 1,
               ),
             ),
           ),
@@ -347,7 +345,6 @@ class _CreditInsightMetric extends StatelessWidget {
                 maxLines: 1,
                 softWrap: false,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: valueColor,
                   fontWeight: FontWeight.w700,
                   fontFeatures: const [AppTextStyles.tabularFigures],
                 ),
@@ -397,12 +394,14 @@ class _AccountMetric {
     required this.progress,
     this.isOver = false,
     this.showPercentage = false,
+    this.isCreditUtilization = false,
   });
 
   final String label;
   final double progress;
   final bool isOver;
   final bool showPercentage;
+  final bool isCreditUtilization;
 }
 
 class _AccountMetricBar extends StatelessWidget {
@@ -413,6 +412,14 @@ class _AccountMetricBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final progress = metric.progress.clamp(0.0, 1.0).toDouble();
+    final fillColor = metric.isCreditUtilization
+        ? creditUtilizationFillColor(
+            metric.progress,
+            brightness: Theme.of(context).brightness,
+          )
+        : metric.isOver
+        ? AppColors.danger
+        : AppColors.accent;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -439,20 +446,24 @@ class _AccountMetricBar extends StatelessWidget {
                     backgroundColor: Theme.of(
                       context,
                     ).colorScheme.surfaceContainerHighest,
-                    color: metric.isOver ? AppColors.danger : AppColors.accent,
+                    color: fillColor,
                   ),
                 ),
               ),
             ),
             if (metric.showPercentage) ...[
               const SizedBox(width: AppSpacing.xs),
-              SizedBox(
-                width: 36,
+              ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minWidth: creditUtilizationLabelMinWidth,
+                ),
                 child: Text(
-                  '${(progress * 100).round()}%',
+                  '${(metric.progress * 100).round()}% utilized',
+                  maxLines: 1,
+                  softWrap: false,
                   textAlign: TextAlign.right,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: metric.isOver ? AppColors.danger : AppColors.accent,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                     fontFeatures: const [AppTextStyles.tabularFigures],
                   ),

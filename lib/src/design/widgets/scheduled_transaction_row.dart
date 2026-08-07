@@ -11,6 +11,7 @@ class ScheduledTransactionRow extends StatelessWidget {
     required this.scheduledTransaction,
     this.currency = const CurrencyFormatSettings(),
     this.needsAttention = false,
+    this.metadata,
     this.onTap,
     this.onLongPress,
     super.key,
@@ -19,6 +20,7 @@ class ScheduledTransactionRow extends StatelessWidget {
   final ScheduledTransactionRecord scheduledTransaction;
   final CurrencyFormatSettings currency;
   final bool needsAttention;
+  final String? metadata;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
@@ -49,7 +51,7 @@ class ScheduledTransactionRow extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.xxs),
                   Text(
-                    _compactDate(scheduledTransaction.nextDate),
+                    metadata ?? _compactDate(scheduledTransaction.nextDate),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
