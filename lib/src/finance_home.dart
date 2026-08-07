@@ -1995,7 +1995,10 @@ class AccountGroupCard extends StatelessWidget {
           showNavigationChevron: true,
           metricLeadingIndent: 58,
           padding: const EdgeInsets.all(AppSpacing.md),
-          leading: _CreditCardAccountBadge(accountName: account.name),
+          leading: CreditCardAppearanceBadge(
+            iconId: account.creditCardIconId,
+            accentId: account.creditCardAccentId,
+          ),
           onTap: onOpenLedgerForAccount == null
               ? null
               : () => onOpenLedgerForAccount!(account.id),
@@ -2083,47 +2086,6 @@ class _AccountGroupSummaryRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _CreditCardAccountBadge extends StatelessWidget {
-  const _CreditCardAccountBadge({required this.accountName});
-
-  final String accountName;
-
-  @override
-  Widget build(BuildContext context) {
-    final words = accountName
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((word) => word.isNotEmpty)
-        .toList(growable: false);
-    final initial = words.isEmpty
-        ? 'C'
-        : words.length == 1
-        ? words.first.characters.first.toUpperCase()
-        : words
-              .take(2)
-              .map((word) => word.characters.first)
-              .join()
-              .toUpperCase();
-    return Container(
-      width: 46,
-      height: 46,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: AppTheme.accent.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.18)),
-      ),
-      child: Text(
-        initial,
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-          color: AppTheme.accentStrong,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
     );
   }
 }
@@ -2459,6 +2421,7 @@ class _LedgerViewState extends State<LedgerView> {
         ? null
         : ManagementLedgerIndex.build(
             transactions: store.transactions,
+            accounts: store.accounts,
             categories: store.categories,
             now: now,
           ).transactionIdsFor(managementFilter!);
@@ -7290,6 +7253,7 @@ class _CategoriesViewState extends State<CategoriesView> {
     }
     final managementIndex = ManagementLedgerIndex.build(
       transactions: store.transactions,
+      accounts: store.accounts,
       categories: store.categories,
       now: DateTime.now(),
     );
@@ -8167,6 +8131,7 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
     final store = FinanceDataStoreScope.watch(context);
     final managementIndex = ManagementLedgerIndex.build(
       transactions: store.transactions,
+      accounts: store.accounts,
       categories: store.categories,
       now: DateTime.now(),
     );
@@ -11964,6 +11929,8 @@ Future<void> showChangeAccountTypeDialog(
       type: selectedType,
       clearCreditLimit: selectedType != v2_account.AccountType.creditCard,
       clearCreditInsights: selectedType != v2_account.AccountType.creditCard,
+      clearCreditCardAppearance:
+          selectedType != v2_account.AccountType.creditCard,
       clearOriginalLoanAmount: selectedType != v2_account.AccountType.loan,
     ),
   );
@@ -12281,6 +12248,339 @@ class _AccountFormControllerScopeState
   Widget build(BuildContext context) => widget.child;
 }
 
+class _CreditCardAppearanceFormSection extends StatelessWidget {
+  const _CreditCardAppearanceFormSection({
+    required this.iconId,
+    required this.accentId,
+    required this.fieldValueStyle,
+    required this.onChooseIcon,
+    required this.onChooseAccent,
+  });
+
+  final String? iconId;
+  final String? accentId;
+  final TextStyle? fieldValueStyle;
+  final VoidCallback onChooseIcon;
+  final VoidCallback onChooseAccent;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final iconName = CreditCardAppearanceCatalog.iconFor(iconId).label;
+    final accentName =
+        CreditCardAppearanceCatalog.accentFor(accentId)?.label ?? 'Default';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const TransactionFormDivider(),
+        const TransactionFormLabel('Appearance'),
+        InkWell(
+          key: const ValueKey('credit-card-icon-picker-row'),
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          onTap: onChooseIcon,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+            child: Row(
+              children: [
+                CreditCardAppearanceBadge(
+                  iconId: iconId,
+                  accentId: accentId,
+                  size: 40,
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Account Icon', style: fieldValueStyle),
+                      const SizedBox(height: 2),
+                      Text(
+                        iconName,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(AppIcon.chevronRight, size: AppIconSize.action),
+              ],
+            ),
+          ),
+        ),
+        Divider(
+          height: AppSpacing.md,
+          indent: 56,
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.38),
+        ),
+        InkWell(
+          key: const ValueKey('credit-card-accent-picker-row'),
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          onTap: onChooseAccent,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+            child: Row(
+              children: [
+                _CreditCardAccentSwatch(accentId: accentId),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(child: Text('Accent Color', style: fieldValueStyle)),
+                Text(
+                  accentName,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Icon(AppIcon.chevronRight, size: AppIconSize.action),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CreditCardAccentSwatch extends StatelessWidget {
+  const _CreditCardAccentSwatch({required this.accentId});
+
+  final String? accentId;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = CreditCardAppearanceCatalog.accentFor(accentId)?.color;
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color:
+            color ??
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.75),
+        border: Border.all(
+          color:
+              color?.withValues(alpha: 0.45) ??
+              theme.colorScheme.outlineVariant,
+        ),
+      ),
+      child: color == null
+          ? Icon(
+              AppIcon.creditCard,
+              size: 18,
+              color: theme.colorScheme.onSurfaceVariant,
+            )
+          : null,
+    );
+  }
+}
+
+Future<String?> _showCreditCardIconPicker(
+  BuildContext context, {
+  required String? selectedId,
+  required String? accentId,
+}) {
+  return showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    useSafeArea: true,
+    builder: (sheetContext) => Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        0,
+        AppSpacing.md,
+        AppSpacing.lg,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Choose Account Icon',
+            style: Theme.of(
+              sheetContext,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: AppSpacing.sm,
+            crossAxisSpacing: AppSpacing.sm,
+            childAspectRatio: 2.15,
+            children: [
+              for (final option in CreditCardAppearanceCatalog.icons)
+                InkWell(
+                  key: ValueKey('credit-card-icon-${option.id}'),
+                  borderRadius: BorderRadius.circular(AppRadii.control),
+                  onTap: () => Navigator.pop(sheetContext, option.id),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      border: Border.all(
+                        color:
+                            option.id ==
+                                (selectedId ??
+                                    CreditCardAppearanceCatalog.defaultIconId)
+                            ? AppTheme.accent
+                            : Theme.of(sheetContext).colorScheme.outlineVariant,
+                        width:
+                            option.id ==
+                                (selectedId ??
+                                    CreditCardAppearanceCatalog.defaultIconId)
+                            ? 1.5
+                            : 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        CreditCardAppearanceBadge(
+                          iconId: option.id,
+                          accentId: accentId,
+                          size: 36,
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            option.label,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (option.id ==
+                            (selectedId ??
+                                CreditCardAppearanceCatalog.defaultIconId))
+                          Icon(AppIcon.check, size: 18, color: AppTheme.accent),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+Future<String?> _showCreditCardAccentPicker(
+  BuildContext context, {
+  required String? selectedId,
+}) {
+  return showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    useSafeArea: true,
+    isScrollControlled: true,
+    builder: (sheetContext) => SizedBox(
+      height: min(MediaQuery.sizeOf(sheetContext).height * 0.68, 540),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          0,
+          AppSpacing.md,
+          AppSpacing.lg,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Choose Accent Color',
+              style: Theme.of(
+                sheetContext,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Expanded(
+              child: GridView.count(
+                crossAxisCount: 4,
+                mainAxisSpacing: AppSpacing.md,
+                crossAxisSpacing: AppSpacing.sm,
+                childAspectRatio: 0.82,
+                children: [
+                  _AccentPickerItem(
+                    id: 'default',
+                    label: 'Default',
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                    isSelected: selectedId == null,
+                    onTap: () => Navigator.pop(sheetContext, 'default'),
+                  ),
+                  for (final option in CreditCardAppearanceCatalog.accents)
+                    _AccentPickerItem(
+                      id: option.id,
+                      label: option.label,
+                      color: option.color,
+                      isSelected: selectedId == option.id,
+                      onTap: () => Navigator.pop(sheetContext, option.id),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _AccentPickerItem extends StatelessWidget {
+  const _AccentPickerItem({
+    required this.id,
+    required this.label,
+    required this.color,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final String id;
+  final String label;
+  final Color color;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      key: ValueKey('credit-card-accent-$id'),
+      borderRadius: BorderRadius.circular(AppRadii.control),
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              border: Border.all(
+                color: isSelected
+                    ? Theme.of(context).colorScheme.onSurface
+                    : color.withValues(alpha: 0.55),
+                width: isSelected ? 2.5 : 1,
+              ),
+            ),
+            child: isSelected
+                ? Icon(AppIcon.check, color: Colors.white, size: 20)
+                : null,
+          ),
+          const SizedBox(height: AppSpacing.xxs),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 Future<void> showEditAccountDialog(
   BuildContext context,
   v2_account.AccountRecord account,
@@ -12297,6 +12597,9 @@ Future<void> showEditAccountDialog(
     text: account.paymentDueDay?.toString() ?? '',
   );
   var creditLimitMinor = account.creditLimitMinor ?? 0;
+  var creditCardIconId =
+      account.creditCardIconId ?? CreditCardAppearanceCatalog.defaultIconId;
+  var creditCardAccentId = account.creditCardAccentId;
   var interestEstimationEnabled = account.interestEstimationEnabled;
   var originalLoanAmountMinor = account.originalLoanAmountMinor ?? 0;
   var type = account.type;
@@ -12313,6 +12616,8 @@ Future<void> showEditAccountDialog(
           double? annualPercentageRate,
           int? statementClosingDay,
           int? paymentDueDay,
+          String? creditCardIconId,
+          String? creditCardAccentId,
           int? originalLoanAmountMinor,
           bool includeInGroupBalance,
           bool includeInNetWorth,
@@ -12384,6 +12689,12 @@ Future<void> showEditAccountDialog(
                       type == v2_account.AccountType.creditCard &&
                           interestEstimationEnabled
                       ? insights.paymentDueDay
+                      : null,
+                  creditCardIconId: type == v2_account.AccountType.creditCard
+                      ? creditCardIconId
+                      : null,
+                  creditCardAccentId: type == v2_account.AccountType.creditCard
+                      ? creditCardAccentId
                       : null,
                   originalLoanAmountMinor: type == v2_account.AccountType.loan
                       ? optionalPositiveMinor(originalLoanAmountMinor)
@@ -12495,6 +12806,43 @@ Future<void> showEditAccountDialog(
                                     ),
                                   ],
                                 ),
+                                _CreditCardAppearanceFormSection(
+                                  iconId: creditCardIconId,
+                                  accentId: creditCardAccentId,
+                                  fieldValueStyle: fieldValueStyle,
+                                  onChooseIcon: () async {
+                                    FocusManager.instance.primaryFocus
+                                        ?.unfocus();
+                                    final selected =
+                                        await _showCreditCardIconPicker(
+                                          context,
+                                          selectedId: creditCardIconId,
+                                          accentId: creditCardAccentId,
+                                        );
+                                    if (selected != null) {
+                                      setDialogState(
+                                        () => creditCardIconId = selected,
+                                      );
+                                    }
+                                  },
+                                  onChooseAccent: () async {
+                                    FocusManager.instance.primaryFocus
+                                        ?.unfocus();
+                                    final selected =
+                                        await _showCreditCardAccentPicker(
+                                          context,
+                                          selectedId: creditCardAccentId,
+                                        );
+                                    if (selected != null) {
+                                      setDialogState(
+                                        () => creditCardAccentId =
+                                            selected == 'default'
+                                            ? null
+                                            : selected,
+                                      );
+                                    }
+                                  },
+                                ),
                                 const TransactionFormDivider(),
                                 CreditInsightsFormSection(
                                   enabled: interestEstimationEnabled,
@@ -12596,9 +12944,16 @@ Future<void> showEditAccountDialog(
       annualPercentageRate: result.annualPercentageRate,
       statementClosingDay: result.statementClosingDay,
       paymentDueDay: result.paymentDueDay,
+      creditCardIconId: result.creditCardIconId,
+      creditCardAccentId: result.creditCardAccentId,
       originalLoanAmountMinor: result.originalLoanAmountMinor,
       clearCreditLimit: result.creditLimitMinor == null,
       clearCreditInsights: result.type != v2_account.AccountType.creditCard,
+      clearCreditCardAppearance:
+          result.type != v2_account.AccountType.creditCard,
+      clearCreditCardAccent:
+          result.type == v2_account.AccountType.creditCard &&
+          result.creditCardAccentId == null,
       clearOriginalLoanAmount: result.originalLoanAmountMinor == null,
       includeInGroupBalance: result.includeInGroupBalance,
       includeInNetWorth: result.includeInNetWorth,
@@ -12781,6 +13136,8 @@ Future<void> showAccountDialog(BuildContext context) async {
   final statementClosingDay = TextEditingController();
   final paymentDueDay = TextEditingController();
   var creditLimitMinor = 0;
+  var creditCardIconId = CreditCardAppearanceCatalog.defaultIconId;
+  String? creditCardAccentId = CreditCardAppearanceCatalog.defaultAccentId;
   var interestEstimationEnabled = false;
   var originalLoanAmountMinor = 0;
   var type = AccountType.checking;
@@ -12800,6 +13157,8 @@ Future<void> showAccountDialog(BuildContext context) async {
           double? annualPercentageRate,
           int? statementClosingDay,
           int? paymentDueDay,
+          String? creditCardIconId,
+          String? creditCardAccentId,
           int? originalLoanAmountMinor,
           bool includeInGroupBalance,
           bool includeInNetWorth,
@@ -12872,6 +13231,12 @@ Future<void> showAccountDialog(BuildContext context) async {
                       type == AccountType.creditCard &&
                           interestEstimationEnabled
                       ? insights.paymentDueDay
+                      : null,
+                  creditCardIconId: type == AccountType.creditCard
+                      ? creditCardIconId
+                      : null,
+                  creditCardAccentId: type == AccountType.creditCard
+                      ? creditCardAccentId
                       : null,
                   originalLoanAmountMinor: type == AccountType.loan
                       ? optionalPositiveMinor(originalLoanAmountMinor)
@@ -12982,6 +13347,43 @@ Future<void> showAccountDialog(BuildContext context) async {
                                       ),
                                     ),
                                   ],
+                                ),
+                                _CreditCardAppearanceFormSection(
+                                  iconId: creditCardIconId,
+                                  accentId: creditCardAccentId,
+                                  fieldValueStyle: fieldValueStyle,
+                                  onChooseIcon: () async {
+                                    FocusManager.instance.primaryFocus
+                                        ?.unfocus();
+                                    final selected =
+                                        await _showCreditCardIconPicker(
+                                          context,
+                                          selectedId: creditCardIconId,
+                                          accentId: creditCardAccentId,
+                                        );
+                                    if (selected != null) {
+                                      setDialogState(
+                                        () => creditCardIconId = selected,
+                                      );
+                                    }
+                                  },
+                                  onChooseAccent: () async {
+                                    FocusManager.instance.primaryFocus
+                                        ?.unfocus();
+                                    final selected =
+                                        await _showCreditCardAccentPicker(
+                                          context,
+                                          selectedId: creditCardAccentId,
+                                        );
+                                    if (selected != null) {
+                                      setDialogState(
+                                        () => creditCardAccentId =
+                                            selected == 'default'
+                                            ? null
+                                            : selected,
+                                      );
+                                    }
+                                  },
                                 ),
                                 const TransactionFormDivider(),
                                 CreditInsightsFormSection(
@@ -13131,6 +13533,12 @@ Future<void> showAccountDialog(BuildContext context) async {
           v2Type == v2_account.AccountType.creditCard &&
               result.interestEstimationEnabled
           ? result.paymentDueDay
+          : null,
+      creditCardIconId: v2Type == v2_account.AccountType.creditCard
+          ? result.creditCardIconId
+          : null,
+      creditCardAccentId: v2Type == v2_account.AccountType.creditCard
+          ? result.creditCardAccentId
           : null,
       originalLoanAmountMinor: v2Type == v2_account.AccountType.loan
           ? result.originalLoanAmountMinor ??
@@ -18717,21 +19125,7 @@ CategoryKind legacyCategoryKindFor(v2_category.CategoryKind kind) {
   };
 }
 
-class CategoryColorOption {
-  const CategoryColorOption({required this.label, required this.value});
-
-  final String label;
-  final int value;
-}
-
-const categoryColorOptions = [
-  CategoryColorOption(label: 'Teal', value: 0xFF0F766E),
-  CategoryColorOption(label: 'Blue', value: 0xFF2563EB),
-  CategoryColorOption(label: 'Green', value: 0xFF16A34A),
-  CategoryColorOption(label: 'Amber', value: 0xFFD97706),
-  CategoryColorOption(label: 'Rose', value: 0xFFE11D48),
-  CategoryColorOption(label: 'Slate', value: 0xFF475569),
-];
+const categoryColorOptions = TrackmarkAccentCatalog.options;
 
 String launchScreenLabel(LaunchScreen screen) {
   return switch (screen) {

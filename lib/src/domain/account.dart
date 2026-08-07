@@ -41,6 +41,8 @@ class AccountRecord {
     this.annualPercentageRate,
     this.statementClosingDay,
     this.paymentDueDay,
+    this.creditCardIconId,
+    this.creditCardAccentId,
     this.originalLoanAmountMinor,
     this.isArchived = false,
     this.includeInGroupBalance = true,
@@ -63,6 +65,8 @@ class AccountRecord {
   final double? annualPercentageRate;
   final int? statementClosingDay;
   final int? paymentDueDay;
+  final String? creditCardIconId;
+  final String? creditCardAccentId;
   final int? originalLoanAmountMinor;
   final bool isArchived;
   final bool includeInGroupBalance;
@@ -96,6 +100,8 @@ class AccountRecord {
     double? annualPercentageRate,
     int? statementClosingDay,
     int? paymentDueDay,
+    String? creditCardIconId,
+    String? creditCardAccentId,
     int? originalLoanAmountMinor,
     bool? isArchived,
     bool? includeInGroupBalance,
@@ -106,6 +112,8 @@ class AccountRecord {
     SyncMetadata? sync,
     bool clearCreditLimit = false,
     bool clearCreditInsights = false,
+    bool clearCreditCardAppearance = false,
+    bool clearCreditCardAccent = false,
     bool clearOriginalLoanAmount = false,
     bool clearGoalId = false,
   }) {
@@ -129,6 +137,12 @@ class AccountRecord {
       paymentDueDay: clearCreditInsights
           ? null
           : paymentDueDay ?? this.paymentDueDay,
+      creditCardIconId: clearCreditCardAppearance
+          ? null
+          : creditCardIconId ?? this.creditCardIconId,
+      creditCardAccentId: clearCreditCardAppearance || clearCreditCardAccent
+          ? null
+          : creditCardAccentId ?? this.creditCardAccentId,
       originalLoanAmountMinor: clearOriginalLoanAmount
           ? null
           : originalLoanAmountMinor ?? this.originalLoanAmountMinor,
@@ -155,6 +169,8 @@ class AccountRecord {
       'annualPercentageRate': annualPercentageRate,
       'statementClosingDay': statementClosingDay,
       'paymentDueDay': paymentDueDay,
+      'creditCardIconId': creditCardIconId,
+      'creditCardAccentId': creditCardAccentId,
       'originalLoanAmountMinor': originalLoanAmountMinor,
       'isArchived': isArchived,
       'includeInGroupBalance': includeInGroupBalance,
@@ -178,6 +194,8 @@ class AccountRecord {
       annualPercentageRate: (json['annualPercentageRate'] as num?)?.toDouble(),
       statementClosingDay: json['statementClosingDay'] as int?,
       paymentDueDay: json['paymentDueDay'] as int?,
+      creditCardIconId: json['creditCardIconId'] as String?,
+      creditCardAccentId: json['creditCardAccentId'] as String?,
       originalLoanAmountMinor: json['originalLoanAmountMinor'] as int?,
       isArchived: json['isArchived'] as bool? ?? false,
       includeInGroupBalance: json['includeInGroupBalance'] as bool? ?? true,

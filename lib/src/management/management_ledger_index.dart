@@ -1,3 +1,4 @@
+import '../domain/account.dart';
 import '../domain/category.dart';
 import '../domain/transaction.dart';
 
@@ -75,6 +76,7 @@ class ManagementLedgerIndex {
 
   factory ManagementLedgerIndex.build({
     required Iterable<TransactionRecord> transactions,
+    required Iterable<AccountRecord> accounts,
     required Iterable<CategoryRecord> categories,
     required DateTime now,
   }) {
@@ -82,6 +84,7 @@ class ManagementLedgerIndex {
     final categoriesById = {
       for (final category in categories) category.id: category,
     };
+    final accountsById = {for (final account in accounts) account.id: account};
     final categoryTransactions = <String, Set<String>>{};
     final mutablePayees = <String, _MutablePayeeSummary>{};
 
@@ -109,26 +112,37 @@ class ManagementLedgerIndex {
             .add(transaction.id);
       }
 
-      final normalizedPayee = normalizeManagedPayee(transaction.payee);
-      if (normalizedPayee.isEmpty) continue;
-      final payee = mutablePayees.putIfAbsent(
-        normalizedPayee,
-        _MutablePayeeSummary.new,
-      );
-      if (!payee.transactionIds.add(transaction.id)) continue;
-      switch (transaction.type) {
-        case TransactionType.expense:
-          payee.expenseMinor += transaction.amountMinor.abs();
-        case TransactionType.income:
-          payee.incomeMinor += transaction.amountMinor.abs();
-        case TransactionType.transfer:
-        case TransactionType.goalFunding:
-        case TransactionType.adjustment:
-          break;
-      }
-      if (payee.mostRecentDate == null ||
-          transaction.date.isAfter(payee.mostRecentDate!)) {
-        payee.mostRecentDate = transaction.date;
+      final Iterable<String> associatedPayees = switch (transaction.type) {
+        TransactionType.expense ||
+        TransactionType.income => [transaction.payee],
+        TransactionType.transfer => [
+          accountsById[transaction.transferAccountId]?.name,
+        ].whereType<String>(),
+        TransactionType.goalFunding ||
+        TransactionType.adjustment => const <String>[],
+      };
+      for (final associatedPayee in associatedPayees) {
+        final normalizedPayee = normalizeManagedPayee(associatedPayee);
+        if (normalizedPayee.isEmpty) continue;
+        final payee = mutablePayees.putIfAbsent(
+          normalizedPayee,
+          _MutablePayeeSummary.new,
+        );
+        if (!payee.transactionIds.add(transaction.id)) continue;
+        switch (transaction.type) {
+          case TransactionType.expense:
+            payee.expenseMinor += transaction.amountMinor.abs();
+          case TransactionType.income:
+            payee.incomeMinor += transaction.amountMinor.abs();
+          case TransactionType.transfer:
+          case TransactionType.goalFunding:
+          case TransactionType.adjustment:
+            break;
+        }
+        if (payee.mostRecentDate == null ||
+            transaction.date.isAfter(payee.mostRecentDate!)) {
+          payee.mostRecentDate = transaction.date;
+        }
       }
     }
 
@@ -180,7 +194,8 @@ bool _isEligibleActualTransaction(
   return !transaction.isDeleted &&
       range.includes(transaction.date) &&
       (transaction.type == TransactionType.expense ||
-          transaction.type == TransactionType.income);
+          transaction.type == TransactionType.income ||
+          transaction.type == TransactionType.transfer);
 }
 
 String normalizeManagedPayee(String value) => value.trim().toLowerCase();

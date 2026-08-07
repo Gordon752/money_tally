@@ -437,6 +437,8 @@ void main() {
       annualPercentageRate: 29.99,
       statementClosingDay: 15,
       paymentDueDay: 7,
+      creditCardIconId: 'rectangleStackFill',
+      creditCardAccentId: 'indigo',
       sync: SyncMetadata.fresh(now: DateTime(2026, 8, 4)),
     );
 
@@ -445,6 +447,12 @@ void main() {
     expect(restored.annualPercentageRate, 29.99);
     expect(restored.statementClosingDay, 15);
     expect(restored.paymentDueDay, 7);
+    expect(restored.creditCardIconId, 'rectangleStackFill');
+    expect(restored.creditCardAccentId, 'indigo');
+    expect(
+      restored.copyWith(clearCreditCardAccent: true).creditCardAccentId,
+      isNull,
+    );
 
     final olderRecord = AccountRecord.fromJson({
       ...account.toJson(),
@@ -452,11 +460,15 @@ void main() {
       'annualPercentageRate': null,
       'statementClosingDay': null,
       'paymentDueDay': null,
+      'creditCardIconId': null,
+      'creditCardAccentId': null,
     });
     expect(olderRecord.interestEstimationEnabled, isFalse);
     expect(olderRecord.annualPercentageRate, isNull);
     expect(olderRecord.statementClosingDay, isNull);
     expect(olderRecord.paymentDueDay, isNull);
+    expect(olderRecord.creditCardIconId, isNull);
+    expect(olderRecord.creditCardAccentId, isNull);
   });
 
   test(

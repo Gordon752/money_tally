@@ -249,8 +249,9 @@ class _CreditInsightsPreview extends StatelessWidget {
                   flex: 28,
                   child: _CreditInsightMetric(
                     label: 'Estimated Interest',
-                    value:
-                        '≈ ${formatter.formatMinor(estimate.estimatedInterestMinor!)}',
+                    value: formatter.formatMinor(
+                      estimate.estimatedInterestMinor!,
+                    ),
                   ),
                 ),
                 const _CreditInsightDivider(),
@@ -258,8 +259,9 @@ class _CreditInsightsPreview extends StatelessWidget {
                   flex: 30,
                   child: _CreditInsightMetric(
                     label: 'Projected Statement',
-                    value:
-                        '≈ ${formatter.formatMinor(estimate.projectedStatementMinor!)}',
+                    value: formatter.formatMinor(
+                      estimate.projectedStatementMinor!,
+                    ),
                   ),
                 ),
               ],
@@ -315,7 +317,7 @@ class _CreditInsightMetric extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SizedBox(
             width: double.infinity,
@@ -325,6 +327,7 @@ class _CreditInsightMetric extends StatelessWidget {
               maxLines: 1,
               softWrap: false,
               overflow: TextOverflow.clip,
+              textAlign: TextAlign.center,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
                 fontSize: 9.5,
@@ -339,11 +342,12 @@ class _CreditInsightMetric extends StatelessWidget {
             height: 22,
             child: FittedBox(
               fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
+              alignment: Alignment.center,
               child: Text(
                 value,
                 maxLines: 1,
                 softWrap: false,
+                textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                   fontFeatures: const [AppTextStyles.tabularFigures],
@@ -359,11 +363,12 @@ class _CreditInsightMetric extends StatelessWidget {
                 ? null
                 : FittedBox(
                     fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
+                    alignment: Alignment.center,
                     child: Text(
                       supporting!,
                       maxLines: 1,
                       softWrap: false,
+                      textAlign: TextAlign.center,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                         fontFeatures: const [AppTextStyles.tabularFigures],

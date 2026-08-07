@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:money_tally/src/domain/account.dart';
 import 'package:money_tally/src/domain/category.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart';
 import 'package:money_tally/src/domain/transaction.dart';
@@ -35,6 +36,7 @@ void main() {
     () {
       final index = ManagementLedgerIndex.build(
         now: now,
+        accounts: const [],
         categories: categories,
         transactions: [
           transaction(
@@ -82,69 +84,118 @@ void main() {
     },
   );
 
-  test('payee index counts actual income and expenses once only', () {
-    final sync = SyncMetadata.fresh(now: DateTime(2026, 1, 1));
-    final index = ManagementLedgerIndex.build(
-      now: now,
-      categories: categories,
-      transactions: [
-        transaction(
-          id: 'expense',
-          categoryId: 'parent',
-          payee: ' Love’s ',
-          amountMinor: 2500,
-          date: DateTime(2026, 7, 2),
-        ),
-        transaction(
-          id: 'income',
-          categoryId: 'income',
-          payee: 'LOVE’S',
-          amountMinor: 8000,
-          type: TransactionType.income,
-          date: DateTime(2026, 7, 4),
-        ),
-        TransactionRecord(
-          id: 'transfer',
-          type: TransactionType.transfer,
-          accountId: 'checking',
-          transferAccountId: 'savings',
-          date: DateTime(2026, 7, 5),
-          payee: 'Love’s',
-          amountMinor: 10000,
-          sync: sync,
-        ),
-        TransactionRecord(
-          id: 'adjustment',
-          type: TransactionType.adjustment,
-          accountId: 'checking',
-          date: DateTime(2026, 7, 5),
-          payee: 'Balance adjustment',
-          amountMinor: 10000,
-          sync: sync,
-        ),
-        transaction(
-          id: 'outside',
-          categoryId: 'parent',
-          payee: 'Love’s',
-          date: DateTime(2025, 7, 25),
-        ),
-        transaction(
-          id: 'deleted',
-          categoryId: 'parent',
-          payee: 'Love’s',
-          date: DateTime(2026, 7, 6),
-          deleted: true,
-        ),
-      ],
-    );
+  test(
+    'payee index counts income, expenses, and transfer destinations once',
+    () {
+      final sync = SyncMetadata.fresh(now: DateTime(2026, 1, 1));
+      final index = ManagementLedgerIndex.build(
+        now: now,
+        accounts: [
+          account('checking', 'Checking', AccountType.checking),
+          account('savings', 'Savings', AccountType.savings),
+          account('credit-one', 'Credit One', AccountType.creditCard),
+          account('loan', 'Best Egg', AccountType.loan),
+        ],
+        categories: categories,
+        transactions: [
+          transaction(
+            id: 'expense',
+            categoryId: 'parent',
+            payee: ' Love’s ',
+            amountMinor: 2500,
+            date: DateTime(2026, 7, 2),
+          ),
+          transaction(
+            id: 'income',
+            categoryId: 'income',
+            payee: 'LOVE’S',
+            amountMinor: 8000,
+            type: TransactionType.income,
+            date: DateTime(2026, 7, 4),
+          ),
+          TransactionRecord(
+            id: 'transfer',
+            type: TransactionType.transfer,
+            accountId: 'checking',
+            transferAccountId: 'savings',
+            date: DateTime(2026, 7, 5),
+            payee: 'Love’s',
+            amountMinor: 10000,
+            sync: sync,
+          ),
+          TransactionRecord(
+            id: 'credit-card-payment',
+            type: TransactionType.transfer,
+            accountId: 'checking',
+            transferAccountId: 'credit-one',
+            date: DateTime(2026, 7, 6),
+            payee: 'Credit One',
+            amountMinor: 12000,
+            sync: sync,
+          ),
+          TransactionRecord(
+            id: 'loan-payment',
+            type: TransactionType.transfer,
+            accountId: 'checking',
+            transferAccountId: 'loan',
+            date: DateTime(2026, 7, 7),
+            payee: 'Loan payment',
+            amountMinor: 20000,
+            sync: sync,
+          ),
+          TransactionRecord(
+            id: 'adjustment',
+            type: TransactionType.adjustment,
+            accountId: 'checking',
+            date: DateTime(2026, 7, 5),
+            payee: 'Balance adjustment',
+            amountMinor: 10000,
+            sync: sync,
+          ),
+          transaction(
+            id: 'outside',
+            categoryId: 'parent',
+            payee: 'Love’s',
+            date: DateTime(2025, 7, 25),
+          ),
+          transaction(
+            id: 'deleted',
+            categoryId: 'parent',
+            payee: 'Love’s',
+            date: DateTime(2026, 7, 6),
+            deleted: true,
+          ),
+        ],
+      );
 
-    final summary = index.payeeSummary('love’s');
-    expect(summary.count, 2);
-    expect(summary.expenseMinor, 2500);
-    expect(summary.incomeMinor, 8000);
-    expect(summary.mostRecentDate, DateTime(2026, 7, 4));
-    expect(index.payeeSummary('Balance adjustment').count, 0);
-  });
+      final summary = index.payeeSummary('love’s');
+      expect(summary.count, 2);
+      expect(summary.expenseMinor, 2500);
+      expect(summary.incomeMinor, 8000);
+      expect(summary.mostRecentDate, DateTime(2026, 7, 4));
+      expect(index.payeeSummary('Savings').transactionIds, {'transfer'});
+      expect(index.payeeSummary('Credit One').count, 1);
+      expect(index.payeeSummary('Best Egg').count, 1);
+      expect(
+        index.transactionIdsFor(
+          const ManagementLedgerFilter.payee(payee: 'Credit One'),
+        ),
+        {'credit-card-payment'},
+      );
+      expect(index.payeeSummary('Loan payment').count, 0);
+      expect(index.payeeSummary('Balance adjustment').count, 0);
+    },
+  );
+}
+
+AccountRecord account(String id, String name, AccountType type) {
+  return AccountRecord(
+    id: id,
+    name: name,
+    type: type,
+    openingBalanceMinor: 0,
+    sync: SyncMetadata.fresh(now: DateTime(2026, 1, 1)),
+  );
 }
 
 TransactionRecord transaction({

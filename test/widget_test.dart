@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
+import 'package:money_tally/src/design/accent_color_catalog.dart';
 import 'package:money_tally/src/design/app_icons.dart';
+import 'package:money_tally/src/design/credit_card_appearance.dart';
 import 'package:money_tally/src/design/design_tokens.dart';
 import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
@@ -153,6 +155,35 @@ class FailingLocalFinanceRepository extends LocalFinanceDataSetRepository {
 }
 
 void main() {
+  test('categories and credit cards share one curated accent palette', () {
+    expect(categoryColorOptions, same(TrackmarkAccentCatalog.options));
+    expect(TrackmarkAccentCatalog.options.map((option) => option.label), [
+      'Teal',
+      'Mint',
+      'Green',
+      'Blue',
+      'Indigo',
+      'Purple',
+      'Rose',
+      'Red',
+      'Orange',
+      'Amber',
+      'Gold',
+      'Slate',
+    ]);
+    expect(
+      CreditCardAppearanceCatalog.accents,
+      same(TrackmarkAccentCatalog.options),
+    );
+    expect(
+      TrackmarkAccentCatalog.options
+          .where((option) => option.label == 'Teal')
+          .single
+          .value,
+      0xFF0F766E,
+    );
+  });
+
   testWidgets('amount entry field formats typed digits as money', (
     tester,
   ) async {
@@ -2673,6 +2704,48 @@ void main() {
     expect(account.includeInNetWorth, isFalse);
   });
 
+  testWidgets('new credit card receives the standard icon and teal accent', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1500);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Account'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'Travel Card');
+    await tester.tap(find.text('Checking').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Credit Card').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.text('Teal'), findsOneWidget);
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    final account = dataStore.accounts.singleWhere(
+      (account) => account.name == 'Travel Card',
+    );
+    expect(account.creditCardIconId, CreditCardAppearanceCatalog.defaultIconId);
+    expect(
+      account.creditCardAccentId,
+      CreditCardAppearanceCatalog.defaultAccentId,
+    );
+  });
+
   testWidgets('floating add transfer creates first-class transfer', (
     tester,
   ) async {
@@ -3534,11 +3607,28 @@ void main() {
     );
     await tester.pump();
     expect(find.text(r'$2,500.00'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('credit-card-icon-picker-row')));
+    await tester.pumpAndSettle();
+    expect(CreditCardAppearanceCatalog.icons, hasLength(4));
+    await tester.tap(
+      find.byKey(const ValueKey('credit-card-icon-rectangleStackFill')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('credit-card-accent-picker-row')),
+    );
+    await tester.pumpAndSettle();
+    expect(CreditCardAppearanceCatalog.accents, hasLength(12));
+    await tester.tap(find.byKey(const ValueKey('credit-card-accent-purple')));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     final account = dataStore.accountById('card');
     expect(account.creditLimitMinor, 250000);
+    expect(account.creditCardIconId, 'rectangleStackFill');
+    expect(account.creditCardAccentId, 'purple');
     expect(dataStore.creditAvailableMinorForAccount('card'), 206178);
     expect(find.text(r'Credit Available $2,061.78 of $2,500.00'), findsWidgets);
   });
@@ -3578,6 +3668,7 @@ void main() {
     expect(find.text('Projected Statement'), findsOneWidget);
     expect(find.text('Estimated Interest'), findsOneWidget);
     expect(find.text('67% utilized'), findsOneWidget);
+    expect(find.textContaining('≈'), findsNothing);
 
     final utilizationBox = tester.renderObject<RenderBox>(
       find.text('67% utilized'),
@@ -3599,7 +3690,9 @@ void main() {
       expect(label.style?.fontWeight, nextStatementLabel.style?.fontWeight);
       expect(label.style?.color, nextStatementLabel.style?.color);
       expect(label.style?.height, nextStatementLabel.style?.height);
+      expect(label.textAlign, TextAlign.center);
     }
+    expect(nextStatementLabel.textAlign, TextAlign.center);
 
     expect(
       tester
@@ -3624,6 +3717,41 @@ void main() {
           .flex,
       30,
     );
+  });
+
+  testWidgets('credit card appearance resolves saved and legacy identifiers', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: const [
+              CreditCardAppearanceBadge(
+                iconId: 'rectangleStackFill',
+                accentId: 'purple',
+              ),
+              CreditCardAppearanceBadge(
+                iconId: 'unknownLegacyValue',
+                accentId: 'unknownLegacyValue',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.byIcon(
+        CreditCardAppearanceCatalog.iconFor('rectangleStackFill').icon,
+      ),
+      findsOneWidget,
+    );
+    expect(
+      CreditCardAppearanceCatalog.iconFor('unknownLegacyValue').id,
+      CreditCardAppearanceCatalog.defaultIconId,
+    );
+    expect(CreditCardAppearanceCatalog.accentFor('unknownLegacyValue'), isNull);
   });
 
   test('credit utilization color thresholds use the unrounded ratio', () {
@@ -6999,6 +7127,70 @@ void main() {
     expect(find.byKey(const ValueKey('payee-row-best buy')), findsNothing);
     expect(find.text('Archived (1)'), findsOneWidget);
     expect(find.byKey(const ValueKey('archived-payee-best buy')), findsNothing);
+  });
+
+  testWidgets('payee count includes transfer to its destination account', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final source = migrated.accounts.first;
+    final creditOne = v2_account.AccountRecord(
+      id: 'credit-one-payee-count',
+      name: 'Credit One',
+      type: v2_account.AccountType.creditCard,
+      openingBalanceMinor: 0,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+    );
+    final payment = v2_transaction.TransactionRecord(
+      id: 'credit-one-payment',
+      type: v2_transaction.TransactionType.transfer,
+      accountId: source.id,
+      transferAccountId: creditOne.id,
+      date: DateTime.now(),
+      payee: 'Credit One',
+      amountMinor: 10000,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        accounts: [...migrated.accounts, creditOne],
+        transactions: [...migrated.transactions, payment],
+        preferences: migrated.preferences.copyWith(
+          savedPayeeNames: const ['Credit One'],
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Manage payees'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('payee-count-credit one')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('payee-count-credit one')));
+    await tester.pumpAndSettle();
+    expect(find.text('Payee: Credit One'), findsOneWidget);
+    expect(find.text('Period: Last 12 Months'), findsOneWidget);
   });
 
   testWidgets('payee tap shows details, long press actions, and pill Ledger', (
