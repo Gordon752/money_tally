@@ -46,6 +46,51 @@ service cloud.firestore {
       allow read, write: if ownsUserData(userId);
     }
 
+    // A confirmed backup restore stages a complete record generation, then
+    // atomically activates it through this user-owned authority marker.
+    match /users/{userId}/metadata/restoreAuthority {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    // Restored generations remain isolated from legacy record collections so
+    // older beta clients cannot read staged records as duplicates. Keep the
+    // allowed shape limited to Trackmark's known record collections.
+    match /users/{userId}/restoreGenerations/{generation}/accounts/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/categories/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/transactions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/scheduledTransactions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/budgets/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/goals/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/goalContributions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/goalFundingEvents/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/preferences/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
     // Retain access to the legacy snapshot while existing installations
     // complete migration to the record-based collections above.
     match /users/{userId}/finance/{documentId} {

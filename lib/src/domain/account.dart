@@ -38,6 +38,7 @@ class AccountRecord {
     required this.sync,
     this.creditLimitMinor,
     this.interestEstimationEnabled = false,
+    this.creditInsightsDisclosureAcknowledged = false,
     this.annualPercentageRate,
     this.statementClosingDay,
     this.paymentDueDay,
@@ -62,9 +63,14 @@ class AccountRecord {
   /// These values are intentionally descriptive only in this phase; no
   /// balance, transaction, or interest calculations depend on them.
   final bool interestEstimationEnabled;
+  final bool creditInsightsDisclosureAcknowledged;
   final double? annualPercentageRate;
   final int? statementClosingDay;
   final int? paymentDueDay;
+
+  /// Stable app-owned appearance IDs. The persisted field names predate the
+  /// shared account Appearance system and remain unchanged for backup, sync,
+  /// and existing beta-user compatibility.
   final String? creditCardIconId;
   final String? creditCardAccentId;
   final int? originalLoanAmountMinor;
@@ -90,6 +96,8 @@ class AccountRecord {
   bool get isVisible => !isArchived && !isDeleted;
   bool get isGoalAccount => goalId != null && goalId!.isNotEmpty;
   bool get isInternalGoalAccount => isGoalAccount || isDetachedGoalAccount;
+  String? get appearanceIconId => creditCardIconId;
+  String? get appearanceAccentId => creditCardAccentId;
 
   AccountRecord copyWith({
     String? name,
@@ -97,6 +105,7 @@ class AccountRecord {
     int? openingBalanceMinor,
     int? creditLimitMinor,
     bool? interestEstimationEnabled,
+    bool? creditInsightsDisclosureAcknowledged,
     double? annualPercentageRate,
     int? statementClosingDay,
     int? paymentDueDay,
@@ -128,6 +137,9 @@ class AccountRecord {
       interestEstimationEnabled: clearCreditInsights
           ? false
           : interestEstimationEnabled ?? this.interestEstimationEnabled,
+      creditInsightsDisclosureAcknowledged:
+          creditInsightsDisclosureAcknowledged ??
+          this.creditInsightsDisclosureAcknowledged,
       annualPercentageRate: clearCreditInsights
           ? null
           : annualPercentageRate ?? this.annualPercentageRate,
@@ -166,6 +178,8 @@ class AccountRecord {
       'openingBalanceMinor': openingBalanceMinor,
       'creditLimitMinor': creditLimitMinor,
       'interestEstimationEnabled': interestEstimationEnabled,
+      'creditInsightsDisclosureAcknowledged':
+          creditInsightsDisclosureAcknowledged,
       'annualPercentageRate': annualPercentageRate,
       'statementClosingDay': statementClosingDay,
       'paymentDueDay': paymentDueDay,
@@ -191,6 +205,11 @@ class AccountRecord {
       creditLimitMinor: json['creditLimitMinor'] as int?,
       interestEstimationEnabled:
           json['interestEstimationEnabled'] as bool? ?? false,
+      // Credit Insights predates the acknowledgement flag. Treat an existing
+      // enabled record as acknowledged so an upgrade never interrupts editing.
+      creditInsightsDisclosureAcknowledged:
+          json['creditInsightsDisclosureAcknowledged'] as bool? ??
+          (json['interestEstimationEnabled'] as bool? ?? false),
       annualPercentageRate: (json['annualPercentageRate'] as num?)?.toDouble(),
       statementClosingDay: json['statementClosingDay'] as int?,
       paymentDueDay: json['paymentDueDay'] as int?,

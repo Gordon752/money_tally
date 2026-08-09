@@ -11,6 +11,9 @@ class LocalFinanceDataSetRepository {
 
   final String storageKey;
 
+  String _restoreGenerationKey(String userId) =>
+      '${storageKey}_restore_generation_$userId';
+
   Future<FinanceDataSet?> load() async {
     final preferences = await SharedPreferences.getInstance();
     final raw = preferences.getString(storageKey);
@@ -22,5 +25,18 @@ class LocalFinanceDataSetRepository {
   Future<void> save(FinanceDataSet dataSet) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(storageKey, jsonEncode(dataSet.toJson()));
+  }
+
+  Future<String?> loadAcknowledgedRestoreGeneration(String userId) async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getString(_restoreGenerationKey(userId));
+  }
+
+  Future<void> saveAcknowledgedRestoreGeneration(
+    String userId,
+    String generation,
+  ) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_restoreGenerationKey(userId), generation);
   }
 }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../credit/credit_insights_calculator.dart';
+import '../../credit/credit_insights_completeness_ui.dart';
 import '../../domain/account.dart';
 import '../../domain/money.dart';
+import '../../domain/transaction.dart';
 import '../app_icons.dart';
 import '../design_tokens.dart';
 import '../money_format.dart';
@@ -12,6 +14,7 @@ class AccountCard extends StatelessWidget {
   const AccountCard({
     required this.account,
     required this.balanceMinor,
+    this.transactions = const [],
     this.currency = const CurrencyFormatSettings(),
     this.groupLabel,
     this.subtitle,
@@ -29,6 +32,7 @@ class AccountCard extends StatelessWidget {
 
   final AccountRecord account;
   final int balanceMinor;
+  final Iterable<TransactionRecord> transactions;
   final CurrencyFormatSettings currency;
   final String? groupLabel;
   final String? subtitle;
@@ -118,6 +122,7 @@ class AccountCard extends StatelessWidget {
               _CreditInsightsPreview(
                 account: account,
                 currentBalanceMinor: balanceMinor,
+                transactions: transactions,
                 currency: currency,
               ),
             ],
@@ -194,22 +199,36 @@ class _CreditInsightsPreview extends StatelessWidget {
   const _CreditInsightsPreview({
     required this.account,
     required this.currentBalanceMinor,
+    required this.transactions,
     required this.currency,
   });
 
   final AccountRecord account;
   final int currentBalanceMinor;
+  final Iterable<TransactionRecord> transactions;
   final CurrencyFormatSettings currency;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final formatter = MoneyFormatter(currency);
-    final estimate = const CreditInsightsCalculator().calculate(
+    const calculator = CreditInsightsCalculator();
+    final now = DateTime.now();
+    final estimate = calculator.calculate(
+      account: account,
+      transactions: transactions,
       currentBalanceMinor: currentBalanceMinor,
-      annualPercentageRate: account.annualPercentageRate,
-      statementClosingDay: account.statementClosingDay,
+      today: now,
     );
+    final nextPaymentDueDate = calculator.nextPaymentDueDate(
+      paymentDueDay: account.paymentDueDay,
+      today: now,
+    );
+    final completeness = estimate.estimateCompleteness;
+    final isPartial =
+        completeness == CreditInsightsEstimateCompleteness.partial;
+    final hasInsufficientHistory =
+        completeness == CreditInsightsEstimateCompleteness.insufficientHistory;
     return Container(
       padding: const EdgeInsets.only(top: AppSpacing.sm),
       decoration: BoxDecoration(
@@ -226,45 +245,64 @@ class _CreditInsightsPreview extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                flex: 16,
+                flex: 23,
                 child: _CreditInsightMetric(
-                  label: 'APR',
-                  value: account.annualPercentageRate == null
-                      ? '–'
-                      : '${account.annualPercentageRate!.toStringAsFixed(2)}%',
+                  label: 'Next Statement',
+                  value: _compactDateLabel(estimate.nextStatementClosingDate),
+                  supporting: _countdownLabel(
+                    estimate.daysUntilStatementClosing,
+                  ),
                 ),
               ),
               const _CreditInsightDivider(),
               Expanded(
-                flex: 26,
+                flex: 20,
                 child: _CreditInsightMetric(
-                  label: 'Next Statement',
-                  value: _statementCloseDateLabel(estimate),
-                  supporting: _statementCloseDaysLabel(estimate),
+                  label: 'Payment Due',
+                  value: _compactDateLabel(nextPaymentDueDate),
+                  supporting: _countdownLabel(
+                    nextPaymentDueDate
+                        ?.difference(DateTime(now.year, now.month, now.day))
+                        .inDays,
+                  ),
                 ),
               ),
-              if (estimate.hasInterestEstimate) ...[
-                const _CreditInsightDivider(),
-                Expanded(
-                  flex: 28,
-                  child: _CreditInsightMetric(
-                    label: 'Estimated Interest',
-                    value: formatter.formatMinor(
-                      estimate.estimatedInterestMinor!,
-                    ),
-                  ),
+              const _CreditInsightDivider(),
+              Expanded(
+                flex: 27,
+                child: _CreditInsightMetric(
+                  label: 'Estimated Interest',
+                  value: hasInsufficientHistory
+                      ? ''
+                      : estimate.estimatedInterestMinor == null
+                      ? '–'
+                      : formatter.formatMinor(estimate.estimatedInterestMinor!),
+                  valueWidget: hasInsufficientHistory
+                      ? CreditInsightsCompletenessIndicator(
+                          completeness: completeness,
+                          compact: true,
+                        )
+                      : null,
+                  supportingWidget: isPartial
+                      ? CreditInsightsCompletenessIndicator(
+                          completeness: completeness,
+                          compact: true,
+                        )
+                      : null,
                 ),
-                const _CreditInsightDivider(),
-                Expanded(
-                  flex: 30,
-                  child: _CreditInsightMetric(
-                    label: 'Projected Statement',
-                    value: formatter.formatMinor(
-                      estimate.projectedStatementMinor!,
-                    ),
-                  ),
+              ),
+              const _CreditInsightDivider(),
+              Expanded(
+                flex: 30,
+                child: _CreditInsightMetric(
+                  label: 'Projected Statement',
+                  value: estimate.projectedStatementMinor == null
+                      ? '–'
+                      : formatter.formatMinor(
+                          estimate.projectedStatementMinor!,
+                        ),
                 ),
-              ],
+              ),
             ],
           ),
         ],
@@ -272,9 +310,8 @@ class _CreditInsightsPreview extends StatelessWidget {
     );
   }
 
-  String _statementCloseDateLabel(CreditInsightsEstimate estimate) {
-    final closing = estimate.nextStatementClosingDate;
-    if (closing == null) return '–';
+  String _compactDateLabel(DateTime? date) {
+    if (date == null) return '–';
     const monthNames = [
       'Jan',
       'Feb',
@@ -289,14 +326,14 @@ class _CreditInsightsPreview extends StatelessWidget {
       'Nov',
       'Dec',
     ];
-    return '${monthNames[closing.month - 1]} ${closing.day}, ${closing.year}';
+    return '${monthNames[date.month - 1]} ${date.day}';
   }
 
-  String? _statementCloseDaysLabel(CreditInsightsEstimate estimate) {
-    final days = estimate.daysUntilStatementClosing;
+  String? _countdownLabel(int? days) {
     if (days == null) return null;
     if (days == 0) return 'Today';
-    return '$days ${days == 1 ? 'day' : 'days'}';
+    if (days == 1) return 'Tomorrow';
+    return '$days days';
   }
 }
 
@@ -305,11 +342,15 @@ class _CreditInsightMetric extends StatelessWidget {
     required this.label,
     required this.value,
     this.supporting,
+    this.valueWidget,
+    this.supportingWidget,
   });
 
   final String label;
   final String value;
   final String? supporting;
+  final Widget? valueWidget;
+  final Widget? supportingWidget;
 
   @override
   Widget build(BuildContext context) {
@@ -340,41 +381,45 @@ class _CreditInsightMetric extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             height: 22,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.center,
-              child: Text(
-                value,
-                maxLines: 1,
-                softWrap: false,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  fontFeatures: const [AppTextStyles.tabularFigures],
+            child:
+                valueWidget ??
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.center,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    softWrap: false,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [AppTextStyles.tabularFigures],
+                    ),
+                  ),
                 ),
-              ),
-            ),
           ),
           const SizedBox(height: 2),
           SizedBox(
             width: double.infinity,
             height: 16,
-            child: supporting == null
-                ? null
-                : FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.center,
-                    child: Text(
-                      supporting!,
-                      maxLines: 1,
-                      softWrap: false,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontFeatures: const [AppTextStyles.tabularFigures],
-                      ),
-                    ),
-                  ),
+            child:
+                supportingWidget ??
+                (supporting == null
+                    ? null
+                    : FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.center,
+                        child: Text(
+                          supporting!,
+                          maxLines: 1,
+                          softWrap: false,
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontFeatures: const [AppTextStyles.tabularFigures],
+                          ),
+                        ),
+                      )),
           ),
         ],
       ),

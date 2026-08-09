@@ -451,6 +451,15 @@ class _MigrationRecordRepository implements FinanceRecordRepository {
   Future<FinanceDataSet> loadDataSet(String userId) async => remoteDataSet;
 
   @override
+  Future<String?> activeRestoreGeneration(String userId) async => null;
+
+  @override
+  Future<String> replaceDataSetAuthoritatively({
+    required String userId,
+    required FinanceDataSet dataSet,
+  }) async => 'unused-generation';
+
+  @override
   Future<void> saveAccount({
     required String userId,
     required v2_account.AccountRecord account,

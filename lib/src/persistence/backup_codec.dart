@@ -6,8 +6,11 @@ import '../domain/transaction.dart';
 class BackupCodec {
   const BackupCodec();
 
-  String encodeJson(FinanceDataSet dataSet) {
-    return const JsonEncoder.withIndent('  ').convert(dataSet.toJson());
+  String encodeJson(FinanceDataSet dataSet, {DateTime? exportedAt}) {
+    return const JsonEncoder.withIndent('  ').convert({
+      ...dataSet.toJson(),
+      'exportedAt': (exportedAt ?? DateTime.now()).toUtc().toIso8601String(),
+    });
   }
 
   FinanceDataSet decodeJson(String rawJson) {

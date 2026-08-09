@@ -1,77 +1,214 @@
-/// A deliberately simple, transparent first-pass Credit Insights estimate.
+import '../domain/account.dart';
+import '../domain/transaction.dart';
+
+enum CreditInsightsEstimateCompleteness {
+  complete,
+  partial,
+  insufficientHistory,
+}
+
+/// A read-only estimate for the currently active credit-card billing cycle.
 ///
-/// The estimator uses the current revolving balance and a 365-day simple
-/// interest approximation. It is isolated from UI and transaction code so a
-/// future average-daily-balance implementation can replace only this layer.
+/// Money values remain in minor units. [averageDailyBalanceMinor] is a double
+/// so the average is not rounded before interest is calculated.
 class CreditInsightsEstimate {
   const CreditInsightsEstimate({
     required this.nextStatementClosingDate,
     required this.daysUntilStatementClosing,
+    required this.cycleStart,
+    required this.cycleEnd,
+    required this.representedStart,
+    required this.representedEnd,
+    required this.daysRepresented,
+    required this.totalCycleDays,
+    required this.averageDailyBalanceMinor,
     required this.estimatedInterestMinor,
     required this.projectedStatementMinor,
+    required this.estimateCompleteness,
   });
 
   final DateTime? nextStatementClosingDate;
   final int? daysUntilStatementClosing;
+  final DateTime? cycleStart;
+  final DateTime? cycleEnd;
+  final DateTime? representedStart;
+  final DateTime? representedEnd;
+  final int daysRepresented;
+  final int totalCycleDays;
+  final double? averageDailyBalanceMinor;
 
-  /// A positive cost in minor units. Null means the inputs are incomplete.
+  /// A positive estimated cost in minor units. Null means calculation inputs
+  /// or reliable account history are unavailable.
   final int? estimatedInterestMinor;
 
-  /// Uses the app's signed card-balance convention: a revolving balance and
-  /// its projected statement are negative.
+  /// Uses Trackmark's signed card-balance convention: debt and its projected
+  /// statement are negative values.
   final int? projectedStatementMinor;
+  final CreditInsightsEstimateCompleteness estimateCompleteness;
 
   bool get hasInterestEstimate => estimatedInterestMinor != null;
 }
 
+/// Reconstructs end-of-day credit-card debt from Trackmark's existing account
+/// baseline and ordinary transaction effects.
+///
+/// The service never writes account data. It intentionally does not infer
+/// issuer grace periods, posting rules, compounding, or multiple APR buckets.
 class CreditInsightsCalculator {
   const CreditInsightsCalculator();
 
   CreditInsightsEstimate calculate({
+    required AccountRecord account,
+    required Iterable<TransactionRecord> transactions,
     required int currentBalanceMinor,
-    required double? annualPercentageRate,
-    required int? statementClosingDay,
     DateTime? today,
   }) {
     final referenceDate = _calendarDate(today ?? DateTime.now());
-    final closingDate = nextStatementClosingDate(
-      statementClosingDay: statementClosingDay,
+    final cycle = currentStatementCycle(
+      statementClosingDay: account.statementClosingDay,
       today: referenceDate,
     );
-    final daysUntilClosing = closingDate?.difference(referenceDate).inDays;
+    final closingDate = cycle?.end;
+    final daysUntilClosing = closingDate == null
+        ? null
+        : _calendarDayDifference(referenceDate, closingDate);
+    final apr = account.annualPercentageRate;
 
-    if (annualPercentageRate == null ||
-        annualPercentageRate.isNegative ||
-        closingDate == null ||
-        daysUntilClosing == null) {
+    if (cycle == null || apr == null || apr.isNegative) {
+      return _unavailableEstimate(
+        closingDate: closingDate,
+        daysUntilClosing: daysUntilClosing,
+        cycle: cycle,
+      );
+    }
+
+    final historyStart = _calendarDate(account.sync.createdAt);
+    final representedStart = historyStart.isAfter(cycle.start)
+        ? historyStart
+        : cycle.start;
+    final representedEnd = referenceDate.isBefore(cycle.end)
+        ? referenceDate
+        : cycle.end;
+    final totalCycleDays = _inclusiveDays(cycle.start, cycle.end);
+
+    if (representedStart.isAfter(representedEnd)) {
       return CreditInsightsEstimate(
         nextStatementClosingDate: closingDate,
         daysUntilStatementClosing: daysUntilClosing,
+        cycleStart: cycle.start,
+        cycleEnd: cycle.end,
+        representedStart: null,
+        representedEnd: null,
+        daysRepresented: 0,
+        totalCycleDays: totalCycleDays,
+        averageDailyBalanceMinor: null,
         estimatedInterestMinor: null,
         projectedStatementMinor: null,
+        estimateCompleteness:
+            CreditInsightsEstimateCompleteness.insufficientHistory,
       );
     }
 
-    // A zero or positive card balance has no revolving balance to estimate.
-    if (currentBalanceMinor >= 0) {
-      return CreditInsightsEstimate(
-        nextStatementClosingDate: closingDate,
-        daysUntilStatementClosing: daysUntilClosing,
-        estimatedInterestMinor: 0,
-        projectedStatementMinor: currentBalanceMinor,
-      );
+    final dailyDeltas = <DateTime, int>{};
+    for (final transaction in transactions) {
+      if (transaction.isDeleted) continue;
+      final delta = transaction.deltaForAccount(account.id);
+      if (delta == 0) continue;
+      final date = _calendarDate(transaction.date);
+      dailyDeltas[date] = (dailyDeltas[date] ?? 0) + delta;
     }
 
-    final simpleInterestMinor =
-        (currentBalanceMinor.abs() *
-                (annualPercentageRate / 100) *
-                (daysUntilClosing / 365))
-            .round();
+    var signedBalanceMinor = account.openingBalanceMinor;
+    for (final entry in dailyDeltas.entries) {
+      if (entry.key.isBefore(representedStart)) {
+        signedBalanceMinor += entry.value;
+      }
+    }
+
+    var representedDay = representedStart;
+    var daysRepresented = 0;
+    var summedDailyDebtMinor = 0;
+    while (!representedDay.isAfter(representedEnd)) {
+      signedBalanceMinor += dailyDeltas[representedDay] ?? 0;
+      // Credit-card debt is negative in Trackmark. A zero or positive balance
+      // is not interest-bearing debt for this estimate.
+      summedDailyDebtMinor += signedBalanceMinor < 0
+          ? signedBalanceMinor.abs()
+          : 0;
+      daysRepresented += 1;
+      representedDay = _nextCalendarDay(representedDay);
+    }
+
+    final averageDailyBalanceMinor = summedDailyDebtMinor / daysRepresented;
+    final dailyPeriodicRate = apr / 100 / 365;
+    final estimatedInterestMinor = (summedDailyDebtMinor * dailyPeriodicRate)
+        .round();
+
     return CreditInsightsEstimate(
       nextStatementClosingDate: closingDate,
       daysUntilStatementClosing: daysUntilClosing,
-      estimatedInterestMinor: simpleInterestMinor,
-      projectedStatementMinor: currentBalanceMinor - simpleInterestMinor,
+      cycleStart: cycle.start,
+      cycleEnd: cycle.end,
+      representedStart: representedStart,
+      representedEnd: representedEnd,
+      daysRepresented: daysRepresented,
+      totalCycleDays: totalCycleDays,
+      averageDailyBalanceMinor: averageDailyBalanceMinor,
+      estimatedInterestMinor: estimatedInterestMinor,
+      projectedStatementMinor: currentBalanceMinor - estimatedInterestMinor,
+      estimateCompleteness: historyStart.isAfter(cycle.start)
+          ? CreditInsightsEstimateCompleteness.partial
+          : CreditInsightsEstimateCompleteness.complete,
+    );
+  }
+
+  CreditInsightsEstimate _unavailableEstimate({
+    required DateTime? closingDate,
+    required int? daysUntilClosing,
+    required CreditStatementCycle? cycle,
+  }) {
+    return CreditInsightsEstimate(
+      nextStatementClosingDate: closingDate,
+      daysUntilStatementClosing: daysUntilClosing,
+      cycleStart: cycle?.start,
+      cycleEnd: cycle?.end,
+      representedStart: null,
+      representedEnd: null,
+      daysRepresented: 0,
+      totalCycleDays: cycle == null
+          ? 0
+          : _inclusiveDays(cycle.start, cycle.end),
+      averageDailyBalanceMinor: null,
+      estimatedInterestMinor: null,
+      projectedStatementMinor: null,
+      estimateCompleteness:
+          CreditInsightsEstimateCompleteness.insufficientHistory,
+    );
+  }
+
+  CreditStatementCycle? currentStatementCycle({
+    required int? statementClosingDay,
+    required DateTime today,
+  }) {
+    if (!_isValidConfiguredDay(statementClosingDay)) return null;
+    final referenceDate = _calendarDate(today);
+    final currentClose = _nextDayOfMonth(
+      configuredDay: statementClosingDay,
+      today: referenceDate,
+    )!;
+    final previousMonth = DateTime(
+      currentClose.year,
+      currentClose.month - 1,
+      1,
+    );
+    final previousClose = _closingDateFor(
+      previousMonth.year,
+      previousMonth.month,
+      statementClosingDay!,
+    );
+    return CreditStatementCycle(
+      start: _nextCalendarDay(previousClose),
+      end: currentClose,
     );
   }
 
@@ -81,26 +218,52 @@ class CreditInsightsCalculator {
     required int? statementClosingDay,
     required DateTime today,
   }) {
-    if (statementClosingDay == null ||
-        statementClosingDay < 1 ||
-        statementClosingDay > 31) {
-      return null;
-    }
+    return _nextDayOfMonth(configuredDay: statementClosingDay, today: today);
+  }
+
+  /// Returns the next payment due date, clamping configured days such as 31
+  /// to the final valid day of shorter months.
+  DateTime? nextPaymentDueDate({
+    required int? paymentDueDay,
+    required DateTime today,
+  }) {
+    return _nextDayOfMonth(configuredDay: paymentDueDay, today: today);
+  }
+
+  DateTime? _nextDayOfMonth({
+    required int? configuredDay,
+    required DateTime today,
+  }) {
+    if (!_isValidConfiguredDay(configuredDay)) return null;
     final referenceDate = _calendarDate(today);
-    var closingDate = _closingDateFor(
+    var date = _closingDateFor(
       referenceDate.year,
       referenceDate.month,
-      statementClosingDay,
+      configuredDay!,
     );
-    if (closingDate.isBefore(referenceDate)) {
-      closingDate = _closingDateFor(
+    if (date.isBefore(referenceDate)) {
+      date = _closingDateFor(
         referenceDate.year,
         referenceDate.month + 1,
-        statementClosingDay,
+        configuredDay,
       );
     }
-    return closingDate;
+    return date;
   }
+
+  bool _isValidConfiguredDay(int? day) => day != null && day >= 1 && day <= 31;
+
+  int _inclusiveDays(DateTime start, DateTime end) =>
+      _calendarDayDifference(start, end) + 1;
+
+  int _calendarDayDifference(DateTime start, DateTime end) {
+    final utcStart = DateTime.utc(start.year, start.month, start.day);
+    final utcEnd = DateTime.utc(end.year, end.month, end.day);
+    return utcEnd.difference(utcStart).inDays;
+  }
+
+  DateTime _nextCalendarDay(DateTime date) =>
+      DateTime(date.year, date.month, date.day + 1);
 
   DateTime _closingDateFor(int year, int month, int day) {
     final finalDay = DateTime(year, month + 1, 0).day;
@@ -111,4 +274,11 @@ class CreditInsightsCalculator {
     final local = date.toLocal();
     return DateTime(local.year, local.month, local.day);
   }
+}
+
+class CreditStatementCycle {
+  const CreditStatementCycle({required this.start, required this.end});
+
+  final DateTime start;
+  final DateTime end;
 }

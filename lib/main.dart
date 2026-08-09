@@ -28,9 +28,12 @@ import 'src/design/widgets/account_card.dart';
 import 'src/design/widgets/floating_action_button.dart';
 import 'src/design/widgets/floating_action_menu.dart';
 import 'src/design/widgets/money_text.dart';
+import 'src/design/widgets/percentage_entry_field.dart';
 import 'src/design/widgets/scheduled_transaction_row.dart';
 import 'src/design/widgets/transaction_row.dart';
 import 'src/budgets/budget_calculator.dart';
+import 'src/credit/credit_insights_calculator.dart';
+import 'src/credit/credit_insights_completeness_ui.dart';
 import 'src/domain/budget.dart';
 import 'src/domain/account.dart' as v2_account;
 import 'src/domain/category.dart' as v2_category;
@@ -50,6 +53,7 @@ import 'src/ledger/ledger_projection.dart';
 import 'src/notifications/local_notification_scheduler.dart';
 import 'src/notifications/notification_scheduler.dart';
 import 'src/persistence/backup_codec.dart';
+import 'src/persistence/backup_restore_service.dart';
 import 'src/persistence/finance_record_repository.dart';
 import 'src/persistence/firestore_record_repository.dart';
 import 'src/reporting/report_calculator.dart';
@@ -96,6 +100,12 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
     final launchStopwatch = Stopwatch()..start();
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
+    );
+    // Trackmark's v2 repository is the durable offline source of truth.
+    // Disabling Firestore's second disk cache prevents stale reads and pending
+    // mutation queues from masquerading as a completed cloud sync.
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
     );
     NotificationScheduler notificationScheduler =
         const NoopNotificationScheduler();

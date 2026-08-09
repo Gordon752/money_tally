@@ -350,6 +350,22 @@ class _FinanceHomeState extends State<FinanceHome> {
     );
   }
 
+  Future<void> _openAccountLedger(String accountId) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => AccountLedgerScreen(
+          accountId: accountId,
+          onOpenSettings: () {
+            Navigator.of(routeContext).pop();
+            if (mounted) {
+              setState(() => selected = FinanceSection.settings);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _sectionBody() {
     if (selected == FinanceSection.plan) {
       return PlanView(
@@ -410,10 +426,7 @@ class _FinanceHomeState extends State<FinanceHome> {
                       setState(() => selected = FinanceSection.scheduled),
                 ),
                 FinanceSection.accounts => AccountsView(
-                  onOpenLedgerForAccount: (accountId) => setState(() {
-                    ledgerAccountFilterId = accountId;
-                    selected = FinanceSection.ledger;
-                  }),
+                  onOpenLedgerForAccount: _openAccountLedger,
                 ),
                 FinanceSection.ledger => LedgerView(
                   key: ValueKey(
@@ -452,6 +465,113 @@ class _FinanceHomeState extends State<FinanceHome> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class AccountLedgerScreen extends StatefulWidget {
+  const AccountLedgerScreen({
+    required this.accountId,
+    required this.onOpenSettings,
+    super.key,
+  });
+
+  final String accountId;
+  final VoidCallback onOpenSettings;
+
+  @override
+  State<AccountLedgerScreen> createState() => _AccountLedgerScreenState();
+}
+
+class _AccountLedgerScreenState extends State<AccountLedgerScreen> {
+  var _isScrolling = false;
+  Timer? _scrollSettleTimer;
+
+  @override
+  void dispose() {
+    _scrollSettleTimer?.cancel();
+    super.dispose();
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    if (notification is ScrollStartNotification) {
+      _scrollSettleTimer?.cancel();
+      if (!_isScrolling) setState(() => _isScrolling = true);
+    } else if (notification is ScrollEndNotification) {
+      _scrollSettleTimer?.cancel();
+      _scrollSettleTimer = Timer(const Duration(milliseconds: 120), () {
+        if (mounted && _isScrolling) setState(() => _isScrolling = false);
+      });
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final preferences = FinanceDataStoreScope.watch(context).preferences;
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    final duration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
+    return Scaffold(
+      key: const ValueKey('account-ledger-screen'),
+      body: SafeArea(
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _handleScrollNotification,
+          child: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: PageHeader(
+                  section: FinanceSection.ledger,
+                  onOpenSettings: widget.onOpenSettings,
+                  onBack: () => Navigator.of(context).pop(),
+                ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 112),
+                sliver: SliverToBoxAdapter(
+                  child: LedgerView(
+                    key: ValueKey('account-ledger-${widget.accountId}'),
+                    initialAccountFilterId: widget.accountId,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: IgnorePointer(
+        ignoring: _isScrolling,
+        child: AnimatedScale(
+          scale: _isScrolling ? 0.78 : 1,
+          duration: duration,
+          curve: Curves.easeOutCubic,
+          child: AnimatedOpacity(
+            opacity: _isScrolling ? 0.18 : 1,
+            duration: duration,
+            curve: Curves.easeOutCubic,
+            child: MoneyTallyFloatingActionButton(
+              tooltip: 'Add',
+              onPressed: () => showFloatingAddMenu(
+                context,
+                section: FinanceSection.ledger,
+                initialAccountId: widget.accountId,
+              ),
+              child: Icon(AppIcon.add),
+            ),
+          ),
+        ),
+      ),
+      floatingActionButtonLocation:
+          switch (preferences.floatingAddButtonPosition) {
+            FloatingAddButtonPosition.left =>
+              FloatingActionButtonLocation.startFloat,
+            FloatingAddButtonPosition.center =>
+              FloatingActionButtonLocation.centerFloat,
+            FloatingAddButtonPosition.right =>
+              FloatingActionButtonLocation.endFloat,
+          },
     );
   }
 }
@@ -561,11 +681,13 @@ class PageHeader extends StatelessWidget {
   const PageHeader({
     required this.section,
     required this.onOpenSettings,
+    this.onBack,
     super.key,
   });
 
   final FinanceSection section;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -577,6 +699,21 @@ class PageHeader extends StatelessWidget {
         children: [
           Row(
             children: [
+              if (onBack != null) ...[
+                IconButton(
+                  key: const ValueKey('account-ledger-back'),
+                  tooltip: 'Back to Accounts',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 40,
+                    minHeight: 40,
+                  ),
+                  onPressed: onBack,
+                  icon: Icon(AppIcon.chevronLeft, size: AppIconSize.action),
+                ),
+                const SizedBox(width: AppSpacing.xxs),
+              ],
               const Expanded(
                 child: Text(
                   trackmarkMoneyName,
@@ -1814,6 +1951,7 @@ class AccountGroupCard extends StatelessWidget {
                             },
                             child: AccountCard(
                               account: accounts[index],
+                              transactions: store.transactions,
                               balanceMinor: store.balanceForAccount(
                                 accounts[index].id,
                               ),
@@ -1827,10 +1965,10 @@ class AccountGroupCard extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(
                                 vertical: AppSpacing.sm,
                               ),
-                              leading: Icon(
-                                accountGroupIcon(group.name),
-                                color: AppTheme.accent,
-                                size: AppIconSize.form,
+                              leading: AccountAppearanceBadge(
+                                accountType: accounts[index].type,
+                                iconId: accounts[index].appearanceIconId,
+                                accentId: accounts[index].appearanceAccentId,
                               ),
                               onTap: onOpenLedgerForAccount == null
                                   ? null
@@ -1986,6 +2124,7 @@ class AccountGroupCard extends StatelessWidget {
         },
         child: AccountCard(
           account: account,
+          transactions: store.transactions,
           balanceMinor: store.balanceForAccount(account.id),
           currency: store.preferences.currency,
           subtitle: lastAccountActivitySubtitle(store, account.id),
@@ -7520,6 +7659,9 @@ class SettingsView extends StatefulWidget {
     this.onSyncNow,
     this.onSignOut,
     this.exportFileService,
+    this.backupImportFileService,
+    this.backupSafetyFileService,
+    this.backupRestoreValidator = const BackupRestoreValidator(),
     this.now,
     super.key,
   });
@@ -7530,6 +7672,9 @@ class SettingsView extends StatefulWidget {
   final Future<void> Function()? onSyncNow;
   final VoidCallback? onSignOut;
   final ExportFileService? exportFileService;
+  final BackupImportFileService? backupImportFileService;
+  final BackupSafetyFileService? backupSafetyFileService;
+  final BackupRestoreValidator backupRestoreValidator;
   final DateTime Function()? now;
 
   static const _currencyOptions = [
@@ -7555,16 +7700,28 @@ class SettingsView extends StatefulWidget {
 
 class _SettingsViewState extends State<SettingsView> {
   ExportFileService? _defaultExportFileService;
+  BackupImportFileService? _defaultBackupImportFileService;
+  BackupSafetyFileService? _defaultBackupSafetyFileService;
   _ExportKind? _sharingExport;
+  var _isImportingBackup = false;
 
   ExportFileService get _exportFileService =>
       widget.exportFileService ??
       (_defaultExportFileService ??= ExportFileService());
 
+  BackupImportFileService get _backupImportFileService =>
+      widget.backupImportFileService ??
+      (_defaultBackupImportFileService ??= BackupImportFileService());
+
+  BackupSafetyFileService get _backupSafetyFileService =>
+      widget.backupSafetyFileService ??
+      (_defaultBackupSafetyFileService ??= BackupSafetyFileService());
+
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final preferences = store.preferences;
+    final isSyncing = widget.syncLabel == 'Syncing';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -7586,7 +7743,7 @@ class _SettingsViewState extends State<SettingsView> {
               },
               trailingText: widget.syncLabel,
               showStatusPill: true,
-              onTap: widget.onSyncNow == null
+              onTap: widget.onSyncNow == null || isSyncing
                   ? null
                   : () => widget.onSyncNow!.call(),
             ),
@@ -7603,10 +7760,15 @@ class _SettingsViewState extends State<SettingsView> {
             if (widget.onSyncNow != null)
               SettingsActionRow(
                 icon: AppIcon.sync,
-                title: 'Sync now',
-                subtitle: 'Refresh your data',
+                title: isSyncing ? 'Syncing…' : 'Sync now',
+                subtitle: isSyncing
+                    ? 'Refreshing your Trackmark data'
+                    : widget.syncLabel == 'Sync issue'
+                    ? 'Try syncing again'
+                    : 'Refresh your data',
+                showProgress: isSyncing,
                 showDivider: widget.onSignOut != null,
-                onTap: () => widget.onSyncNow!.call(),
+                onTap: isSyncing ? null : () => widget.onSyncNow!.call(),
               ),
             if (widget.onSignOut != null)
               SettingsActionRow(
@@ -7836,15 +7998,155 @@ class _SettingsViewState extends State<SettingsView> {
             ),
             SettingsActionRow(
               icon: AppIcon.restore,
-              title: 'Backup and restore',
-              subtitle: 'Restore a JSON backup from the clipboard',
+              title: 'Import Backup',
+              subtitle: _isImportingBackup
+                  ? 'Preparing restore…'
+                  : 'Select, validate, and restore a Trackmark backup',
+              trailingText: _isImportingBackup ? 'Working…' : null,
               showDivider: false,
-              onTap: () => restoreJsonBackupFromClipboard(context),
+              onTap: _isImportingBackup ? null : _importBackup,
             ),
           ],
         ),
       ],
     );
+  }
+
+  Future<void> _importBackup() async {
+    if (_isImportingBackup) return;
+    final store = FinanceDataStoreScope.read(context);
+    setState(() => _isImportingBackup = true);
+    try {
+      final selected = await _backupImportFileService.selectBackup();
+      if (!mounted || selected == null) return;
+
+      final ValidatedBackup backup;
+      try {
+        backup = widget.backupRestoreValidator.validate(selected.content);
+      } on BackupValidationException catch (error) {
+        if (!mounted) return;
+        await _showBackupError(context, error.message);
+        return;
+      } on Object {
+        if (!mounted) return;
+        await _showBackupError(
+          context,
+          'This backup could not be decoded safely. Your current data was not changed.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      final confirmed = await _showRestorePreview(
+        context,
+        backup: backup,
+        fileName: selected.name,
+        cloudEnabled: store.hasRemoteSync,
+      );
+      if (!mounted || confirmed != true) return;
+
+      final createdAt = widget.now?.call() ?? DateTime.now();
+      final safetyJson = const BackupCodec().encodeJson(
+        store.dataSet,
+        exportedAt: createdAt,
+      );
+      final ExportedFile safetyBackup;
+      try {
+        safetyBackup = await _backupSafetyFileService.savePreRestoreBackup(
+          content: safetyJson,
+          createdAt: createdAt,
+        );
+      } on Object {
+        if (!mounted) return;
+        await _showBackupError(
+          context,
+          'Trackmark could not create and verify the required pre-restore safety backup. Nothing was changed.',
+        );
+        return;
+      }
+
+      try {
+        await store.restoreBackupDataSet(backup.dataSet);
+      } on AuthoritativeRestoreLocalInstallException {
+        if (!mounted) return;
+        await _showBackupError(
+          context,
+          'The restored backup is now authoritative in Trackmark cloud sync, but this device could not finish saving its local copy. Your pre-restore safety backup is ${safetyBackup.fileName}. Close and reopen Trackmark, then sync again; stale cloud data cannot override the restored backup.',
+          title: 'Backup Restore Needs Attention',
+        );
+        return;
+      } on Object {
+        if (!mounted) return;
+        await _showBackupError(
+          context,
+          'Trackmark could not complete the restore safely. The prior local data was retained. The safety backup remains at ${safetyBackup.fileName}.',
+        );
+        return;
+      }
+
+      var notificationsRebuilt = true;
+      try {
+        await store.refreshScheduledNotifications();
+      } on Object {
+        // The authoritative replacement has already completed. A device-only
+        // notification failure must not be reported as a rolled-back restore.
+        notificationsRebuilt = false;
+      }
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Backup Restored'),
+          content: Text(
+            [
+              if (store.hasRemoteSync)
+                'Your Trackmark data was restored successfully and synchronized as the authoritative cloud dataset.'
+              else
+                'Your Trackmark data was restored successfully.',
+              'A pre-restore safety backup was saved as ${safetyBackup.fileName}.',
+              if (!notificationsRebuilt)
+                'Trackmark could not re-register this device\'s scheduled notifications. Your restored data is safe; review notification settings to try again.',
+            ].join('\n\n'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => _shareSafetyBackup(dialogContext, safetyBackup),
+              child: const Text('Share Safety Backup'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } on Object {
+      if (!mounted) return;
+      await _showBackupError(
+        context,
+        'Trackmark could not open the selected backup file. Your current data was not changed.',
+      );
+    } finally {
+      if (mounted) setState(() => _isImportingBackup = false);
+    }
+  }
+
+  Future<void> _shareSafetyBackup(
+    BuildContext anchorContext,
+    ExportedFile safetyBackup,
+  ) async {
+    try {
+      await _exportFileService.shareExistingFile(
+        file: safetyBackup,
+        shareTitle: 'Trackmark pre-restore safety backup',
+        sharePositionOrigin: exportSharePositionOrigin(anchorContext),
+      );
+    } on Object {
+      if (!anchorContext.mounted) return;
+      ScaffoldMessenger.of(anchorContext).showSnackBar(
+        const SnackBar(content: Text('Could not share the safety backup file')),
+      );
+    }
   }
 
   Future<void> _showExportActions(
@@ -7904,6 +8206,137 @@ class _SettingsViewState extends State<SettingsView> {
     } finally {
       if (mounted) setState(() => _sharingExport = null);
     }
+  }
+}
+
+Future<bool?> _showRestorePreview(
+  BuildContext context, {
+  required ValidatedBackup backup,
+  required String fileName,
+  required bool cloudEnabled,
+}) {
+  final dataSet = backup.dataSet;
+  final exportedAt = backup.exportedAt?.toLocal();
+  return showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Restore Backup?'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(fileName, style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 12),
+            _BackupPreviewRow(
+              label: 'Backup date',
+              value: exportedAt == null
+                  ? 'Not recorded'
+                  : '${shortDate(exportedAt)} · ${TimeOfDay.fromDateTime(exportedAt).format(context)}',
+            ),
+            _BackupPreviewRow(
+              label: 'Schema version',
+              value: backup.sourceSchemaVersion == backup.schemaVersion
+                  ? '${backup.schemaVersion}'
+                  : '${backup.sourceSchemaVersion} → ${backup.schemaVersion}',
+            ),
+            _BackupPreviewRow(
+              label: 'Accounts',
+              value: '${dataSet.accounts.length}',
+            ),
+            _BackupPreviewRow(
+              label: 'Transactions',
+              value: '${dataSet.transactions.length}',
+            ),
+            _BackupPreviewRow(
+              label: 'Scheduled Transactions',
+              value: '${dataSet.scheduledTransactions.length}',
+            ),
+            _BackupPreviewRow(
+              label: 'Categories',
+              value: '${dataSet.categories.length}',
+            ),
+            _BackupPreviewRow(
+              label: 'Budgets',
+              value: '${dataSet.budgets.length}',
+            ),
+            _BackupPreviewRow(label: 'Goals', value: '${dataSet.goals.length}'),
+            const SizedBox(height: 16),
+            const Text(
+              'Restoring this backup will replace the current Trackmark data on this device.',
+            ),
+            if (cloudEnabled) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'The restored backup will also become the authoritative Trackmark cloud dataset.',
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Update Trackmark on your other devices before their next sync. Older versions cannot read an authoritative restored dataset.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            const SizedBox(height: 10),
+            Text(
+              'Trackmark will create and verify a pre-restore safety backup before changing any data.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppTheme.rose),
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('Restore Backup'),
+        ),
+      ],
+    ),
+  );
+}
+
+Future<void> _showBackupError(
+  BuildContext context,
+  String message, {
+  String title = 'Backup Could Not Be Restored',
+}) {
+  return showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _BackupPreviewRow extends StatelessWidget {
+  const _BackupPreviewRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          const SizedBox(width: 16),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
   }
 }
 
@@ -9766,6 +10199,7 @@ class SettingsActionRow extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.trailingText,
+    this.showProgress = false,
     this.showStatusPill = false,
     this.showDivider = true,
     this.destructive = false,
@@ -9777,6 +10211,7 @@ class SettingsActionRow extends StatelessWidget {
   final String title;
   final String? subtitle;
   final String? trailingText;
+  final bool showProgress;
   final bool showStatusPill;
   final bool showDivider;
   final bool destructive;
@@ -9820,7 +10255,12 @@ class SettingsActionRow extends StatelessWidget {
                   height: 1.2,
                 ),
               ),
-        trailing: showStatusPill && trailingText != null
+        trailing: showProgress
+            ? const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+              )
+            : showStatusPill && trailingText != null
             ? Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -9945,34 +10385,6 @@ Future<void> copyExportToClipboard(
   await Clipboard.setData(ClipboardData(text: payload));
   if (!context.mounted) return;
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(title)));
-}
-
-Future<void> restoreJsonBackupFromClipboard(BuildContext context) async {
-  final store = FinanceDataStoreScope.read(context);
-  final clipboardData = await Clipboard.getData('text/plain');
-  final rawJson = clipboardData?.text;
-  if (rawJson == null || rawJson.trim().isEmpty) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Clipboard does not contain a JSON backup')),
-    );
-    return;
-  }
-
-  try {
-    final restored = const BackupCodec().decodeJson(rawJson);
-    await store.restoreBackupDataSet(restored);
-    await store.refreshScheduledNotifications();
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('JSON backup restored')));
-  } catch (_) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Could not restore JSON backup')),
-    );
-  }
 }
 
 class AccountBalancePanel extends StatelessWidget {
@@ -11756,6 +12168,7 @@ Future<void> showAccountOptions(
   String accountId, {
   Set<String>? allowedActions,
 }) async {
+  final isFullActionMenu = allowedActions == null;
   bool allows(String action) =>
       allowedActions == null || allowedActions.contains(action);
   final dataStore = FinanceDataStoreScope.read(context);
@@ -11829,9 +12242,12 @@ Future<void> showAccountOptions(
               ),
             if (allows('edit'))
               ListTile(
-                leading: Icon(AppIcon.edit),
-                title: Text('Edit'),
-                onTap: () => Navigator.pop(context, 'edit'),
+                leading: Icon(isFullActionMenu ? AppIcon.info : AppIcon.edit),
+                title: Text(isFullActionMenu ? 'Account Details' : 'Edit'),
+                onTap: () => Navigator.pop(
+                  context,
+                  isFullActionMenu ? 'details' : 'edit',
+                ),
               ),
             if (allows('archive'))
               ListTile(
@@ -11875,6 +12291,8 @@ Future<void> showAccountOptions(
     await dataStore.moveAccountWithinGroup(accountId: accountId, direction: 1);
   } else if (action == 'changeType' && context.mounted) {
     await showChangeAccountTypeDialog(context, account);
+  } else if (action == 'details' && context.mounted) {
+    await showAccountDetailsSheet(context, account.id);
   } else if (action == 'edit' && context.mounted) {
     await showEditAccountDialog(context, account);
   } else if (action == 'archive' && context.mounted) {
@@ -11895,6 +12313,510 @@ Future<void> showAccountOptions(
       return;
     }
     await dataStore.deleteAccount(account.id);
+  }
+}
+
+Future<void> showAccountDetailsSheet(
+  BuildContext context,
+  String accountId,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    useSafeArea: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) {
+        final account = dataStore.accountById(accountId);
+        return FractionallySizedBox(
+          heightFactor: 0.92,
+          child: _AccountDetailsView(
+            account: account,
+            store: dataStore,
+            onEdit: () async {
+              await showEditAccountDialog(sheetContext, account);
+              if (sheetContext.mounted) setSheetState(() {});
+            },
+          ),
+        );
+      },
+    ),
+  );
+}
+
+class _AccountDetailsView extends StatelessWidget {
+  const _AccountDetailsView({
+    required this.account,
+    required this.store,
+    required this.onEdit,
+  });
+
+  final v2_account.AccountRecord account;
+  final FinanceDataStore store;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final balanceMinor = store.balanceForAccount(account.id);
+    final activity = _latestActivity;
+    final icon = AccountAppearanceCatalog.iconFor(
+      account.type,
+      account.appearanceIconId,
+    );
+    final accent = AccountAppearanceCatalog.accentFor(
+      account.appearanceAccentId,
+    );
+
+    return Column(
+      key: const ValueKey('account-details-view'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            0,
+            AppSpacing.sm,
+            AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Account Details',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              TextButton(
+                key: const ValueKey('account-details-edit'),
+                onPressed: onEdit,
+                child: const Text('Edit'),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              0,
+              AppSpacing.lg,
+              AppSpacing.xl,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _AccountDetailsHeader(
+                  account: account,
+                  balanceMinor: balanceMinor,
+                  currency: store.preferences.currency,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _AccountDetailsSection(
+                  title: 'Account Information',
+                  children: [
+                    _AccountDetailsRow(
+                      label: 'Account Type',
+                      value: v2AccountTypeLabel(account.type),
+                    ),
+                    _AccountDetailsRow(
+                      label: 'Last Activity',
+                      value: activity == null
+                          ? 'No transactions yet'
+                          : _activityName(activity),
+                    ),
+                    if (activity != null)
+                      _AccountDetailsRow(
+                        label: 'Activity Date',
+                        value: fullMonthDateLabel(activity.date),
+                      ),
+                    if (account.type == v2_account.AccountType.loan)
+                      _AccountDetailsRow(
+                        label: 'Original Loan Amount',
+                        value: account.originalLoanAmountMinor == null
+                            ? '–'
+                            : money(
+                                account.originalLoanAmountMinor!,
+                                store.preferences.currency,
+                              ),
+                      ),
+                  ],
+                ),
+                if (account.type == v2_account.AccountType.creditCard) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _CreditCardAccountDetails(
+                    account: account,
+                    store: store,
+                    balanceMinor: balanceMinor,
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.md),
+                _AccountDetailsSection(
+                  title: 'Balance Options',
+                  children: [
+                    _AccountDetailsRow(
+                      label: 'Included in group balance',
+                      value: account.includeInGroupBalance ? 'Yes' : 'No',
+                    ),
+                    _AccountDetailsRow(
+                      label: 'Included in net worth',
+                      value: account.includeInNetWorth ? 'Yes' : 'No',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _AccountDetailsSection(
+                  title: 'Appearance',
+                  leading: AccountAppearanceBadge(
+                    accountType: account.type,
+                    iconId: account.appearanceIconId,
+                    accentId: account.appearanceAccentId,
+                    size: 38,
+                  ),
+                  children: [
+                    _AccountDetailsRow(label: 'Icon', value: icon.label),
+                    _AccountDetailsRow(
+                      label: 'Accent Color',
+                      value: accent?.label ?? 'Default',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  TransactionRecord? get _latestActivity {
+    final activity =
+        store.transactions
+            .where(
+              (transaction) =>
+                  !transaction.isDeleted &&
+                  (transaction.accountId == account.id ||
+                      transaction.transferAccountId == account.id),
+            )
+            .toList(growable: false)
+          ..sort((a, b) => b.date.compareTo(a.date));
+    return activity.isEmpty ? null : activity.first;
+  }
+
+  String _activityName(TransactionRecord transaction) {
+    final payee = transaction.payee.trim();
+    return payee.isEmpty ? transactionTypeLabel(transaction.type) : payee;
+  }
+}
+
+class _AccountDetailsHeader extends StatelessWidget {
+  const _AccountDetailsHeader({
+    required this.account,
+    required this.balanceMinor,
+    required this.currency,
+  });
+
+  final v2_account.AccountRecord account;
+  final int balanceMinor;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AppCard(
+      borderRadius: 14,
+      child: Row(
+        children: [
+          AccountAppearanceBadge(
+            accountType: account.type,
+            iconId: account.appearanceIconId,
+            accentId: account.appearanceAccentId,
+            size: 54,
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  account.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  v2AccountTypeLabel(account.type),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'Current Balance',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 2),
+              MoneyText(
+                amountMinor: balanceMinor,
+                currency: currency,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: balanceMinor < 0 ? AppColors.danger : null,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CreditCardAccountDetails extends StatelessWidget {
+  const _CreditCardAccountDetails({
+    required this.account,
+    required this.store,
+    required this.balanceMinor,
+  });
+
+  final v2_account.AccountRecord account;
+  final FinanceDataStore store;
+  final int balanceMinor;
+
+  @override
+  Widget build(BuildContext context) {
+    final limit = account.creditLimitMinor;
+    final available = store.creditAvailableMinorForAccount(account.id);
+    final used = store.creditUsedMinorForAccount(account.id);
+    final utilization = limit == null || limit <= 0 ? null : used / limit;
+    const calculator = CreditInsightsCalculator();
+    final now = DateTime.now();
+    final estimate = calculator.calculate(
+      account: account,
+      transactions: store.transactions,
+      currentBalanceMinor: balanceMinor,
+      today: now,
+    );
+    final dueDate = calculator.nextPaymentDueDate(
+      paymentDueDay: account.paymentDueDay,
+      today: now,
+    );
+    final completeness = estimate.estimateCompleteness;
+    final isPartial =
+        completeness == CreditInsightsEstimateCompleteness.partial;
+    final hasInsufficientHistory =
+        completeness == CreditInsightsEstimateCompleteness.insufficientHistory;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _AccountDetailsSection(
+          title: 'Credit',
+          children: [
+            _AccountDetailsRow(
+              label: 'Credit Available',
+              value: available == null
+                  ? '–'
+                  : money(available, store.preferences.currency),
+            ),
+            _AccountDetailsRow(
+              label: 'Credit Limit',
+              value: limit == null
+                  ? '–'
+                  : money(limit, store.preferences.currency),
+            ),
+            if (utilization != null)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs),
+                child: AccountGroupProgressStrip(
+                  label: 'Utilization',
+                  progress: utilization,
+                  isOver: used > limit!,
+                  showPercentage: true,
+                  isCreditUtilization: true,
+                ),
+              ),
+          ],
+        ),
+        if (account.interestEstimationEnabled) ...[
+          const SizedBox(height: AppSpacing.md),
+          _AccountDetailsSection(
+            title: 'Credit Insights',
+            trailing: IconButton(
+              tooltip: 'About Credit Insights',
+              visualDensity: VisualDensity.compact,
+              icon: Icon(AppIcon.info, size: AppIconSize.inline),
+              onPressed: () => showCreditInsightsInfoDialog(context),
+            ),
+            children: [
+              _AccountDetailsRow(
+                label: 'APR',
+                value: account.annualPercentageRate == null
+                    ? '–'
+                    : '${account.annualPercentageRate!.toStringAsFixed(2)}%',
+              ),
+              _AccountDetailsRow(
+                label: 'Next Statement',
+                value: estimate.nextStatementClosingDate == null
+                    ? '–'
+                    : fullMonthDateLabel(estimate.nextStatementClosingDate!),
+              ),
+              _AccountDetailsRow(
+                label: 'Payment Due',
+                value: dueDate == null ? '–' : fullMonthDateLabel(dueDate),
+              ),
+              if (hasInsufficientHistory)
+                _AccountDetailsRow(
+                  label: 'Estimated Interest',
+                  valueWidget: CreditInsightsCompletenessIndicator(
+                    completeness: completeness,
+                  ),
+                )
+              else
+                _AccountDetailsRow(
+                  label: 'Estimated Interest',
+                  value: estimate.estimatedInterestMinor == null
+                      ? '–'
+                      : money(
+                          estimate.estimatedInterestMinor!,
+                          store.preferences.currency,
+                        ),
+                ),
+              if (isPartial)
+                _AccountDetailsRow(
+                  label: 'Estimate Status',
+                  valueWidget: CreditInsightsCompletenessIndicator(
+                    completeness: completeness,
+                  ),
+                ),
+              _AccountDetailsRow(
+                label: 'Projected Statement',
+                value: estimate.projectedStatementMinor == null
+                    ? '–'
+                    : money(
+                        estimate.projectedStatementMinor!,
+                        store.preferences.currency,
+                      ),
+              ),
+              _AccountDetailsRow(
+                label: 'Statement Closing Day',
+                value: account.statementClosingDay?.toString() ?? '–',
+              ),
+              _AccountDetailsRow(
+                label: 'Payment Due Day',
+                value: account.paymentDueDay?.toString() ?? '–',
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AccountDetailsSection extends StatelessWidget {
+  const _AccountDetailsSection({
+    required this.title,
+    required this.children,
+    this.leading,
+    this.trailing,
+  });
+
+  final String title;
+  final List<Widget> children;
+  final Widget? leading;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AppCard(
+      borderRadius: 12,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              if (leading != null) ...[
+                leading!,
+                const SizedBox(width: AppSpacing.sm),
+              ],
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              ?trailing,
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          for (var index = 0; index < children.length; index++) ...[
+            if (index > 0)
+              Divider(
+                height: AppSpacing.md,
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.42),
+              ),
+            children[index],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AccountDetailsRow extends StatelessWidget {
+  const _AccountDetailsRow({required this.label, this.value, this.valueWidget})
+    : assert(value != null || valueWidget != null);
+
+  final String label;
+  final String? value;
+  final Widget? valueWidget;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        Flexible(
+          child:
+              valueWidget ??
+              Text(
+                value!,
+                textAlign: TextAlign.right,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: const [AppTextStyles.tabularFigures],
+                ),
+              ),
+        ),
+      ],
+    );
   }
 }
 
@@ -11927,44 +12849,53 @@ Future<void> showChangeAccountTypeDialog(
   await dataStore.saveAccount(
     account.copyWith(
       type: selectedType,
+      creditCardIconId: AccountAppearanceCatalog.defaultIconIdFor(selectedType),
       clearCreditLimit: selectedType != v2_account.AccountType.creditCard,
       clearCreditInsights: selectedType != v2_account.AccountType.creditCard,
-      clearCreditCardAppearance:
-          selectedType != v2_account.AccountType.creditCard,
       clearOriginalLoanAmount: selectedType != v2_account.AccountType.loan,
     ),
   );
 }
 
-Future<void> showCreditInsightsInfoDialog(BuildContext context) {
-  return showDialog<void>(
+Future<bool> showCreditInsightsInfoDialog(
+  BuildContext context, {
+  bool requiresAcknowledgement = false,
+}) async {
+  final acknowledged = await showDialog<bool>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('About Credit Insights'),
-      content: const Text(
-        'Credit Insights estimates your upcoming interest using your APR, '
-        'statement closing date, and recorded transactions.\n\n'
-        'If your transactions are entered accurately, the estimate will '
-        'generally be close. Actual interest may differ because card issuers '
-        'may use different calculation methods.\n\n'
-        'Credit Insights is designed to help you understand your credit card '
-        'costs and projected statement balance. It is an estimate and should '
-        'not replace your card issuer’s official statement.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: const Text('Close'),
+    barrierDismissible: !requiresAcknowledgement,
+    builder: (dialogContext) => PopScope(
+      canPop: !requiresAcknowledgement,
+      child: AlertDialog(
+        title: const Text('About Credit Insights'),
+        content: const Text(
+          'Credit Insights estimates your upcoming interest using your APR, '
+          'statement closing date, and recorded transactions.\n\n'
+          'If your transactions are entered accurately, the estimate will '
+          'generally be close. Actual interest may differ because card issuers '
+          'may use different calculation methods.\n\n'
+          'Credit Insights is designed to help you understand your credit card '
+          'costs and projected statement balance. It is an estimate and should '
+          'not replace your card issuer’s official statement.',
         ),
-      ],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(requiresAcknowledgement ? 'Continue' : 'Close'),
+          ),
+        ],
+      ),
     ),
   );
+  return acknowledged ?? false;
 }
 
 class CreditInsightsFormSection extends StatefulWidget {
   const CreditInsightsFormSection({
     required this.enabled,
+    required this.disclosureAcknowledged,
     required this.onEnabledChanged,
+    required this.onDisclosureAcknowledged,
     required this.aprController,
     required this.statementClosingDayController,
     required this.paymentDueDayController,
@@ -11975,7 +12906,9 @@ class CreditInsightsFormSection extends StatefulWidget {
   });
 
   final bool enabled;
+  final bool disclosureAcknowledged;
   final ValueChanged<bool> onEnabledChanged;
+  final VoidCallback onDisclosureAcknowledged;
   final TextEditingController aprController;
   final TextEditingController statementClosingDayController;
   final TextEditingController paymentDueDayController;
@@ -12040,7 +12973,20 @@ class _CreditInsightsFormSectionState extends State<CreditInsightsFormSection> {
           secondary: TransactionFormIcon(AppIcon.insights),
           title: Text('Enable Credit Insights', style: widget.fieldValueStyle),
           value: widget.enabled,
-          onChanged: widget.onEnabledChanged,
+          onChanged: (value) async {
+            if (!value || widget.disclosureAcknowledged) {
+              widget.onEnabledChanged(value);
+              return;
+            }
+            FocusManager.instance.primaryFocus?.unfocus();
+            final acknowledged = await showCreditInsightsInfoDialog(
+              context,
+              requiresAcknowledgement: true,
+            );
+            if (!mounted || !acknowledged) return;
+            widget.onDisclosureAcknowledged();
+            widget.onEnabledChanged(true);
+          },
         ),
         AnimatedSize(
           duration: MediaQuery.of(context).disableAnimations
@@ -12053,15 +12999,11 @@ class _CreditInsightsFormSectionState extends State<CreditInsightsFormSection> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const TransactionFormDivider(),
-                    _CreditInsightsTextField(
+                    _CreditInsightsAprField(
                       fieldKey: const ValueKey('credit-insights-apr'),
-                      label: 'APR',
                       controller: widget.aprController,
                       focusNode: _aprFocusNode,
                       hintText: 'Enter APR (%)',
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
                       textInputAction: TextInputAction.next,
                       onSubmitted: (_) => _statementDayFocusNode.requestFocus(),
                       fieldValueStyle: widget.fieldValueStyle,
@@ -12106,6 +13048,59 @@ class _CreditInsightsFormSectionState extends State<CreditInsightsFormSection> {
                   ],
                 )
               : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+}
+
+class _CreditInsightsAprField extends StatelessWidget {
+  const _CreditInsightsAprField({
+    required this.fieldKey,
+    required this.controller,
+    required this.focusNode,
+    required this.hintText,
+    required this.textInputAction,
+    required this.onSubmitted,
+    required this.fieldValueStyle,
+    required this.fieldHintStyle,
+    required this.decoration,
+  });
+
+  final Key fieldKey;
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String hintText;
+  final TextInputAction textInputAction;
+  final ValueChanged<String> onSubmitted;
+  final TextStyle? fieldValueStyle;
+  final TextStyle? fieldHintStyle;
+  final InputDecoration decoration;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        TransactionFormIcon(AppIcon.numbers),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('APR', style: fieldValueStyle),
+              PercentageEntryField(
+                fieldKey: fieldKey,
+                controller: controller,
+                focusNode: focusNode,
+                hintText: hintText,
+                textInputAction: textInputAction,
+                onSubmitted: onSubmitted,
+                hintStyle: fieldHintStyle,
+                decoration: decoration,
+                style: fieldValueStyle,
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -12248,15 +13243,18 @@ class _AccountFormControllerScopeState
   Widget build(BuildContext context) => widget.child;
 }
 
-class _CreditCardAppearanceFormSection extends StatelessWidget {
-  const _CreditCardAppearanceFormSection({
+class _AccountAppearanceFormSection extends StatelessWidget {
+  const _AccountAppearanceFormSection({
+    required this.accountType,
     required this.iconId,
     required this.accentId,
     required this.fieldValueStyle,
     required this.onChooseIcon,
     required this.onChooseAccent,
+    super.key,
   });
 
+  final v2_account.AccountType accountType;
   final String? iconId;
   final String? accentId;
   final TextStyle? fieldValueStyle;
@@ -12266,23 +13264,30 @@ class _CreditCardAppearanceFormSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final iconName = CreditCardAppearanceCatalog.iconFor(iconId).label;
+    final keyPrefix = accountType == v2_account.AccountType.creditCard
+        ? 'credit-card'
+        : 'account';
+    final iconName = AccountAppearanceCatalog.iconFor(
+      accountType,
+      iconId,
+    ).label;
     final accentName =
-        CreditCardAppearanceCatalog.accentFor(accentId)?.label ?? 'Default';
+        AccountAppearanceCatalog.accentFor(accentId)?.label ?? 'Default';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const TransactionFormDivider(),
         const TransactionFormLabel('Appearance'),
         InkWell(
-          key: const ValueKey('credit-card-icon-picker-row'),
+          key: ValueKey('$keyPrefix-icon-picker-row'),
           borderRadius: BorderRadius.circular(AppRadii.control),
           onTap: onChooseIcon,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
             child: Row(
               children: [
-                CreditCardAppearanceBadge(
+                AccountAppearanceBadge(
+                  accountType: accountType,
                   iconId: iconId,
                   accentId: accentId,
                   size: 40,
@@ -12314,14 +13319,14 @@ class _CreditCardAppearanceFormSection extends StatelessWidget {
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.38),
         ),
         InkWell(
-          key: const ValueKey('credit-card-accent-picker-row'),
+          key: ValueKey('$keyPrefix-accent-picker-row'),
           borderRadius: BorderRadius.circular(AppRadii.control),
           onTap: onChooseAccent,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
             child: Row(
               children: [
-                _CreditCardAccentSwatch(accentId: accentId),
+                _AccountAccentSwatch(accentId: accentId),
                 const SizedBox(width: AppSpacing.md),
                 Expanded(child: Text('Accent Color', style: fieldValueStyle)),
                 Text(
@@ -12341,15 +13346,15 @@ class _CreditCardAppearanceFormSection extends StatelessWidget {
   }
 }
 
-class _CreditCardAccentSwatch extends StatelessWidget {
-  const _CreditCardAccentSwatch({required this.accentId});
+class _AccountAccentSwatch extends StatelessWidget {
+  const _AccountAccentSwatch({required this.accentId});
 
   final String? accentId;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = CreditCardAppearanceCatalog.accentFor(accentId)?.color;
+    final color = AccountAppearanceCatalog.accentFor(accentId)?.color;
     return Container(
       width: 40,
       height: 40,
@@ -12375,11 +13380,20 @@ class _CreditCardAccentSwatch extends StatelessWidget {
   }
 }
 
-Future<String?> _showCreditCardIconPicker(
+Future<String?> _showAccountIconPicker(
   BuildContext context, {
+  required v2_account.AccountType accountType,
   required String? selectedId,
   required String? accentId,
 }) {
+  final keyPrefix = accountType == v2_account.AccountType.creditCard
+      ? 'credit-card'
+      : 'account';
+  final icons = AccountAppearanceCatalog.iconsFor(accountType);
+  final resolvedSelectedId = AccountAppearanceCatalog.iconFor(
+    accountType,
+    selectedId,
+  ).id;
   return showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
@@ -12410,9 +13424,9 @@ Future<String?> _showCreditCardIconPicker(
             crossAxisSpacing: AppSpacing.sm,
             childAspectRatio: 2.15,
             children: [
-              for (final option in CreditCardAppearanceCatalog.icons)
+              for (final option in icons)
                 InkWell(
-                  key: ValueKey('credit-card-icon-${option.id}'),
+                  key: ValueKey('$keyPrefix-icon-${option.id}'),
                   borderRadius: BorderRadius.circular(AppRadii.control),
                   onTap: () => Navigator.pop(sheetContext, option.id),
                   child: Container(
@@ -12422,23 +13436,16 @@ Future<String?> _showCreditCardIconPicker(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(AppRadii.control),
                       border: Border.all(
-                        color:
-                            option.id ==
-                                (selectedId ??
-                                    CreditCardAppearanceCatalog.defaultIconId)
+                        color: option.id == resolvedSelectedId
                             ? AppTheme.accent
                             : Theme.of(sheetContext).colorScheme.outlineVariant,
-                        width:
-                            option.id ==
-                                (selectedId ??
-                                    CreditCardAppearanceCatalog.defaultIconId)
-                            ? 1.5
-                            : 1,
+                        width: option.id == resolvedSelectedId ? 1.5 : 1,
                       ),
                     ),
                     child: Row(
                       children: [
-                        CreditCardAppearanceBadge(
+                        AccountAppearanceBadge(
+                          accountType: accountType,
                           iconId: option.id,
                           accentId: accentId,
                           size: 36,
@@ -12451,9 +13458,7 @@ Future<String?> _showCreditCardIconPicker(
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (option.id ==
-                            (selectedId ??
-                                CreditCardAppearanceCatalog.defaultIconId))
+                        if (option.id == resolvedSelectedId)
                           Icon(AppIcon.check, size: 18, color: AppTheme.accent),
                       ],
                     ),
@@ -12467,10 +13472,14 @@ Future<String?> _showCreditCardIconPicker(
   );
 }
 
-Future<String?> _showCreditCardAccentPicker(
+Future<String?> _showAccountAccentPicker(
   BuildContext context, {
+  required v2_account.AccountType accountType,
   required String? selectedId,
 }) {
+  final keyPrefix = accountType == v2_account.AccountType.creditCard
+      ? 'credit-card'
+      : 'account';
   return showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
@@ -12503,14 +13512,16 @@ Future<String?> _showCreditCardAccentPicker(
                 childAspectRatio: 0.82,
                 children: [
                   _AccentPickerItem(
+                    keyPrefix: keyPrefix,
                     id: 'default',
                     label: 'Default',
                     color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
                     isSelected: selectedId == null,
                     onTap: () => Navigator.pop(sheetContext, 'default'),
                   ),
-                  for (final option in CreditCardAppearanceCatalog.accents)
+                  for (final option in AccountAppearanceCatalog.accents)
                     _AccentPickerItem(
+                      keyPrefix: keyPrefix,
                       id: option.id,
                       label: option.label,
                       color: option.color,
@@ -12529,6 +13540,7 @@ Future<String?> _showCreditCardAccentPicker(
 
 class _AccentPickerItem extends StatelessWidget {
   const _AccentPickerItem({
+    required this.keyPrefix,
     required this.id,
     required this.label,
     required this.color,
@@ -12536,6 +13548,7 @@ class _AccentPickerItem extends StatelessWidget {
     required this.onTap,
   });
 
+  final String keyPrefix;
   final String id;
   final String label;
   final Color color;
@@ -12545,7 +13558,7 @@ class _AccentPickerItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      key: ValueKey('credit-card-accent-$id'),
+      key: ValueKey('$keyPrefix-accent-$id'),
       borderRadius: BorderRadius.circular(AppRadii.control),
       onTap: onTap,
       child: Column(
@@ -12597,10 +13610,13 @@ Future<void> showEditAccountDialog(
     text: account.paymentDueDay?.toString() ?? '',
   );
   var creditLimitMinor = account.creditLimitMinor ?? 0;
-  var creditCardIconId =
-      account.creditCardIconId ?? CreditCardAppearanceCatalog.defaultIconId;
-  var creditCardAccentId = account.creditCardAccentId;
+  var accountIconId =
+      account.appearanceIconId ??
+      AccountAppearanceCatalog.defaultIconIdFor(account.type);
+  var accountAccentId = account.appearanceAccentId;
   var interestEstimationEnabled = account.interestEstimationEnabled;
+  var creditInsightsDisclosureAcknowledged =
+      account.creditInsightsDisclosureAcknowledged;
   var originalLoanAmountMinor = account.originalLoanAmountMinor ?? 0;
   var type = account.type;
   var includeInGroupBalance = account.includeInGroupBalance;
@@ -12613,6 +13629,7 @@ Future<void> showEditAccountDialog(
           v2_account.AccountType type,
           int? creditLimitMinor,
           bool interestEstimationEnabled,
+          bool creditInsightsDisclosureAcknowledged,
           double? annualPercentageRate,
           int? statementClosingDay,
           int? paymentDueDay,
@@ -12675,6 +13692,8 @@ Future<void> showEditAccountDialog(
                   interestEstimationEnabled:
                       type == v2_account.AccountType.creditCard &&
                       interestEstimationEnabled,
+                  creditInsightsDisclosureAcknowledged:
+                      creditInsightsDisclosureAcknowledged,
                   annualPercentageRate:
                       type == v2_account.AccountType.creditCard &&
                           interestEstimationEnabled
@@ -12690,12 +13709,8 @@ Future<void> showEditAccountDialog(
                           interestEstimationEnabled
                       ? insights.paymentDueDay
                       : null,
-                  creditCardIconId: type == v2_account.AccountType.creditCard
-                      ? creditCardIconId
-                      : null,
-                  creditCardAccentId: type == v2_account.AccountType.creditCard
-                      ? creditCardAccentId
-                      : null,
+                  creditCardIconId: accountIconId,
+                  creditCardAccentId: accountAccentId,
                   originalLoanAmountMinor: type == v2_account.AccountType.loan
                       ? optionalPositiveMinor(originalLoanAmountMinor)
                       : null,
@@ -12703,6 +13718,42 @@ Future<void> showEditAccountDialog(
                   includeInNetWorth: includeInNetWorth,
                 ));
               }
+
+              Widget appearanceSection({Key? key}) =>
+                  _AccountAppearanceFormSection(
+                    key: key,
+                    accountType: type,
+                    iconId: accountIconId,
+                    accentId: accountAccentId,
+                    fieldValueStyle: fieldValueStyle,
+                    onChooseIcon: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      final selected = await _showAccountIconPicker(
+                        context,
+                        accountType: type,
+                        selectedId: accountIconId,
+                        accentId: accountAccentId,
+                      );
+                      if (selected != null) {
+                        setDialogState(() => accountIconId = selected);
+                      }
+                    },
+                    onChooseAccent: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      final selected = await _showAccountAccentPicker(
+                        context,
+                        accountType: type,
+                        selectedId: accountAccentId,
+                      );
+                      if (selected != null) {
+                        setDialogState(
+                          () => accountAccentId = selected == 'default'
+                              ? null
+                              : selected,
+                        );
+                      }
+                    },
+                  );
 
               return TransactionSheetFrame(
                 title: 'Edit Account',
@@ -12745,7 +13796,18 @@ Future<void> showEditAccountDialog(
                           selected: type,
                         );
                         if (selectedType != null) {
-                          setDialogState(() => type = selectedType);
+                          setDialogState(() {
+                            type = selectedType;
+                            if (!AccountAppearanceCatalog.supportsIcon(
+                              type,
+                              accountIconId,
+                            )) {
+                              accountIconId =
+                                  AccountAppearanceCatalog.defaultIconIdFor(
+                                    type,
+                                  );
+                            }
+                          });
                         }
                       },
                       child: Padding(
@@ -12806,48 +13868,18 @@ Future<void> showEditAccountDialog(
                                     ),
                                   ],
                                 ),
-                                _CreditCardAppearanceFormSection(
-                                  iconId: creditCardIconId,
-                                  accentId: creditCardAccentId,
-                                  fieldValueStyle: fieldValueStyle,
-                                  onChooseIcon: () async {
-                                    FocusManager.instance.primaryFocus
-                                        ?.unfocus();
-                                    final selected =
-                                        await _showCreditCardIconPicker(
-                                          context,
-                                          selectedId: creditCardIconId,
-                                          accentId: creditCardAccentId,
-                                        );
-                                    if (selected != null) {
-                                      setDialogState(
-                                        () => creditCardIconId = selected,
-                                      );
-                                    }
-                                  },
-                                  onChooseAccent: () async {
-                                    FocusManager.instance.primaryFocus
-                                        ?.unfocus();
-                                    final selected =
-                                        await _showCreditCardAccentPicker(
-                                          context,
-                                          selectedId: creditCardAccentId,
-                                        );
-                                    if (selected != null) {
-                                      setDialogState(
-                                        () => creditCardAccentId =
-                                            selected == 'default'
-                                            ? null
-                                            : selected,
-                                      );
-                                    }
-                                  },
-                                ),
+                                appearanceSection(),
                                 const TransactionFormDivider(),
                                 CreditInsightsFormSection(
                                   enabled: interestEstimationEnabled,
+                                  disclosureAcknowledged:
+                                      creditInsightsDisclosureAcknowledged,
                                   onEnabledChanged: (value) => setDialogState(
                                     () => interestEstimationEnabled = value,
+                                  ),
+                                  onDisclosureAcknowledged: () => setDialogState(
+                                    () => creditInsightsDisclosureAcknowledged =
+                                        true,
                                   ),
                                   aprController: annualPercentageRate,
                                   statementClosingDayController:
@@ -12889,10 +13921,11 @@ Future<void> showEditAccountDialog(
                                     ),
                                   ],
                                 ),
+                                appearanceSection(),
                               ],
                             )
-                          : const SizedBox.shrink(
-                              key: ValueKey('no-account-extra-field'),
+                          : appearanceSection(
+                              key: ValueKey('account-appearance-${type.name}'),
                             ),
                     ),
                     TransactionFormDivider(),
@@ -12941,6 +13974,8 @@ Future<void> showEditAccountDialog(
       type: result.type,
       creditLimitMinor: result.creditLimitMinor,
       interestEstimationEnabled: result.interestEstimationEnabled,
+      creditInsightsDisclosureAcknowledged:
+          result.creditInsightsDisclosureAcknowledged,
       annualPercentageRate: result.annualPercentageRate,
       statementClosingDay: result.statementClosingDay,
       paymentDueDay: result.paymentDueDay,
@@ -12949,11 +13984,7 @@ Future<void> showEditAccountDialog(
       originalLoanAmountMinor: result.originalLoanAmountMinor,
       clearCreditLimit: result.creditLimitMinor == null,
       clearCreditInsights: result.type != v2_account.AccountType.creditCard,
-      clearCreditCardAppearance:
-          result.type != v2_account.AccountType.creditCard,
-      clearCreditCardAccent:
-          result.type == v2_account.AccountType.creditCard &&
-          result.creditCardAccentId == null,
+      clearCreditCardAccent: result.creditCardAccentId == null,
       clearOriginalLoanAmount: result.originalLoanAmountMinor == null,
       includeInGroupBalance: result.includeInGroupBalance,
       includeInNetWorth: result.includeInNetWorth,
@@ -13136,9 +14167,12 @@ Future<void> showAccountDialog(BuildContext context) async {
   final statementClosingDay = TextEditingController();
   final paymentDueDay = TextEditingController();
   var creditLimitMinor = 0;
-  var creditCardIconId = CreditCardAppearanceCatalog.defaultIconId;
-  String? creditCardAccentId = CreditCardAppearanceCatalog.defaultAccentId;
+  var accountIconId = AccountAppearanceCatalog.defaultIconIdFor(
+    v2_account.AccountType.checking,
+  );
+  String? accountAccentId;
   var interestEstimationEnabled = false;
+  var creditInsightsDisclosureAcknowledged = false;
   var originalLoanAmountMinor = 0;
   var type = AccountType.checking;
   var openingBalanceCents = 0;
@@ -13154,6 +14188,7 @@ Future<void> showAccountDialog(BuildContext context) async {
           int openingBalanceCents,
           int? creditLimitMinor,
           bool interestEstimationEnabled,
+          bool creditInsightsDisclosureAcknowledged,
           double? annualPercentageRate,
           int? statementClosingDay,
           int? paymentDueDay,
@@ -13217,6 +14252,8 @@ Future<void> showAccountDialog(BuildContext context) async {
                   interestEstimationEnabled:
                       type == AccountType.creditCard &&
                       interestEstimationEnabled,
+                  creditInsightsDisclosureAcknowledged:
+                      creditInsightsDisclosureAcknowledged,
                   annualPercentageRate:
                       type == AccountType.creditCard &&
                           interestEstimationEnabled
@@ -13232,18 +14269,52 @@ Future<void> showAccountDialog(BuildContext context) async {
                           interestEstimationEnabled
                       ? insights.paymentDueDay
                       : null,
-                  creditCardIconId: type == AccountType.creditCard
-                      ? creditCardIconId
-                      : null,
-                  creditCardAccentId: type == AccountType.creditCard
-                      ? creditCardAccentId
-                      : null,
+                  creditCardIconId: accountIconId,
+                  creditCardAccentId: accountAccentId,
                   originalLoanAmountMinor: type == AccountType.loan
                       ? optionalPositiveMinor(originalLoanAmountMinor)
                       : null,
                   includeInGroupBalance: includeInGroupBalance,
                   includeInNetWorth: includeInNetWorth,
                 ));
+              }
+
+              Widget appearanceSection({Key? key}) {
+                final accountType = v2AccountTypeFor(type);
+                return _AccountAppearanceFormSection(
+                  key: key,
+                  accountType: accountType,
+                  iconId: accountIconId,
+                  accentId: accountAccentId,
+                  fieldValueStyle: fieldValueStyle,
+                  onChooseIcon: () async {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    final selected = await _showAccountIconPicker(
+                      context,
+                      accountType: accountType,
+                      selectedId: accountIconId,
+                      accentId: accountAccentId,
+                    );
+                    if (selected != null) {
+                      setDialogState(() => accountIconId = selected);
+                    }
+                  },
+                  onChooseAccent: () async {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    final selected = await _showAccountAccentPicker(
+                      context,
+                      accountType: accountType,
+                      selectedId: accountAccentId,
+                    );
+                    if (selected != null) {
+                      setDialogState(
+                        () => accountAccentId = selected == 'default'
+                            ? null
+                            : selected,
+                      );
+                    }
+                  },
+                );
               }
 
               return TransactionSheetFrame(
@@ -13287,7 +14358,17 @@ Future<void> showAccountDialog(BuildContext context) async {
                           selected: type,
                         );
                         if (selectedType != null) {
-                          setDialogState(() => type = selectedType);
+                          setDialogState(() {
+                            type = selectedType;
+                            final v2Type = v2AccountTypeFor(type);
+                            accountIconId =
+                                AccountAppearanceCatalog.defaultIconIdFor(
+                                  v2Type,
+                                );
+                            accountAccentId = type == AccountType.creditCard
+                                ? AccountAppearanceCatalog.defaultAccentId
+                                : null;
+                          });
                         }
                       },
                       child: Padding(
@@ -13348,48 +14429,18 @@ Future<void> showAccountDialog(BuildContext context) async {
                                     ),
                                   ],
                                 ),
-                                _CreditCardAppearanceFormSection(
-                                  iconId: creditCardIconId,
-                                  accentId: creditCardAccentId,
-                                  fieldValueStyle: fieldValueStyle,
-                                  onChooseIcon: () async {
-                                    FocusManager.instance.primaryFocus
-                                        ?.unfocus();
-                                    final selected =
-                                        await _showCreditCardIconPicker(
-                                          context,
-                                          selectedId: creditCardIconId,
-                                          accentId: creditCardAccentId,
-                                        );
-                                    if (selected != null) {
-                                      setDialogState(
-                                        () => creditCardIconId = selected,
-                                      );
-                                    }
-                                  },
-                                  onChooseAccent: () async {
-                                    FocusManager.instance.primaryFocus
-                                        ?.unfocus();
-                                    final selected =
-                                        await _showCreditCardAccentPicker(
-                                          context,
-                                          selectedId: creditCardAccentId,
-                                        );
-                                    if (selected != null) {
-                                      setDialogState(
-                                        () => creditCardAccentId =
-                                            selected == 'default'
-                                            ? null
-                                            : selected,
-                                      );
-                                    }
-                                  },
-                                ),
+                                appearanceSection(),
                                 const TransactionFormDivider(),
                                 CreditInsightsFormSection(
                                   enabled: interestEstimationEnabled,
+                                  disclosureAcknowledged:
+                                      creditInsightsDisclosureAcknowledged,
                                   onEnabledChanged: (value) => setDialogState(
                                     () => interestEstimationEnabled = value,
+                                  ),
+                                  onDisclosureAcknowledged: () => setDialogState(
+                                    () => creditInsightsDisclosureAcknowledged =
+                                        true,
                                   ),
                                   aprController: annualPercentageRate,
                                   statementClosingDayController:
@@ -13431,10 +14482,11 @@ Future<void> showAccountDialog(BuildContext context) async {
                                     ),
                                   ],
                                 ),
+                                appearanceSection(),
                               ],
                             )
-                          : const SizedBox.shrink(
-                              key: ValueKey('no-account-extra-field'),
+                          : appearanceSection(
+                              key: ValueKey('account-appearance-${type.name}'),
                             ),
                     ),
                     TransactionFormDivider(),
@@ -13519,6 +14571,8 @@ Future<void> showAccountDialog(BuildContext context) async {
       interestEstimationEnabled:
           v2Type == v2_account.AccountType.creditCard &&
           result.interestEstimationEnabled,
+      creditInsightsDisclosureAcknowledged:
+          result.creditInsightsDisclosureAcknowledged,
       annualPercentageRate:
           v2Type == v2_account.AccountType.creditCard &&
               result.interestEstimationEnabled
@@ -13534,12 +14588,8 @@ Future<void> showAccountDialog(BuildContext context) async {
               result.interestEstimationEnabled
           ? result.paymentDueDay
           : null,
-      creditCardIconId: v2Type == v2_account.AccountType.creditCard
-          ? result.creditCardIconId
-          : null,
-      creditCardAccentId: v2Type == v2_account.AccountType.creditCard
-          ? result.creditCardAccentId
-          : null,
+      creditCardIconId: result.creditCardIconId,
+      creditCardAccentId: result.creditCardAccentId,
       originalLoanAmountMinor: v2Type == v2_account.AccountType.loan
           ? result.originalLoanAmountMinor ??
                 normalizedOpeningBalanceCents.abs()

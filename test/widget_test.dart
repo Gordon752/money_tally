@@ -1,5 +1,5 @@
 import 'dart:async';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +11,7 @@ import 'package:money_tally/src/design/design_tokens.dart';
 import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/design/widgets/category_icon_badge.dart';
+import 'package:money_tally/src/design/widgets/percentage_entry_field.dart';
 import 'package:money_tally/src/design/money_format.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/budget.dart';
@@ -39,6 +40,24 @@ Finder ledgerRowWithText(String text) => find.ancestor(
     (widget) => widget.runtimeType.toString() == 'LedgerJournalRow',
   ),
 );
+
+v2_account.AccountRecord _creditInsightsWidgetAccount({
+  required DateTime createdAt,
+  required int statementClosingDay,
+}) {
+  return v2_account.AccountRecord(
+    id: 'credit-insights-completeness',
+    name: 'Credit Card',
+    type: v2_account.AccountType.creditCard,
+    openingBalanceMinor: -100000,
+    creditLimitMinor: 200000,
+    interestEstimationEnabled: true,
+    annualPercentageRate: 24,
+    statementClosingDay: statementClosingDay,
+    paymentDueDay: 28,
+    sync: v2_sync.SyncMetadata.fresh(now: createdAt, deviceId: 'test'),
+  );
+}
 
 Future<void> collapseScheduledCalendar(WidgetTester tester) async {
   final collapse = find.byTooltip('Collapse calendar');
@@ -210,6 +229,45 @@ void main() {
     await tester.pump();
     expect(amountMinor, 1000000);
     expect(find.text(r'$10,000.00'), findsOneWidget);
+  });
+
+  testWidgets('percentage entry shifts digits and keeps percent visual only', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    final focusNode = FocusNode();
+    addTearDown(controller.dispose);
+    addTearDown(focusNode.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PercentageEntryField(
+            controller: controller,
+            focusNode: focusNode,
+            onSubmitted: (_) {},
+            decoration: const InputDecoration(),
+          ),
+        ),
+      ),
+    );
+
+    final field = find.byType(TextField);
+    await tester.enterText(field, '2');
+    expect(controller.text, '0.02');
+    expect(find.text('0.02'), findsOneWidget);
+    expect(find.text('%'), findsOneWidget);
+
+    await tester.enterText(field, '28');
+    expect(controller.text, '0.28');
+    await tester.enterText(field, '284');
+    expect(controller.text, '2.84');
+    await tester.enterText(field, '2849');
+    expect(controller.text, '28.49');
+
+    await tester.enterText(field, '-700');
+    expect(controller.text, '7.00');
+    expect(controller.text, isNot(contains('%')));
   });
 
   testWidgets('amount entry field supports signed calculator input', (
@@ -3472,7 +3530,9 @@ void main() {
     expect(scheduled.amountMinor, 30000);
   });
 
-  testWidgets('account long press edits a v2-only account', (tester) async {
+  testWidgets('account long press opens details before editing', (
+    tester,
+  ) async {
     final legacyStore = FinanceStore.seeded();
     final migrated = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
@@ -3499,14 +3559,155 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Cloud Only'));
     await tester.pumpAndSettle();
+    expect(find.text('Account Details'), findsOneWidget);
+    expect(find.text('Edit'), findsNothing);
+    await tester.tap(find.text('Account Details'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('account-details-view')), findsOneWidget);
+    expect(find.text('Account Information'), findsOneWidget);
+    expect(find.text('Balance Options'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'Main Checking');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Main Checking'), findsOneWidget);
+    expect(find.text('Main Checking'), findsWidgets);
     expect(dataStore.accountById('cloud-only').name, 'Main Checking');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('account-details-view')), findsNothing);
+  });
+
+  testWidgets(
+    'account ledger is a pushed detail and Back restores Accounts position',
+    (tester) async {
+      tester.view.physicalSize = const Size(393, 852);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final legacyStore = FinanceStore.seeded();
+      final migrated = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final extraAccounts = List.generate(
+        14,
+        (index) => v2_account.AccountRecord(
+          id: 'scroll-account-$index',
+          name: 'Scroll Account $index',
+          type: v2_account.AccountType.checking,
+          openingBalanceMinor: index * 100,
+          sortOrder: 1000 + index,
+          sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+        ),
+      );
+      final dataStore = FinanceDataStore(
+        dataSet: migrated.copyWith(
+          accounts: [...migrated.accounts, ...extraAccounts],
+          preferences: const UserPreferences(
+            launchScreen: LaunchScreen.accounts,
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+      await tester.pumpAndSettle();
+
+      final targetCard = find.byWidgetPredicate(
+        (widget) =>
+            widget is AccountCard && widget.account.id == 'scroll-account-12',
+      );
+      await tester.ensureVisible(targetCard);
+      await tester.pumpAndSettle();
+      final accountsScroll = tester.state<ScrollableState>(
+        find.byType(Scrollable).first,
+      );
+      final positionBeforePush = accountsScroll.position.pixels;
+      expect(positionBeforePush, greaterThan(0));
+
+      await tester.tap(targetCard);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('account-ledger-screen')),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<LedgerView>(find.byType(LedgerView))
+            .initialAccountFilterId,
+        'scroll-account-12',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('account-ledger-back')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('account-ledger-screen')), findsNothing);
+      expect(
+        tester
+            .state<ScrollableState>(find.byType(Scrollable).first)
+            .position
+            .pixels,
+        closeTo(positionBeforePush, 0.1),
+      );
+
+      await tester.tap(find.text('Ledger').last);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<LedgerView>(find.byType(LedgerView))
+            .initialAccountFilterId,
+        isNull,
+      );
+    },
+  );
+
+  testWidgets('account ledger supports the native iOS edge swipe back', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    tester.view.physicalSize = const Size(393, 852);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator()
+        .migrate(legacyStore.snapshot().toJson())
+        .copyWith(
+          preferences: const UserPreferences(
+            launchScreen: LaunchScreen.accounts,
+          ),
+        );
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        store: legacyStore,
+        dataStore: FinanceDataStore(dataSet: migrated),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final accountCard = find.byWidgetPredicate(
+      (widget) => widget is AccountCard && widget.account.id == 'checking',
+    );
+    await tester.ensureVisible(accountCard);
+    await tester.tap(accountCard);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('account-ledger-screen')), findsOneWidget);
+
+    await tester.timedDragFrom(
+      const Offset(1, 420),
+      const Offset(360, 0),
+      const Duration(milliseconds: 350),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('account-ledger-screen')), findsNothing);
+    expect(find.text('Accounts'), findsWidgets);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('account edit can toggle balance inclusion flags', (
@@ -3526,14 +3727,22 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.text('Checking'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Account Details'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.widgetWithText(SwitchListTile, 'Include in group balance'),
+    final groupBalanceSwitch = find.widgetWithText(
+      SwitchListTile,
+      'Include in group balance',
     );
-    await tester.tap(
-      find.widgetWithText(SwitchListTile, 'Include in net worth'),
+    final netWorthSwitch = find.widgetWithText(
+      SwitchListTile,
+      'Include in net worth',
     );
+    await tester.ensureVisible(groupBalanceSwitch);
+    await tester.tap(groupBalanceSwitch);
+    await tester.ensureVisible(netWorthSwitch);
+    await tester.tap(netWorthSwitch);
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -3597,6 +3806,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(card);
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Account Details'));
+    await tester.pumpAndSettle();
+    expect(find.text('Credit Available'), findsOneWidget);
+    expect(find.text('Credit Limit'), findsOneWidget);
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
 
@@ -3607,7 +3820,7 @@ void main() {
     );
     await tester.pump();
     expect(find.text(r'$2,500.00'), findsOneWidget);
-    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.text('Appearance'), findsWidgets);
     await tester.tap(find.byKey(const ValueKey('credit-card-icon-picker-row')));
     await tester.pumpAndSettle();
     expect(CreditCardAppearanceCatalog.icons, hasLength(4));
@@ -3631,6 +3844,85 @@ void main() {
     expect(account.creditCardAccentId, 'purple');
     expect(dataStore.creditAvailableMinorForAccount('card'), 206178);
     expect(find.text(r'Credit Available $2,061.78 of $2,500.00'), findsWidgets);
+  });
+
+  testWidgets('credit card Account Details shows read-only Credit Insights', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1500);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final card = migrated.accounts.singleWhere(
+      (account) => account.type == v2_account.AccountType.creditCard,
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        accounts: [
+          for (final account in migrated.accounts)
+            if (account.id == card.id)
+              account.copyWith(
+                creditLimitMinor: 250000,
+                interestEstimationEnabled: true,
+                creditInsightsDisclosureAcknowledged: true,
+                annualPercentageRate: 28.49,
+                statementClosingDay: 15,
+                paymentDueDay: 7,
+              )
+            else
+              account,
+        ],
+        preferences: const UserPreferences(launchScreen: LaunchScreen.accounts),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    final accountCard = find.byWidgetPredicate(
+      (widget) => widget is AccountCard && widget.account.id == card.id,
+    );
+    await tester.ensureVisible(accountCard);
+    await tester.longPress(accountCard);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Account Details'));
+    await tester.pumpAndSettle();
+
+    final details = find.byKey(const ValueKey('account-details-view'));
+    for (final label in [
+      'Credit Available',
+      'Credit Limit',
+      'Credit Insights',
+      'APR',
+      '28.49%',
+      'Next Statement',
+      'Payment Due',
+      'Estimated Interest',
+      'Projected Statement',
+      'Statement Closing Day',
+      'Payment Due Day',
+    ]) {
+      expect(
+        find.descendant(of: details, matching: find.text(label)),
+        findsOneWidget,
+      );
+    }
+    expect(
+      find.descendant(
+        of: details,
+        matching: find.byTooltip('About Credit Insights'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: details, matching: find.byType(SwitchListTile)),
+      findsNothing,
+    );
   });
 
   testWidgets('enabled credit card shows additive Credit Insights preview', (
@@ -3664,7 +3956,9 @@ void main() {
 
     expect(find.text(r'Credit Available $562.14 of $1,700.00'), findsOneWidget);
     expect(find.text('Next Statement'), findsOneWidget);
-    expect(find.text('29.99%'), findsOneWidget);
+    expect(find.text('Payment Due'), findsOneWidget);
+    expect(find.text('APR'), findsNothing);
+    expect(find.text('29.99%'), findsNothing);
     expect(find.text('Projected Statement'), findsOneWidget);
     expect(find.text('Estimated Interest'), findsOneWidget);
     expect(find.text('67% utilized'), findsOneWidget);
@@ -3679,13 +3973,18 @@ void main() {
     );
 
     final nextStatementLabel = tester.widget<Text>(find.text('Next Statement'));
+    final paymentDueLabel = tester.widget<Text>(find.text('Payment Due'));
     final estimatedInterestLabel = tester.widget<Text>(
       find.text('Estimated Interest'),
     );
     final projectedStatementLabel = tester.widget<Text>(
       find.text('Projected Statement'),
     );
-    for (final label in [estimatedInterestLabel, projectedStatementLabel]) {
+    for (final label in [
+      paymentDueLabel,
+      estimatedInterestLabel,
+      projectedStatementLabel,
+    ]) {
       expect(label.style?.fontSize, nextStatementLabel.style?.fontSize);
       expect(label.style?.fontWeight, nextStatementLabel.style?.fontWeight);
       expect(label.style?.color, nextStatementLabel.style?.color);
@@ -3698,11 +3997,40 @@ void main() {
       tester
           .widget<Expanded>(
             find
-                .ancestor(of: find.text('APR'), matching: find.byType(Expanded))
+                .ancestor(
+                  of: find.text('Next Statement'),
+                  matching: find.byType(Expanded),
+                )
                 .first,
           )
           .flex,
-      16,
+      23,
+    );
+    expect(
+      tester
+          .widget<Expanded>(
+            find
+                .ancestor(
+                  of: find.text('Payment Due'),
+                  matching: find.byType(Expanded),
+                )
+                .first,
+          )
+          .flex,
+      20,
+    );
+    expect(
+      tester
+          .widget<Expanded>(
+            find
+                .ancestor(
+                  of: find.text('Estimated Interest'),
+                  matching: find.byType(Expanded),
+                )
+                .first,
+          )
+          .flex,
+      27,
     );
     expect(
       tester
@@ -3717,6 +4045,130 @@ void main() {
           .flex,
       30,
     );
+  });
+
+  testWidgets('complete Credit Insights estimate has no status indicator', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final account = _creditInsightsWidgetAccount(
+      createdAt: DateTime(now.year, now.month - 2, now.day),
+      statementClosingDay: now.day,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AccountCard(account: account, balanceMinor: -100000),
+        ),
+      ),
+    );
+
+    expect(find.text('Partial'), findsNothing);
+    expect(find.text('Not enough history'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('credit-estimate-status-partial')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('partial estimate shows amount, status, and explanation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(393, 852);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final now = DateTime.now();
+    final account = _creditInsightsWidgetAccount(
+      createdAt: now,
+      statementClosingDay: now.day,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AccountCard(account: account, balanceMinor: -100000),
+        ),
+      ),
+    );
+
+    expect(find.text('Partial'), findsOneWidget);
+    expect(find.text(r'$0.66'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('credit-estimate-status-partial')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Partial Estimate'), findsOneWidget);
+    expect(
+      find.textContaining('part of this statement cycle’s account history'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('insufficient history replaces precise estimate with status', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(393, 852);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final now = DateTime.now();
+    final account = _creditInsightsWidgetAccount(
+      createdAt: DateTime(now.year, now.month, now.day + 1),
+      statementClosingDay: now.day,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AccountCard(account: account, balanceMinor: -100000),
+        ),
+      ),
+    );
+
+    expect(find.text('Not enough history'), findsOneWidget);
+    expect(find.text(r'$0.00'), findsNothing);
+    await tester.tap(
+      find.byKey(const ValueKey('credit-estimate-status-insufficientHistory')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Not Enough History'), findsOneWidget);
+  });
+
+  testWidgets('partial indicator disappears when estimate becomes complete', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final partialAccount = _creditInsightsWidgetAccount(
+      createdAt: now,
+      statementClosingDay: now.day,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AccountCard(account: partialAccount, balanceMinor: -100000),
+        ),
+      ),
+    );
+    expect(find.text('Partial'), findsOneWidget);
+
+    final completeAccount = _creditInsightsWidgetAccount(
+      createdAt: DateTime(now.year, now.month - 2, now.day),
+      statementClosingDay: now.day,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AccountCard(account: completeAccount, balanceMinor: -100000),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Partial'), findsNothing);
+    expect(find.text('Not enough history'), findsNothing);
   });
 
   testWidgets('credit card appearance resolves saved and legacy identifiers', (
@@ -3754,6 +4206,162 @@ void main() {
     expect(CreditCardAppearanceCatalog.accentFor('unknownLegacyValue'), isNull);
   });
 
+  test('shared account appearance catalog is curated by account type', () {
+    expect(
+      AccountAppearanceCatalog.defaultIconIdFor(
+        v2_account.AccountType.checking,
+      ),
+      'bank',
+    );
+    expect(
+      AccountAppearanceCatalog.defaultIconIdFor(v2_account.AccountType.savings),
+      'savings',
+    );
+    expect(
+      AccountAppearanceCatalog.defaultIconIdFor(v2_account.AccountType.cash),
+      'cash',
+    );
+    expect(
+      AccountAppearanceCatalog.defaultIconIdFor(v2_account.AccountType.loan),
+      'loanDocument',
+    );
+    expect(
+      AccountAppearanceCatalog.iconsFor(v2_account.AccountType.checking),
+      hasLength(4),
+    );
+    expect(
+      AccountAppearanceCatalog.iconsFor(v2_account.AccountType.cash),
+      hasLength(4),
+    );
+    expect(
+      AccountAppearanceCatalog.iconsFor(v2_account.AccountType.loan),
+      hasLength(4),
+    );
+    expect(AccountAppearanceCatalog.accents, hasLength(12));
+    expect(
+      AccountAppearanceCatalog.iconFor(
+        v2_account.AccountType.loan,
+        'unknownLegacyValue',
+      ).id,
+      'loanDocument',
+    );
+  });
+
+  testWidgets('banking account appearance edits persist and render', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(393, 852);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    final originalAccount = dataStore.accountById('checking');
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Accounts').last);
+    await tester.pumpAndSettle();
+    final checkingCard = find.byWidgetPredicate(
+      (widget) => widget is AccountCard && widget.account.id == 'checking',
+    );
+    await tester.ensureVisible(checkingCard);
+    await tester.longPress(checkingCard);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Account Details'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Appearance'), findsWidgets);
+    final iconRow = find.byKey(const ValueKey('account-icon-picker-row'));
+    await tester.ensureVisible(iconRow);
+    await tester.tap(iconRow);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('account-icon-portfolio')));
+    await tester.pumpAndSettle();
+
+    final accentRow = find.byKey(const ValueKey('account-accent-picker-row'));
+    await tester.ensureVisible(accentRow);
+    await tester.tap(accentRow);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('account-accent-gold')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final account = dataStore.accountById('checking');
+    expect(account.appearanceIconId, 'portfolio');
+    expect(account.appearanceAccentId, 'gold');
+    expect(account.openingBalanceMinor, originalAccount.openingBalanceMinor);
+    expect(account.type, originalAccount.type);
+    expect(
+      account.includeInGroupBalance,
+      originalAccount.includeInGroupBalance,
+    );
+    expect(account.includeInNetWorth, originalAccount.includeInNetWorth);
+    expect(
+      find.descendant(
+        of: checkingCard,
+        matching: find.byIcon(
+          AccountAppearanceCatalog.iconFor(
+            v2_account.AccountType.checking,
+            'portfolio',
+          ).icon,
+        ),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('new cash account uses its neutral type appearance by default', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(393, 852);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Account'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'Pocket Cash');
+    await tester.tap(find.text('Checking').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Cash').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.text('Default'), findsOneWidget);
+    expect(find.text('Cash'), findsWidgets);
+    await tester.tap(find.text('Save').last);
+    await tester.pumpAndSettle();
+
+    final account = dataStore.accounts.singleWhere(
+      (account) => account.name == 'Pocket Cash',
+    );
+    expect(account.type, v2_account.AccountType.cash);
+    expect(account.appearanceIconId, 'cash');
+    expect(account.appearanceAccentId, isNull);
+  });
+
   test('credit utilization color thresholds use the unrounded ratio', () {
     expect(
       creditUtilizationFillColor(0, brightness: Brightness.light),
@@ -3777,7 +4385,7 @@ void main() {
     );
   });
 
-  testWidgets('Credit Insights hides estimates when APR is unavailable', (
+  testWidgets('Credit Insights shows placeholders when APR is unavailable', (
     tester,
   ) async {
     final account = v2_account.AccountRecord(
@@ -3799,9 +4407,13 @@ void main() {
       ),
     );
 
-    expect(find.text('APR'), findsOneWidget);
-    expect(find.text('Projected Statement'), findsNothing);
-    expect(find.text('Estimated Interest'), findsNothing);
+    expect(find.text('APR'), findsNothing);
+    expect(find.text('Payment Due'), findsOneWidget);
+    expect(find.text('Projected Statement'), findsOneWidget);
+    expect(find.text('Estimated Interest'), findsOneWidget);
+    // Payment Due has no configured day and Estimated Interest has no APR.
+    // Projected Statement can still show the current recorded card balance.
+    expect(find.text('–'), findsNWidgets(2));
   });
 
   testWidgets(
@@ -3814,6 +4426,7 @@ void main() {
       addTearDown(statementDay.dispose);
       addTearDown(paymentDay.dispose);
       var enabled = false;
+      var disclosureAcknowledged = false;
 
       await tester.pumpWidget(
         MaterialApp(
@@ -3821,7 +4434,10 @@ void main() {
             body: StatefulBuilder(
               builder: (context, setState) => CreditInsightsFormSection(
                 enabled: enabled,
+                disclosureAcknowledged: disclosureAcknowledged,
                 onEnabledChanged: (value) => setState(() => enabled = value),
+                onDisclosureAcknowledged: () =>
+                    setState(() => disclosureAcknowledged = true),
                 aprController: apr,
                 statementClosingDayController: statementDay,
                 paymentDueDayController: paymentDay,
@@ -3835,6 +4451,12 @@ void main() {
       );
 
       await tester.tap(find.text('Enable Credit Insights'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('About Credit Insights'), findsOneWidget);
+      expect(find.text('Continue'), findsOneWidget);
+      expect(find.byKey(const ValueKey('credit-insights-apr')), findsNothing);
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
 
       expect(find.text('APR'), findsOneWidget);
@@ -3855,6 +4477,7 @@ void main() {
 
       await tester.testTextInput.receiveAction(TextInputAction.next);
       await tester.pump();
+      expect(find.text('Enter an APR'), findsOneWidget);
       expect(
         tester
             .widget<TextField>(
@@ -3890,6 +4513,20 @@ void main() {
             .hasFocus,
         isFalse,
       );
+
+      await tester.tap(find.byTooltip('About Credit Insights'));
+      await tester.pumpAndSettle();
+      expect(find.text('Close'), findsOneWidget);
+      expect(find.text('Continue'), findsNothing);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Enable Credit Insights'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Enable Credit Insights'));
+      await tester.pumpAndSettle();
+      expect(find.text('About Credit Insights'), findsNothing);
+      expect(find.byKey(const ValueKey('credit-insights-apr')), findsOneWidget);
     },
   );
 
@@ -3909,7 +4546,9 @@ void main() {
           body: Builder(
             builder: (context) => CreditInsightsFormSection(
               enabled: true,
+              disclosureAcknowledged: true,
               onEnabledChanged: (_) {},
+              onDisclosureAcknowledged: () {},
               aprController: apr,
               statementClosingDayController: statementDay,
               paymentDueDayController: paymentDay,
@@ -3926,6 +4565,7 @@ void main() {
     expect(statementDay.text, '15');
     expect(paymentDay.text, '7');
     expect(find.text('28.49'), findsOneWidget);
+    expect(find.text('%'), findsOneWidget);
     expect(find.text('15'), findsOneWidget);
     expect(find.text('7'), findsOneWidget);
   });
@@ -7591,6 +8231,45 @@ void main() {
     expect(signOutCount, 1);
   });
 
+  testWidgets('settings disables repeated sync taps and shows real progress', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    var syncCount = 0;
+    await tester.pumpWidget(
+      FinanceStoreScope(
+        store: legacyStore,
+        child: FinanceDataStoreScope(
+          store: dataStore,
+          child: MaterialApp(
+            home: FinanceHome(
+              syncLabel: 'Syncing',
+              onSyncNow: () async => syncCount += 1,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Settings').last);
+    await tester.pump();
+
+    expect(find.text('Syncing…'), findsOneWidget);
+    expect(find.text('Refreshing your Trackmark data'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tester.tap(find.widgetWithText(ListTile, 'Syncing…'));
+    await tester.pump();
+    expect(syncCount, 0);
+  });
+
   testWidgets('mobile settings more card opens reports', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -7913,97 +8592,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Could not share backup file'), findsOneWidget);
-  });
-
-  testWidgets('settings restores JSON backup from clipboard', (tester) async {
-    tester.view.physicalSize = const Size(1200, 1400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final legacyStore = FinanceStore.seeded();
-    final dataSet = const V1SnapshotMigrator().migrate(
-      legacyStore.snapshot().toJson(),
-    );
-    final restoredDataSet = dataSet.copyWith(
-      accounts: [
-        for (final account in dataSet.accounts)
-          if (account.id == 'checking')
-            account.copyWith(name: 'Restored Checking')
-          else
-            account,
-      ],
-    );
-    final dataStore = FinanceDataStore(dataSet: dataSet);
-    final restoredJson = const BackupCodec().encodeJson(restoredDataSet);
-
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'Clipboard.getData') {
-          return {'text': restoredJson};
-        }
-        return null;
-      },
-    );
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        null,
-      ),
-    );
-
-    await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
-    );
-
-    await tester.tap(find.text('Settings').last);
-    await tester.pumpAndSettle();
-    final restoreRow = find.widgetWithText(ListTile, 'Backup and restore');
-    await tester.ensureVisible(restoreRow);
-    await tester.pumpAndSettle();
-    await tester.tap(restoreRow);
-    await tester.pump();
-
-    expect(dataStore.accountById('checking').name, 'Restored Checking');
-    expect(find.text('JSON backup restored'), findsOneWidget);
-  });
-
-  testWidgets('settings reports invalid JSON restore clipboard', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1200, 1400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'Clipboard.getData') {
-          return {'text': 'not json'};
-        }
-        return null;
-      },
-    );
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        null,
-      ),
-    );
-
-    await tester.pumpWidget(MoneyTallyApp());
-
-    await tester.tap(find.text('Settings').last);
-    await tester.pumpAndSettle();
-    final restoreRow = find.widgetWithText(ListTile, 'Backup and restore');
-    await tester.ensureVisible(restoreRow);
-    await tester.pumpAndSettle();
-    await tester.tap(restoreRow);
-    await tester.pump();
-
-    expect(find.text('Could not restore JSON backup'), findsOneWidget);
   });
 
   testWidgets('launch screen preference selects initial finance section', (

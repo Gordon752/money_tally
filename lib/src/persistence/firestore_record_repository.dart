@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../domain/account.dart';
 import '../domain/budget.dart';
@@ -11,11 +14,16 @@ import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
 import 'finance_record_repository.dart';
 
-class FirestoreRecordRepository implements FinanceRecordRepository {
+class FirestoreRecordRepository
+    implements FinanceRecordRepository, BulkFinanceRecordRepository {
   FirestoreRecordRepository({FirebaseFirestore? firestore})
     : firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore firestore;
+  final Map<String, String?> _activeGenerations = {};
+
+  static const _batchWriteLimit = 400;
+  static const _normalSyncWriteConcurrency = 8;
 
   CollectionReference<Map<String, dynamic>> get _users {
     return firestore.collection('users');
@@ -32,6 +40,29 @@ class FirestoreRecordRepository implements FinanceRecordRepository {
     return _users.doc(userId).collection('preferences').doc('main');
   }
 
+  DocumentReference<Map<String, dynamic>> _authorityDoc(String userId) {
+    return _users.doc(userId).collection('metadata').doc('restoreAuthority');
+  }
+
+  DocumentReference<Map<String, dynamic>> _generationPreferencesDoc(
+    String userId,
+    String generation,
+  ) {
+    return _generationCollection(userId, generation, 'preferences').doc('main');
+  }
+
+  CollectionReference<Map<String, dynamic>> _generationCollection(
+    String userId,
+    String generation,
+    String collectionPath,
+  ) {
+    return _users
+        .doc(userId)
+        .collection('restoreGenerations')
+        .doc(generation)
+        .collection(collectionPath);
+  }
+
   @override
   Stream<FinanceDataSet> watchDataSet(String userId) async* {
     // Initial scaffold: emit full loads when callers subscribe. This keeps the
@@ -42,16 +73,23 @@ class FirestoreRecordRepository implements FinanceRecordRepository {
 
   @override
   Future<FinanceDataSet> loadDataSet(String userId) async {
+    await firestore.enableNetwork();
+    final generation = await _loadActiveGeneration(userId);
     final results = await Future.wait([
-      _collection(userId, 'accounts').get(),
-      _collection(userId, 'categories').get(),
-      _collection(userId, 'transactions').get(),
-      _collection(userId, 'scheduledTransactions').get(),
-      _collection(userId, 'budgets').get(),
-      _collection(userId, 'goals').get(),
-      _collection(userId, 'goalContributions').get(),
-      _collection(userId, 'goalFundingEvents').get(),
-      _preferencesDoc(userId).get(),
+      _loadCollection(userId, 'accounts', generation),
+      _loadCollection(userId, 'categories', generation),
+      _loadCollection(userId, 'transactions', generation),
+      _loadCollection(userId, 'scheduledTransactions', generation),
+      _loadCollection(userId, 'budgets', generation),
+      _loadCollection(userId, 'goals', generation),
+      _loadCollection(userId, 'goalContributions', generation),
+      _loadCollection(userId, 'goalFundingEvents', generation),
+      generation == null
+          ? _preferencesDoc(userId).get(const GetOptions(source: Source.server))
+          : _generationPreferencesDoc(
+              userId,
+              generation,
+            ).get(const GetOptions(source: Source.server)),
     ]);
 
     final accountsSnapshot = results[0] as QuerySnapshot<Map<String, dynamic>>;
@@ -101,96 +139,401 @@ class FirestoreRecordRepository implements FinanceRecordRepository {
   }
 
   @override
+  Future<String?> activeRestoreGeneration(String userId) {
+    return _loadActiveGeneration(userId);
+  }
+
+  @override
   Future<void> saveAccount({
     required String userId,
     required AccountRecord account,
-  }) {
-    return _collection(
-      userId,
-      'accounts',
-    ).doc(account.id).set(account.toJson(), SetOptions(merge: true));
+  }) async {
+    await _saveRecord(userId, 'accounts', account.id, account.toJson());
   }
 
   @override
   Future<void> saveCategory({
     required String userId,
     required CategoryRecord category,
-  }) {
-    return _collection(
-      userId,
-      'categories',
-    ).doc(category.id).set(category.toJson(), SetOptions(merge: true));
+  }) async {
+    await _saveRecord(userId, 'categories', category.id, category.toJson());
   }
 
   @override
   Future<void> saveTransaction({
     required String userId,
     required TransactionRecord transaction,
-  }) {
-    return _collection(
+  }) async {
+    await _saveRecord(
       userId,
       'transactions',
-    ).doc(transaction.id).set(transaction.toJson(), SetOptions(merge: true));
+      transaction.id,
+      transaction.toJson(),
+    );
   }
 
   @override
   Future<void> saveScheduledTransaction({
     required String userId,
     required ScheduledTransactionRecord scheduledTransaction,
-  }) {
-    return _collection(userId, 'scheduledTransactions')
-        .doc(scheduledTransaction.id)
-        .set(scheduledTransaction.toJson(), SetOptions(merge: true));
+  }) async {
+    await _saveRecord(
+      userId,
+      'scheduledTransactions',
+      scheduledTransaction.id,
+      scheduledTransaction.toJson(),
+    );
   }
 
   @override
   Future<void> saveBudget({
     required String userId,
     required BudgetRecord budget,
-  }) {
-    return _collection(
-      userId,
-      'budgets',
-    ).doc(budget.id).set(budget.toJson(), SetOptions(merge: true));
+  }) async {
+    await _saveRecord(userId, 'budgets', budget.id, budget.toJson());
   }
 
   @override
-  Future<void> saveGoal({required String userId, required GoalRecord goal}) {
-    return _collection(
-      userId,
-      'goals',
-    ).doc(goal.id).set(goal.toJson(), SetOptions(merge: true));
+  Future<void> saveGoal({
+    required String userId,
+    required GoalRecord goal,
+  }) async {
+    await _saveRecord(userId, 'goals', goal.id, goal.toJson());
   }
 
   @override
   Future<void> saveGoalContribution({
     required String userId,
     required GoalContributionRecord contribution,
-  }) {
-    return _collection(
+  }) async {
+    await _saveRecord(
       userId,
       'goalContributions',
-    ).doc(contribution.id).set(contribution.toJson(), SetOptions(merge: true));
+      contribution.id,
+      contribution.toJson(),
+    );
   }
 
   @override
   Future<void> saveGoalFundingEvent({
     required String userId,
     required GoalFundingEventRecord fundingEvent,
-  }) {
-    return _collection(
+  }) async {
+    await _saveRecord(
       userId,
       'goalFundingEvents',
-    ).doc(fundingEvent.id).set(fundingEvent.toJson(), SetOptions(merge: true));
+      fundingEvent.id,
+      fundingEvent.toJson(),
+    );
   }
 
   @override
   Future<void> savePreferences({
     required String userId,
     required UserPreferences preferences,
-  }) {
-    return _preferencesDoc(
-      userId,
-    ).set(preferences.toJson(), SetOptions(merge: true));
+  }) async {
+    final generation = await _activeGeneration(userId);
+    final document = generation == null
+        ? _preferencesDoc(userId)
+        : _generationPreferencesDoc(userId, generation);
+    await document.set(preferences.toJson(), SetOptions(merge: true));
   }
+
+  @override
+  Future<void> saveDataSet({
+    required String userId,
+    required FinanceDataSet dataSet,
+    FinanceDataSet? baseline,
+  }) async {
+    final generation = await _activeGeneration(userId);
+    final writes = <_GenerationWrite>[];
+
+    void addRecords<T>(
+      String collection,
+      Iterable<T> records,
+      Iterable<T> baselineRecords,
+      String Function(T record) idOf,
+      Map<String, Object?> Function(T record) jsonOf,
+    ) {
+      final baselineJsonById = {
+        for (final record in baselineRecords) idOf(record): jsonOf(record),
+      };
+      for (final record in records) {
+        final id = idOf(record);
+        final data = jsonOf(record);
+        final baselineData = baselineJsonById[id];
+        if (baselineData != null &&
+            jsonEncode(baselineData) == jsonEncode(data)) {
+          continue;
+        }
+        final reference = generation == null
+            ? _collection(userId, collection).doc(id)
+            : _generationCollection(
+                userId,
+                generation,
+                collection,
+              ).doc(_encodedDocumentId(id));
+        writes.add(_GenerationWrite(reference: reference, data: data));
+      }
+    }
+
+    addRecords(
+      'accounts',
+      dataSet.accounts,
+      baseline?.accounts ?? const <AccountRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'categories',
+      dataSet.categories,
+      baseline?.categories ?? const <CategoryRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'transactions',
+      dataSet.transactions,
+      baseline?.transactions ?? const <TransactionRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'scheduledTransactions',
+      dataSet.scheduledTransactions,
+      baseline?.scheduledTransactions ?? const <ScheduledTransactionRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'budgets',
+      dataSet.budgets,
+      baseline?.budgets ?? const <BudgetRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'goals',
+      dataSet.goals,
+      baseline?.goals ?? const <GoalRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'goalContributions',
+      dataSet.goalContributions,
+      baseline?.goalContributions ?? const <GoalContributionRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'goalFundingEvents',
+      dataSet.goalFundingEvents,
+      baseline?.goalFundingEvents ?? const <GoalFundingEventRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    final preferencesJson = dataSet.preferences.toJson();
+    if (baseline == null ||
+        jsonEncode(baseline.preferences.toJson()) !=
+            jsonEncode(preferencesJson)) {
+      writes.add(
+        _GenerationWrite(
+          reference: generation == null
+              ? _preferencesDoc(userId)
+              : _generationPreferencesDoc(userId, generation),
+          data: preferencesJson,
+        ),
+      );
+    }
+
+    debugPrint('Cloud sync upload: ${writes.length} documents');
+    for (
+      var offset = 0;
+      offset < writes.length;
+      offset += _normalSyncWriteConcurrency
+    ) {
+      final end = (offset + _normalSyncWriteConcurrency).clamp(
+        0,
+        writes.length,
+      );
+      debugPrint('Cloud sync upload: saving documents $offset–${end - 1}');
+      await Future.wait(
+        writes
+            .sublist(offset, end)
+            .map(
+              (write) =>
+                  write.reference.set(write.data, SetOptions(merge: true)),
+            ),
+      );
+      debugPrint('Cloud sync upload: saved documents $offset–${end - 1}');
+    }
+  }
+
+  @override
+  Future<String> replaceDataSetAuthoritatively({
+    required String userId,
+    required FinanceDataSet dataSet,
+  }) async {
+    final generation =
+        'restore_${DateTime.now().toUtc().microsecondsSinceEpoch.toRadixString(36)}';
+    final writes = <_GenerationWrite>[];
+
+    void addRecords<T>(
+      String collection,
+      Iterable<T> records,
+      String Function(T record) idOf,
+      Map<String, Object?> Function(T record) jsonOf,
+    ) {
+      for (final record in records) {
+        writes.add(
+          _GenerationWrite(
+            reference: _generationCollection(
+              userId,
+              generation,
+              collection,
+            ).doc(_encodedDocumentId(idOf(record))),
+            data: jsonOf(record),
+          ),
+        );
+      }
+    }
+
+    addRecords(
+      'accounts',
+      dataSet.accounts,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'categories',
+      dataSet.categories,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'transactions',
+      dataSet.transactions,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'scheduledTransactions',
+      dataSet.scheduledTransactions,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'budgets',
+      dataSet.budgets,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'goals',
+      dataSet.goals,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'goalContributions',
+      dataSet.goalContributions,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'goalFundingEvents',
+      dataSet.goalFundingEvents,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    writes.add(
+      _GenerationWrite(
+        reference: _generationPreferencesDoc(userId, generation),
+        data: dataSet.preferences.toJson(),
+      ),
+    );
+
+    for (var offset = 0; offset < writes.length; offset += _batchWriteLimit) {
+      final batch = firestore.batch();
+      final end = (offset + _batchWriteLimit).clamp(0, writes.length);
+      for (final write in writes.sublist(offset, end)) {
+        batch.set(write.reference, write.data);
+      }
+      await batch.commit();
+    }
+
+    // This single marker write is the authority boundary. Staged records are
+    // invisible to normal loads until every preceding batch has succeeded.
+    await _authorityDoc(userId).set({
+      'activeGeneration': generation,
+      'activatedAt': FieldValue.serverTimestamp(),
+    });
+    _activeGenerations[userId] = generation;
+    return generation;
+  }
+
+  Future<QuerySnapshot<Map<String, dynamic>>> _loadCollection(
+    String userId,
+    String collection,
+    String? generation,
+  ) {
+    final reference = _collection(userId, collection);
+    return generation == null
+        ? reference.get(const GetOptions(source: Source.server))
+        : _generationCollection(
+            userId,
+            generation,
+            collection,
+          ).get(const GetOptions(source: Source.server));
+  }
+
+  Future<String?> _loadActiveGeneration(String userId) async {
+    await firestore.enableNetwork();
+    final snapshot = await _authorityDoc(
+      userId,
+    ).get(const GetOptions(source: Source.server));
+    final value = snapshot.data()?['activeGeneration'];
+    if (value != null && (value is! String || value.trim().isEmpty)) {
+      throw StateError('Invalid Trackmark cloud restore authority marker');
+    }
+    final generation = value as String?;
+    _activeGenerations[userId] = generation;
+    return generation;
+  }
+
+  Future<String?> _activeGeneration(String userId) async {
+    if (_activeGenerations.containsKey(userId)) {
+      return _activeGenerations[userId];
+    }
+    return _loadActiveGeneration(userId);
+  }
+
+  Future<void> _saveRecord(
+    String userId,
+    String collection,
+    String id,
+    Map<String, Object?> json,
+  ) async {
+    final generation = await _activeGeneration(userId);
+    final reference = generation == null
+        ? _collection(userId, collection)
+        : _generationCollection(userId, generation, collection);
+    final documentId = generation == null ? id : _encodedDocumentId(id);
+    await reference.doc(documentId).set(json, SetOptions(merge: true));
+  }
+
+  String _encodedDocumentId(String recordId) {
+    final encodedId = base64Url
+        .encode(utf8.encode(recordId))
+        .replaceAll('=', '');
+    return encodedId;
+  }
+}
+
+class _GenerationWrite {
+  const _GenerationWrite({required this.reference, required this.data});
+
+  final DocumentReference<Map<String, dynamic>> reference;
+  final Map<String, Object?> data;
 }

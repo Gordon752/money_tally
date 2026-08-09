@@ -434,6 +434,7 @@ void main() {
       openingBalanceMinor: -50000,
       creditLimitMinor: 200000,
       interestEstimationEnabled: true,
+      creditInsightsDisclosureAcknowledged: true,
       annualPercentageRate: 29.99,
       statementClosingDay: 15,
       paymentDueDay: 7,
@@ -444,6 +445,7 @@ void main() {
 
     final restored = AccountRecord.fromJson(account.toJson());
     expect(restored.interestEstimationEnabled, isTrue);
+    expect(restored.creditInsightsDisclosureAcknowledged, isTrue);
     expect(restored.annualPercentageRate, 29.99);
     expect(restored.statementClosingDay, 15);
     expect(restored.paymentDueDay, 7);
@@ -457,6 +459,7 @@ void main() {
     final olderRecord = AccountRecord.fromJson({
       ...account.toJson(),
       'interestEstimationEnabled': null,
+      'creditInsightsDisclosureAcknowledged': null,
       'annualPercentageRate': null,
       'statementClosingDay': null,
       'paymentDueDay': null,
@@ -464,30 +467,253 @@ void main() {
       'creditCardAccentId': null,
     });
     expect(olderRecord.interestEstimationEnabled, isFalse);
+    expect(olderRecord.creditInsightsDisclosureAcknowledged, isFalse);
     expect(olderRecord.annualPercentageRate, isNull);
     expect(olderRecord.statementClosingDay, isNull);
     expect(olderRecord.paymentDueDay, isNull);
     expect(olderRecord.creditCardIconId, isNull);
     expect(olderRecord.creditCardAccentId, isNull);
+
+    final legacyEnabledRecord = AccountRecord.fromJson(
+      {...account.toJson()}..remove('creditInsightsDisclosureAcknowledged'),
+    );
+    expect(legacyEnabledRecord.interestEstimationEnabled, isTrue);
+    expect(legacyEnabledRecord.creditInsightsDisclosureAcknowledged, isTrue);
   });
 
-  test(
-    'credit insights estimates simple interest through next statement close',
-    () {
+  test('shared account appearance IDs round-trip for non-credit accounts', () {
+    final account = AccountRecord(
+      id: 'savings',
+      name: 'Emergency Savings',
+      type: AccountType.savings,
+      openingBalanceMinor: 250000,
+      creditCardIconId: 'portfolio',
+      creditCardAccentId: 'gold',
+      sync: SyncMetadata.fresh(now: DateTime(2026, 8, 8)),
+    );
+
+    final restored = AccountRecord.fromJson(account.toJson());
+
+    expect(restored.appearanceIconId, 'portfolio');
+    expect(restored.appearanceAccentId, 'gold');
+    expect(restored.openingBalanceMinor, 250000);
+    expect(restored.type, AccountType.savings);
+    expect(restored.name, 'Emergency Savings');
+  });
+
+  group('credit insights daily average balance', () {
+    test('constant balance uses every represented day', () {
       const calculator = CreditInsightsCalculator();
+      final account = _creditInsightsAccount(
+        openingBalanceMinor: -100000,
+        createdAt: DateTime(2026, 7, 1),
+        statementClosingDay: 31,
+        annualPercentageRate: 24,
+      );
       final estimate = calculator.calculate(
+        account: account,
+        transactions: const [],
         currentBalanceMinor: -100000,
-        annualPercentageRate: 36,
-        statementClosingDay: 15,
-        today: DateTime(2026, 8, 5),
+        today: DateTime(2026, 8, 30),
       );
 
-      expect(estimate.nextStatementClosingDate, DateTime(2026, 8, 15));
-      expect(estimate.daysUntilStatementClosing, 10);
-      expect(estimate.estimatedInterestMinor, 986);
-      expect(estimate.projectedStatementMinor, -100986);
-    },
-  );
+      expect(estimate.cycleStart, DateTime(2026, 8, 1));
+      expect(estimate.cycleEnd, DateTime(2026, 8, 31));
+      expect(estimate.daysRepresented, 30);
+      expect(estimate.averageDailyBalanceMinor, 100000);
+      expect(estimate.estimatedInterestMinor, 1973);
+      expect(estimate.projectedStatementMinor, -101973);
+      expect(
+        estimate.estimateCompleteness,
+        CreditInsightsEstimateCompleteness.complete,
+      );
+    });
+
+    test('mid-cycle purchase increases debt from its date forward', () {
+      const calculator = CreditInsightsCalculator();
+      final account = _creditInsightsAccount(
+        openingBalanceMinor: -100000,
+        createdAt: DateTime(2026, 7, 1),
+        statementClosingDay: 31,
+      );
+      final purchase = _creditExpense(
+        id: 'purchase',
+        date: DateTime(2026, 8, 16),
+        amountMinor: 50000,
+      );
+      final estimate = calculator.calculate(
+        account: account,
+        transactions: [purchase],
+        currentBalanceMinor: -150000,
+        today: DateTime(2026, 8, 30),
+      );
+
+      expect(estimate.averageDailyBalanceMinor, 125000);
+      expect(estimate.estimatedInterestMinor, 2466);
+    });
+
+    test('mid-cycle payment reduces debt from its date forward', () {
+      const calculator = CreditInsightsCalculator();
+      final account = _creditInsightsAccount(
+        openingBalanceMinor: -200000,
+        createdAt: DateTime(2026, 7, 1),
+        statementClosingDay: 31,
+      );
+      final payment = _creditPayment(
+        id: 'payment',
+        date: DateTime(2026, 8, 16),
+        amountMinor: 50000,
+      );
+      final estimate = calculator.calculate(
+        account: account,
+        transactions: [payment],
+        currentBalanceMinor: -150000,
+        today: DateTime(2026, 8, 30),
+      );
+
+      expect(estimate.averageDailyBalanceMinor, 175000);
+      expect(estimate.estimatedInterestMinor, 3452);
+    });
+
+    test('multiple purchases and payments reconstruct end-of-day balances', () {
+      const calculator = CreditInsightsCalculator();
+      final account = _creditInsightsAccount(
+        openingBalanceMinor: -100000,
+        createdAt: DateTime(2026, 7, 1),
+        statementClosingDay: 31,
+      );
+      final estimate = calculator.calculate(
+        account: account,
+        transactions: [
+          _creditExpense(
+            id: 'purchase-1',
+            date: DateTime(2026, 8, 3),
+            amountMinor: 50000,
+          ),
+          _creditPayment(
+            id: 'payment-1',
+            date: DateTime(2026, 8, 5),
+            amountMinor: 25000,
+          ),
+          _creditExpense(
+            id: 'purchase-2',
+            date: DateTime(2026, 8, 7),
+            amountMinor: 10000,
+          ),
+        ],
+        currentBalanceMinor: -135000,
+        today: DateTime(2026, 8, 8),
+      );
+
+      // EOD debt: 1000, 1000, 1500, 1500, 1250, 1250, 1350, 1350.
+      expect(estimate.averageDailyBalanceMinor, 127500);
+      expect(estimate.daysRepresented, 8);
+    });
+
+    test('closing day retains accrued interest', () {
+      const calculator = CreditInsightsCalculator();
+      final account = _creditInsightsAccount(
+        openingBalanceMinor: -100000,
+        createdAt: DateTime(2026, 7, 1),
+        statementClosingDay: 8,
+      );
+      final estimate = calculator.calculate(
+        account: account,
+        transactions: const [],
+        currentBalanceMinor: -100000,
+        today: DateTime(2026, 8, 8),
+      );
+
+      expect(estimate.daysUntilStatementClosing, 0);
+      expect(estimate.daysRepresented, 31);
+      expect(estimate.estimatedInterestMinor, 2038);
+    });
+
+    test('closing day 31 clamps to February month end', () {
+      const calculator = CreditInsightsCalculator();
+      final cycle = calculator.currentStatementCycle(
+        statementClosingDay: 31,
+        today: DateTime(2028, 2, 29),
+      );
+
+      expect(cycle?.start, DateTime(2028, 2, 1));
+      expect(cycle?.end, DateTime(2028, 2, 29));
+    });
+
+    test('zero and credit balances never produce negative interest', () {
+      const calculator = CreditInsightsCalculator();
+      for (final balance in [0, 25000]) {
+        final account = _creditInsightsAccount(
+          openingBalanceMinor: balance,
+          createdAt: DateTime(2026, 7, 1),
+          statementClosingDay: 31,
+        );
+        final estimate = calculator.calculate(
+          account: account,
+          transactions: const [],
+          currentBalanceMinor: balance,
+          today: DateTime(2026, 8, 8),
+        );
+
+        expect(estimate.estimatedInterestMinor, 0);
+        expect(estimate.projectedStatementMinor, balance);
+      }
+    });
+
+    test('mid-cycle account history is explicitly partial', () {
+      const calculator = CreditInsightsCalculator();
+      final account = _creditInsightsAccount(
+        openingBalanceMinor: -100000,
+        createdAt: DateTime(2026, 8, 10),
+        statementClosingDay: 31,
+      );
+      final estimate = calculator.calculate(
+        account: account,
+        transactions: const [],
+        currentBalanceMinor: -100000,
+        today: DateTime(2026, 8, 20),
+      );
+
+      expect(estimate.representedStart, DateTime(2026, 8, 10));
+      expect(estimate.daysRepresented, 11);
+      expect(
+        estimate.estimateCompleteness,
+        CreditInsightsEstimateCompleteness.partial,
+      );
+    });
+
+    test('history beginning after today is insufficient', () {
+      const calculator = CreditInsightsCalculator();
+      final account = _creditInsightsAccount(
+        openingBalanceMinor: -100000,
+        createdAt: DateTime(2026, 8, 10),
+        statementClosingDay: 31,
+      );
+      final estimate = calculator.calculate(
+        account: account,
+        transactions: const [],
+        currentBalanceMinor: -100000,
+        today: DateTime(2026, 8, 8),
+      );
+
+      expect(estimate.estimatedInterestMinor, isNull);
+      expect(
+        estimate.estimateCompleteness,
+        CreditInsightsEstimateCompleteness.insufficientHistory,
+      );
+    });
+
+    test('day after closing begins the next cycle', () {
+      const calculator = CreditInsightsCalculator();
+      final cycle = calculator.currentStatementCycle(
+        statementClosingDay: 8,
+        today: DateTime(2026, 8, 9),
+      );
+
+      expect(cycle?.start, DateTime(2026, 8, 9));
+      expect(cycle?.end, DateTime(2026, 9, 8));
+    });
+  });
 
   test('credit insights closing date handles passed and shortened months', () {
     const calculator = CreditInsightsCalculator();
@@ -508,17 +734,30 @@ void main() {
     );
   });
 
-  test('credit insights returns zero interest without a revolving balance', () {
+  test('credit insights due date handles boundaries and year rollover', () {
     const calculator = CreditInsightsCalculator();
-    final estimate = calculator.calculate(
-      currentBalanceMinor: 0,
-      annualPercentageRate: 29.99,
-      statementClosingDay: 15,
-      today: DateTime(2026, 8, 5),
-    );
 
-    expect(estimate.estimatedInterestMinor, 0);
-    expect(estimate.projectedStatementMinor, 0);
+    expect(
+      calculator.nextPaymentDueDate(
+        paymentDueDay: 31,
+        today: DateTime(2026, 2, 1),
+      ),
+      DateTime(2026, 2, 28),
+    );
+    expect(
+      calculator.nextPaymentDueDate(
+        paymentDueDay: 7,
+        today: DateTime(2026, 12, 8),
+      ),
+      DateTime(2027, 1, 7),
+    );
+    expect(
+      calculator.nextPaymentDueDate(
+        paymentDueDay: 8,
+        today: DateTime(2026, 8, 8),
+      ),
+      DateTime(2026, 8, 8),
+    );
   });
 
   test('split transactions must match the parent amount', () async {
@@ -896,6 +1135,36 @@ void main() {
 
     expect(remote.savedTransactions.single.payee, 'Settlement');
   });
+
+  test('store uses repository bulk capability for a full sync', () async {
+    final remote = BulkFakeRecordRepository(dataSet: _emptyDataSet());
+    final localDataSet = _dataSet();
+    final store = FinanceDataStore(dataSet: localDataSet);
+
+    await store.attachRemoteSync(remoteRepository: remote, userId: 'user-1');
+
+    expect(remote.bulkSaveCount, 1);
+    expect(remote.bulkSavedUserId, 'user-1');
+    expect(remote.bulkSavedDataSet?.toJson(), localDataSet.toJson());
+    expect(remote.bulkSavedBaseline?.toJson(), _emptyDataSet().toJson());
+    expect(remote.savedAccounts, isEmpty);
+    expect(remote.savedTransactions, isEmpty);
+  });
+
+  test(
+    'store provides the remote snapshot as the bulk sync baseline',
+    () async {
+      final dataSet = _dataSet();
+      final remote = BulkFakeRecordRepository(dataSet: dataSet);
+      final store = FinanceDataStore(dataSet: dataSet);
+
+      await store.attachRemoteSync(remoteRepository: remote, userId: 'user-1');
+
+      expect(remote.bulkSaveCount, 1);
+      expect(remote.bulkSavedDataSet?.toJson(), dataSet.toJson());
+      expect(remote.bulkSavedBaseline?.toJson(), dataSet.toJson());
+    },
+  );
 
   test('store loads existing per-record remote when sync attaches', () async {
     final remoteDataSet = _dataSet().copyWith(
@@ -2227,6 +2496,57 @@ void main() {
   });
 }
 
+AccountRecord _creditInsightsAccount({
+  required int openingBalanceMinor,
+  required DateTime createdAt,
+  required int statementClosingDay,
+  double annualPercentageRate = 24,
+}) {
+  return AccountRecord(
+    id: 'card',
+    name: 'Card',
+    type: AccountType.creditCard,
+    openingBalanceMinor: openingBalanceMinor,
+    interestEstimationEnabled: true,
+    annualPercentageRate: annualPercentageRate,
+    statementClosingDay: statementClosingDay,
+    sync: SyncMetadata.fresh(now: createdAt),
+  );
+}
+
+TransactionRecord _creditExpense({
+  required String id,
+  required DateTime date,
+  required int amountMinor,
+}) {
+  return TransactionRecord(
+    id: id,
+    type: TransactionType.expense,
+    accountId: 'card',
+    date: date,
+    payee: 'Purchase',
+    amountMinor: amountMinor,
+    sync: SyncMetadata.fresh(now: date),
+  );
+}
+
+TransactionRecord _creditPayment({
+  required String id,
+  required DateTime date,
+  required int amountMinor,
+}) {
+  return TransactionRecord(
+    id: id,
+    type: TransactionType.transfer,
+    accountId: 'checking',
+    transferAccountId: 'card',
+    date: date,
+    payee: 'Card payment',
+    amountMinor: amountMinor,
+    sync: SyncMetadata.fresh(now: date),
+  );
+}
+
 class RecordingNotificationScheduler implements NotificationScheduler {
   RecordingNotificationScheduler({
     this.permissionGranted = true,
@@ -2367,9 +2687,25 @@ class FakeRecordRepository implements FinanceRecordRepository {
   final savedGoalContributions = <GoalContributionRecord>[];
   final savedGoalFundingEvents = <GoalFundingEventRecord>[];
   UserPreferences? savedPreferences;
+  FinanceDataSet? authoritativeDataSet;
+  String? activeGeneration;
 
   @override
   Future<FinanceDataSet> loadDataSet(String userId) async => remoteDataSet;
+
+  @override
+  Future<String?> activeRestoreGeneration(String userId) async =>
+      activeGeneration;
+
+  @override
+  Future<String> replaceDataSetAuthoritatively({
+    required String userId,
+    required FinanceDataSet dataSet,
+  }) async {
+    authoritativeDataSet = dataSet;
+    remoteDataSet = dataSet;
+    return activeGeneration = 'test-generation';
+  }
 
   @override
   Future<void> saveAccount({
@@ -2446,6 +2782,29 @@ class FakeRecordRepository implements FinanceRecordRepository {
   @override
   Stream<FinanceDataSet> watchDataSet(String userId) async* {
     yield _dataSet();
+  }
+}
+
+class BulkFakeRecordRepository extends FakeRecordRepository
+    implements BulkFinanceRecordRepository {
+  BulkFakeRecordRepository({super.dataSet});
+
+  int bulkSaveCount = 0;
+  String? bulkSavedUserId;
+  FinanceDataSet? bulkSavedDataSet;
+  FinanceDataSet? bulkSavedBaseline;
+
+  @override
+  Future<void> saveDataSet({
+    required String userId,
+    required FinanceDataSet dataSet,
+    FinanceDataSet? baseline,
+  }) async {
+    bulkSaveCount += 1;
+    bulkSavedUserId = userId;
+    bulkSavedDataSet = dataSet;
+    bulkSavedBaseline = baseline;
+    remoteDataSet = dataSet;
   }
 }
 

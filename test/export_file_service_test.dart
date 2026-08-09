@@ -56,4 +56,57 @@ void main() {
       'money_tally_backup_2026-07-23_2245.json',
     );
   });
+
+  test('native backup selection preserves the chosen JSON exactly', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'trackmark_native_backup_import_',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File('${directory.path}/Trackmark Backup.json');
+    const content = '{\n  "schemaVersion": 4,\n  "exact": "spacing"\n}\n';
+    await file.writeAsString(content);
+    final service = BackupImportFileService(
+      picker: () async => XFile(file.path, mimeType: 'application/json'),
+    );
+
+    final imported = await service.selectBackup();
+
+    expect(imported, isNotNull);
+    expect(imported!.name, 'Trackmark Backup.json');
+    expect(imported.path, file.path);
+    expect(imported.content, content);
+  });
+
+  test(
+    'an automatic safety backup can be shared to external storage',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'trackmark_share_safety_backup_',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/Trackmark Pre-Restore Backup.json');
+      await file.writeAsString('{"schemaVersion":4}');
+      ShareParams? captured;
+      final service = ExportFileService(
+        shareLauncher: (params) async {
+          captured = params;
+          return const ShareResult('', ShareResultStatus.dismissed);
+        },
+      );
+
+      await service.shareExistingFile(
+        file: ExportedFile(
+          path: file.path,
+          fileName: file.uri.pathSegments.last,
+          mimeType: 'application/json',
+        ),
+        shareTitle: 'Trackmark pre-restore safety backup',
+        sharePositionOrigin: const Rect.fromLTWH(10, 10, 20, 20),
+      );
+
+      expect(captured, isNotNull);
+      expect(captured!.files!.single.path, file.path);
+      expect(captured!.fileNameOverrides, [file.uri.pathSegments.last]);
+    },
+  );
 }

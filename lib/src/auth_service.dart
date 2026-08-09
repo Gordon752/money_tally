@@ -143,6 +143,7 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   static const _initialSyncRetryDelay = Duration(milliseconds: 900);
+  static const _syncTimeout = Duration(seconds: 60);
 
   var _localOnly = false;
   var _isSigningIn = false;
@@ -151,6 +152,7 @@ class _AuthGateState extends State<AuthGate> {
   String? _authError;
   String? _syncingUid;
   String? _syncedUid;
+  String? _autoSyncAttemptedUid;
   late final Stream<MoneyTallyUser?> _authStateStream;
 
   @override
@@ -170,6 +172,7 @@ class _AuthGateState extends State<AuthGate> {
       FinanceDataStoreScope.read(context).detachRemoteSync();
       _syncedUid = null;
       _syncingUid = null;
+      _autoSyncAttemptedUid = null;
       return const FinanceHome(syncLabel: 'Local only');
     }
 
@@ -186,6 +189,7 @@ class _AuthGateState extends State<AuthGate> {
           FinanceDataStoreScope.read(context).detachRemoteSync();
           _syncedUid = null;
           _syncingUid = null;
+          _autoSyncAttemptedUid = null;
           return SignInView(
             isSigningIn: _isSigningIn,
             errorMessage: _authError,
@@ -236,9 +240,17 @@ class _AuthGateState extends State<AuthGate> {
     if (user.isLocalOnly || recordRepository == null) {
       return;
     }
-    if (_syncedUid == user.uid || _syncingUid == user.uid) return;
+    if (_syncedUid == user.uid ||
+        _syncingUid == user.uid ||
+        _autoSyncAttemptedUid == user.uid) {
+      return;
+    }
 
-    _syncingUid = user.uid;
+    setState(() {
+      _autoSyncAttemptedUid = user.uid;
+      _syncingUid = user.uid;
+      _syncLabel = 'Syncing';
+    });
     unawaited(_syncUser(user.uid, recordRepository, dataStore));
   }
 
@@ -250,10 +262,17 @@ class _AuthGateState extends State<AuthGate> {
   }) async {
     try {
       if (recordRepository != null) {
-        await dataStore.attachRemoteSync(
-          remoteRepository: recordRepository,
-          userId: userId,
-        );
+        await dataStore
+            .attachRemoteSync(
+              remoteRepository: recordRepository,
+              userId: userId,
+            )
+            .timeout(
+              _syncTimeout,
+              onTimeout: () => throw TimeoutException(
+                'Cloud sync did not finish within ${_syncTimeout.inSeconds} seconds.',
+              ),
+            );
       }
       if (!mounted) return;
       setState(() {
@@ -296,7 +315,27 @@ class _AuthGateState extends State<AuthGate> {
       _syncingUid = user.uid;
       _syncLabel = 'Syncing';
     });
-    await _syncUser(user.uid, widget.recordRepository, dataStore);
+    await _syncUser(
+      user.uid,
+      widget.recordRepository,
+      dataStore,
+      retryAfterTransientFailure: false,
+    );
+    if (!mounted || _syncLabel != 'Synced') return;
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle_outline, color: Colors.white),
+              SizedBox(width: 10),
+              Text('Sync completed'),
+            ],
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
   }
 }
 

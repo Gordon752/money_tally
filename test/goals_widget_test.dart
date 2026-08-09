@@ -693,7 +693,13 @@ void main() {
 
     expect(find.text('Funded Goals'), findsOneWidget);
     expect(find.text('Checking • 2 Goals'), findsOneWidget);
-    expect(find.text(r'-$500.00'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(GoalFundingLedgerRow),
+        matching: find.text(r'-$500.00'),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Funded Goals'));
     await tester.pumpAndSettle();
 

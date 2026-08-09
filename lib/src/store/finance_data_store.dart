@@ -19,6 +19,12 @@ import '../notifications/notification_scheduler.dart';
 import '../persistence/finance_record_repository.dart';
 import '../persistence/local_finance_data_set_repository.dart';
 
+class AuthoritativeRestoreLocalInstallException implements Exception {
+  const AuthoritativeRestoreLocalInstallException(this.cause);
+
+  final Object cause;
+}
+
 class FinanceDataValidationException implements Exception {
   const FinanceDataValidationException(this.message);
 
@@ -138,6 +144,9 @@ class FinanceDataStore extends ChangeNotifier {
   final NotificationScheduler notificationScheduler;
   bool preferRemoteOnFirstSync;
   String? userId;
+  bool _authoritativeRestoreInProgress = false;
+
+  bool get hasRemoteSync => remoteRepository != null && userId != null;
   final String deviceId;
   final ValueNotifier<BudgetLowAlert?> budgetLowAlertNotifier =
       ValueNotifier<BudgetLowAlert?>(null);
@@ -694,10 +703,10 @@ class FinanceDataStore extends ChangeNotifier {
     FinanceDataSet dataSet, {
     bool persistLocal = true,
   }) async {
-    _dataSet = dataSet;
     if (persistLocal) {
-      await localRepository?.save(_dataSet);
+      await localRepository?.save(dataSet);
     }
+    _dataSet = dataSet;
     await refreshScheduledNotificationBadge();
     notifyListeners();
   }
@@ -705,26 +714,87 @@ class FinanceDataStore extends ChangeNotifier {
   /// A JSON backup is already a v2 data set. Its successful restoration forms
   /// a new v2 authority boundary, even when the older backup predates the
   /// one-time legacy-import marker.
-  Future<void> restoreBackupDataSet(FinanceDataSet dataSet) {
+  Future<void> restoreBackupDataSet(FinanceDataSet dataSet) async {
+    if (_authoritativeRestoreInProgress) {
+      throw StateError('A backup restore is already in progress.');
+    }
+    _authoritativeRestoreInProgress = true;
     preferRemoteOnFirstSync = false;
-    return replaceDataSet(
-      dataSet.copyWith(
-        preferences: dataSet.preferences.copyWith(
-          legacyV1MigrationCompleted: true,
-        ),
+    final restored = dataSet.copyWith(
+      preferences: dataSet.preferences.copyWith(
+        legacyV1MigrationCompleted: true,
       ),
     );
+    try {
+      final remote = remoteRepository;
+      final currentUserId = userId;
+      String? activatedGeneration;
+      if (remote != null && currentUserId != null) {
+        // Activate the isolated cloud generation before replacing local data.
+        // If staging or activation fails, local state is still untouched. If
+        // the process stops after activation, the next sync can only load the
+        // restored generation, never the stale pre-restore cloud records.
+        activatedGeneration = await remote.replaceDataSetAuthoritatively(
+          userId: currentUserId,
+          dataSet: restored,
+        );
+      }
+      try {
+        await replaceDataSet(restored);
+        if (currentUserId != null && activatedGeneration != null) {
+          await localRepository?.saveAcknowledgedRestoreGeneration(
+            currentUserId,
+            activatedGeneration,
+          );
+        }
+      } on Object catch (error) {
+        if (remote != null && currentUserId != null) {
+          throw AuthoritativeRestoreLocalInstallException(error);
+        }
+        rethrow;
+      }
+    } finally {
+      _authoritativeRestoreInProgress = false;
+    }
   }
 
   Future<void> attachRemoteSync({
     required FinanceRecordRepository remoteRepository,
     required String userId,
   }) async {
+    if (_authoritativeRestoreInProgress) {
+      throw StateError('Cloud sync is paused while a backup is restored.');
+    }
     this.remoteRepository = remoteRepository;
     this.userId = userId;
 
+    debugPrint('Cloud sync stage: loading restore authority');
+    final remoteGeneration = await remoteRepository.activeRestoreGeneration(
+      userId,
+    );
+    debugPrint('Cloud sync stage: loading local authority acknowledgement');
+    final acknowledgedGeneration = await localRepository
+        ?.loadAcknowledgedRestoreGeneration(userId);
+    debugPrint('Cloud sync stage: loading remote data set');
     final remoteDataSet = await remoteRepository.loadDataSet(userId);
+    debugPrint('Cloud sync stage: remote data set loaded');
     if (financeDataSetHasRecords(remoteDataSet)) {
+      if (remoteGeneration != null &&
+          remoteGeneration != acknowledgedGeneration) {
+        // A confirmed restore is an authority boundary. A device that has not
+        // seen this generation must discard its stale local-only records once,
+        // otherwise those records would be pushed into the restored data set.
+        await replaceDataSet(remoteDataSet);
+        await localRepository?.saveAcknowledgedRestoreGeneration(
+          userId,
+          remoteGeneration,
+        );
+        preferRemoteOnFirstSync = false;
+        debugPrint('Cloud sync stage: migrating legacy Goals');
+        await migrateLegacyGoalsToAccounts();
+        debugPrint('Cloud sync stage: complete');
+        return;
+      }
       final merged = preferRemoteOnFirstSync
           ? mergeFinanceDataSetsPreferIncoming(
               incoming: remoteDataSet,
@@ -736,13 +806,18 @@ class FinanceDataStore extends ChangeNotifier {
             );
       await replaceDataSet(merged);
       preferRemoteOnFirstSync = false;
+      debugPrint('Cloud sync stage: migrating legacy Goals');
       await migrateLegacyGoalsToAccounts();
-      await pushAllRecordsToRemote();
+      debugPrint('Cloud sync stage: uploading merged data set');
+      await pushAllRecordsToRemote(baseline: remoteDataSet);
+      debugPrint('Cloud sync stage: complete');
       return;
     }
 
-    await pushAllRecordsToRemote();
+    debugPrint('Cloud sync stage: seeding empty remote data set');
+    await pushAllRecordsToRemote(baseline: remoteDataSet);
     preferRemoteOnFirstSync = false;
+    debugPrint('Cloud sync stage: complete');
   }
 
   /// Converts the former Goal-reservation/funding graph to the normal account
@@ -968,10 +1043,19 @@ class FinanceDataStore extends ChangeNotifier {
     userId = null;
   }
 
-  Future<void> pushAllRecordsToRemote() async {
+  Future<void> pushAllRecordsToRemote({FinanceDataSet? baseline}) async {
     final remote = remoteRepository;
     final currentUserId = userId;
     if (remote == null || currentUserId == null) return;
+
+    if (remote case final BulkFinanceRecordRepository bulkRepository) {
+      await bulkRepository.saveDataSet(
+        userId: currentUserId,
+        dataSet: _dataSet,
+        baseline: baseline,
+      );
+      return;
+    }
 
     for (final account in accounts) {
       await remote.saveAccount(userId: currentUserId, account: account);
