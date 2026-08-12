@@ -49,6 +49,8 @@ class UserPreferences {
     this.newAccountIncludeInNetWorth = true,
     this.warnBeforeNegativeAssetBalance = true,
     this.notificationsEnabled = false,
+    this.automaticSyncEnabled = false,
+    this.preferredDailySyncMinutes = 22 * 60,
     this.collapsedAccountGroupNames = const {},
     this.accountGroupOrderNames = defaultAccountGroupOrderNames,
     this.accountGroupLabelOverrides = const {},
@@ -75,6 +77,11 @@ class UserPreferences {
   final bool newAccountIncludeInNetWorth;
   final bool warnBeforeNegativeAssetBalance;
   final bool notificationsEnabled;
+  final bool automaticSyncEnabled;
+
+  /// Minutes after local midnight. This is a best-effort scheduling preference,
+  /// not a promise that iOS will launch the app at an exact clock time.
+  final int preferredDailySyncMinutes;
   final Set<String> collapsedAccountGroupNames;
   final List<String> accountGroupOrderNames;
   final Map<String, String> accountGroupLabelOverrides;
@@ -105,6 +112,8 @@ class UserPreferences {
     bool? newAccountIncludeInNetWorth,
     bool? warnBeforeNegativeAssetBalance,
     bool? notificationsEnabled,
+    bool? automaticSyncEnabled,
+    int? preferredDailySyncMinutes,
     Set<String>? collapsedAccountGroupNames,
     List<String>? accountGroupOrderNames,
     Map<String, String>? accountGroupLabelOverrides,
@@ -145,6 +154,9 @@ class UserPreferences {
       warnBeforeNegativeAssetBalance:
           warnBeforeNegativeAssetBalance ?? this.warnBeforeNegativeAssetBalance,
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+      automaticSyncEnabled: automaticSyncEnabled ?? this.automaticSyncEnabled,
+      preferredDailySyncMinutes:
+          preferredDailySyncMinutes ?? this.preferredDailySyncMinutes,
       collapsedAccountGroupNames:
           collapsedAccountGroupNames ?? this.collapsedAccountGroupNames,
       accountGroupOrderNames:
@@ -178,6 +190,8 @@ class UserPreferences {
       'newAccountIncludeInNetWorth': newAccountIncludeInNetWorth,
       'warnBeforeNegativeAssetBalance': warnBeforeNegativeAssetBalance,
       'notificationsEnabled': notificationsEnabled,
+      'automaticSyncEnabled': automaticSyncEnabled,
+      'preferredDailySyncMinutes': preferredDailySyncMinutes,
       'collapsedAccountGroupNames': collapsedAccountGroupNames.toList()..sort(),
       'accountGroupOrderNames': accountGroupOrderNames,
       'accountGroupLabelOverrides': accountGroupLabelOverrides,
@@ -248,6 +262,10 @@ class UserPreferences {
       warnBeforeNegativeAssetBalance:
           json['warnBeforeNegativeAssetBalance'] as bool? ?? true,
       notificationsEnabled: json['notificationsEnabled'] as bool? ?? false,
+      automaticSyncEnabled: json['automaticSyncEnabled'] as bool? ?? false,
+      preferredDailySyncMinutes: _validPreferredSyncMinutes(
+        json['preferredDailySyncMinutes'],
+      ),
       collapsedAccountGroupNames:
           (json['collapsedAccountGroupNames'] as List<Object?>?)
               ?.whereType<String>()
@@ -283,4 +301,9 @@ class UserPreferences {
           json['legacyV1MigrationCompleted'] as bool? ?? false,
     );
   }
+}
+
+int _validPreferredSyncMinutes(Object? value) {
+  final minutes = value is int ? value : 22 * 60;
+  return minutes.clamp(0, (24 * 60) - 1);
 }

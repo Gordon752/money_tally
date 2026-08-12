@@ -137,6 +137,248 @@ void main() {
     });
 
     test(
+      'repairs real blank split IDs without changing financial allocations',
+      () {
+        final source = _richDataSet();
+        final recordSync = source.transactions.first.sync;
+        final dataSet = source.copyWith(
+          categories: [
+            ...source.categories,
+            CategoryRecord(
+              id: 'dining',
+              name: 'Dining',
+              kind: CategoryKind.expense,
+              sync: recordSync,
+            ),
+            CategoryRecord(
+              id: 'maintenance',
+              name: 'Maintenance',
+              kind: CategoryKind.expense,
+              sync: recordSync,
+            ),
+            CategoryRecord(
+              id: 'sales-tax',
+              name: 'Sales Tax',
+              kind: CategoryKind.expense,
+              sync: recordSync,
+            ),
+          ],
+          transactions: [
+            ...source.transactions,
+            TransactionRecord(
+              id: 'txn_1786393981825072',
+              type: TransactionType.expense,
+              accountId: 'cash',
+              categoryId: 'dining',
+              date: DateTime(2026, 8, 10, 15, 33, 1),
+              payee: 'Pizza Hut',
+              amountMinor: 2304,
+              splitLines: const [
+                TransactionSplitLine(
+                  id: '',
+                  categoryId: 'dining',
+                  amountMinor: 2128,
+                ),
+                TransactionSplitLine(
+                  id: 'split_1786394123220666_1',
+                  categoryId: 'sales-tax',
+                  amountMinor: 176,
+                ),
+              ],
+              sync: recordSync,
+            ),
+            TransactionRecord(
+              id: 'txn_1786412936472197',
+              type: TransactionType.expense,
+              accountId: 'card',
+              categoryId: 'maintenance',
+              date: DateTime(2026, 8, 10, 20, 48, 56),
+              payee: 'Travel Centers Of America',
+              amountMinor: 100000,
+              note: 'Shocks and metal hose leak',
+              splitLines: const [
+                TransactionSplitLine(
+                  id: '   ',
+                  categoryId: 'maintenance',
+                  amountMinor: 88958,
+                ),
+                TransactionSplitLine(
+                  id: 'split_1786416511003681_1',
+                  categoryId: 'sales-tax',
+                  amountMinor: 11042,
+                ),
+              ],
+              sync: recordSync,
+            ),
+          ],
+        );
+
+        final restored = const BackupRestoreValidator().validate(
+          const BackupCodec().encodeJson(dataSet),
+        );
+        final pizza = restored.dataSet.transactions.firstWhere(
+          (item) => item.id == 'txn_1786393981825072',
+        );
+        final travelCenter = restored.dataSet.transactions.firstWhere(
+          (item) => item.id == 'txn_1786412936472197',
+        );
+
+        expect(pizza.amountMinor, 2304);
+        expect(pizza.splitLines.map((line) => line.id), [
+          'split_txn_1786393981825072_0',
+          'split_1786394123220666_1',
+        ]);
+        expect(
+          pizza.splitLines.map(
+            (line) => (line.categoryId, line.amountMinor, line.note),
+          ),
+          [('dining', 2128, ''), ('sales-tax', 176, '')],
+        );
+        expect(travelCenter.amountMinor, 100000);
+        expect(travelCenter.note, 'Shocks and metal hose leak');
+        expect(travelCenter.splitLines.map((line) => line.id), [
+          'split_txn_1786412936472197_0',
+          'split_1786416511003681_1',
+        ]);
+        expect(
+          travelCenter.splitLines.map(
+            (line) => (line.categoryId, line.amountMinor, line.note),
+          ),
+          [('maintenance', 88958, ''), ('sales-tax', 11042, '')],
+        );
+        expect(pizza.hasValidSplitTotal, isTrue);
+        expect(travelCenter.hasValidSplitTotal, isTrue);
+      },
+    );
+
+    test('duplicate nonblank split IDs remain invalid', () {
+      final raw = _richDataSet().toJson();
+      final transactions = raw['transactions']! as List<Object?>;
+      final splitIndex = transactions.indexWhere(
+        (item) => (item as Map)['id'] == 'split-1',
+      );
+      final split = Map<String, Object?>.from(transactions[splitIndex] as Map);
+      final lines = (split['splitLines']! as List<Object?>)
+          .map((item) => Map<String, Object?>.from(item as Map))
+          .toList();
+      lines[1]['id'] = lines[0]['id'];
+      split['splitLines'] = lines;
+      transactions[splitIndex] = split;
+
+      expect(
+        () => const BackupRestoreValidator().validate(jsonEncode(raw)),
+        throwsA(
+          isA<BackupValidationException>().having(
+            (error) => error.message,
+            'message',
+            'A transaction contains an invalid split allocation.',
+          ),
+        ),
+      );
+    });
+
+    test('saving a split transaction replaces blank IDs stably', () async {
+      final source = _richDataSet();
+      final store = FinanceDataStore(dataSet: source);
+      final transaction = TransactionRecord(
+        id: 'new-split',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        categoryId: 'groceries',
+        date: DateTime(2026, 8, 11, 9, 30),
+        payee: 'Split merchant',
+        amountMinor: 2500,
+        splitLines: const [
+          TransactionSplitLine(
+            id: '',
+            categoryId: 'groceries',
+            amountMinor: 2000,
+            note: 'Primary',
+          ),
+          TransactionSplitLine(
+            id: 'existing-line',
+            categoryId: 'snacks',
+            amountMinor: 500,
+            note: 'Secondary',
+          ),
+        ],
+        sync: source.transactions.first.sync,
+      );
+
+      await store.saveTransaction(transaction);
+      final saved = store.transactions.firstWhere(
+        (item) => item.id == transaction.id,
+      );
+
+      expect(saved.splitLines.map((line) => line.id), [
+        'split_new-split_0',
+        'existing-line',
+      ]);
+      expect(
+        saved.splitLines.every((line) => line.id.trim().isNotEmpty),
+        isTrue,
+      );
+      expect(saved.splitLines.map((line) => line.amountMinor), [2000, 500]);
+      expect(saved.splitLines.map((line) => line.note), [
+        'Primary',
+        'Secondary',
+      ]);
+    });
+
+    test(
+      'deleted Goal tombstones may outlive their removed hidden accounts',
+      () {
+        final source = _richDataSet();
+        final goal = source.goals.single;
+        final tombstone = goal.copyWith(
+          sync: goal.sync.deleted(deviceId: 'test-device'),
+        );
+        final withoutHiddenAccount = source.copyWith(
+          goals: [tombstone],
+          accounts: source.accounts
+              .where((account) => account.id != goal.accountId)
+              .toList(),
+        );
+
+        final restored = const BackupRestoreValidator().validate(
+          const BackupCodec().encodeJson(withoutHiddenAccount),
+        );
+
+        expect(restored.dataSet.goals.single.id, goal.id);
+        expect(restored.dataSet.goals.single.isDeleted, isTrue);
+        expect(
+          restored.dataSet.accounts.where(
+            (account) => account.id == goal.accountId,
+          ),
+          isEmpty,
+        );
+      },
+    );
+
+    test('live Goals still require their linked hidden account', () {
+      final source = _richDataSet();
+      final goal = source.goals.single;
+      final withoutHiddenAccount = source.copyWith(
+        accounts: source.accounts
+            .where((account) => account.id != goal.accountId)
+            .toList(),
+      );
+
+      expect(
+        () => const BackupRestoreValidator().validate(
+          const BackupCodec().encodeJson(withoutHiddenAccount),
+        ),
+        throwsA(
+          isA<BackupValidationException>().having(
+            (error) => error.message,
+            'message',
+            'A Goal is not linked to its expected hidden account.',
+          ),
+        ),
+      );
+    });
+
+    test(
       'authoritative cloud replacement defeats newer records, extras, and tombstones',
       () async {
         final remote = _AuthoritativeFakeRepository(
@@ -344,6 +586,8 @@ void main() {
         await store.refreshScheduledNotifications();
 
         expect(store.preferences.notificationsEnabled, isTrue);
+        expect(store.preferences.automaticSyncEnabled, isTrue);
+        expect(store.preferences.preferredDailySyncMinutes, 22 * 60 + 30);
         expect(scheduler.permissionRequests, greaterThan(0));
         expect(scheduler.scheduledIds, contains('scheduled-expense'));
       },
@@ -685,6 +929,8 @@ FinanceDataSet _richDataSet() {
       defaultTransferSourceMode: AccountDefaultMode.specific,
       defaultTransferSourceAccountId: 'checking',
       notificationsEnabled: true,
+      automaticSyncEnabled: true,
+      preferredDailySyncMinutes: 22 * 60 + 30,
       collapsedAccountGroupNames: {'loans'},
       accountGroupOrderNames: ['cash', 'banking', 'creditCards', 'loans'],
       accountGroupLabelOverrides: {'banking': 'Banking'},

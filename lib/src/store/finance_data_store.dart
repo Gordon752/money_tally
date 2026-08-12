@@ -2484,6 +2484,9 @@ class FinanceDataStore extends ChangeNotifier {
   Future<void> saveScheduledTransaction(
     ScheduledTransactionRecord scheduledTransaction,
   ) async {
+    scheduledTransaction = _withStableScheduledSplitLineIds(
+      scheduledTransaction,
+    );
     _validateScheduledTransaction(scheduledTransaction);
     final notificationAdjusted = await _applyScheduledNotificationState(
       scheduledTransaction,
@@ -2502,6 +2505,10 @@ class FinanceDataStore extends ChangeNotifier {
     required TransactionRecord transaction,
     required ScheduledTransactionRecord scheduledTransaction,
   }) async {
+    transaction = _withStableTransactionSplitLineIds(transaction);
+    scheduledTransaction = _withStableScheduledSplitLineIds(
+      scheduledTransaction,
+    );
     _validateTransaction(transaction);
     _validateScheduledTransaction(scheduledTransaction);
     final previousDataSet = _dataSet;
@@ -2778,12 +2785,81 @@ class FinanceDataStore extends ChangeNotifier {
   }
 
   Future<void> saveTransaction(TransactionRecord transaction) async {
+    transaction = _withStableTransactionSplitLineIds(transaction);
     _validateTransaction(transaction);
     final before = _dataSet;
     final updated = _upsert(transactions, transaction, (item) => item.id);
     _dataSet = _dataSet.copyWith(transactions: updated);
     await _commit(transaction: transaction);
     _detectBudgetLowAlerts(before: before, after: _dataSet);
+  }
+
+  TransactionRecord _withStableTransactionSplitLineIds(
+    TransactionRecord transaction,
+  ) {
+    final splitLines = _withStableSplitLineIds(
+      ownerId: transaction.id,
+      splitLines: transaction.splitLines,
+    );
+    return identical(splitLines, transaction.splitLines)
+        ? transaction
+        : transaction.copyWith(splitLines: splitLines);
+  }
+
+  ScheduledTransactionRecord _withStableScheduledSplitLineIds(
+    ScheduledTransactionRecord scheduledTransaction,
+  ) {
+    final splitLines = _withStableSplitLineIds(
+      ownerId: scheduledTransaction.id,
+      splitLines: scheduledTransaction.splitLines,
+    );
+    return identical(splitLines, scheduledTransaction.splitLines)
+        ? scheduledTransaction
+        : scheduledTransaction.copyWith(splitLines: splitLines);
+  }
+
+  List<TransactionSplitLine> _withStableSplitLineIds({
+    required String ownerId,
+    required List<TransactionSplitLine> splitLines,
+  }) {
+    if (!splitLines.any((line) => line.id.trim().isEmpty)) {
+      return splitLines;
+    }
+    final usedIds = splitLines
+        .map((line) => line.id)
+        .where((id) => id.trim().isNotEmpty)
+        .toSet();
+    return [
+      for (var index = 0; index < splitLines.length; index++)
+        if (splitLines[index].id.trim().isNotEmpty)
+          splitLines[index]
+        else
+          TransactionSplitLine(
+            id: _availableSplitLineId(
+              ownerId: ownerId,
+              index: index,
+              usedIds: usedIds,
+            ),
+            categoryId: splitLines[index].categoryId,
+            amountMinor: splitLines[index].amountMinor,
+            note: splitLines[index].note,
+          ),
+    ];
+  }
+
+  String _availableSplitLineId({
+    required String ownerId,
+    required int index,
+    required Set<String> usedIds,
+  }) {
+    final baseId = 'split_${ownerId}_$index';
+    var candidate = baseId;
+    var collisionIndex = 1;
+    while (!usedIds.add(candidate)) {
+      candidate = '${baseId}_$collisionIndex';
+      collisionIndex += 1;
+    }
+    return candidate;
   }
 
   void dismissBudgetLowAlert() {

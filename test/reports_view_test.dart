@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -24,13 +26,30 @@ void main() {
       await pumpReports(tester, store);
 
       expect(find.text('Spending by Category'), findsOneWidget);
+      expect(find.text('Spending by Account'), findsOneWidget);
+      expect(find.text('Income by Source'), findsOneWidget);
       expect(find.text('Monthly Trend'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('spending-category-donut')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('monthly-trend-chart')), findsNothing);
+      final trendExpand = find.byKey(const ValueKey('report-trend-expand'));
+      await tester.ensureVisible(trendExpand);
+      await tester.tap(trendExpand);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('monthly-trend-chart')), findsOneWidget);
+      final categoryExpand = find.byKey(
+        const ValueKey('report-categories-expand'),
+      );
+      await tester.ensureVisible(categoryExpand);
+      await tester.tap(categoryExpand);
+      await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('spending-category-donut')),
         findsOneWidget,
       );
-      expect(find.byKey(const ValueKey('monthly-trend-chart')), findsOneWidget);
-      expect(find.text(r'$1,000.00'), findsOneWidget);
+      expect(find.text(r'$1,000.00'), findsWidgets);
       expect(find.text(r'$250.00'), findsWidgets);
       expect(find.text(r'$750.00'), findsOneWidget);
 
@@ -40,9 +59,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Last Month'), findsWidgets);
-      expect(find.text(r'$400.00'), findsOneWidget);
+      expect(find.text(r'$400.00'), findsWidgets);
       expect(find.text(r'$100.00'), findsWidgets);
-      expect(find.text(r'$300.00'), findsOneWidget);
+      expect(find.text(r'$300.00'), findsWidgets);
 
       await store.addExpense(
         accountId: 'checking',
@@ -81,18 +100,159 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('No expense data for this period'), findsOneWidget);
+    expect(find.text('No account spending for this period'), findsOneWidget);
+    expect(find.text('No income data for this period'), findsOneWidget);
     expect(find.text('No trend data yet'), findsOneWidget);
     expect(find.byType(PieChart), findsNothing);
     expect(find.byType(BarChart), findsNothing);
   });
+
+  testWidgets('category chart opens Ledger on tap but never on hover', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1024, 1366);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await pumpReports(tester, reportStore());
+    final expandCategories = find.byKey(
+      const ValueKey('report-categories-expand'),
+    );
+    await tester.ensureVisible(expandCategories);
+    await tester.tap(expandCategories);
+    await tester.pumpAndSettle();
+
+    final chart = find.byKey(const ValueKey('spending-category-donut'));
+    await tester.ensureVisible(chart);
+    await tester.pumpAndSettle();
+    final chartRect = tester.getRect(chart);
+    final categorySectionPoint = Offset(
+      chartRect.center.dx + 74,
+      chartRect.center.dy,
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: categorySectionPoint);
+    await mouse.moveTo(categorySectionPoint);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('report-ledger-screen')), findsNothing);
+
+    await tester.tapAt(categorySectionPoint);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('report-ledger-screen')), findsOneWidget);
+  });
+
+  testWidgets(
+    'report drill-downs reuse Ledger filters and Back preserves report state',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = reportStore();
+
+      await pumpReports(tester, store);
+      await tester.tap(find.byKey(const ValueKey('reports-date-range')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Last Month').last);
+      await tester.pumpAndSettle();
+
+      final expandCategories = find.byKey(
+        const ValueKey('report-categories-expand'),
+      );
+      await tester.ensureVisible(expandCategories);
+      await tester.tap(expandCategories);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('spending-category-donut')),
+        findsOneWidget,
+      );
+
+      final category = find.byKey(const ValueKey('report-category-groceries'));
+      await tester.ensureVisible(category);
+      await tester.tap(category);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('report-ledger-screen')),
+        findsOneWidget,
+      );
+      expect(find.text('Category: Groceries'), findsOneWidget);
+      expect(find.text('Last Month'), findsOneWidget);
+      expect(find.text('june-expense'), findsWidgets);
+      expect(find.text('july-expense'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('report-ledger-back')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('report-ledger-screen')), findsNothing);
+      expect(find.text('Last Month'), findsWidgets);
+      expect(
+        find.byKey(const ValueKey('spending-category-donut')),
+        findsOneWidget,
+      );
+
+      final account = find.byKey(const ValueKey('report-account-checking'));
+      await tester.ensureVisible(account);
+      await tester.tap(account);
+      await tester.pumpAndSettle();
+      expect(find.text('Account: Checking'), findsOneWidget);
+      expect(find.text('june-expense'), findsWidgets);
+      expect(find.text('june-income'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('report-ledger-back')));
+      await tester.pumpAndSettle();
+
+      final income = find.byKey(const ValueKey('report-income-june-income'));
+      await tester.ensureVisible(income);
+      await tester.tap(income);
+      await tester.pumpAndSettle();
+      expect(find.text('Income source: june-income'), findsOneWidget);
+      expect(find.text('june-income'), findsWidgets);
+      expect(find.text('june-expense'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('report-ledger-back')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Last Month'), findsWidgets);
+      expect(
+        find.byKey(const ValueKey('report-account-checking')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('Reports filtered Ledger supports native iOS edge swipe back', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await pumpReports(tester, reportStore(), platform: TargetPlatform.iOS);
+    final category = find.byKey(const ValueKey('report-category-groceries'));
+    await tester.tap(category);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('report-ledger-screen')), findsOneWidget);
+
+    await tester.dragFrom(const Offset(1, 300), const Offset(340, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('report-ledger-screen')), findsNothing);
+    expect(find.text('Spending by Category'), findsOneWidget);
+  });
 }
 
-Future<void> pumpReports(WidgetTester tester, FinanceDataStore store) async {
+Future<void> pumpReports(
+  WidgetTester tester,
+  FinanceDataStore store, {
+  TargetPlatform? platform,
+}) async {
   await tester.pumpWidget(
     FinanceDataStoreScope(
       store: store,
       child: MaterialApp(
-        theme: AppTheme.light(),
+        theme: AppTheme.light().copyWith(platform: platform),
         home: Scaffold(
           body: SingleChildScrollView(
             padding: const EdgeInsets.all(16),

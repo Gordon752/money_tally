@@ -2488,15 +2488,64 @@ Future<void> showRenameAccountGroupDialog(
   await store.renameAccountGroup(group: group, label: label);
 }
 
+class LedgerDrillDownFilter {
+  const LedgerDrillDownFilter({
+    required this.label,
+    required this.periodLabel,
+    required this.start,
+    required this.endExclusive,
+    required this.icon,
+    this.accountId,
+    this.categoryId,
+    this.payee,
+    this.transactionType,
+    this.uncategorizedExpensesOnly = false,
+  });
+
+  final String label;
+  final String periodLabel;
+  final DateTime start;
+  final DateTime endExclusive;
+  final IconData icon;
+  final String? accountId;
+  final String? categoryId;
+  final String? payee;
+  final TransactionType? transactionType;
+  final bool uncategorizedExpensesOnly;
+
+  bool matches(TransactionRecord transaction) {
+    if (transaction.date.isBefore(start) ||
+        !transaction.date.isBefore(endExclusive)) {
+      return false;
+    }
+    if (transactionType != null && transaction.type != transactionType) {
+      return false;
+    }
+    if (accountId != null && transaction.accountId != accountId) return false;
+    if (uncategorizedExpensesOnly &&
+        transaction.effectiveCategoryAllocations.isNotEmpty) {
+      return false;
+    }
+    if (payee != null &&
+        normalizeManagedPayee(transaction.payee) !=
+            normalizeManagedPayee(payee!)) {
+      return false;
+    }
+    return true;
+  }
+}
+
 class LedgerView extends StatefulWidget {
   const LedgerView({
     this.initialAccountFilterId,
     this.initialManagementFilter,
+    this.initialDrillDownFilter,
     super.key,
   });
 
   final String? initialAccountFilterId;
   final ManagementLedgerFilter? initialManagementFilter;
+  final LedgerDrillDownFilter? initialDrillDownFilter;
 
   @override
   State<LedgerView> createState() => _LedgerViewState();
@@ -2514,6 +2563,7 @@ class _LedgerViewState extends State<LedgerView> {
   var dateFilter = LedgerDateFilter.all;
   DateTimeRange? customDateRange;
   ManagementLedgerFilter? managementFilter;
+  LedgerDrillDownFilter? drillDownFilter;
   final _collapsedMonthKeys = <String>{};
   final _monthAnchors = <String, GlobalKey>{};
 
@@ -2522,6 +2572,7 @@ class _LedgerViewState extends State<LedgerView> {
     super.initState();
     accountFilterId = widget.initialAccountFilterId ?? '';
     managementFilter = widget.initialManagementFilter;
+    drillDownFilter = widget.initialDrillDownFilter;
   }
 
   @override
@@ -2533,6 +2584,9 @@ class _LedgerViewState extends State<LedgerView> {
     }
     if (widget.initialManagementFilter != oldWidget.initialManagementFilter) {
       managementFilter = widget.initialManagementFilter;
+    }
+    if (widget.initialDrillDownFilter != oldWidget.initialDrillDownFilter) {
+      drillDownFilter = widget.initialDrillDownFilter;
     }
   }
 
@@ -2567,6 +2621,8 @@ class _LedgerViewState extends State<LedgerView> {
     final normalizedQuery = query.trim().toLowerCase();
     final requestedCategoryId = categoryFilterId.isNotEmpty
         ? categoryFilterId
+        : drillDownFilter?.categoryId?.isNotEmpty == true
+        ? drillDownFilter!.categoryId!
         : managementFilter?.kind == ManagementLedgerFilterKind.category
         ? managementFilter!.value
         : '';
@@ -2583,6 +2639,11 @@ class _LedgerViewState extends State<LedgerView> {
               (transaction) =>
                   managementTransactionIds == null ||
                   managementTransactionIds.contains(transaction.id),
+            )
+            .where(
+              (transaction) =>
+                  drillDownFilter == null ||
+                  drillDownFilter!.matches(transaction),
             )
             .where(
               (transaction) => transactionMatchesSearch(
@@ -2619,6 +2680,7 @@ class _LedgerViewState extends State<LedgerView> {
             .where(
               (event) =>
                   managementFilter == null &&
+                  drillDownFilter == null &&
                   typeFilterName.isEmpty &&
                   categoryFilterId.isEmpty &&
                   (accountFilterId.isEmpty ||
@@ -2654,7 +2716,8 @@ class _LedgerViewState extends State<LedgerView> {
         accountFilterId.isNotEmpty ||
         categoryFilterId.isNotEmpty ||
         dateFilter != LedgerDateFilter.all ||
-        managementFilter != null;
+        managementFilter != null ||
+        drillDownFilter != null;
     final selectedTypeLabel = typeFilterName.isEmpty
         ? 'Type'
         : transactionTypeLabel(
@@ -2797,6 +2860,73 @@ class _LedgerViewState extends State<LedgerView> {
             ),
           ),
         ],
+        if (drillDownFilter case final filter?) ...[
+          Builder(
+            builder: (context) {
+              final theme = Theme.of(context);
+              final isDark = theme.brightness == Brightness.dark;
+              final contextAccent = isDark
+                  ? Color.lerp(AppColors.info, Colors.white, 0.24)!
+                  : AppColors.info;
+              final contextSurface = Color.alphaBlend(
+                AppColors.info.withValues(alpha: isDark ? 0.16 : 0.09),
+                theme.colorScheme.surface,
+              );
+
+              return Container(
+                key: const ValueKey('ledger-report-filter-context'),
+                margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
+                ),
+                decoration: BoxDecoration(
+                  color: contextSurface,
+                  borderRadius: BorderRadius.circular(AppRadii.control),
+                  border: Border.all(
+                    color: contextAccent.withValues(
+                      alpha: isDark ? 0.34 : 0.24,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      filter.icon,
+                      size: AppIconSize.inline,
+                      color: contextAccent,
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            filter.label,
+                            key: const ValueKey('ledger-report-filter-label'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          Text(
+                            filter.periodLabel,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
         Row(
           children: [
             Expanded(
@@ -2865,10 +2995,30 @@ class _LedgerViewState extends State<LedgerView> {
                   backgroundColor: activeFilterCount == 0
                       ? Theme.of(context).colorScheme.surfaceContainerHighest
                             .withValues(alpha: 0.55)
-                      : Theme.of(context).colorScheme.primaryContainer,
+                      : Color.alphaBlend(
+                          AppColors.accent.withValues(
+                            alpha:
+                                Theme.of(context).brightness == Brightness.dark
+                                ? 0.22
+                                : 0.12,
+                          ),
+                          Theme.of(context).colorScheme.surface,
+                        ),
                   foregroundColor: activeFilterCount == 0
                       ? Theme.of(context).colorScheme.onSurfaceVariant
-                      : Theme.of(context).colorScheme.onPrimaryContainer,
+                      : Theme.of(context).brightness == Brightness.dark
+                      ? Color.lerp(AppColors.accent, Colors.white, 0.18)
+                      : AppColors.accentStrong,
+                  side: activeFilterCount == 0
+                      ? BorderSide.none
+                      : BorderSide(
+                          color: AppColors.accent.withValues(
+                            alpha:
+                                Theme.of(context).brightness == Brightness.dark
+                                ? 0.34
+                                : 0.22,
+                          ),
+                        ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
@@ -3185,6 +3335,40 @@ class FilteredLedgerScreen extends StatelessWidget {
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
           child: LedgerView(initialManagementFilter: filter),
+        ),
+      ),
+    );
+  }
+}
+
+class ReportLedgerScreen extends StatelessWidget {
+  const ReportLedgerScreen({required this.filter, super.key});
+
+  final LedgerDrillDownFilter filter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      key: const ValueKey('report-ledger-screen'),
+      appBar: AppBar(
+        leading: IconButton(
+          key: const ValueKey('report-ledger-back'),
+          tooltip: 'Back to Reports',
+          onPressed: () => Navigator.of(context).pop(),
+          icon: Icon(AppIcon.chevronLeft),
+        ),
+        title: const Text('Ledger'),
+        scrolledUnderElevation: 0,
+      ),
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+          child: LedgerView(
+            key: const ValueKey('report-filtered-ledger'),
+            initialDrillDownFilter: filter,
+          ),
         ),
       ),
     );
@@ -7767,9 +7951,35 @@ class _SettingsViewState extends State<SettingsView> {
                     ? 'Try syncing again'
                     : 'Refresh your data',
                 showProgress: isSyncing,
-                showDivider: widget.onSignOut != null,
+                showDivider: true,
                 onTap: isSyncing ? null : () => widget.onSyncNow!.call(),
               ),
+            SettingsSwitch(
+              icon: AppIcon.sync,
+              label: 'Automatic Sync',
+              subtitle: widget.onSyncNow == null
+                  ? 'Sign in with Apple to use automatic cloud sync'
+                  : 'Trackmark will try to sync once daily around your preferred time. iOS may delay background activity.',
+              value: preferences.automaticSyncEnabled,
+              onChanged: widget.onSyncNow == null
+                  ? null
+                  : (value) => store.savePreferences(
+                      preferences.copyWith(automaticSyncEnabled: value),
+                    ),
+            ),
+            SettingsActionRow(
+              icon: AppIcon.schedule,
+              title: 'Preferred Daily Sync Time',
+              subtitle: TimeOfDay(
+                hour: preferences.preferredDailySyncMinutes ~/ 60,
+                minute: preferences.preferredDailySyncMinutes % 60,
+              ).format(context),
+              showDivider: widget.onSignOut != null,
+              onTap:
+                  widget.onSyncNow == null || !preferences.automaticSyncEnabled
+                  ? null
+                  : () => _pickPreferredDailySyncTime(store),
+            ),
             if (widget.onSignOut != null)
               SettingsActionRow(
                 icon: AppIcon.signOut,
@@ -8009,6 +8219,23 @@ class _SettingsViewState extends State<SettingsView> {
           ],
         ),
       ],
+    );
+  }
+
+  Future<void> _pickPreferredDailySyncTime(FinanceDataStore store) async {
+    final preferences = store.preferences;
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: preferences.preferredDailySyncMinutes ~/ 60,
+        minute: preferences.preferredDailySyncMinutes % 60,
+      ),
+    );
+    if (selected == null || !mounted) return;
+    await store.savePreferences(
+      store.preferences.copyWith(
+        preferredDailySyncMinutes: selected.hour * 60 + selected.minute,
+      ),
     );
   }
 
@@ -9308,9 +9535,13 @@ class ReportsView extends StatefulWidget {
 
 class _ReportsViewState extends State<ReportsView> {
   var _range = ReportDateRange.thisMonth;
-  String? _selectedCategoryId;
+  var _categoriesExpanded = false;
+  var _accountsExpanded = false;
+  var _incomeExpanded = false;
+  var _trendExpanded = false;
   List<TransactionRecord>? _cachedTransactions;
   List<v2_category.CategoryRecord>? _cachedCategories;
+  List<v2_account.AccountRecord>? _cachedAccounts;
   ReportDateRange? _cachedRange;
   DateTime? _cachedDay;
   ReportSnapshot? _cachedSnapshot;
@@ -9322,6 +9553,7 @@ class _ReportsViewState extends State<ReportsView> {
     final day = DateTime(now.year, now.month, now.day);
     if (identical(_cachedTransactions, store.transactions) &&
         identical(_cachedCategories, store.categories) &&
+        identical(_cachedAccounts, store.accounts) &&
         _cachedRange == _range &&
         _cachedDay == day &&
         _cachedSnapshot != null) {
@@ -9330,11 +9562,13 @@ class _ReportsViewState extends State<ReportsView> {
     final snapshot = const MoneyReportCalculator().calculate(
       transactions: store.transactions,
       categories: store.categories,
+      accounts: store.accounts,
       range: _range,
       now: now,
     );
     _cachedTransactions = store.transactions;
     _cachedCategories = store.categories;
+    _cachedAccounts = store.accounts;
     _cachedRange = _range;
     _cachedDay = day;
     _cachedSnapshot = snapshot;
@@ -9358,8 +9592,61 @@ class _ReportsViewState extends State<ReportsView> {
     if (selected == null || selected == _range || !mounted) return;
     setState(() {
       _range = selected;
-      _selectedCategoryId = null;
     });
+  }
+
+  Future<void> _openReportLedger(LedgerDrillDownFilter filter) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => ReportLedgerScreen(filter: filter),
+      ),
+    );
+  }
+
+  LedgerDrillDownFilter _categoryFilter(
+    ReportSnapshot report,
+    CategoryReportTotal total,
+  ) {
+    return LedgerDrillDownFilter(
+      label: 'Category: ${total.name}',
+      periodLabel: report.period.label,
+      start: report.period.start,
+      endExclusive: report.period.end,
+      icon: AppIcon.category,
+      categoryId: total.isUncategorized ? null : total.id,
+      transactionType: TransactionType.expense,
+      uncategorizedExpensesOnly: total.isUncategorized,
+    );
+  }
+
+  LedgerDrillDownFilter _accountFilter(
+    ReportSnapshot report,
+    AccountReportTotal total,
+  ) {
+    return LedgerDrillDownFilter(
+      label: 'Account: ${total.name}',
+      periodLabel: report.period.label,
+      start: report.period.start,
+      endExclusive: report.period.end,
+      icon: v2AccountIcon(total.type),
+      accountId: total.accountId,
+      transactionType: TransactionType.expense,
+    );
+  }
+
+  LedgerDrillDownFilter _incomeFilter(
+    ReportSnapshot report,
+    IncomeSourceReportTotal total,
+  ) {
+    return LedgerDrillDownFilter(
+      label: 'Income source: ${total.source}',
+      periodLabel: report.period.label,
+      start: report.period.start,
+      endExclusive: report.period.end,
+      icon: AppIcon.income,
+      payee: total.source,
+      transactionType: TransactionType.income,
+    );
   }
 
   @override
@@ -9419,20 +9706,24 @@ class _ReportsViewState extends State<ReportsView> {
         const SizedBox(height: AppSpacing.sm),
         ReportSectionCard(
           title: 'Spending by Category',
+          trailing: report.hasExpenses
+              ? ReportExpansionButton(
+                  key: const ValueKey('report-categories-expand'),
+                  expanded: _categoriesExpanded,
+                  onPressed: () => setState(
+                    () => _categoriesExpanded = !_categoriesExpanded,
+                  ),
+                )
+              : null,
           child: report.hasExpenses
               ? CategorySpendingReport(
                   totals: report.categoryTotals,
                   totalExpensesMinor: report.expensesMinor,
                   currency: currency,
                   colors: colors,
-                  selectedCategoryId: _selectedCategoryId,
-                  onSelected: (categoryId) {
-                    setState(() {
-                      _selectedCategoryId = _selectedCategoryId == categoryId
-                          ? null
-                          : categoryId;
-                    });
-                  },
+                  expanded: _categoriesExpanded,
+                  onSelected: (total) =>
+                      _openReportLedger(_categoryFilter(report, total)),
                 )
               : ReportEmptyState(
                   icon: AppIcon.donutChart,
@@ -9441,12 +9732,75 @@ class _ReportsViewState extends State<ReportsView> {
         ),
         const SizedBox(height: AppSpacing.sm),
         ReportSectionCard(
-          title: 'Monthly Trend',
-          child: report.hasTrendData
-              ? MonthlyTrendReport(
-                  totals: report.monthlyTotals,
-                  currency: currency,
+          title: 'Spending by Account',
+          trailing: report.accountTotals.length > 4
+              ? ReportExpansionButton(
+                  key: const ValueKey('report-accounts-expand'),
+                  expanded: _accountsExpanded,
+                  onPressed: () =>
+                      setState(() => _accountsExpanded = !_accountsExpanded),
                 )
+              : null,
+          child: report.accountTotals.isEmpty
+              ? ReportEmptyState(
+                  icon: AppIcon.wallet,
+                  message: 'No account spending for this period',
+                )
+              : AccountSpendingReport(
+                  totals: report.accountTotals,
+                  totalExpensesMinor: report.expensesMinor,
+                  currency: currency,
+                  expanded: _accountsExpanded,
+                  onSelected: (total) =>
+                      _openReportLedger(_accountFilter(report, total)),
+                ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        ReportSectionCard(
+          title: 'Income by Source',
+          trailing: report.incomeSourceTotals.length > 4
+              ? ReportExpansionButton(
+                  key: const ValueKey('report-income-expand'),
+                  expanded: _incomeExpanded,
+                  onPressed: () =>
+                      setState(() => _incomeExpanded = !_incomeExpanded),
+                )
+              : null,
+          child: report.incomeSourceTotals.isEmpty
+              ? ReportEmptyState(
+                  icon: AppIcon.income,
+                  message: 'No income data for this period',
+                )
+              : IncomeSourceReport(
+                  totals: report.incomeSourceTotals,
+                  totalIncomeMinor: report.incomeMinor,
+                  currency: currency,
+                  expanded: _incomeExpanded,
+                  onSelected: (total) =>
+                      _openReportLedger(_incomeFilter(report, total)),
+                ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        ReportSectionCard(
+          title: 'Monthly Trend',
+          trailing: report.hasTrendData
+              ? ReportExpansionButton(
+                  key: const ValueKey('report-trend-expand'),
+                  expanded: _trendExpanded,
+                  onPressed: () =>
+                      setState(() => _trendExpanded = !_trendExpanded),
+                )
+              : null,
+          child: report.hasTrendData
+              ? _trendExpanded
+                    ? MonthlyTrendReport(
+                        totals: report.monthlyTotals,
+                        currency: currency,
+                      )
+                    : CompactMonthlyTrendReport(
+                        totals: report.monthlyTotals,
+                        currency: currency,
+                      )
               : ReportEmptyState(
                   icon: AppIcon.barChart,
                   message: 'No trend data yet',
@@ -9565,11 +9919,13 @@ class ReportSectionCard extends StatelessWidget {
   const ReportSectionCard({
     required this.title,
     required this.child,
+    this.trailing,
     super.key,
   });
 
   final String title;
   final Widget child;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -9579,11 +9935,18 @@ class ReportSectionCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                ?trailing,
+              ],
             ),
             const SizedBox(height: AppSpacing.md),
             child,
@@ -9600,7 +9963,7 @@ class CategorySpendingReport extends StatelessWidget {
     required this.totalExpensesMinor,
     required this.currency,
     required this.colors,
-    required this.selectedCategoryId,
+    required this.expanded,
     required this.onSelected,
     super.key,
   });
@@ -9609,8 +9972,8 @@ class CategorySpendingReport extends StatelessWidget {
   final int totalExpensesMinor;
   final CurrencyFormatSettings currency;
   final List<Color> colors;
-  final String? selectedCategoryId;
-  final ValueChanged<String> onSelected;
+  final bool expanded;
+  final ValueChanged<CategoryReportTotal> onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -9630,13 +9993,13 @@ class CategorySpendingReport extends StatelessWidget {
                 sectionsSpace: 2,
                 pieTouchData: PieTouchData(
                   touchCallback: (event, response) {
-                    if (!event.isInterestedForInteractions ||
+                    if (event is! FlTapUpEvent ||
                         response?.touchedSection == null) {
                       return;
                     }
                     final index = response!.touchedSection!.touchedSectionIndex;
                     if (index >= 0 && index < totals.length) {
-                      onSelected(totals[index].id);
+                      onSelected(totals[index]);
                     }
                   },
                 ),
@@ -9645,14 +10008,9 @@ class CategorySpendingReport extends StatelessWidget {
                     PieChartSectionData(
                       value: totals[index].amountMinor.toDouble(),
                       color: colors[index % colors.length],
-                      radius: selectedCategoryId == totals[index].id ? 36 : 31,
+                      radius: 31,
                       showTitle: false,
-                      borderSide: selectedCategoryId == totals[index].id
-                          ? BorderSide(
-                              color: Theme.of(context).colorScheme.surface,
-                              width: 2,
-                            )
-                          : BorderSide.none,
+                      borderSide: BorderSide.none,
                     ),
                 ],
               ),
@@ -9680,20 +10038,25 @@ class CategorySpendingReport extends StatelessWidget {
         ),
       ),
     );
+    final visibleTotals = expanded
+        ? totals
+        : totals.take(4).toList(growable: false);
     final ranking = Column(
       children: [
-        for (var index = 0; index < totals.length; index += 1)
+        for (var index = 0; index < visibleTotals.length; index += 1)
           CategoryReportRow(
-            key: ValueKey('report-category-${totals[index].id}'),
-            total: totals[index],
+            key: ValueKey('report-category-${visibleTotals[index].id}'),
+            total: visibleTotals[index],
             color: colors[index % colors.length],
             currency: currency,
-            selected: selectedCategoryId == totals[index].id,
-            onTap: () => onSelected(totals[index].id),
-            showDivider: index != totals.length - 1,
+            selected: false,
+            onTap: () => onSelected(visibleTotals[index]),
+            showDivider: index != visibleTotals.length - 1,
           ),
       ],
     );
+
+    if (!expanded) return ranking;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -9807,10 +10170,340 @@ class CategoryReportRow extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(width: AppSpacing.xxs),
+              Icon(
+                AppIcon.chevronRight,
+                size: AppIconSize.inline,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class ReportExpansionButton extends StatelessWidget {
+  const ReportExpansionButton({
+    required this.expanded,
+    required this.onPressed,
+    super.key,
+  });
+
+  final bool expanded;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: onPressed,
+      iconAlignment: IconAlignment.end,
+      icon: AnimatedRotation(
+        turns: expanded ? .5 : 0,
+        duration: const Duration(milliseconds: 160),
+        child: Icon(AppIcon.chevronDown, size: AppIconSize.inline),
+      ),
+      label: Text(expanded ? 'Show Less' : 'Show All'),
+    );
+  }
+}
+
+class AccountSpendingReport extends StatelessWidget {
+  const AccountSpendingReport({
+    required this.totals,
+    required this.totalExpensesMinor,
+    required this.currency,
+    required this.expanded,
+    required this.onSelected,
+    super.key,
+  });
+
+  final List<AccountReportTotal> totals;
+  final int totalExpensesMinor;
+  final CurrencyFormatSettings currency;
+  final bool expanded;
+  final ValueChanged<AccountReportTotal> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = expanded ? totals : totals.take(4).toList(growable: false);
+    return Column(
+      children: [
+        for (var index = 0; index < visible.length; index += 1)
+          ReportRankedRow(
+            key: ValueKey('report-account-${visible[index].accountId}'),
+            leading: AccountAppearanceBadge(
+              accountType: visible[index].type,
+              iconId: visible[index].iconId,
+              accentId: visible[index].accentId,
+              size: 36,
+            ),
+            label: visible[index].name,
+            amountMinor: visible[index].amountMinor,
+            percentage: totalExpensesMinor == 0
+                ? 0
+                : visible[index].amountMinor / totalExpensesMinor,
+            currency: currency,
+            showDivider: index != visible.length - 1,
+            onTap: () => onSelected(visible[index]),
+          ),
+      ],
+    );
+  }
+}
+
+class IncomeSourceReport extends StatelessWidget {
+  const IncomeSourceReport({
+    required this.totals,
+    required this.totalIncomeMinor,
+    required this.currency,
+    required this.expanded,
+    required this.onSelected,
+    super.key,
+  });
+
+  final List<IncomeSourceReportTotal> totals;
+  final int totalIncomeMinor;
+  final CurrencyFormatSettings currency;
+  final bool expanded;
+  final ValueChanged<IncomeSourceReportTotal> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = expanded ? totals : totals.take(4).toList(growable: false);
+    return Column(
+      children: [
+        for (var index = 0; index < visible.length; index += 1)
+          ReportRankedRow(
+            key: ValueKey('report-income-${visible[index].source}'),
+            leading: Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppTheme.accent.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: AppTheme.accent.withValues(alpha: 0.20),
+                ),
+              ),
+              child: Icon(
+                AppIcon.income,
+                size: AppIconSize.inline,
+                color: AppTheme.accent,
+              ),
+            ),
+            label: visible[index].source,
+            amountMinor: visible[index].amountMinor,
+            percentage: totalIncomeMinor == 0
+                ? 0
+                : visible[index].amountMinor / totalIncomeMinor,
+            currency: currency,
+            showDivider: index != visible.length - 1,
+            onTap: () => onSelected(visible[index]),
+          ),
+      ],
+    );
+  }
+}
+
+class ReportRankedRow extends StatelessWidget {
+  const ReportRankedRow({
+    required this.leading,
+    required this.label,
+    required this.amountMinor,
+    required this.percentage,
+    required this.currency,
+    required this.showDivider,
+    required this.onTap,
+    super.key,
+  });
+
+  final Widget leading;
+  final String label;
+  final int amountMinor;
+  final double percentage;
+  final CurrencyFormatSettings currency;
+  final bool showDivider;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadii.control),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+        decoration: BoxDecoration(
+          border: showDivider
+              ? Border(
+                  bottom: BorderSide(
+                    color: Theme.of(
+                      context,
+                    ).dividerColor.withValues(alpha: 0.45),
+                  ),
+                )
+              : null,
+        ),
+        child: Row(
+          children: [
+            leading,
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  money(amountMinor, currency),
+                  style: const TextStyle(
+                    fontFeatures: [AppTextStyles.tabularFigures],
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  '${(percentage * 100).round()}%',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Icon(
+              AppIcon.chevronRight,
+              size: AppIconSize.inline,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class CompactMonthlyTrendReport extends StatelessWidget {
+  const CompactMonthlyTrendReport({
+    required this.totals,
+    required this.currency,
+    super.key,
+  });
+
+  final List<MonthlyReportTotal> totals;
+  final CurrencyFormatSettings currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = totals.reversed.take(3).toList(growable: false);
+    return Column(
+      children: [
+        for (var index = 0; index < visible.length; index += 1)
+          Container(
+            key: ValueKey(
+              'report-trend-${visible[index].month.year}-${visible[index].month.month}',
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+            decoration: BoxDecoration(
+              border: index != visible.length - 1
+                  ? Border(
+                      bottom: BorderSide(
+                        color: Theme.of(
+                          context,
+                        ).dividerColor.withValues(alpha: 0.45),
+                      ),
+                    )
+                  : null,
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 42,
+                  child: Text(
+                    reportMonthAbbreviation(visible[index].month),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                Expanded(
+                  child: ReportCompactTrendValue(
+                    label: 'Income',
+                    value: visible[index].incomeMinor,
+                    currency: currency,
+                    color: AppTheme.accent,
+                  ),
+                ),
+                Expanded(
+                  child: ReportCompactTrendValue(
+                    label: 'Expenses',
+                    value: visible[index].expensesMinor,
+                    currency: currency,
+                    color: AppTheme.rose,
+                  ),
+                ),
+                Expanded(
+                  child: ReportCompactTrendValue(
+                    label: 'Net',
+                    value: visible[index].netCashFlowMinor,
+                    currency: currency,
+                    color: visible[index].netCashFlowMinor < 0
+                        ? AppTheme.rose
+                        : AppTheme.accent,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class ReportCompactTrendValue extends StatelessWidget {
+  const ReportCompactTrendValue({
+    required this.label,
+    required this.value,
+    required this.currency,
+    required this.color,
+    super.key,
+  });
+
+  final String label;
+  final int value;
+  final CurrencyFormatSettings currency;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Text(
+            money(value, currency),
+            style: TextStyle(
+              color: color,
+              fontFeatures: const [AppTextStyles.tabularFigures],
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -10167,7 +10860,7 @@ class SettingsSwitch extends StatelessWidget {
   final String label;
   final String? subtitle;
   final bool value;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -15440,7 +16133,7 @@ Future<bool> showScheduledTransactionDialog(
   }
   var splitMode =
       existing?.isCategorySplit ?? sourceTransaction?.isCategorySplit ?? false;
-  var autofocusSecondSplitAmount = false;
+  int? autofocusSplitAmountIndex;
   final splitSectionKey = GlobalKey();
   var firstSplitAutoRemainder = !splitMode;
   var frequency =
@@ -15733,7 +16426,7 @@ Future<bool> showScheduledTransactionDialog(
                     ),
                   );
                 }
-                autofocusSecondSplitAmount = true;
+                autofocusSplitAmountIndex = splitDrafts.length - 1;
                 recalculateScheduledRemainder();
               });
               WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -15775,7 +16468,7 @@ Future<bool> showScheduledTransactionDialog(
                     : splitDrafts.first.categoryId;
                 firstSplitAutoRemainder = true;
                 splitMode = false;
-                autofocusSecondSplitAmount = false;
+                autofocusSplitAmountIndex = null;
               });
             }
 
@@ -15786,9 +16479,9 @@ Future<bool> showScheduledTransactionDialog(
               return [
                 for (var index = 0; index < splitDrafts.length; index++)
                   TransactionSplitLine(
-                    id:
-                        splitDrafts[index].id ??
-                        'split_${DateTime.now().microsecondsSinceEpoch}_$index',
+                    id: splitDrafts[index].id?.trim().isNotEmpty == true
+                        ? splitDrafts[index].id!
+                        : 'split_${DateTime.now().microsecondsSinceEpoch}_$index',
                     categoryId: splitDrafts[index].categoryId,
                     amountMinor: splitDrafts[index].amountMinor.abs(),
                     note: splitDrafts[index].note.text.trim(),
@@ -15893,7 +16586,7 @@ Future<bool> showScheduledTransactionDialog(
                               ..amountMinor = amountMinor.abs();
                             firstSplitAutoRemainder = true;
                             splitMode = false;
-                            autofocusSecondSplitAmount = false;
+                            autofocusSplitAmountIndex = null;
                           }
                           if (type == TransactionType.transfer &&
                               transferAccountId == accountId) {
@@ -16038,12 +16731,10 @@ Future<bool> showScheduledTransactionDialog(
                         currency: dataStore.preferences.currency,
                         totalMinor: amountMinor.abs(),
                         firstAutoRemainder: firstSplitAutoRemainder,
-                        autofocusAmountIndex: autofocusSecondSplitAmount
-                            ? 1
-                            : null,
+                        autofocusAmountIndex: autofocusSplitAmountIndex,
                         onChooseCategory: chooseScheduledSplitCategory,
                         onAmountChanged: (index, value) => setDialogState(() {
-                          autofocusSecondSplitAmount = false;
+                          autofocusSplitAmountIndex = null;
                           splitDrafts[index].amountMinor = value.abs();
                           if (index == 0) {
                             firstSplitAutoRemainder = false;
@@ -16052,7 +16743,6 @@ Future<bool> showScheduledTransactionDialog(
                           }
                         }),
                         onAdd: () => setDialogState(() {
-                          autofocusSecondSplitAmount = false;
                           final currentTotal = splitDrafts.fold<int>(
                             0,
                             (total, line) => total + line.amountMinor.abs(),
@@ -16065,9 +16755,10 @@ Future<bool> showScheduledTransactionDialog(
                               amountMinor: remainder > 0 ? remainder : 0,
                             ),
                           );
+                          autofocusSplitAmountIndex = splitDrafts.length - 1;
                         }),
                         onRemove: (index) => setDialogState(() {
-                          autofocusSecondSplitAmount = false;
+                          autofocusSplitAmountIndex = null;
                           splitDrafts[index].note.dispose();
                           splitDrafts.removeAt(index);
                           recalculateScheduledRemainder();
@@ -18209,7 +18900,9 @@ Future<void> showTransactionDialog(
       ),
     );
   }
-  var autofocusSecondSplitAmount = initialSplitMode && !hasExistingSplit;
+  int? autofocusSplitAmountIndex = initialSplitMode && !hasExistingSplit
+      ? splitDrafts.length - 1
+      : null;
   final splitSectionKey = GlobalKey();
   var switchToTransfer = false;
   var isCreatingCategory = false;
@@ -18385,9 +19078,9 @@ Future<void> showTransactionDialog(
               return [
                 for (var index = 0; index < splitDrafts.length; index++)
                   TransactionSplitLine(
-                    id:
-                        splitDrafts[index].id ??
-                        'split_${DateTime.now().microsecondsSinceEpoch}_$index',
+                    id: splitDrafts[index].id?.trim().isNotEmpty == true
+                        ? splitDrafts[index].id!
+                        : 'split_${DateTime.now().microsecondsSinceEpoch}_$index',
                     categoryId: splitDrafts[index].categoryId,
                     amountMinor: splitDrafts[index].amountMinor.abs(),
                     note: splitDrafts[index].note.text.trim(),
@@ -18586,7 +19279,7 @@ Future<void> showTransactionDialog(
                     ),
                   );
                 }
-                autofocusSecondSplitAmount = true;
+                autofocusSplitAmountIndex = splitDrafts.length - 1;
                 recalculateAutoRemainder();
               });
               WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -18626,7 +19319,7 @@ Future<void> showTransactionDialog(
                 categoryId = splitDrafts.first.categoryId;
                 firstSplitAutoRemainder = true;
                 splitMode = false;
-                autofocusSecondSplitAmount = false;
+                autofocusSplitAmountIndex = null;
               });
             }
 
@@ -18817,11 +19510,11 @@ Future<void> showTransactionDialog(
                 currency: dataStore.preferences.currency,
                 totalMinor: absoluteAmountMinor,
                 firstAutoRemainder: firstSplitAutoRemainder,
-                autofocusAmountIndex: autofocusSecondSplitAmount ? 1 : null,
+                autofocusAmountIndex: autofocusSplitAmountIndex,
                 quietWhenZero: true,
                 onChooseCategory: chooseSplitCategory,
                 onAmountChanged: (index, value) => setDialogState(() {
-                  autofocusSecondSplitAmount = false;
+                  autofocusSplitAmountIndex = null;
                   splitDrafts[index].amountMinor = value.abs();
                   if (index == 0) {
                     firstSplitAutoRemainder = false;
@@ -18830,7 +19523,6 @@ Future<void> showTransactionDialog(
                   }
                 }),
                 onAdd: () => setDialogState(() {
-                  autofocusSecondSplitAmount = false;
                   ensureSplitDrafts();
                   final currentTotal = splitDrafts.fold<int>(
                     0,
@@ -18844,9 +19536,10 @@ Future<void> showTransactionDialog(
                       amountMinor: remainder > 0 ? remainder : 0,
                     ),
                   );
+                  autofocusSplitAmountIndex = splitDrafts.length - 1;
                 }),
                 onRemove: (index) => setDialogState(() {
-                  autofocusSecondSplitAmount = false;
+                  autofocusSplitAmountIndex = null;
                   splitDrafts[index].note.dispose();
                   splitDrafts.removeAt(index);
                   recalculateAutoRemainder();
@@ -18934,7 +19627,7 @@ Future<void> showTransactionDialog(
                             );
                             firstSplitAutoRemainder = true;
                             splitMode = false;
-                            autofocusSecondSplitAmount = false;
+                            autofocusSplitAmountIndex = null;
                             isCreatingCategory = false;
                             isSavingCategory = false;
                             newCategoryError = null;

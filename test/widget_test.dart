@@ -1693,6 +1693,13 @@ void main() {
           .autofocus,
       isTrue,
     );
+    var splitAmountFields = tester
+        .widgetList<TextField>(
+          find.descendant(of: splitSection, matching: find.byType(TextField)),
+        )
+        .toList();
+    expect(splitAmountFields[1].focusNode?.hasFocus, isTrue);
+    expect(splitAmountFields[0].focusNode?.hasFocus, isFalse);
     final newSplitAmount = tester.widget<AmountEntryField>(
       find
           .descendant(of: splitSection, matching: find.byType(AmountEntryField))
@@ -1709,6 +1716,43 @@ void main() {
     expect(
       find.descendant(of: splitSection, matching: find.byType(TextField)),
       findsNWidgets(3),
+    );
+    splitAmountFields = tester
+        .widgetList<TextField>(
+          find.descendant(of: splitSection, matching: find.byType(TextField)),
+        )
+        .toList();
+    expect(splitAmountFields[2].focusNode?.hasFocus, isTrue);
+    expect(splitAmountFields[1].focusNode?.hasFocus, isFalse);
+    expect(
+      tester
+          .widgetList<AmountEntryField>(
+            find.descendant(
+              of: splitSection,
+              matching: find.byType(AmountEntryField),
+            ),
+          )
+          .map((field) => field.initialMinor),
+      [0, 0, 0],
+    );
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('transaction-add-split')),
+    );
+    await tester.tap(find.byKey(const ValueKey('transaction-add-split')));
+    await tester.pumpAndSettle();
+    splitAmountFields = tester
+        .widgetList<TextField>(
+          find.descendant(of: splitSection, matching: find.byType(TextField)),
+        )
+        .toList();
+    expect(splitAmountFields, hasLength(4));
+    expect(splitAmountFields[3].focusNode?.hasFocus, isTrue);
+    expect(
+      splitAmountFields
+          .take(3)
+          .every((field) => field.focusNode?.hasFocus == false),
+      isTrue,
     );
     await tester.ensureVisible(
       find.byKey(const ValueKey('transaction-use-single-category')),
@@ -7665,7 +7709,7 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     final managePayees = find.widgetWithText(ListTile, 'Manage payees');
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    await tester.ensureVisible(managePayees);
     await tester.pumpAndSettle();
     await tester.tap(managePayees);
     await tester.pumpAndSettle();
@@ -7716,9 +7760,10 @@ void main() {
     );
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    final managePayees = find.widgetWithText(ListTile, 'Manage payees');
+    await tester.ensureVisible(managePayees);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListTile, 'Manage payees'));
+    await tester.tap(managePayees);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('payee-section-A')), findsOneWidget);
@@ -7952,7 +7997,7 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     final managePayees = find.widgetWithText(ListTile, 'Manage payees');
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    await tester.ensureVisible(managePayees);
     await tester.pumpAndSettle();
     await tester.tap(managePayees);
     await tester.pumpAndSettle();
@@ -8223,10 +8268,19 @@ void main() {
 
     expect(find.text('Your data is securely synced'), findsOneWidget);
     expect(find.text('Today at 8:39 AM'), findsOneWidget);
+    expect(find.text('Automatic Sync'), findsOneWidget);
+    expect(find.text('Preferred Daily Sync Time'), findsOneWidget);
     await tester.tap(find.widgetWithText(ListTile, 'Sync now'));
     await tester.pumpAndSettle();
     expect(syncCount, 1);
-    await tester.tap(find.widgetWithText(ListTile, 'Sign out'));
+    final automaticSync = find.widgetWithText(SwitchListTile, 'Automatic Sync');
+    await tester.ensureVisible(automaticSync);
+    await tester.tap(automaticSync);
+    await tester.pumpAndSettle();
+    expect(dataStore.preferences.automaticSyncEnabled, isTrue);
+    final signOut = find.widgetWithText(ListTile, 'Sign out');
+    await tester.ensureVisible(signOut);
+    await tester.tap(signOut);
     await tester.pumpAndSettle();
     expect(signOutCount, 1);
   });
@@ -8360,9 +8414,13 @@ void main() {
 
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byType(SwitchListTile));
+    final notifications = find.widgetWithText(
+      SwitchListTile,
+      'Scheduled transaction alerts',
+    );
+    await tester.ensureVisible(notifications);
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(SwitchListTile));
+    await tester.tap(notifications);
     await tester.pumpAndSettle();
 
     expect(dataStore.preferences.notificationsEnabled, isTrue);

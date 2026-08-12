@@ -59,6 +59,8 @@ import 'src/persistence/firestore_record_repository.dart';
 import 'src/reporting/report_calculator.dart';
 import 'src/store/finance_data_store.dart';
 import 'src/store/finance_data_store_scope.dart';
+import 'src/sync/automatic_sync_service.dart';
+import 'src/sync/cloud_sync_coordinator.dart';
 
 part 'src/app_theme.dart';
 part 'src/accounts/manage_accounts.dart';
@@ -78,6 +80,7 @@ const trackmarkMoneyName = 'Trackmark Money';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeTrackmarkBackgroundSync();
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('Flutter startup error: ${details.exceptionAsString()}');

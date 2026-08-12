@@ -47,6 +47,7 @@ dependencies:
   path_provider: ^2.1.6
   share_plus: 13.2.1
   timezone: ^0.11.1
+  workmanager: ^0.10.0
 
 dev_dependencies:
   flutter_test:
@@ -64,6 +65,11 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  config:
+    # Trackmark's existing custom iOS Podfile has project-specific build hooks.
+    # Keep plugin integration on CocoaPods instead of allowing Flutter to
+    # attempt a partial automatic migration to Swift Package Manager.
+    enable-swift-package-manager: false
 
   assets:
     - assets/branding/trackmark_tm_monogram.png

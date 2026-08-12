@@ -1,3 +1,4 @@
+import '../domain/account.dart';
 import '../domain/category.dart';
 import '../domain/transaction.dart';
 
@@ -37,6 +38,7 @@ class CategoryReportTotal {
     this.iconName,
     this.colorValue,
     this.isOther = false,
+    this.isUncategorized = false,
   });
 
   final String id;
@@ -46,6 +48,39 @@ class CategoryReportTotal {
   final String? iconName;
   final int? colorValue;
   final bool isOther;
+  final bool isUncategorized;
+}
+
+class AccountReportTotal {
+  const AccountReportTotal({
+    required this.accountId,
+    required this.name,
+    required this.amountMinor,
+    required this.percentage,
+    required this.type,
+    this.iconId,
+    this.accentId,
+  });
+
+  final String accountId;
+  final String name;
+  final int amountMinor;
+  final double percentage;
+  final AccountType type;
+  final String? iconId;
+  final String? accentId;
+}
+
+class IncomeSourceReportTotal {
+  const IncomeSourceReportTotal({
+    required this.source,
+    required this.amountMinor,
+    required this.percentage,
+  });
+
+  final String source;
+  final int amountMinor;
+  final double percentage;
 }
 
 class MonthlyReportTotal {
@@ -70,6 +105,8 @@ class ReportSnapshot {
     required this.incomeMinor,
     required this.expensesMinor,
     required this.categoryTotals,
+    required this.accountTotals,
+    required this.incomeSourceTotals,
     required this.monthlyTotals,
   });
 
@@ -78,6 +115,8 @@ class ReportSnapshot {
   final int incomeMinor;
   final int expensesMinor;
   final List<CategoryReportTotal> categoryTotals;
+  final List<AccountReportTotal> accountTotals;
+  final List<IncomeSourceReportTotal> incomeSourceTotals;
   final List<MonthlyReportTotal> monthlyTotals;
 
   int get netCashFlowMinor => incomeMinor - expensesMinor;
@@ -91,6 +130,7 @@ class MoneyReportCalculator {
   ReportSnapshot calculate({
     required Iterable<TransactionRecord> transactions,
     required Iterable<CategoryRecord> categories,
+    Iterable<AccountRecord> accounts = const [],
     required ReportDateRange range,
     DateTime? now,
   }) {
@@ -111,18 +151,31 @@ class MoneyReportCalculator {
     var incomeMinor = 0;
     var expensesMinor = 0;
     final categoryAmounts = <String, int>{};
+    final accountAmounts = <String, int>{};
+    final incomeSourceAmounts = <String, int>{};
+    final incomeSourceNames = <String, String>{};
     final categoriesById = {
       for (final category in categories) category.id: category,
     };
+    final accountsById = {for (final account in accounts) account.id: account};
 
     for (final transaction in selectedTransactions) {
       final amountMinor = transaction.amountMinor.abs();
       if (transaction.type == TransactionType.income) {
         incomeMinor += amountMinor;
+        final source = transaction.payee.trim().isEmpty
+            ? 'Unspecified income'
+            : transaction.payee.trim();
+        final sourceKey = source.toLowerCase();
+        incomeSourceNames.putIfAbsent(sourceKey, () => source);
+        incomeSourceAmounts[sourceKey] =
+            (incomeSourceAmounts[sourceKey] ?? 0) + amountMinor;
         continue;
       }
 
       expensesMinor += amountMinor;
+      accountAmounts[transaction.accountId] =
+          (accountAmounts[transaction.accountId] ?? 0) + amountMinor;
       _addExpenseCategories(categoryAmounts, transaction, categoriesById);
     }
 
@@ -135,6 +188,16 @@ class MoneyReportCalculator {
         categoryAmounts,
         expensesMinor,
         categoriesById,
+      ),
+      accountTotals: _rankedAccountTotals(
+        accountAmounts,
+        expensesMinor,
+        accountsById,
+      ),
+      incomeSourceTotals: _rankedIncomeSourceTotals(
+        incomeSourceAmounts,
+        incomeSourceNames,
+        incomeMinor,
       ),
       monthlyTotals: _monthlyTotals(reportable, trendMonthsFor(range, anchor)),
     );
@@ -181,18 +244,8 @@ class MoneyReportCalculator {
             : amountComparison;
       });
 
-    final visible = ranked.take(5).toList(growable: true);
-    if (ranked.length > 5) {
-      visible.add(
-        MapEntry(
-          _otherId,
-          ranked.skip(5).fold(0, (sum, entry) => sum + entry.value),
-        ),
-      );
-    }
-
     return [
-      for (final entry in visible)
+      for (final entry in ranked)
         CategoryReportTotal(
           id: entry.key,
           name: _categoryName(entry.key, categoriesById),
@@ -200,7 +253,59 @@ class MoneyReportCalculator {
           percentage: entry.value / expensesMinor,
           iconName: categoriesById[entry.key]?.iconName,
           colorValue: categoriesById[entry.key]?.colorValue,
-          isOther: entry.key == _otherId,
+          isOther: false,
+          isUncategorized: entry.key == _uncategorizedId,
+        ),
+    ];
+  }
+
+  List<AccountReportTotal> _rankedAccountTotals(
+    Map<String, int> totals,
+    int expensesMinor,
+    Map<String, AccountRecord> accountsById,
+  ) {
+    if (expensesMinor == 0) return const [];
+    final ranked = totals.entries.toList()
+      ..sort((a, b) {
+        final amountComparison = b.value.compareTo(a.value);
+        if (amountComparison != 0) return amountComparison;
+        return (accountsById[a.key]?.name ?? 'Unknown account').compareTo(
+          accountsById[b.key]?.name ?? 'Unknown account',
+        );
+      });
+    return [
+      for (final entry in ranked)
+        AccountReportTotal(
+          accountId: entry.key,
+          name: accountsById[entry.key]?.name ?? 'Unknown account',
+          amountMinor: entry.value,
+          percentage: entry.value / expensesMinor,
+          type: accountsById[entry.key]?.type ?? AccountType.otherBanking,
+          iconId: accountsById[entry.key]?.appearanceIconId,
+          accentId: accountsById[entry.key]?.appearanceAccentId,
+        ),
+    ];
+  }
+
+  List<IncomeSourceReportTotal> _rankedIncomeSourceTotals(
+    Map<String, int> totals,
+    Map<String, String> names,
+    int incomeMinor,
+  ) {
+    if (incomeMinor == 0) return const [];
+    final ranked = totals.entries.toList()
+      ..sort((a, b) {
+        final amountComparison = b.value.compareTo(a.value);
+        return amountComparison == 0
+            ? a.key.toLowerCase().compareTo(b.key.toLowerCase())
+            : amountComparison;
+      });
+    return [
+      for (final entry in ranked)
+        IncomeSourceReportTotal(
+          source: names[entry.key] ?? entry.key,
+          amountMinor: entry.value,
+          percentage: entry.value / incomeMinor,
         ),
     ];
   }
@@ -282,7 +387,6 @@ List<DateTime> trendMonthsFor(ReportDateRange range, DateTime now) {
 }
 
 String _categoryName(String id, Map<String, CategoryRecord> categoriesById) {
-  if (id == _otherId) return 'Other';
   if (id == _uncategorizedId) return 'Uncategorized';
   final name = categoriesById[id]?.name.trim();
   return name == null || name.isEmpty ? 'Uncategorized' : name;
@@ -291,4 +395,3 @@ String _categoryName(String id, Map<String, CategoryRecord> categoriesById) {
 String _monthKey(DateTime date) => '${date.year}-${date.month}';
 
 const _uncategorizedId = '__uncategorized__';
-const _otherId = '__other__';

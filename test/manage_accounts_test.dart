@@ -19,6 +19,8 @@ void main() {
       newAccountIncludeInGroupBalance: false,
       newAccountIncludeInNetWorth: false,
       warnBeforeNegativeAssetBalance: false,
+      automaticSyncEnabled: true,
+      preferredDailySyncMinutes: 21 * 60 + 45,
     );
 
     final restored = UserPreferences.fromJson(preferences.toJson());
@@ -33,6 +35,8 @@ void main() {
     expect(restored.newAccountIncludeInGroupBalance, isFalse);
     expect(restored.newAccountIncludeInNetWorth, isFalse);
     expect(restored.warnBeforeNegativeAssetBalance, isFalse);
+    expect(restored.automaticSyncEnabled, isTrue);
+    expect(restored.preferredDailySyncMinutes, 21 * 60 + 45);
 
     final legacy = UserPreferences.fromJson(const {});
     expect(legacy.defaultTransactionAccountMode, AccountDefaultMode.lastUsed);
@@ -40,6 +44,8 @@ void main() {
     expect(legacy.newAccountIncludeInGroupBalance, isTrue);
     expect(legacy.newAccountIncludeInNetWorth, isTrue);
     expect(legacy.warnBeforeNegativeAssetBalance, isTrue);
+    expect(legacy.automaticSyncEnabled, isFalse);
+    expect(legacy.preferredDailySyncMinutes, 22 * 60);
   });
 
   test('invalid configured defaults fall back without retaining an orphan', () {

@@ -130,40 +130,106 @@ class AuthGate extends StatefulWidget {
     required this.authService,
     this.remoteRepository,
     this.recordRepository,
+    this.automaticSyncScheduler = const WorkmanagerAutomaticSyncTaskScheduler(),
     super.key,
   });
 
   final AuthService authService;
   final FinanceRemoteRepository? remoteRepository;
   final FinanceRecordRepository? recordRepository;
+  final AutomaticSyncTaskScheduler automaticSyncScheduler;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
 
-class _AuthGateState extends State<AuthGate> {
-  static const _initialSyncRetryDelay = Duration(milliseconds: 900);
-  static const _syncTimeout = Duration(seconds: 60);
-
+class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   var _localOnly = false;
   var _isSigningIn = false;
-  var _syncLabel = 'Synced';
-  DateTime? _lastSuccessfulSyncAt;
   String? _authError;
-  String? _syncingUid;
   String? _syncedUid;
   String? _autoSyncAttemptedUid;
+  String? _loadedSyncStateUid;
+  String? _automaticSyncConfiguration;
+  String? _foregroundCatchUpAttempt;
+  FinanceDataStore? _currentDataStore;
+  MoneyTallyUser? _currentUser;
+  CloudSyncCoordinator? _syncCoordinator;
   late final Stream<MoneyTallyUser?> _authStateStream;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _authStateStream = widget.authService.authStateChanges();
+    final repository = widget.recordRepository;
+    if (repository != null) {
+      _syncCoordinator = CloudSyncCoordinator(recordRepository: repository)
+        ..addListener(_handleSyncStateChanged);
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _currentDataStore?.removeListener(_handleDataStoreChanged);
+    _syncCoordinator
+      ?..removeListener(_handleSyncStateChanged)
+      ..dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _foregroundCatchUpAttempt = null;
+      final user = _currentUser;
+      final store = _currentDataStore;
+      if (user != null && store != null && !user.isLocalOnly) {
+        unawaited(_refreshSyncStateAndCatchUp(user, store));
+      }
+    }
+  }
+
+  Future<void> _refreshSyncStateAndCatchUp(
+    MoneyTallyUser user,
+    FinanceDataStore dataStore,
+  ) async {
+    await _syncCoordinator?.loadStateForUser(user.uid, force: true);
+    await _runForegroundCatchUp(user, dataStore);
+  }
+
+  void _handleSyncStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleDataStoreChanged() {
+    final user = _currentUser;
+    final dataStore = _currentDataStore;
+    if (user == null || user.isLocalOnly || dataStore == null) return;
+    unawaited(_applyAutomaticSyncPreferences(user, dataStore));
+  }
+
+  Future<void> _applyAutomaticSyncPreferences(
+    MoneyTallyUser user,
+    FinanceDataStore dataStore,
+  ) async {
+    await _configureAutomaticSync(dataStore.preferences);
+    await _runForegroundCatchUp(user, dataStore);
+  }
+
+  void _bindDataStore(FinanceDataStore? dataStore) {
+    if (identical(_currentDataStore, dataStore)) return;
+    _currentDataStore?.removeListener(_handleDataStoreChanged);
+    _currentDataStore = dataStore;
+    dataStore?.addListener(_handleDataStoreChanged);
+  }
+
+  void _disableAutomaticSyncForUnauthenticatedState() {
+    const unavailable = 'unavailable';
+    if (_automaticSyncConfiguration == unavailable) return;
+    _automaticSyncConfiguration = unavailable;
+    unawaited(widget.automaticSyncScheduler.cancel());
   }
 
   @override
@@ -171,8 +237,11 @@ class _AuthGateState extends State<AuthGate> {
     if (_localOnly) {
       FinanceDataStoreScope.read(context).detachRemoteSync();
       _syncedUid = null;
-      _syncingUid = null;
       _autoSyncAttemptedUid = null;
+      _loadedSyncStateUid = null;
+      _currentUser = null;
+      _bindDataStore(null);
+      _disableAutomaticSyncForUnauthenticatedState();
       return const FinanceHome(syncLabel: 'Local only');
     }
 
@@ -188,8 +257,11 @@ class _AuthGateState extends State<AuthGate> {
         if (user == null) {
           FinanceDataStoreScope.read(context).detachRemoteSync();
           _syncedUid = null;
-          _syncingUid = null;
           _autoSyncAttemptedUid = null;
+          _loadedSyncStateUid = null;
+          _currentUser = null;
+          _bindDataStore(null);
+          _disableAutomaticSyncForUnauthenticatedState();
           return SignInView(
             isSigningIn: _isSigningIn,
             errorMessage: _authError,
@@ -199,15 +271,26 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         final dataStore = FinanceDataStoreScope.read(context);
+        _currentUser = user;
+        _bindDataStore(dataStore);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _syncIfNeeded(user, dataStore);
+          if (mounted) unawaited(_prepareSignedInExperience(user, dataStore));
         });
+        final coordinator = _syncCoordinator;
+        final syncLabel = user.isLocalOnly
+            ? 'Local only'
+            : switch (coordinator?.status) {
+                CloudSyncStatus.syncing => 'Syncing',
+                CloudSyncStatus.issue => 'Sync issue',
+                _ => 'Synced',
+              };
+        final lastSuccessfulSyncAt = coordinator?.lastSuccessfulSyncAt;
         return FinanceHome(
-          syncLabel: user.isLocalOnly ? 'Local only' : _syncLabel,
-          lastSuccessfulSyncLabel: _lastSuccessfulSyncAt == null
+          syncLabel: syncLabel,
+          lastSuccessfulSyncLabel: lastSuccessfulSyncAt == null
               ? null
-              : '${shortDate(_lastSuccessfulSyncAt!.toLocal())} '
-                    '${TimeOfDay.fromDateTime(_lastSuccessfulSyncAt!.toLocal()).format(context)}',
+              : '${shortDate(lastSuccessfulSyncAt.toLocal())} '
+                    '${TimeOfDay.fromDateTime(lastSuccessfulSyncAt.toLocal()).format(context)}',
           onSyncNow: user.isLocalOnly ? null : () => _syncNow(user, dataStore),
           onSignOut: user.isLocalOnly ? null : widget.authService.signOut,
         );
@@ -235,93 +318,87 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  void _syncIfNeeded(MoneyTallyUser user, FinanceDataStore dataStore) {
-    final recordRepository = widget.recordRepository;
-    if (user.isLocalOnly || recordRepository == null) {
-      return;
+  Future<void> _prepareSignedInExperience(
+    MoneyTallyUser user,
+    FinanceDataStore dataStore,
+  ) async {
+    final coordinator = _syncCoordinator;
+    if (user.isLocalOnly || coordinator == null) return;
+    if (_loadedSyncStateUid != user.uid) {
+      _loadedSyncStateUid = user.uid;
+      await coordinator.loadStateForUser(user.uid);
     }
-    if (_syncedUid == user.uid ||
-        _syncingUid == user.uid ||
-        _autoSyncAttemptedUid == user.uid) {
-      return;
-    }
-
-    setState(() {
+    await _configureAutomaticSync(dataStore.preferences);
+    var attemptedInitialSync = false;
+    if (_syncedUid != user.uid && _autoSyncAttemptedUid != user.uid) {
+      attemptedInitialSync = true;
       _autoSyncAttemptedUid = user.uid;
-      _syncingUid = user.uid;
-      _syncLabel = 'Syncing';
-    });
-    unawaited(_syncUser(user.uid, recordRepository, dataStore));
+      final succeeded = await coordinator.synchronize(
+        userId: user.uid,
+        dataStore: dataStore,
+        retryAfterTransientFailure: true,
+      );
+      if (succeeded) _syncedUid = user.uid;
+    }
+    if (!attemptedInitialSync) {
+      await _runForegroundCatchUp(user, dataStore);
+    }
   }
 
-  Future<void> _syncUser(
-    String userId,
-    FinanceRecordRepository? recordRepository,
-    FinanceDataStore dataStore, {
-    bool retryAfterTransientFailure = true,
-  }) async {
+  Future<void> _configureAutomaticSync(UserPreferences preferences) async {
+    final signature =
+        '${preferences.automaticSyncEnabled}:${preferences.preferredDailySyncMinutes}';
+    if (_automaticSyncConfiguration == signature) return;
     try {
-      if (recordRepository != null) {
-        await dataStore
-            .attachRemoteSync(
-              remoteRepository: recordRepository,
-              userId: userId,
-            )
-            .timeout(
-              _syncTimeout,
-              onTimeout: () => throw TimeoutException(
-                'Cloud sync did not finish within ${_syncTimeout.inSeconds} seconds.',
-              ),
-            );
+      if (preferences.automaticSyncEnabled) {
+        await widget.automaticSyncScheduler.schedule(
+          preferredMinutes: preferences.preferredDailySyncMinutes,
+        );
+      } else {
+        await widget.automaticSyncScheduler.cancel();
       }
-      if (!mounted) return;
-      setState(() {
-        _syncedUid = userId;
-        _syncingUid = null;
-        _syncLabel = 'Synced';
-        _lastSuccessfulSyncAt = DateTime.now();
-      });
-    } on Exception catch (error, stackTrace) {
-      debugPrint('Cloud record sync failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      // On a cold start Firebase Auth can publish the restored user shortly
-      // before Firestore has a usable session token. Retry once while keeping
-      // the in-progress state; a persistent error still reaches the normal
-      // Sync issue state below.
-      if (retryAfterTransientFailure && _syncingUid == userId) {
-        await Future<void>.delayed(_initialSyncRetryDelay);
-        if (mounted && _syncingUid == userId) {
-          return _syncUser(
-            userId,
-            recordRepository,
-            dataStore,
-            retryAfterTransientFailure: false,
-          );
-        }
-        return;
-      }
-      if (!mounted) return;
-      setState(() {
-        _syncingUid = null;
-        _syncLabel = 'Sync issue';
-      });
+      _automaticSyncConfiguration = signature;
+    } on Object catch (error) {
+      debugPrint('Could not update automatic sync schedule: $error');
     }
+  }
+
+  Future<void> _runForegroundCatchUp(
+    MoneyTallyUser user,
+    FinanceDataStore dataStore,
+  ) async {
+    final coordinator = _syncCoordinator;
+    if (coordinator == null || user.isLocalOnly || coordinator.isSyncing) {
+      return;
+    }
+    final now = DateTime.now();
+    final preferences = dataStore.preferences;
+    if (!AutomaticSyncPolicy.isCatchUpDue(
+      preferences: preferences,
+      now: now,
+      lastSuccessfulSync: coordinator.lastSuccessfulSyncAt,
+    )) {
+      return;
+    }
+    final window = AutomaticSyncPolicy.preferredTimeForDay(
+      day: now,
+      preferredMinutes: preferences.preferredDailySyncMinutes,
+    ).toIso8601String();
+    if (_foregroundCatchUpAttempt == window) return;
+    _foregroundCatchUpAttempt = window;
+    await coordinator.synchronize(userId: user.uid, dataStore: dataStore);
   }
 
   Future<void> _syncNow(MoneyTallyUser user, FinanceDataStore dataStore) async {
-    if (_syncingUid != null) return;
-    setState(() {
-      _syncedUid = null;
-      _syncingUid = user.uid;
-      _syncLabel = 'Syncing';
-    });
-    await _syncUser(
-      user.uid,
-      widget.recordRepository,
-      dataStore,
-      retryAfterTransientFailure: false,
+    final coordinator = _syncCoordinator;
+    if (coordinator == null || coordinator.isSyncing) return;
+    _syncedUid = null;
+    final succeeded = await coordinator.synchronize(
+      userId: user.uid,
+      dataStore: dataStore,
     );
-    if (!mounted || _syncLabel != 'Synced') return;
+    if (!mounted || !succeeded) return;
+    _syncedUid = user.uid;
     ScaffoldMessenger.maybeOf(context)
       ?..hideCurrentSnackBar()
       ..showSnackBar(

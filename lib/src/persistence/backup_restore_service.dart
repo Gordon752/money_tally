@@ -82,7 +82,9 @@ class BackupRestoreValidator {
     }
 
     _validateRequiredStructure(root, sourceVersion);
-    final migrated = _migrateToCurrent(root, sourceVersion);
+    final migrated = _repairBlankSplitLineIds(
+      _migrateToCurrent(root, sourceVersion),
+    );
     _validateEnumValues(migrated);
 
     final FinanceDataSet dataSet;
@@ -181,6 +183,64 @@ class BackupRestoreValidator {
     throw BackupValidationException(
       'Trackmark cannot safely migrate backup schema $sourceVersion.',
     );
+  }
+
+  Map<String, Object?> _repairBlankSplitLineIds(Map<String, Object?> root) {
+    final repaired = Map<String, Object?>.from(root);
+    for (final collection in const ['transactions', 'scheduledTransactions']) {
+      final records = _recordMaps(root, collection);
+      repaired[collection] = [
+        for (final record in records) _repairRecordSplitLineIds(record),
+      ];
+    }
+    return repaired;
+  }
+
+  Map<String, Object?> _repairRecordSplitLineIds(Map<String, Object?> record) {
+    final rawSplitLines = record['splitLines'];
+    if (rawSplitLines == null) return record;
+    if (rawSplitLines is! List || rawSplitLines.any((item) => item is! Map)) {
+      return record;
+    }
+
+    final splitLines = rawSplitLines
+        .cast<Map>()
+        .map(_stringMap)
+        .toList(growable: false);
+    final usedIds = <String>{};
+    for (final line in splitLines) {
+      final id = line['id'];
+      if (id is String && id.trim().isNotEmpty && !usedIds.add(id)) {
+        throw const BackupValidationException(
+          'A transaction contains an invalid split allocation.',
+        );
+      }
+    }
+
+    final ownerId = record['id'] as String;
+    final repairedLines = <Map<String, Object?>>[];
+    for (var index = 0; index < splitLines.length; index++) {
+      final line = splitLines[index];
+      final id = line['id'];
+      if (id is String && id.trim().isNotEmpty) {
+        repairedLines.add(line);
+        continue;
+      }
+      if (id != null && id is! String) {
+        repairedLines.add(line);
+        continue;
+      }
+
+      final baseId = 'split_${ownerId}_$index';
+      var repairedId = baseId;
+      var collisionIndex = 1;
+      while (!usedIds.add(repairedId)) {
+        repairedId = '${baseId}_$collisionIndex';
+        collisionIndex += 1;
+      }
+      repairedLines.add({...line, 'id': repairedId});
+    }
+    return {...record, 'splitLines': repairedLines};
   }
 
   void _validateEnumValues(Map<String, Object?> root) {
@@ -505,6 +565,7 @@ class BackupRestoreValidator {
     }
 
     for (final goal in dataSet.goals) {
+      if (goal.isDeleted) continue;
       if (goal.accountId case final accountId?) {
         final account = accounts[accountId];
         if (account == null || account.goalId != goal.id) {
