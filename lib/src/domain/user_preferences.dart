@@ -51,6 +51,7 @@ class UserPreferences {
     this.notificationsEnabled = false,
     this.automaticSyncEnabled = false,
     this.preferredDailySyncMinutes = 22 * 60,
+    this.showRunningBalance = false,
     this.collapsedAccountGroupNames = const {},
     this.accountGroupOrderNames = defaultAccountGroupOrderNames,
     this.accountGroupLabelOverrides = const {},
@@ -82,6 +83,7 @@ class UserPreferences {
   /// Minutes after local midnight. This is a best-effort scheduling preference,
   /// not a promise that iOS will launch the app at an exact clock time.
   final int preferredDailySyncMinutes;
+  final bool showRunningBalance;
   final Set<String> collapsedAccountGroupNames;
   final List<String> accountGroupOrderNames;
   final Map<String, String> accountGroupLabelOverrides;
@@ -114,6 +116,7 @@ class UserPreferences {
     bool? notificationsEnabled,
     bool? automaticSyncEnabled,
     int? preferredDailySyncMinutes,
+    bool? showRunningBalance,
     Set<String>? collapsedAccountGroupNames,
     List<String>? accountGroupOrderNames,
     Map<String, String>? accountGroupLabelOverrides,
@@ -157,6 +160,7 @@ class UserPreferences {
       automaticSyncEnabled: automaticSyncEnabled ?? this.automaticSyncEnabled,
       preferredDailySyncMinutes:
           preferredDailySyncMinutes ?? this.preferredDailySyncMinutes,
+      showRunningBalance: showRunningBalance ?? this.showRunningBalance,
       collapsedAccountGroupNames:
           collapsedAccountGroupNames ?? this.collapsedAccountGroupNames,
       accountGroupOrderNames:
@@ -192,6 +196,7 @@ class UserPreferences {
       'notificationsEnabled': notificationsEnabled,
       'automaticSyncEnabled': automaticSyncEnabled,
       'preferredDailySyncMinutes': preferredDailySyncMinutes,
+      'showRunningBalance': showRunningBalance,
       'collapsedAccountGroupNames': collapsedAccountGroupNames.toList()..sort(),
       'accountGroupOrderNames': accountGroupOrderNames,
       'accountGroupLabelOverrides': accountGroupLabelOverrides,
@@ -266,6 +271,7 @@ class UserPreferences {
       preferredDailySyncMinutes: _validPreferredSyncMinutes(
         json['preferredDailySyncMinutes'],
       ),
+      showRunningBalance: json['showRunningBalance'] as bool? ?? false,
       collapsedAccountGroupNames:
           (json['collapsedAccountGroupNames'] as List<Object?>?)
               ?.whereType<String>()

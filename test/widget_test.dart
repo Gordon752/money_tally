@@ -1024,6 +1024,112 @@ void main() {
     expect(ledgerRowWithText('Settlement'), findsNothing);
   });
 
+  testWidgets(
+    'running balance is optional, account-scoped, and survives search',
+    (tester) async {
+      final legacyStore = FinanceStore.seeded();
+      final migrated = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final dataStore = FinanceDataStore(
+        dataSet: migrated.copyWith(
+          preferences: migrated.preferences.copyWith(showRunningBalance: true),
+        ),
+      );
+      final expectedBalances = <String, int>{};
+      var balance = dataStore.accountById('checking').openingBalanceMinor;
+      final history =
+          dataStore.transactions
+              .where(
+                (transaction) =>
+                    !transaction.isDeleted &&
+                    transaction.deltaForAccount('checking') != 0,
+              )
+              .toList()
+            ..sort((left, right) {
+              final date = left.date.compareTo(right.date);
+              if (date != 0) return date;
+              final created = left.sync.createdAt.compareTo(
+                right.sync.createdAt,
+              );
+              if (created != 0) return created;
+              return left.id.compareTo(right.id);
+            });
+      for (final transaction in history) {
+        balance += transaction.deltaForAccount('checking');
+        expectedBalances[transaction.id] = balance;
+      }
+
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+      await tester.tap(find.text('Ledger').last);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(ValueKey('ledger-running-balance-${history.first.id}')),
+        findsNothing,
+      );
+
+      await tester.tap(find.text('Accounts').last);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byWidgetPredicate(
+          (widget) => widget is AccountCard && widget.account.id == 'checking',
+        ),
+      );
+      await tester.pumpAndSettle();
+      final walmart = dataStore.transactions.firstWhere(
+        (transaction) => transaction.payee == 'Walmart',
+      );
+      expect(
+        find.byKey(ValueKey('ledger-running-balance-${walmart.id}')),
+        findsOneWidget,
+      );
+      expect(expectedBalances[walmart.id], isNotNull);
+
+      await tester.enterText(find.byType(TextField).first, 'Walmart');
+      await tester.pumpAndSettle();
+      expect(ledgerRowWithText('Walmart'), findsOneWidget);
+      expect(
+        find.byKey(ValueKey('ledger-running-balance-${walmart.id}')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('single-account filter exposes running-balance preference', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(dataSet: migrated);
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('ledger-show-running-balance')),
+      findsNothing,
+    );
+    await tester.tap(find.byKey(const ValueKey('ledger-account-')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Checking').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-show-running-balance')));
+    await tester.pumpAndSettle();
+
+    expect(dataStore.preferences.showRunningBalance, isTrue);
+    expect(find.text('Show Running Balance'), findsNothing);
+  });
+
   test('scheduled undo uses type-specific labels', () {
     expect(
       undoScheduledTransactionLabel(v2_transaction.TransactionType.expense),

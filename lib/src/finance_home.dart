@@ -2609,6 +2609,21 @@ class _LedgerViewState extends State<LedgerView> {
     final categoriesById = {
       for (final category in store.categories) category.id: category,
     };
+    final singleAccountId = accountFilterId.isNotEmpty
+        ? accountFilterId
+        : drillDownFilter?.accountId;
+    final singleAccount = singleAccountId == null
+        ? null
+        : accountsById[singleAccountId];
+    final runningBalances = singleAccount == null
+        ? null
+        : calculateAccountRunningBalances(
+            account: singleAccount,
+            transactions: store.transactions,
+            goalFundingEvents: store.goalFundingEvents,
+          );
+    final showRunningBalance =
+        singleAccount != null && store.preferences.showRunningBalance;
     final now = DateTime.now();
     final managementTransactionIds = managementFilter == null
         ? null
@@ -2987,6 +3002,7 @@ class _LedgerViewState extends State<LedgerView> {
                     selectedCategoryLabel: selectedCategoryLabel,
                     selectedDateLabel: selectedDateLabel,
                     visibleMonths: visibleMonths,
+                    isSingleAccountLedger: singleAccount != null,
                   );
                   if (mounted) _dismissSearchFocus();
                 },
@@ -3066,6 +3082,7 @@ class _LedgerViewState extends State<LedgerView> {
               store: store,
               accountsById: accountsById,
               categoriesById: categoriesById,
+              runningBalances: showRunningBalance ? runningBalances : null,
               isCollapsed: _collapsedMonthKeys.contains(ledgerMonthKey(month)),
               onDismissFocus: _dismissSearchFocus,
               onToggle: () {
@@ -3113,206 +3130,233 @@ class _LedgerViewState extends State<LedgerView> {
     required String selectedCategoryLabel,
     required String selectedDateLabel,
     required List<DateTime> visibleMonths,
+    required bool isSingleAccountLedger,
   }) async {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Filters',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Wrap(
-                spacing: AppSpacing.xs,
-                runSpacing: AppSpacing.xs,
-                children: [
-                  LedgerFilterButton(
-                    buttonKey: ValueKey('ledger-type-$typeFilterName'),
-                    icon: AppIcon.filter,
-                    label: selectedTypeLabel,
-                    isActive: typeFilterName.isNotEmpty,
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      WidgetsBinding.instance.addPostFrameCallback((_) async {
-                        final value = await showLedgerSelectionSheet<String>(
-                          context: context,
-                          title: 'Filter by Type',
-                          selectedValue: typeFilterName,
-                          items: [
-                            (
-                              value: '',
-                              label: 'All types',
-                              icon: AppIcon.filter,
-                              detail: null,
-                            ),
-                            for (final type in TransactionType.values)
-                              (
-                                value: type.name,
-                                label: transactionTypeLabel(type),
-                                icon: transactionTypeIcon(type),
-                                detail: null,
-                              ),
-                          ],
-                        );
-                        if (value != null && mounted) {
-                          setState(() => typeFilterName = value);
-                        }
-                      });
-                    },
-                  ),
-                  LedgerFilterButton(
-                    buttonKey: ValueKey('ledger-account-$accountFilterId'),
-                    icon: AppIcon.wallet,
-                    label: selectedAccountLabel,
-                    isActive: accountFilterId.isNotEmpty,
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      WidgetsBinding.instance.addPostFrameCallback((_) async {
-                        final value = await showLedgerSelectionSheet<String>(
-                          context: context,
-                          title: 'Filter by Account',
-                          searchable: activeAccounts.length > 7,
-                          selectedValue: accountFilterId,
-                          items: [
-                            (
-                              value: '',
-                              label: 'All accounts',
-                              icon: AppIcon.wallet,
-                              detail: null,
-                            ),
-                            for (final account in activeAccounts)
-                              (
-                                value: account.id,
-                                label: account.name,
-                                icon: v2AccountIcon(account.type),
-                                detail: v2AccountTypeLabel(account.type),
-                              ),
-                          ],
-                        );
-                        if (value != null && mounted) {
-                          setState(() => accountFilterId = value);
-                        }
-                      });
-                    },
-                  ),
-                  LedgerFilterButton(
-                    buttonKey: ValueKey('ledger-category-$categoryFilterId'),
-                    icon: AppIcon.category,
-                    label: selectedCategoryLabel,
-                    isActive: categoryFilterId.isNotEmpty,
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      WidgetsBinding.instance.addPostFrameCallback((_) async {
-                        final value = await showLedgerCategorySelectionSheet(
-                          context: context,
-                          categories: activeCategories,
-                          selectedCategoryId: categoryFilterId,
-                        );
-                        if (value != null && mounted) {
-                          setState(() => categoryFilterId = value);
-                        }
-                      });
-                    },
-                  ),
-                  LedgerFilterButton(
-                    buttonKey: ValueKey('ledger-date-${dateFilter.name}'),
-                    icon: AppIcon.calendar,
-                    label: selectedDateLabel,
-                    isActive: dateFilter != LedgerDateFilter.all,
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      WidgetsBinding.instance.addPostFrameCallback((_) async {
-                        final value =
-                            await showLedgerSelectionSheet<LedgerDateFilter>(
-                              context: context,
-                              title: 'Filter by Date',
-                              selectedValue: dateFilter,
-                              items: [
-                                for (final filter in LedgerDateFilter.values)
-                                  (
-                                    value: filter,
-                                    label: ledgerDateFilterLabel(filter),
-                                    icon: AppIcon.calendar,
-                                    detail: null,
-                                  ),
-                              ],
-                            );
-                        if (value == LedgerDateFilter.custom && mounted) {
-                          final range = await showDateRangePicker(
-                            context: this.context,
-                            firstDate: DateTime(2000),
-                            lastDate: DateTime(DateTime.now().year + 10),
-                            initialDateRange: null,
-                          );
-                          if (range == null || !mounted) return;
-                          setState(() {
-                            dateFilter = LedgerDateFilter.custom;
-                            customDateRange = range;
-                          });
-                        } else if (value != null && mounted) {
-                          setState(() {
-                            dateFilter = value;
-                            customDateRange = null;
-                          });
-                        }
-                      });
-                    },
-                  ),
-                  if (visibleMonths.isNotEmpty)
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Filters',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Wrap(
+                  spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xs,
+                  children: [
                     LedgerFilterButton(
-                      buttonKey: ValueKey('ledger-jump-month'),
-                      icon: AppIcon.event,
-                      label: 'Jump to month',
+                      buttonKey: ValueKey('ledger-type-$typeFilterName'),
+                      icon: AppIcon.filter,
+                      label: selectedTypeLabel,
+                      isActive: typeFilterName.isNotEmpty,
                       onTap: () {
                         Navigator.pop(sheetContext);
                         WidgetsBinding.instance.addPostFrameCallback((_) async {
                           final value = await showLedgerSelectionSheet<String>(
                             context: context,
-                            title: 'Jump to Month',
-                            selectedValue: '',
+                            title: 'Filter by Type',
+                            selectedValue: typeFilterName,
                             items: [
-                              for (final month in visibleMonths)
+                              (
+                                value: '',
+                                label: 'All types',
+                                icon: AppIcon.filter,
+                                detail: null,
+                              ),
+                              for (final type in TransactionType.values)
                                 (
-                                  value: ledgerMonthKey(month),
-                                  label: monthLabel(month),
-                                  icon: AppIcon.event,
+                                  value: type.name,
+                                  label: transactionTypeLabel(type),
+                                  icon: transactionTypeIcon(type),
                                   detail: null,
                                 ),
                             ],
                           );
-                          if (value == null || !mounted) return;
-                          final anchor = _monthAnchors[value]?.currentContext;
-                          if (anchor == null || !anchor.mounted) return;
-                          Scrollable.ensureVisible(
-                            anchor,
-                            duration: const Duration(milliseconds: 280),
-                            curve: Curves.easeOutCubic,
-                            alignment: 0.08,
-                          );
+                          if (value != null && mounted) {
+                            setState(() => typeFilterName = value);
+                          }
                         });
                       },
                     ),
+                    LedgerFilterButton(
+                      buttonKey: ValueKey('ledger-account-$accountFilterId'),
+                      icon: AppIcon.wallet,
+                      label: selectedAccountLabel,
+                      isActive: accountFilterId.isNotEmpty,
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        WidgetsBinding.instance.addPostFrameCallback((_) async {
+                          final value = await showLedgerSelectionSheet<String>(
+                            context: context,
+                            title: 'Filter by Account',
+                            searchable: activeAccounts.length > 7,
+                            selectedValue: accountFilterId,
+                            items: [
+                              (
+                                value: '',
+                                label: 'All accounts',
+                                icon: AppIcon.wallet,
+                                detail: null,
+                              ),
+                              for (final account in activeAccounts)
+                                (
+                                  value: account.id,
+                                  label: account.name,
+                                  icon: v2AccountIcon(account.type),
+                                  detail: v2AccountTypeLabel(account.type),
+                                ),
+                            ],
+                          );
+                          if (value != null && mounted) {
+                            setState(() => accountFilterId = value);
+                          }
+                        });
+                      },
+                    ),
+                    LedgerFilterButton(
+                      buttonKey: ValueKey('ledger-category-$categoryFilterId'),
+                      icon: AppIcon.category,
+                      label: selectedCategoryLabel,
+                      isActive: categoryFilterId.isNotEmpty,
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        WidgetsBinding.instance.addPostFrameCallback((_) async {
+                          final value = await showLedgerCategorySelectionSheet(
+                            context: context,
+                            categories: activeCategories,
+                            selectedCategoryId: categoryFilterId,
+                          );
+                          if (value != null && mounted) {
+                            setState(() => categoryFilterId = value);
+                          }
+                        });
+                      },
+                    ),
+                    LedgerFilterButton(
+                      buttonKey: ValueKey('ledger-date-${dateFilter.name}'),
+                      icon: AppIcon.calendar,
+                      label: selectedDateLabel,
+                      isActive: dateFilter != LedgerDateFilter.all,
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        WidgetsBinding.instance.addPostFrameCallback((_) async {
+                          final value =
+                              await showLedgerSelectionSheet<LedgerDateFilter>(
+                                context: context,
+                                title: 'Filter by Date',
+                                selectedValue: dateFilter,
+                                items: [
+                                  for (final filter in LedgerDateFilter.values)
+                                    (
+                                      value: filter,
+                                      label: ledgerDateFilterLabel(filter),
+                                      icon: AppIcon.calendar,
+                                      detail: null,
+                                    ),
+                                ],
+                              );
+                          if (value == LedgerDateFilter.custom && mounted) {
+                            final range = await showDateRangePicker(
+                              context: this.context,
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(DateTime.now().year + 10),
+                              initialDateRange: null,
+                            );
+                            if (range == null || !mounted) return;
+                            setState(() {
+                              dateFilter = LedgerDateFilter.custom;
+                              customDateRange = range;
+                            });
+                          } else if (value != null && mounted) {
+                            setState(() {
+                              dateFilter = value;
+                              customDateRange = null;
+                            });
+                          }
+                        });
+                      },
+                    ),
+                    if (visibleMonths.isNotEmpty)
+                      LedgerFilterButton(
+                        buttonKey: ValueKey('ledger-jump-month'),
+                        icon: AppIcon.event,
+                        label: 'Jump to month',
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          WidgetsBinding.instance.addPostFrameCallback((
+                            _,
+                          ) async {
+                            final value =
+                                await showLedgerSelectionSheet<String>(
+                                  context: context,
+                                  title: 'Jump to Month',
+                                  selectedValue: '',
+                                  items: [
+                                    for (final month in visibleMonths)
+                                      (
+                                        value: ledgerMonthKey(month),
+                                        label: monthLabel(month),
+                                        icon: AppIcon.event,
+                                        detail: null,
+                                      ),
+                                  ],
+                                );
+                            if (value == null || !mounted) return;
+                            final anchor = _monthAnchors[value]?.currentContext;
+                            if (anchor == null || !anchor.mounted) return;
+                            Scrollable.ensureVisible(
+                              anchor,
+                              duration: const Duration(milliseconds: 280),
+                              curve: Curves.easeOutCubic,
+                              alignment: 0.08,
+                            );
+                          });
+                        },
+                      ),
+                  ],
+                ),
+                if (isSingleAccountLedger) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  SwitchListTile.adaptive(
+                    key: const ValueKey('ledger-show-running-balance'),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Show Running Balance'),
+                    subtitle: const Text(
+                      'Show the account balance after each transaction',
+                    ),
+                    value: FinanceDataStoreScope.read(
+                      context,
+                    ).preferences.showRunningBalance,
+                    onChanged: (value) async {
+                      final store = FinanceDataStoreScope.read(context);
+                      await store.savePreferences(
+                        store.preferences.copyWith(showRunningBalance: value),
+                      );
+                      if (sheetContext.mounted) Navigator.pop(sheetContext);
+                    },
+                  ),
                 ],
-              ),
-              SizedBox(height: AppSpacing.md),
-              TextButton.icon(
-                onPressed: () {
-                  clearFilters();
-                  Navigator.pop(sheetContext);
-                },
-                icon: Icon(AppIcon.clearFilter),
-                label: const Text('Clear filters'),
-              ),
-            ],
+                SizedBox(height: AppSpacing.md),
+                TextButton.icon(
+                  onPressed: () {
+                    clearFilters();
+                    Navigator.pop(sheetContext);
+                  },
+                  icon: Icon(AppIcon.clearFilter),
+                  label: const Text('Clear filters'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3458,6 +3502,7 @@ class LedgerMonthSection extends StatelessWidget {
     required this.store,
     required this.accountsById,
     required this.categoriesById,
+    this.runningBalances,
     required this.isCollapsed,
     required this.onDismissFocus,
     required this.onToggle,
@@ -3470,6 +3515,7 @@ class LedgerMonthSection extends StatelessWidget {
   final FinanceDataStore store;
   final Map<String, v2_account.AccountRecord> accountsById;
   final Map<String, v2_category.CategoryRecord> categoriesById;
+  final AccountRunningBalances? runningBalances;
   final bool isCollapsed;
   final VoidCallback onDismissFocus;
   final VoidCallback onToggle;
@@ -3507,7 +3553,23 @@ class LedgerMonthSection extends StatelessWidget {
                 fundingEvent: fundingEvent,
               ),
           ]
-          ..sort((left, right) => right.date.compareTo(left.date));
+          ..sort((left, right) {
+            final dateOrder = right.date.compareTo(left.date);
+            if (dateOrder != 0) return dateOrder;
+            final leftCreated =
+                left.projection?.transaction.sync.createdAt ??
+                left.fundingEvent!.sync.createdAt;
+            final rightCreated =
+                right.projection?.transaction.sync.createdAt ??
+                right.fundingEvent!.sync.createdAt;
+            final createdOrder = rightCreated.compareTo(leftCreated);
+            if (createdOrder != 0) return createdOrder;
+            final leftId =
+                left.projection?.transaction.id ?? left.fundingEvent!.id;
+            final rightId =
+                right.projection?.transaction.id ?? right.fundingEvent!.id;
+            return rightId.compareTo(leftId);
+          });
     final activitiesByDay =
         <
           DateTime,
@@ -3612,6 +3674,7 @@ class LedgerMonthSection extends StatelessWidget {
                             store: store,
                             accountsById: accountsById,
                             categoriesById: categoriesById,
+                            runningBalances: runningBalances,
                             onDismissFocus: onDismissFocus,
                           ),
                           if (entry.key != activitiesByDay.entries.last.key)
@@ -3634,6 +3697,7 @@ class _LedgerDayCard extends StatelessWidget {
     required this.store,
     required this.accountsById,
     required this.categoriesById,
+    this.runningBalances,
     required this.onDismissFocus,
   });
 
@@ -3649,6 +3713,7 @@ class _LedgerDayCard extends StatelessWidget {
   final FinanceDataStore store;
   final Map<String, v2_account.AccountRecord> accountsById;
   final Map<String, v2_category.CategoryRecord> categoriesById;
+  final AccountRunningBalances? runningBalances;
   final VoidCallback onDismissFocus;
 
   @override
@@ -3698,6 +3763,8 @@ class _LedgerDayCard extends StatelessWidget {
                           ? null
                           : categoriesById[projection.transaction.categoryId]
                                 ?.name),
+                  runningBalanceMinor: runningBalances
+                      ?.afterTransaction[projection.transaction.id],
                   onTap: () async {
                     onDismissFocus();
                     await showTransactionDetails(
@@ -3728,6 +3795,10 @@ class _LedgerDayCard extends StatelessWidget {
                           .fundingEvent!
                           .sourceAccountId],
                   currency: store.preferences.currency,
+                  runningBalanceMinor:
+                      runningBalances?.afterGoalFundingEvent[activities[index]
+                          .fundingEvent!
+                          .id],
                   onTap: () => showGoalFundingDetails(
                     context,
                     activities[index].fundingEvent!.id,
@@ -3998,6 +4069,7 @@ class LedgerJournalRow extends StatelessWidget {
     this.account,
     this.category,
     this.categoryName,
+    this.runningBalanceMinor,
     this.showDateContext = true,
     super.key,
   });
@@ -4008,6 +4080,7 @@ class LedgerJournalRow extends StatelessWidget {
   final v2_account.AccountRecord? account;
   final v2_category.CategoryRecord? category;
   final String? categoryName;
+  final int? runningBalanceMinor;
   final bool showDateContext;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
@@ -4117,6 +4190,7 @@ class LedgerJournalRow extends StatelessWidget {
                         _LedgerMetadataLine(
                           details: metadataDetails,
                           timeLabel: timeLabel,
+                          showSplit: hasSplit,
                           style: secondaryStyle,
                         ),
                       ],
@@ -4142,12 +4216,23 @@ class LedgerJournalRow extends StatelessWidget {
                       const SizedBox(height: 3),
                       SizedBox(
                         height: 18,
-                        child: hasSplit
-                            ? const Align(
+                        child: runningBalanceMinor == null
+                            ? null
+                            : Align(
                                 alignment: Alignment.centerRight,
-                                child: _LedgerSplitCapsule(),
-                              )
-                            : null,
+                                child: MoneyText(
+                                  key: ValueKey(
+                                    'ledger-running-balance-${transaction.id}',
+                                  ),
+                                  amountMinor: runningBalanceMinor!,
+                                  currency: currency,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
                       ),
                     ],
                   ),
@@ -4166,39 +4251,52 @@ class _LedgerMetadataLine extends StatelessWidget {
     required this.details,
     required this.timeLabel,
     required this.style,
+    this.showSplit = false,
   });
 
   final String details;
   final String? timeLabel;
   final TextStyle style;
+  final bool showSplit;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Stack(
+      clipBehavior: Clip.none,
       children: [
-        Expanded(
-          child: Text(
-            details,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.left,
-            style: style,
-          ),
-        ),
-        if (timeLabel != null) ...[
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 74,
-            child: Text(
-              timeLabel!,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.clip,
-              textAlign: TextAlign.right,
-              style: style,
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                details,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.left,
+                style: style,
+              ),
             ),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 66,
+              child: Text(
+                timeLabel ?? '',
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.clip,
+                textAlign: TextAlign.right,
+                style: style,
+              ),
+            ),
+            const SizedBox(width: 3),
+          ],
+        ),
+        if (showSplit)
+          const Positioned(
+            right: -41,
+            top: 0,
+            bottom: 0,
+            child: Center(child: _LedgerSplitCapsule()),
           ),
-        ],
       ],
     );
   }
@@ -4211,7 +4309,9 @@ class _LedgerSplitCapsule extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      width: 39,
+      height: 18,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(
           alpha: 0.16,
@@ -4227,6 +4327,7 @@ class _LedgerSplitCapsule extends StatelessWidget {
           color: theme.colorScheme.onSurfaceVariant,
           fontSize: 10,
           fontWeight: FontWeight.w600,
+          height: 1,
         ),
       ),
     );
@@ -4272,6 +4373,7 @@ class GoalFundingLedgerRow extends StatelessWidget {
     required this.onTap,
     this.account,
     this.showDateContext = true,
+    this.runningBalanceMinor,
     super.key,
   });
 
@@ -4279,6 +4381,7 @@ class GoalFundingLedgerRow extends StatelessWidget {
   final CurrencyFormatSettings currency;
   final v2_account.AccountRecord? account;
   final bool showDateContext;
+  final int? runningBalanceMinor;
   final VoidCallback onTap;
 
   @override
@@ -4372,7 +4475,26 @@ class GoalFundingLedgerRow extends StatelessWidget {
                       color: Colors.blue.shade700,
                     ),
                     const SizedBox(height: 3),
-                    const SizedBox(height: 18),
+                    SizedBox(
+                      height: 18,
+                      child: runningBalanceMinor == null
+                          ? null
+                          : Align(
+                              alignment: Alignment.centerRight,
+                              child: MoneyText(
+                                key: ValueKey(
+                                  'ledger-running-balance-goal-${event.id}',
+                                ),
+                                amountMinor: runningBalanceMinor!,
+                                currency: currency,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                    ),
                   ],
                 ),
               ),
