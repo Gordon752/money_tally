@@ -1026,9 +1026,16 @@ void main() {
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
     await tester.ensureVisible(
-      find.byKey(const ValueKey('calendar-filter-goals')),
+      find.byKey(const ValueKey('calendar-activity-filter-picker')),
     );
-    await tester.tap(find.byKey(const ValueKey('calendar-filter-goals')));
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-activity-filter-picker')),
+    );
+    await tester.pumpAndSettle();
+    final goalsOption = find.byKey(const ValueKey('calendar-filter-goals'));
+    await tester.ensureVisible(goalsOption);
+    await tester.pumpAndSettle();
+    await tester.tap(goalsOption);
     await tester.pumpAndSettle();
 
     expect(find.text('Emergency Fund'), findsNothing);

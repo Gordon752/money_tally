@@ -1097,9 +1097,13 @@ void main() {
     },
   );
 
-  testWidgets('single-account filter exposes running-balance preference', (
+  testWidgets('running-balance preference lives in Settings, not filters', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final legacyStore = FinanceStore.seeded();
     final migrated = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
@@ -1117,17 +1121,124 @@ void main() {
       find.byKey(const ValueKey('ledger-show-running-balance')),
       findsNothing,
     );
-    await tester.tap(find.byKey(const ValueKey('ledger-account-')));
+    expect(find.text('Show Running Balance'), findsNothing);
+
+    await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Checking').last);
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ledger-show-running-balance')));
+    await tester.ensureVisible(find.text('Show Running Balance'));
+    await tester.tap(
+      find.ancestor(
+        of: find.text('Show Running Balance'),
+        matching: find.byType(SwitchListTile),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(dataStore.preferences.showRunningBalance, isTrue);
-    expect(find.text('Show Running Balance'), findsNothing);
+    expect(find.text('Ledger Display'), findsOneWidget);
+  });
+
+  testWidgets('Ledger display preferences reclaim optional row columns', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final sourceTransaction = migrated.transactions.firstWhere(
+      (transaction) =>
+          transaction.type == v2_transaction.TransactionType.expense,
+    );
+    final splitCategories = migrated.categories
+        .where((category) => category.kind == v2_category.CategoryKind.expense)
+        .take(2)
+        .toList(growable: false);
+    final splitTransaction = sourceTransaction.copyWith(
+      splitLines: [
+        v2_transaction.TransactionSplitLine(
+          id: 'display-split-a',
+          categoryId: splitCategories.first.id,
+          amountMinor: sourceTransaction.amountMinor ~/ 2,
+        ),
+        v2_transaction.TransactionSplitLine(
+          id: 'display-split-b',
+          categoryId: splitCategories.last.id,
+          amountMinor:
+              sourceTransaction.amountMinor -
+              sourceTransaction.amountMinor ~/ 2,
+        ),
+      ],
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        transactions: [
+          for (final transaction in migrated.transactions)
+            if (transaction.id == splitTransaction.id)
+              splitTransaction
+            else
+              transaction,
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(ValueKey('ledger-icon-${splitTransaction.id}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey('ledger-timestamp-slot-${splitTransaction.id}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey('ledger-split-slot-${splitTransaction.id}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey('ledger-split-indicator-${splitTransaction.id}')),
+      findsOneWidget,
+    );
+    final detailsKey = ValueKey(
+      'ledger-metadata-details-${splitTransaction.id}',
+    );
+    final originalWidth = tester.getSize(find.byKey(detailsKey)).width;
+
+    await dataStore.savePreferences(
+      dataStore.preferences.copyWith(
+        showLedgerIcons: false,
+        showLedgerTimestamps: false,
+        showLedgerSplitIndicator: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(ValueKey('ledger-icon-${splitTransaction.id}')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(ValueKey('ledger-timestamp-slot-${splitTransaction.id}')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(ValueKey('ledger-split-slot-${splitTransaction.id}')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(ValueKey('ledger-split-indicator-${splitTransaction.id}')),
+      findsNothing,
+    );
+    expect(
+      tester.getSize(find.byKey(detailsKey)).width,
+      greaterThan(originalWidth),
+    );
   });
 
   test('scheduled undo uses type-specific labels', () {
@@ -1161,7 +1272,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ledger-account-')));
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-account-row')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Credit Card').last);
     await tester.pumpAndSettle();
@@ -1170,11 +1281,19 @@ void main() {
     expect(ledgerRowWithText('Walmart'), findsNothing);
     expect(ledgerRowWithText('Settlement'), findsNothing);
 
-    await tester.tap(find.byTooltip('Clear filters'));
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('All Types'), findsOneWidget);
+    expect(find.text('Credit Card'), findsNWidgets(2));
+    expect(find.text('All Categories'), findsOneWidget);
+    expect(find.text('Any Date'), findsOneWidget);
+    expect(find.text('Navigation'), findsOneWidget);
+    expect(find.text('Jump to Month'), findsOneWidget);
+    await tester.tap(find.text('Clear Filters'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ledger-type-')));
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-type-row')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Income').last);
     await tester.pumpAndSettle();
@@ -1187,7 +1306,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ledger-category-')));
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-category-row')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dining').last);
     await tester.pumpAndSettle();
@@ -1200,7 +1319,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ledger-date-all')));
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-date-row')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Today').last);
     await tester.pumpAndSettle();
@@ -1209,6 +1328,110 @@ void main() {
     expect(ledgerRowWithText('Walmart'), findsNothing);
     expect(ledgerRowWithText('Settlement'), findsNothing);
     expect(find.text('No transactions match'), findsOneWidget);
+  });
+
+  testWidgets(
+    'ledger filter button clearly distinguishes neutral and active states',
+    (tester) async {
+      await tester.pumpWidget(MoneyTallyApp());
+      await tester.tap(find.text('Ledger').last);
+      await tester.pumpAndSettle();
+
+      IconButton filterButton() => tester.widget<IconButton>(
+        find.byKey(const ValueKey('ledger-filter-button')),
+      );
+      Color? background(IconButton button) =>
+          button.style?.backgroundColor?.resolve(<WidgetState>{});
+      Color? foreground(IconButton button) =>
+          button.style?.foregroundColor?.resolve(<WidgetState>{});
+      BorderSide? side(IconButton button) =>
+          button.style?.side?.resolve(<WidgetState>{});
+
+      final neutralButton = filterButton();
+      final neutralBackground = background(neutralButton);
+      expect(find.byTooltip('Filters'), findsOneWidget);
+      expect(side(neutralButton), BorderSide.none);
+
+      await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('ledger-filter-account-row')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Credit Card').last);
+      await tester.pumpAndSettle();
+
+      final oneFilterButton = filterButton();
+      final oneFilterBackground = background(oneFilterButton);
+      final oneFilterForeground = foreground(oneFilterButton);
+      final oneFilterSide = side(oneFilterButton);
+      expect(find.byTooltip('Filters active (1)'), findsOneWidget);
+      expect(oneFilterBackground, isNot(neutralBackground));
+      expect(oneFilterForeground, AppColors.accent);
+      expect(oneFilterSide, isNotNull);
+      expect(oneFilterSide!.width, 1.15);
+      expect(oneFilterSide.color.a, greaterThan(0.40));
+
+      await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('ledger-filter-type-row')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Income').last);
+      await tester.pumpAndSettle();
+
+      final twoFilterButton = filterButton();
+      expect(find.byTooltip('Filters active (2)'), findsOneWidget);
+      expect(background(twoFilterButton), oneFilterBackground);
+      expect(foreground(twoFilterButton), oneFilterForeground);
+      expect(side(twoFilterButton), oneFilterSide);
+
+      await tester.tap(find.byTooltip('Clear filters'));
+      await tester.pumpAndSettle();
+
+      final clearedButton = filterButton();
+      expect(find.byTooltip('Filters'), findsOneWidget);
+      expect(background(clearedButton), neutralBackground);
+      expect(side(clearedButton), BorderSide.none);
+    },
+  );
+
+  testWidgets('ledger active filter treatment remains distinct in dark mode', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        preferences: migrated.preferences.copyWith(
+          appearanceMode: AppearanceMode.dark,
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-account-row')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Credit Card').last);
+    await tester.pumpAndSettle();
+
+    final activeButton = tester.widget<IconButton>(
+      find.byKey(const ValueKey('ledger-filter-button')),
+    );
+    final activeSide = activeButton.style?.side?.resolve(<WidgetState>{});
+    final activeBackground = activeButton.style?.backgroundColor?.resolve(
+      <WidgetState>{},
+    );
+    expect(find.byTooltip('Filters active (1)'), findsOneWidget);
+    expect(activeSide, isNotNull);
+    expect(activeSide!.color.a, greaterThan(0.50));
+    expect(activeBackground, isNotNull);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('ledger long press can duplicate and delete transaction', (
@@ -2594,6 +2817,88 @@ void main() {
     },
   );
 
+  testWidgets(
+    'category picker reveals children expanded near the viewport bottom',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final legacyStore = FinanceStore.seeded();
+      final migrated = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final extraCategories = [
+        for (var index = 0; index < 12; index++)
+          v2_category.CategoryRecord(
+            id: 'reveal-filler-$index',
+            name: 'A Reveal Filler $index',
+            kind: v2_category.CategoryKind.expense,
+            sync: v2_sync.SyncMetadata.fresh(),
+          ),
+        v2_category.CategoryRecord(
+          id: 'reveal-parent',
+          name: 'Truck',
+          kind: v2_category.CategoryKind.expense,
+          sync: v2_sync.SyncMetadata.fresh(),
+        ),
+        for (var index = 0; index < 5; index++)
+          v2_category.CategoryRecord(
+            id: 'reveal-child-$index',
+            name: 'Truck Child $index',
+            kind: v2_category.CategoryKind.expense,
+            parentCategoryId: 'reveal-parent',
+            sync: v2_sync.SyncMetadata.fresh(),
+          ),
+      ];
+      final dataStore = FinanceDataStore(
+        dataSet: migrated.copyWith(
+          categories: [...migrated.categories, ...extraCategories],
+        ),
+      );
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+      await tester.tap(find.byTooltip('Add'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Expense'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose category'));
+      await tester.pumpAndSettle();
+
+      final toggle = find.byKey(
+        const ValueKey('category-picker-toggle-reveal-parent'),
+      );
+      await tester.scrollUntilVisible(
+        toggle,
+        350,
+        scrollable: find.descendant(
+          of: find.byKey(const ValueKey('category-picker-list')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+
+      final parent = find.byKey(
+        const ValueKey('category-picker-row-reveal-parent'),
+      );
+      final lastChild = find.byKey(
+        const ValueKey('category-picker-row-reveal-child-4'),
+      );
+      expect(parent, findsOneWidget);
+      expect(lastChild, findsOneWidget);
+      final viewport = tester.getRect(
+        find.byKey(const ValueKey('category-picker-list')),
+      );
+      expect(tester.getRect(parent).top, greaterThanOrEqualTo(viewport.top));
+      expect(
+        tester.getRect(lastChild).bottom,
+        lessThanOrEqualTo(viewport.bottom),
+      );
+    },
+  );
+
   testWidgets('transaction category picker filters transaction type', (
     tester,
   ) async {
@@ -3242,6 +3547,16 @@ void main() {
 
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
+
+    expect(find.text('All Scheduled'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('calendar-activity-filter-picker')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-activity-filter')),
+      findsNothing,
+    );
 
     expect(find.text('Rent'), findsOneWidget);
   });
@@ -3902,7 +4217,7 @@ void main() {
   });
 
   testWidgets('account long press can change account type', (tester) async {
-    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.physicalSize = const Size(1200, 1500);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -5134,8 +5449,7 @@ void main() {
       ),
       findsNothing,
     );
-    await tester.tap(find.byKey(const ValueKey('calendar-filter-expenses')));
-    await tester.pumpAndSettle();
+    await selectScheduledCalendarFilter(tester, 'expenses');
     expect(
       tester
           .widget<Text>(
@@ -5194,8 +5508,7 @@ void main() {
       required String completed,
       required String remaining,
     }) async {
-      await tester.tap(find.byKey(ValueKey('calendar-filter-$filter')));
-      await tester.pumpAndSettle();
+      await selectScheduledCalendarFilter(tester, filter);
       expect(
         tester
             .widget<Text>(
@@ -5247,8 +5560,7 @@ void main() {
       completed: r'$0.00',
       remaining: r'$0.00',
     );
-    await tester.tap(find.byKey(const ValueKey('calendar-filter-expenses')));
-    await tester.pumpAndSettle();
+    await selectScheduledCalendarFilter(tester, 'expenses');
 
     final ordinaryDecoration = tester.widget<DecoratedBox>(
       find.byKey(
@@ -5600,8 +5912,7 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(find.byKey(const ValueKey('calendar-filter-income')));
-    await tester.pumpAndSettle();
+    await selectScheduledCalendarFilter(tester, 'income');
     expect(find.text('Scheduled Income'), findsWidgets);
     expect(find.text('Scheduled Expense'), findsNothing);
     expect(find.text('Scheduled Transfer'), findsNothing);
@@ -5613,8 +5924,7 @@ void main() {
       r'$20,000.00',
     );
 
-    await tester.tap(find.byKey(const ValueKey('calendar-filter-expenses')));
-    await tester.pumpAndSettle();
+    await selectScheduledCalendarFilter(tester, 'expenses');
     expect(find.text('Scheduled Income'), findsNothing);
     expect(find.text('Scheduled Expense'), findsWidgets);
     expect(find.text('Scheduled Transfer'), findsNothing);
@@ -5626,8 +5936,7 @@ void main() {
       r'$100,000.00',
     );
 
-    await tester.tap(find.byKey(const ValueKey('calendar-filter-transfers')));
-    await tester.pumpAndSettle();
+    await selectScheduledCalendarFilter(tester, 'transfers');
     expect(find.text('Scheduled Transfer'), findsWidgets);
     expect(find.text(r'$5,000.00'), findsWidgets);
     expect(
@@ -5637,8 +5946,7 @@ void main() {
       r'$5,000.00',
     );
 
-    await tester.tap(find.byKey(const ValueKey('calendar-filter-goals')));
-    await tester.pumpAndSettle();
+    await selectScheduledCalendarFilter(tester, 'goals');
     expect(find.text('Scheduled Income'), findsNothing);
     expect(find.text('Scheduled Expense'), findsNothing);
     expect(find.text('Scheduled Transfer'), findsNothing);
@@ -8262,6 +8570,22 @@ void main() {
     await tester.tap(find.text('Income').last);
     await tester.pumpAndSettle();
 
+    for (final label in const [
+      'Show Icons',
+      'Show Timestamps',
+      'Show Split Indicator',
+      'Show Running Balance',
+    ]) {
+      await tester.ensureVisible(find.text(label));
+      await tester.tap(
+        find.ancestor(
+          of: find.text(label),
+          matching: find.byType(SwitchListTile),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
     expect(dataStore.preferences.launchScreen, LaunchScreen.ledger);
     expect(dataStore.preferences.appearanceMode, AppearanceMode.dark);
     expect(
@@ -8273,6 +8597,10 @@ void main() {
       DefaultTransactionType.income,
     );
     expect(dataStore.preferences.notificationsEnabled, isTrue);
+    expect(dataStore.preferences.showLedgerIcons, isFalse);
+    expect(dataStore.preferences.showLedgerTimestamps, isFalse);
+    expect(dataStore.preferences.showLedgerSplitIndicator, isFalse);
+    expect(dataStore.preferences.showRunningBalance, isTrue);
     expect(find.text('Your data is stored securely'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
@@ -8288,10 +8616,14 @@ void main() {
       DefaultTransactionType.income,
     );
     expect(reloaded.preferences.notificationsEnabled, isTrue);
+    expect(reloaded.preferences.showLedgerIcons, isFalse);
+    expect(reloaded.preferences.showLedgerTimestamps, isFalse);
+    expect(reloaded.preferences.showLedgerSplitIndicator, isFalse);
+    expect(reloaded.preferences.showRunningBalance, isTrue);
   });
 
   testWidgets('settings money format rows update and persist', (tester) async {
-    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.physicalSize = const Size(1200, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -8324,6 +8656,7 @@ void main() {
     await tester.tap(find.text('0').last);
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.text('Thousands separator'));
     await tester.tap(find.widgetWithText(ListTile, 'Thousands separator'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Period').last);
@@ -8535,7 +8868,7 @@ void main() {
   testWidgets('settings can save custom currency code and symbol', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.physicalSize = const Size(1200, 1500);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -8552,6 +8885,7 @@ void main() {
 
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Custom currency'));
     await tester.tap(find.widgetWithText(ListTile, 'Custom currency'));
     await tester.pumpAndSettle();
 
@@ -8859,6 +9193,21 @@ void main() {
     expect(app.themeMode, ThemeMode.dark);
     expect(app.darkTheme, isNotNull);
   });
+}
+
+Future<void> selectScheduledCalendarFilter(
+  WidgetTester tester,
+  String filter,
+) async {
+  await tester.tap(
+    find.byKey(const ValueKey('calendar-activity-filter-picker')),
+  );
+  await tester.pumpAndSettle();
+  final option = find.byKey(ValueKey('calendar-filter-$filter'));
+  await tester.ensureVisible(option);
+  await tester.pumpAndSettle();
+  await tester.tap(option);
+  await tester.pumpAndSettle();
 }
 
 String _monthYearLabel(DateTime date) {

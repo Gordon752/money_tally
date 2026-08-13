@@ -51,6 +51,9 @@ class UserPreferences {
     this.notificationsEnabled = false,
     this.automaticSyncEnabled = false,
     this.preferredDailySyncMinutes = 22 * 60,
+    this.showLedgerIcons = true,
+    this.showLedgerTimestamps = true,
+    this.showLedgerSplitIndicator = true,
     this.showRunningBalance = false,
     this.collapsedAccountGroupNames = const {},
     this.accountGroupOrderNames = defaultAccountGroupOrderNames,
@@ -83,6 +86,9 @@ class UserPreferences {
   /// Minutes after local midnight. This is a best-effort scheduling preference,
   /// not a promise that iOS will launch the app at an exact clock time.
   final int preferredDailySyncMinutes;
+  final bool showLedgerIcons;
+  final bool showLedgerTimestamps;
+  final bool showLedgerSplitIndicator;
   final bool showRunningBalance;
   final Set<String> collapsedAccountGroupNames;
   final List<String> accountGroupOrderNames;
@@ -116,6 +122,9 @@ class UserPreferences {
     bool? notificationsEnabled,
     bool? automaticSyncEnabled,
     int? preferredDailySyncMinutes,
+    bool? showLedgerIcons,
+    bool? showLedgerTimestamps,
+    bool? showLedgerSplitIndicator,
     bool? showRunningBalance,
     Set<String>? collapsedAccountGroupNames,
     List<String>? accountGroupOrderNames,
@@ -160,6 +169,10 @@ class UserPreferences {
       automaticSyncEnabled: automaticSyncEnabled ?? this.automaticSyncEnabled,
       preferredDailySyncMinutes:
           preferredDailySyncMinutes ?? this.preferredDailySyncMinutes,
+      showLedgerIcons: showLedgerIcons ?? this.showLedgerIcons,
+      showLedgerTimestamps: showLedgerTimestamps ?? this.showLedgerTimestamps,
+      showLedgerSplitIndicator:
+          showLedgerSplitIndicator ?? this.showLedgerSplitIndicator,
       showRunningBalance: showRunningBalance ?? this.showRunningBalance,
       collapsedAccountGroupNames:
           collapsedAccountGroupNames ?? this.collapsedAccountGroupNames,
@@ -196,6 +209,9 @@ class UserPreferences {
       'notificationsEnabled': notificationsEnabled,
       'automaticSyncEnabled': automaticSyncEnabled,
       'preferredDailySyncMinutes': preferredDailySyncMinutes,
+      'showLedgerIcons': showLedgerIcons,
+      'showLedgerTimestamps': showLedgerTimestamps,
+      'showLedgerSplitIndicator': showLedgerSplitIndicator,
       'showRunningBalance': showRunningBalance,
       'collapsedAccountGroupNames': collapsedAccountGroupNames.toList()..sort(),
       'accountGroupOrderNames': accountGroupOrderNames,
@@ -271,6 +287,10 @@ class UserPreferences {
       preferredDailySyncMinutes: _validPreferredSyncMinutes(
         json['preferredDailySyncMinutes'],
       ),
+      showLedgerIcons: json['showLedgerIcons'] as bool? ?? true,
+      showLedgerTimestamps: json['showLedgerTimestamps'] as bool? ?? true,
+      showLedgerSplitIndicator:
+          json['showLedgerSplitIndicator'] as bool? ?? true,
       showRunningBalance: json['showRunningBalance'] as bool? ?? false,
       collapsedAccountGroupNames:
           (json['collapsedAccountGroupNames'] as List<Object?>?)

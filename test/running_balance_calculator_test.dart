@@ -170,9 +170,18 @@ void main() {
     });
   });
 
-  test('running-balance preference defaults off and survives backup', () {
-    expect(const UserPreferences().showRunningBalance, isFalse);
-    const preferences = UserPreferences(showRunningBalance: true);
+  test('Ledger display preferences use defaults and survive backup', () {
+    const defaults = UserPreferences();
+    expect(defaults.showLedgerIcons, isTrue);
+    expect(defaults.showLedgerTimestamps, isTrue);
+    expect(defaults.showLedgerSplitIndicator, isTrue);
+    expect(defaults.showRunningBalance, isFalse);
+    const preferences = UserPreferences(
+      showLedgerIcons: false,
+      showLedgerTimestamps: false,
+      showLedgerSplitIndicator: false,
+      showRunningBalance: true,
+    );
     final dataSet = FinanceDataSet(
       accounts: [_account('checking')],
       categories: const [],
@@ -185,6 +194,9 @@ void main() {
     final restored = const BackupCodec().decodeJson(
       const BackupCodec().encodeJson(dataSet),
     );
+    expect(restored.preferences.showLedgerIcons, isFalse);
+    expect(restored.preferences.showLedgerTimestamps, isFalse);
+    expect(restored.preferences.showLedgerSplitIndicator, isFalse);
     expect(restored.preferences.showRunningBalance, isTrue);
   });
 }

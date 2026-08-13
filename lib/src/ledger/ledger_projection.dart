@@ -75,6 +75,21 @@ class LedgerTransactionProjection {
   };
 }
 
+/// Returns this Ledger row's contribution to an income/expense summary.
+///
+/// [displayedAmountMinor] is deliberately not a financial classifier: transfers
+/// have a useful signed display amount in an account Ledger, but remain internal
+/// movement and must not inflate income, expense, or net summaries.
+int ledgerActivitySummaryAmountMinor(LedgerTransactionProjection projection) {
+  return switch (projection.transaction.type) {
+    TransactionType.expense => -projection.displayedAmountMinor.abs(),
+    TransactionType.income => projection.displayedAmountMinor.abs(),
+    TransactionType.transfer ||
+    TransactionType.goalFunding ||
+    TransactionType.adjustment => 0,
+  };
+}
+
 /// Produces Ledger-only projections. It relies on the canonical effective
 /// allocation resolver in [TransactionRecord], so legacy mirrored lines and
 /// duplicate category lines cannot be double-counted.

@@ -165,4 +165,115 @@ void main() {
       expect(projections, isEmpty);
     },
   );
+
+  group('Ledger day summary', () {
+    int summaryOf(Iterable<TransactionRecord> transactions) =>
+        projectLedgerTransactions(transactions).fold(
+          0,
+          (total, projection) =>
+              total + ledgerActivitySummaryAmountMinor(projection),
+        );
+
+    test('expense only', () {
+      expect(summaryOf([record(amountMinor: 2500)]), -2500);
+    });
+
+    test('income only', () {
+      expect(
+        summaryOf([
+          record(id: 'income', type: TransactionType.income, amountMinor: 4800),
+        ]),
+        4800,
+      );
+    });
+
+    test('transfer only', () {
+      expect(
+        summaryOf([
+          record(
+            id: 'transfer',
+            type: TransactionType.transfer,
+            categoryId: null,
+            amountMinor: 20000,
+          ),
+        ]),
+        0,
+      );
+    });
+
+    test('income plus transfer', () {
+      expect(
+        summaryOf([
+          record(id: 'income', type: TransactionType.income, amountMinor: 4800),
+          record(
+            id: 'transfer',
+            type: TransactionType.transfer,
+            categoryId: null,
+            amountMinor: 20000,
+          ),
+        ]),
+        4800,
+      );
+    });
+
+    test('expense plus transfer', () {
+      expect(
+        summaryOf([
+          record(id: 'expense', amountMinor: 2500),
+          record(
+            id: 'transfer',
+            type: TransactionType.transfer,
+            categoryId: null,
+            amountMinor: 20000,
+          ),
+        ]),
+        -2500,
+      );
+    });
+
+    test('split expense plus transfer counts the parent once', () {
+      expect(
+        summaryOf([
+          record(
+            id: 'split-expense',
+            amountMinor: 2500,
+            lines: const [
+              TransactionSplitLine(
+                id: 'split-1',
+                categoryId: 'fuel',
+                amountMinor: 1800,
+              ),
+              TransactionSplitLine(
+                id: 'split-2',
+                categoryId: 'snacks',
+                amountMinor: 700,
+              ),
+            ],
+          ),
+          record(
+            id: 'transfer',
+            type: TransactionType.transfer,
+            categoryId: null,
+            amountMinor: 20000,
+          ),
+        ]),
+        -2500,
+      );
+    });
+
+    test('balance adjustment plus expense excludes the adjustment', () {
+      expect(
+        summaryOf([
+          record(
+            id: 'adjustment',
+            type: TransactionType.adjustment,
+            categoryId: null,
+            amountMinor: 100000,
+          ),
+          record(id: 'expense', amountMinor: 2500),
+        ]),
+        -2500,
+      );
+    });
+  });
 }
