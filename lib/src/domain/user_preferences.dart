@@ -23,6 +23,8 @@ enum DefaultTransactionType { expense, income, transfer, lastUsed }
 
 enum AccountDefaultMode { lastUsed, none, specific, useTransactionDefault }
 
+enum AutomaticBackupFrequency { daily, weekly }
+
 const defaultAccountGroupOrderNames = [
   'banking',
   'cash',
@@ -51,6 +53,9 @@ class UserPreferences {
     this.notificationsEnabled = false,
     this.automaticSyncEnabled = false,
     this.preferredDailySyncMinutes = 22 * 60,
+    this.automaticBackupsEnabled = false,
+    this.automaticBackupFrequency = AutomaticBackupFrequency.weekly,
+    this.preferredAutomaticBackupMinutes = 23 * 60,
     this.showLedgerIcons = true,
     this.showLedgerTimestamps = true,
     this.showLedgerSplitIndicator = true,
@@ -86,6 +91,11 @@ class UserPreferences {
   /// Minutes after local midnight. This is a best-effort scheduling preference,
   /// not a promise that iOS will launch the app at an exact clock time.
   final int preferredDailySyncMinutes;
+  final bool automaticBackupsEnabled;
+  final AutomaticBackupFrequency automaticBackupFrequency;
+
+  /// Minutes after local midnight. Background execution remains best-effort.
+  final int preferredAutomaticBackupMinutes;
   final bool showLedgerIcons;
   final bool showLedgerTimestamps;
   final bool showLedgerSplitIndicator;
@@ -122,6 +132,9 @@ class UserPreferences {
     bool? notificationsEnabled,
     bool? automaticSyncEnabled,
     int? preferredDailySyncMinutes,
+    bool? automaticBackupsEnabled,
+    AutomaticBackupFrequency? automaticBackupFrequency,
+    int? preferredAutomaticBackupMinutes,
     bool? showLedgerIcons,
     bool? showLedgerTimestamps,
     bool? showLedgerSplitIndicator,
@@ -169,6 +182,13 @@ class UserPreferences {
       automaticSyncEnabled: automaticSyncEnabled ?? this.automaticSyncEnabled,
       preferredDailySyncMinutes:
           preferredDailySyncMinutes ?? this.preferredDailySyncMinutes,
+      automaticBackupsEnabled:
+          automaticBackupsEnabled ?? this.automaticBackupsEnabled,
+      automaticBackupFrequency:
+          automaticBackupFrequency ?? this.automaticBackupFrequency,
+      preferredAutomaticBackupMinutes:
+          preferredAutomaticBackupMinutes ??
+          this.preferredAutomaticBackupMinutes,
       showLedgerIcons: showLedgerIcons ?? this.showLedgerIcons,
       showLedgerTimestamps: showLedgerTimestamps ?? this.showLedgerTimestamps,
       showLedgerSplitIndicator:
@@ -209,6 +229,9 @@ class UserPreferences {
       'notificationsEnabled': notificationsEnabled,
       'automaticSyncEnabled': automaticSyncEnabled,
       'preferredDailySyncMinutes': preferredDailySyncMinutes,
+      'automaticBackupsEnabled': automaticBackupsEnabled,
+      'automaticBackupFrequency': automaticBackupFrequency.name,
+      'preferredAutomaticBackupMinutes': preferredAutomaticBackupMinutes,
       'showLedgerIcons': showLedgerIcons,
       'showLedgerTimestamps': showLedgerTimestamps,
       'showLedgerSplitIndicator': showLedgerSplitIndicator,
@@ -287,6 +310,17 @@ class UserPreferences {
       preferredDailySyncMinutes: _validPreferredSyncMinutes(
         json['preferredDailySyncMinutes'],
       ),
+      automaticBackupsEnabled:
+          json['automaticBackupsEnabled'] as bool? ?? false,
+      automaticBackupFrequency: enumByName(
+        AutomaticBackupFrequency.values,
+        json['automaticBackupFrequency'],
+        AutomaticBackupFrequency.weekly,
+      ),
+      preferredAutomaticBackupMinutes: _validPreferredMinutes(
+        json['preferredAutomaticBackupMinutes'],
+        fallback: 23 * 60,
+      ),
       showLedgerIcons: json['showLedgerIcons'] as bool? ?? true,
       showLedgerTimestamps: json['showLedgerTimestamps'] as bool? ?? true,
       showLedgerSplitIndicator:
@@ -330,6 +364,10 @@ class UserPreferences {
 }
 
 int _validPreferredSyncMinutes(Object? value) {
-  final minutes = value is int ? value : 22 * 60;
+  return _validPreferredMinutes(value, fallback: 22 * 60);
+}
+
+int _validPreferredMinutes(Object? value, {required int fallback}) {
+  final minutes = value is int ? value : fallback;
   return minutes.clamp(0, (24 * 60) - 1);
 }

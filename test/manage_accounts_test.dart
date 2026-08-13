@@ -21,6 +21,9 @@ void main() {
       warnBeforeNegativeAssetBalance: false,
       automaticSyncEnabled: true,
       preferredDailySyncMinutes: 21 * 60 + 45,
+      automaticBackupsEnabled: true,
+      automaticBackupFrequency: AutomaticBackupFrequency.daily,
+      preferredAutomaticBackupMinutes: 23 * 60 + 20,
     );
 
     final restored = UserPreferences.fromJson(preferences.toJson());
@@ -37,6 +40,9 @@ void main() {
     expect(restored.warnBeforeNegativeAssetBalance, isFalse);
     expect(restored.automaticSyncEnabled, isTrue);
     expect(restored.preferredDailySyncMinutes, 21 * 60 + 45);
+    expect(restored.automaticBackupsEnabled, isTrue);
+    expect(restored.automaticBackupFrequency, AutomaticBackupFrequency.daily);
+    expect(restored.preferredAutomaticBackupMinutes, 23 * 60 + 20);
 
     final legacy = UserPreferences.fromJson(const {});
     expect(legacy.defaultTransactionAccountMode, AccountDefaultMode.lastUsed);
@@ -46,6 +52,9 @@ void main() {
     expect(legacy.warnBeforeNegativeAssetBalance, isTrue);
     expect(legacy.automaticSyncEnabled, isFalse);
     expect(legacy.preferredDailySyncMinutes, 22 * 60);
+    expect(legacy.automaticBackupsEnabled, isFalse);
+    expect(legacy.automaticBackupFrequency, AutomaticBackupFrequency.weekly);
+    expect(legacy.preferredAutomaticBackupMinutes, 23 * 60);
   });
 
   test('invalid configured defaults fall back without retaining an orphan', () {

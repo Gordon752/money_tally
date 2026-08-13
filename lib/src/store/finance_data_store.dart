@@ -2794,6 +2794,22 @@ class FinanceDataStore extends ChangeNotifier {
     _detectBudgetLowAlerts(before: before, after: _dataSet);
   }
 
+  Future<TransactionRecord> setTransactionStatus(
+    String transactionId,
+    TransactionStatus status,
+  ) async {
+    final transaction = transactions.firstWhere(
+      (item) => item.id == transactionId && !item.isDeleted,
+    );
+    if (transaction.status == status) return transaction;
+    final updated = transaction.copyWith(
+      status: status,
+      sync: transaction.sync.touched(deviceId: deviceId),
+    );
+    await saveTransaction(updated);
+    return updated;
+  }
+
   TransactionRecord _withStableTransactionSplitLineIds(
     TransactionRecord transaction,
   ) {
@@ -2940,6 +2956,7 @@ class FinanceDataStore extends ChangeNotifier {
     String? scheduledTransactionId,
     DateTime? scheduledOccurrenceDate,
     int? scheduledPlannedAmountMinor,
+    TransactionStatus status = TransactionStatus.cleared,
   }) async {
     final transaction = TransactionRecord(
       id: _newId('txn'),
@@ -2954,6 +2971,7 @@ class FinanceDataStore extends ChangeNotifier {
       scheduledTransactionId: scheduledTransactionId,
       scheduledOccurrenceDate: scheduledOccurrenceDate,
       scheduledPlannedAmountMinor: scheduledPlannedAmountMinor,
+      status: status,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
     await saveTransaction(transaction);
@@ -2971,6 +2989,7 @@ class FinanceDataStore extends ChangeNotifier {
     String? scheduledTransactionId,
     DateTime? scheduledOccurrenceDate,
     int? scheduledPlannedAmountMinor,
+    TransactionStatus status = TransactionStatus.cleared,
   }) async {
     final transaction = TransactionRecord(
       id: _newId('txn'),
@@ -2985,6 +3004,7 @@ class FinanceDataStore extends ChangeNotifier {
       scheduledTransactionId: scheduledTransactionId,
       scheduledOccurrenceDate: scheduledOccurrenceDate,
       scheduledPlannedAmountMinor: scheduledPlannedAmountMinor,
+      status: status,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
     await saveTransaction(transaction);
@@ -3001,6 +3021,7 @@ class FinanceDataStore extends ChangeNotifier {
     String? scheduledTransactionId,
     DateTime? scheduledOccurrenceDate,
     int? scheduledPlannedAmountMinor,
+    TransactionStatus status = TransactionStatus.cleared,
   }) async {
     final transaction = TransactionRecord(
       id: _newId('txn'),
@@ -3014,6 +3035,7 @@ class FinanceDataStore extends ChangeNotifier {
       scheduledTransactionId: scheduledTransactionId,
       scheduledOccurrenceDate: scheduledOccurrenceDate,
       scheduledPlannedAmountMinor: scheduledPlannedAmountMinor,
+      status: status,
       sync: SyncMetadata.fresh(deviceId: deviceId),
     );
     await saveTransaction(transaction);

@@ -49,6 +49,26 @@ void main() {
       expect(reloaded?.toJson(), original.toJson());
       expect(store.balanceForAccount('checking'), 502500);
       expect(store.balanceForAccount('card'), -125000);
+      expect(
+        store.transactions.firstWhere((item) => item.id == 'expense-1').status,
+        TransactionStatus.pending,
+      );
+    });
+
+    test('supported backup without transaction status defaults to cleared', () {
+      final legacy = _richDataSet().toJson();
+      final transactions = legacy['transactions']! as List<Object?>;
+      transactions[0] = Map<String, Object?>.from(transactions[0]! as Map)
+        ..remove('status');
+
+      final restored = const BackupRestoreValidator().validate(
+        jsonEncode(legacy),
+      );
+
+      expect(
+        restored.dataSet.transactions.first.status,
+        TransactionStatus.cleared,
+      );
     });
 
     test('existing local data is replaced rather than merged', () async {
@@ -565,7 +585,7 @@ void main() {
         createdAt: DateTime(2026, 8, 8, 9, 5, 6),
       );
 
-      expect(saved.fileName, contains('Trackmark Pre-Restore Backup'));
+      expect(saved.fileName, startsWith('trackmark_money_pre_restore_backup_'));
       expect(await File(saved.path).readAsString(), content);
       expect(
         const BackupRestoreValidator().validate(content).dataSet.toJson(),

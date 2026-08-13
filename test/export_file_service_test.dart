@@ -53,7 +53,50 @@ void main() {
     );
     expect(
       backupExportFileName(createdAt),
-      'money_tally_backup_2026-07-23_2245.json',
+      'trackmark_money_backup_2026-07-23_224500.json',
+    );
+    expect(
+      automaticBackupFileName(createdAt),
+      'trackmark_money_automatic_backup_2026-07-23_224500.json',
+    );
+    expect(
+      preRestoreBackupFileName(createdAt),
+      'trackmark_money_pre_restore_backup_2026-07-23_224500.json',
+    );
+    expect(
+      preUpdateBackupFileName(
+        oldVersion: '1.0.0+1',
+        newVersion: '1.1.0+2',
+        createdAt: createdAt,
+      ),
+      'trackmark_money_pre_update_backup_1.0.0_1_to_1.1.0_2_2026-07-23_224500.json',
+    );
+  });
+
+  test('automatic retention matcher is narrow and brand-specific', () {
+    expect(
+      isTrackmarkAutomaticBackupFileName(
+        'trackmark_money_automatic_backup_2026-07-23_224500.json',
+      ),
+      isTrue,
+    );
+    expect(
+      isTrackmarkAutomaticBackupFileName(
+        'trackmark_money_backup_2026-07-23_224500.json',
+      ),
+      isFalse,
+    );
+    expect(
+      isTrackmarkAutomaticBackupFileName(
+        'trackmark_money_pre_restore_backup_2026-07-23_224500.json',
+      ),
+      isFalse,
+    );
+    expect(
+      isTrackmarkAutomaticBackupFileName(
+        'money_tally_automatic_backup_2026-07-23_224500.json',
+      ),
+      isFalse,
     );
   });
 

@@ -2,7 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-/// Central semantic icon registry for Money Tally.
+/// Central semantic icon registry for Trackmark Money.
 ///
 /// iOS uses Cupertino glyphs backed by the SF-style Cupertino icon font.
 /// Android and other platforms use Material Symbols. Screens should reference

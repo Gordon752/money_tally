@@ -11,6 +11,7 @@ import '../../firebase_options.dart';
 import '../domain/user_preferences.dart';
 import '../migration/finance_data_bootstrapper.dart';
 import '../persistence/firestore_record_repository.dart';
+import '../persistence/automatic_backup_service.dart';
 import 'cloud_sync_coordinator.dart';
 
 const trackmarkDailySyncTaskIdentifier =
@@ -39,7 +40,7 @@ class WorkmanagerAutomaticSyncTaskScheduler
       frequency: const Duration(hours: 24),
       initialDelay: next.difference(anchor),
       existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
-      constraints: Constraints(networkType: NetworkType.connected),
+      constraints: Constraints(),
     );
   }
 
@@ -96,6 +97,16 @@ abstract final class AutomaticSyncPolicy {
   }
 }
 
+int? preferredAutomaticMaintenanceMinutes(UserPreferences preferences) {
+  final enabled = <int>[
+    if (preferences.automaticSyncEnabled) preferences.preferredDailySyncMinutes,
+    if (preferences.automaticBackupsEnabled)
+      preferences.preferredAutomaticBackupMinutes,
+  ];
+  if (enabled.isEmpty) return null;
+  return enabled.reduce((a, b) => a < b ? a : b);
+}
+
 typedef AutomaticSyncOperation = Future<bool> Function();
 
 /// Testable orchestration around the platform callback. The actual financial
@@ -150,44 +161,59 @@ void trackmarkBackgroundCallbackDispatcher() {
       );
       final dataStore = await FinanceDataBootstrapper().loadStore();
       loadedPreferences = dataStore.preferences;
-      if (!loadedPreferences.automaticSyncEnabled) return true;
+      final stateStore = const SyncExecutionStateStore();
+      final now = DateTime.now();
+      var succeeded = true;
+      if (loadedPreferences.automaticBackupsEnabled) {
+        try {
+          await AutomaticBackupService().createIfDue(
+            dataSet: dataStore.dataSet,
+            now: now,
+          );
+        } on Object {
+          succeeded = false;
+        }
+      }
 
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return true;
-
-      final stateStore = const SyncExecutionStateStore();
-      final lastSuccess = await stateStore.loadLastSuccessfulSync(user.uid);
-      final now = DateTime.now();
-      final coordinator = CloudSyncCoordinator(
-        recordRepository: FirestoreRecordRepository(),
-        executionStateStore: stateStore,
-      );
-      final succeeded = await runAutomaticSyncAttempt(
-        preferences: loadedPreferences,
-        userId: user.uid,
-        now: now,
-        lastSuccessfulSync: lastSuccess,
-        scheduler: scheduler,
-        synchronize: () => coordinator.synchronize(
-          userId: user.uid,
-          dataStore: dataStore,
-          timeout: const Duration(seconds: 25),
-        ),
-      );
+      if (loadedPreferences.automaticSyncEnabled && user != null) {
+        final lastSuccess = await stateStore.loadLastSuccessfulSync(user.uid);
+        if (AutomaticSyncPolicy.isCatchUpDue(
+          preferences: loadedPreferences,
+          now: now,
+          lastSuccessfulSync: lastSuccess,
+        )) {
+          final coordinator = CloudSyncCoordinator(
+            recordRepository: FirestoreRecordRepository(),
+            executionStateStore: stateStore,
+          );
+          succeeded =
+              await coordinator.synchronize(
+                userId: user.uid,
+                dataStore: dataStore,
+                timeout: const Duration(seconds: 25),
+              ) &&
+              succeeded;
+          coordinator.dispose();
+        }
+      }
+      final preferred = preferredAutomaticMaintenanceMinutes(loadedPreferences);
+      if (preferred != null) {
+        await scheduler.schedule(preferredMinutes: preferred, now: now);
+      }
       nextAttemptScheduled = true;
-      coordinator.dispose();
       return succeeded;
     } on Object catch (error, stackTrace) {
       debugPrint('Automatic background sync failed: $error');
       debugPrintStack(stackTrace: stackTrace);
       return false;
     } finally {
-      if (loadedPreferences?.automaticSyncEnabled == true &&
-          !nextAttemptScheduled) {
+      final preferred = loadedPreferences == null
+          ? null
+          : preferredAutomaticMaintenanceMinutes(loadedPreferences);
+      if (preferred != null && !nextAttemptScheduled) {
         try {
-          await scheduler.schedule(
-            preferredMinutes: loadedPreferences!.preferredDailySyncMinutes,
-          );
+          await scheduler.schedule(preferredMinutes: preferred);
         } on Object catch (error) {
           debugPrint('Could not reschedule automatic sync: $error');
         }

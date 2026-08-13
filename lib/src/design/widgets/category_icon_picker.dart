@@ -8,7 +8,7 @@ import 'category_icon_badge.dart';
 
 const categoryIconNoneKey = '__none__';
 
-/// Opens Money Tally's curated, searchable category icon picker.
+/// Opens Trackmark's curated, searchable category icon picker.
 Future<String?> showCategoryIconPicker(
   BuildContext context, {
   required String selectedKey,

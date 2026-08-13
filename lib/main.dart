@@ -43,6 +43,7 @@ import 'src/domain/money.dart';
 import 'src/domain/scheduled_transaction.dart' as v2_scheduled;
 import 'src/domain/sync_metadata.dart' as v2_sync;
 import 'src/domain/transaction.dart';
+import 'src/domain/transaction.dart' as v2_transaction;
 import 'src/domain/user_preferences.dart';
 import 'src/export/export_file_service.dart';
 import 'src/goals/goal_calculator.dart';
@@ -55,6 +56,8 @@ import 'src/notifications/local_notification_scheduler.dart';
 import 'src/notifications/notification_scheduler.dart';
 import 'src/persistence/backup_codec.dart';
 import 'src/persistence/backup_restore_service.dart';
+import 'src/persistence/automatic_backup_service.dart';
+import 'src/persistence/local_finance_data_set_repository.dart';
 import 'src/persistence/finance_record_repository.dart';
 import 'src/persistence/firestore_record_repository.dart';
 import 'src/reporting/report_calculator.dart';
@@ -102,6 +105,21 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
 
   Future<AppStores> _load() async {
     final launchStopwatch = Stopwatch()..start();
+    final currentVersion = await AppVersionIdentity.current();
+    final localRepository = const LocalFinanceDataSetRepository();
+    var preMigrationDataSet = await localRepository.load();
+    if (preMigrationDataSet == null) {
+      final legacy = await const V1SnapshotLocalLoader().call();
+      if (legacy != null) {
+        preMigrationDataSet = const V1SnapshotMigrator().migrate(legacy);
+      }
+    }
+    final updateBackupCoordinator = PreUpdateBackupCoordinator();
+    await updateBackupCoordinator.prepare(
+      currentVersion: currentVersion,
+      preMigrationDataSet: preMigrationDataSet,
+      now: DateTime.now(),
+    );
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
@@ -134,6 +152,7 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
       debugPrint('Scheduled notification refresh failed: $error');
       debugPrintStack(stackTrace: stackTrace);
     }
+    await updateBackupCoordinator.markLaunchSuccessful(currentVersion);
     final stores = AppStores(dataStore: dataStore);
     final remainingPresentation =
         _minimumLaunchPresentation - launchStopwatch.elapsed;

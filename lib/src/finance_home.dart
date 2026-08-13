@@ -1022,6 +1022,85 @@ class TransactionFormDivider extends StatelessWidget {
   }
 }
 
+class _TransactionStatusField extends StatelessWidget {
+  const _TransactionStatusField({
+    required this.status,
+    required this.onChanged,
+    super.key,
+  });
+
+  final v2_transaction.TransactionStatus status;
+  final ValueChanged<v2_transaction.TransactionStatus> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleStatus = status == v2_transaction.TransactionStatus.pending
+        ? v2_transaction.TransactionStatus.pending
+        : v2_transaction.TransactionStatus.cleared;
+    return PopupMenuButton<v2_transaction.TransactionStatus>(
+      tooltip: 'Choose transaction status',
+      initialValue: visibleStatus,
+      onSelected: onChanged,
+      itemBuilder: (context) => [
+        for (final option in const [
+          v2_transaction.TransactionStatus.cleared,
+          v2_transaction.TransactionStatus.pending,
+        ])
+          PopupMenuItem(
+            value: option,
+            child: Row(
+              children: [
+                Icon(
+                  option == v2_transaction.TransactionStatus.cleared
+                      ? AppIcon.checkRounded
+                      : Icons.schedule_rounded,
+                  color: option == v2_transaction.TransactionStatus.pending
+                      ? AppColors.warning
+                      : AppTheme.accent,
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Text(
+                    option == v2_transaction.TransactionStatus.pending
+                        ? 'Pending'
+                        : 'Cleared',
+                  ),
+                ),
+                if (option == visibleStatus)
+                  Icon(AppIcon.check, color: AppTheme.accent),
+              ],
+            ),
+          ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          children: [
+            TransactionFormIcon(
+              visibleStatus == v2_transaction.TransactionStatus.pending
+                  ? Icons.schedule_rounded
+                  : AppIcon.checkRounded,
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                visibleStatus == v2_transaction.TransactionStatus.pending
+                    ? 'Pending'
+                    : 'Cleared',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ),
+            Icon(AppIcon.chevronDown, size: AppIconSize.hero),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class TransactionFormValueRow extends StatelessWidget {
   const TransactionFormValueRow({
     required this.icon,
@@ -4137,7 +4216,16 @@ class LedgerJournalRow extends StatelessWidget {
         DismissDirection.endToStart: 0.28,
       },
       confirmDismiss: (direction) async {
-        HapticFeedback.selectionClick();
+        if (direction == DismissDirection.endToStart &&
+            transaction.status == v2_transaction.TransactionStatus.pending) {
+          await updateTransactionStatus(
+            context,
+            transaction.id,
+            v2_transaction.TransactionStatus.cleared,
+          );
+          return false;
+        }
+        AppHaptics.toggleSelection();
         await showTransactionOptions(
           context,
           transaction.id,
@@ -4154,8 +4242,12 @@ class LedgerJournalRow extends StatelessWidget {
       ),
       secondaryBackground: SwipeActionBackground(
         alignment: Alignment.centerRight,
-        icon: AppIcon.edit,
-        label: 'Actions',
+        icon: transaction.status == v2_transaction.TransactionStatus.pending
+            ? AppIcon.checkRounded
+            : AppIcon.edit,
+        label: transaction.status == v2_transaction.TransactionStatus.pending
+            ? 'Mark Cleared'
+            : 'Actions',
       ),
       child: InkWell(
         onTap: onTap,
@@ -4206,15 +4298,32 @@ class LedgerJournalRow extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        transaction.payee,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.15,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              transaction.payee,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodyLarge
+                                  ?.copyWith(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -0.15,
+                                  ),
+                            ),
+                          ),
+                          if (transaction.status ==
+                              v2_transaction.TransactionStatus.pending) ...[
+                            const SizedBox(width: 6),
+                            KeyedSubtree(
+                              key: ValueKey(
+                                'ledger-pending-indicator-${transaction.id}',
+                              ),
+                              child: const _LedgerPendingCapsule(),
+                            ),
+                          ],
+                        ],
                       ),
                       if (metadataDetails.isNotEmpty) ...[
                         const SizedBox(height: 3),
@@ -4401,6 +4510,39 @@ class _LedgerSplitCapsule extends StatelessWidget {
           fontSize: 10,
           fontWeight: FontWeight.w600,
           height: 1,
+        ),
+      ),
+    );
+  }
+}
+
+class _LedgerPendingCapsule extends StatelessWidget {
+  const _LedgerPendingCapsule();
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFFE2AA4A)
+        : const Color(0xFF9A650E);
+    return Semantics(
+      label: 'Pending transaction',
+      child: Container(
+        height: 18,
+        padding: const EdgeInsets.symmetric(horizontal: 7),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(color: color.withValues(alpha: 0.62)),
+        ),
+        child: Text(
+          'Pending',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: color,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            height: 1,
+          ),
         ),
       ),
     );
@@ -5254,6 +5396,30 @@ Future<void> showTransactionOptions(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (allowedActions == null)
+              ListTile(
+                key: ValueKey(
+                  transaction.status == v2_transaction.TransactionStatus.pending
+                      ? 'mark-transaction-cleared-option'
+                      : 'mark-transaction-pending-option',
+                ),
+                leading: Icon(
+                  transaction.status == v2_transaction.TransactionStatus.pending
+                      ? AppIcon.checkRounded
+                      : Icons.schedule_rounded,
+                ),
+                title: Text(
+                  transaction.status == v2_transaction.TransactionStatus.pending
+                      ? 'Mark Cleared'
+                      : 'Mark Pending',
+                ),
+                onTap: () => Navigator.pop(
+                  sheetContext,
+                  transaction.status == v2_transaction.TransactionStatus.pending
+                      ? 'markCleared'
+                      : 'markPending',
+                ),
+              ),
             if (allowedActions == null || allowedActions.contains('edit'))
               ListTile(
                 enabled:
@@ -5329,6 +5495,18 @@ Future<void> showTransactionOptions(
 
   if (!context.mounted || action == null) return;
   switch (action) {
+    case 'markCleared':
+      await updateTransactionStatus(
+        context,
+        transaction.id,
+        v2_transaction.TransactionStatus.cleared,
+      );
+    case 'markPending':
+      await updateTransactionStatus(
+        context,
+        transaction.id,
+        v2_transaction.TransactionStatus.pending,
+      );
     case 'edit':
       if (transaction.type == TransactionType.transfer) {
         await showTransferDialog(context, transfer: transaction);
@@ -5356,6 +5534,20 @@ Future<void> showTransactionOptions(
         );
       }
   }
+}
+
+Future<void> updateTransactionStatus(
+  BuildContext context,
+  String transactionId,
+  v2_transaction.TransactionStatus status,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final transaction = dataStore.transactions
+      .where((item) => item.id == transactionId && !item.isDeleted)
+      .firstOrNull;
+  if (transaction == null || transaction.status == status) return;
+  AppHaptics.toggleSelection();
+  await dataStore.setTransactionStatus(transaction.id, status);
 }
 
 Future<void> showTransactionDetails(
@@ -5463,6 +5655,21 @@ Future<void> showTransactionDetails(
             icon: transactionDetailIcon(transaction.type),
             label: 'Type',
             value: transactionTypeLabel(transaction.type),
+          ),
+          TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: transaction.status == v2_transaction.TransactionStatus.pending
+                ? Icons.schedule_rounded
+                : AppIcon.checkRounded,
+            label: 'Status',
+            value:
+                transaction.status == v2_transaction.TransactionStatus.pending
+                ? 'Pending'
+                : 'Cleared',
+            valueColor:
+                transaction.status == v2_transaction.TransactionStatus.pending
+                ? AppColors.warning
+                : null,
           ),
           TransactionFormDivider(),
           ScheduledTransactionDetailRow(
@@ -6029,7 +6236,12 @@ Future<void> showSplitTransactionDialog(
   );
 
   if (splitLines == null) return;
-  await dataStore.saveTransaction(transaction.copyWith(splitLines: splitLines));
+  await dataStore.saveTransaction(
+    transaction.copyWith(
+      splitLines: splitLines,
+      sync: transaction.sync.touched(deviceId: dataStore.deviceId),
+    ),
+  );
 }
 
 class SplitLineDraft {
@@ -8166,6 +8378,18 @@ class _SettingsViewState extends State<SettingsView> {
   BackupSafetyFileService? _defaultBackupSafetyFileService;
   _ExportKind? _sharingExport;
   var _isImportingBackup = false;
+  AutomaticBackupStatus? _automaticBackupStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAutomaticBackupStatus();
+  }
+
+  Future<void> _loadAutomaticBackupStatus() async {
+    final status = await const AutomaticBackupStateStore().loadStatus();
+    if (mounted) setState(() => _automaticBackupStatus = status);
+  }
 
   ExportFileService get _exportFileService =>
       widget.exportFileService ??
@@ -8534,13 +8758,83 @@ class _SettingsViewState extends State<SettingsView> {
                   ? 'Preparing restore…'
                   : 'Select, validate, and restore a Trackmark backup',
               trailingText: _isImportingBackup ? 'Working…' : null,
-              showDivider: false,
               onTap: _isImportingBackup ? null : _importBackup,
+            ),
+            SettingsSwitch(
+              icon: AppIcon.backup,
+              label: 'Automatic Backups',
+              subtitle:
+                  'Trackmark will try to create an automatic backup around your preferred time. iOS may delay background activity.',
+              value: preferences.automaticBackupsEnabled,
+              onChanged: (value) async {
+                await store.savePreferences(
+                  preferences.copyWith(automaticBackupsEnabled: value),
+                );
+                if (mounted) await _loadAutomaticBackupStatus();
+              },
+            ),
+            if (preferences.automaticBackupsEnabled) ...[
+              SettingsDropdown<AutomaticBackupFrequency>(
+                icon: AppIcon.calendar,
+                label: 'Backup Frequency',
+                value: preferences.automaticBackupFrequency,
+                values: AutomaticBackupFrequency.values,
+                labelOf: (value) => switch (value) {
+                  AutomaticBackupFrequency.daily => 'Daily',
+                  AutomaticBackupFrequency.weekly => 'Weekly',
+                },
+                onChanged: (value) => store.savePreferences(
+                  store.preferences.copyWith(automaticBackupFrequency: value),
+                ),
+              ),
+              SettingsActionRow(
+                icon: AppIcon.schedule,
+                title: 'Preferred Backup Time',
+                subtitle: TimeOfDay(
+                  hour: preferences.preferredAutomaticBackupMinutes ~/ 60,
+                  minute: preferences.preferredAutomaticBackupMinutes % 60,
+                ).format(context),
+                onTap: () => _pickPreferredAutomaticBackupTime(store),
+              ),
+            ],
+            SettingsActionRow(
+              icon: AppIcon.history,
+              title: 'Last Automatic Backup',
+              subtitle: _automaticBackupStatus?.lastSuccessfulAt == null
+                  ? (_automaticBackupStatus?.lastFailureAt == null
+                        ? 'Never'
+                        : 'Backup needs attention')
+                  : _backupStatusDateLabel(
+                      _automaticBackupStatus!.lastSuccessfulAt!,
+                    ),
+            ),
+            SettingsActionRow(
+              icon: AppIcon.shield,
+              title: 'Safety Backups',
+              subtitle: _automaticBackupStatus?.latestSafetyBackupAt == null
+                  ? 'Created after app updates and before restores'
+                  : 'Latest created for update to ${_automaticBackupStatus!.latestSafetyBackupVersion}',
+              showDivider: false,
             ),
           ],
         ),
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: Text(
+            'Backups stored on this device may be removed if Trackmark is uninstalled. Export or share a backup externally for disaster recovery.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  String _backupStatusDateLabel(DateTime value) {
+    final local = value.toLocal();
+    return '${shortDate(local)} · ${TimeOfDay.fromDateTime(local).format(context)}';
   }
 
   Future<void> _pickPreferredDailySyncTime(FinanceDataStore store) async {
@@ -8556,6 +8850,23 @@ class _SettingsViewState extends State<SettingsView> {
     await store.savePreferences(
       store.preferences.copyWith(
         preferredDailySyncMinutes: selected.hour * 60 + selected.minute,
+      ),
+    );
+  }
+
+  Future<void> _pickPreferredAutomaticBackupTime(FinanceDataStore store) async {
+    final preferences = store.preferences;
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: preferences.preferredAutomaticBackupMinutes ~/ 60,
+        minute: preferences.preferredAutomaticBackupMinutes % 60,
+      ),
+    );
+    if (selected == null || !mounted) return;
+    await store.savePreferences(
+      store.preferences.copyWith(
+        preferredAutomaticBackupMinutes: selected.hour * 60 + selected.minute,
       ),
     );
   }
@@ -11202,7 +11513,7 @@ class SettingsSwitch extends StatelessWidget {
             ),
       value: value,
       activeThumbColor: AppTheme.accent,
-      onChanged: onChanged,
+      onChanged: AppHaptics.toggleHandler(onChanged),
     );
   }
 }
@@ -12627,8 +12938,10 @@ Future<void> showBudgetDialog(
                     'Count spending in child categories too.',
                   ),
                   value: includeSubcategories,
-                  onChanged: (value) =>
-                      setDialogState(() => includeSubcategories = value),
+                  onChanged: AppHaptics.toggleHandler(
+                    (value) =>
+                        setDialogState(() => includeSubcategories = value),
+                  ),
                 ),
               ],
               const TransactionFormDivider(),
@@ -12694,8 +13007,9 @@ Future<void> showBudgetDialog(
                   'Unused or overspent amounts carry into the next budget period.',
                 ),
                 value: rolloverEnabled,
-                onChanged: (value) =>
-                    setDialogState(() => rolloverEnabled = value),
+                onChanged: AppHaptics.toggleHandler(
+                  (value) => setDialogState(() => rolloverEnabled = value),
+                ),
               ),
               const TransactionFormDivider(),
               SwitchListTile.adaptive(
@@ -12707,8 +13021,10 @@ Future<void> showBudgetDialog(
                 ),
                 subtitle: const Text('Notify me when 5% remains.'),
                 value: lowBudgetAlertEnabled,
-                onChanged: (value) =>
-                    setDialogState(() => lowBudgetAlertEnabled = value),
+                onChanged: AppHaptics.toggleHandler(
+                  (value) =>
+                      setDialogState(() => lowBudgetAlertEnabled = value),
+                ),
               ),
               const TransactionFormDivider(),
               TransactionFormLabel('Note'),
@@ -13987,7 +14303,7 @@ class _CreditInsightsFormSectionState extends State<CreditInsightsFormSection> {
           secondary: TransactionFormIcon(AppIcon.insights),
           title: Text('Enable Credit Insights', style: widget.fieldValueStyle),
           value: widget.enabled,
-          onChanged: (value) async {
+          onChanged: AppHaptics.toggleHandler((value) async {
             if (!value || widget.disclosureAcknowledged) {
               widget.onEnabledChanged(value);
               return;
@@ -14000,7 +14316,7 @@ class _CreditInsightsFormSectionState extends State<CreditInsightsFormSection> {
             if (!mounted || !acknowledged) return;
             widget.onDisclosureAcknowledged();
             widget.onEnabledChanged(true);
-          },
+          }),
         ),
         AnimatedSize(
           duration: MediaQuery.of(context).disableAnimations
@@ -14952,8 +15268,10 @@ Future<void> showEditAccountDialog(
                         style: fieldValueStyle,
                       ),
                       value: includeInGroupBalance,
-                      onChanged: (value) =>
-                          setDialogState(() => includeInGroupBalance = value),
+                      onChanged: AppHaptics.toggleHandler(
+                        (value) =>
+                            setDialogState(() => includeInGroupBalance = value),
+                      ),
                     ),
                     Divider(
                       height: 1,
@@ -14970,8 +15288,10 @@ Future<void> showEditAccountDialog(
                         style: fieldValueStyle,
                       ),
                       value: includeInNetWorth,
-                      onChanged: (value) =>
-                          setDialogState(() => includeInNetWorth = value),
+                      onChanged: AppHaptics.toggleHandler(
+                        (value) =>
+                            setDialogState(() => includeInNetWorth = value),
+                      ),
                     ),
                   ],
                 ),
@@ -15533,8 +15853,10 @@ Future<void> showAccountDialog(BuildContext context) async {
                         style: fieldValueStyle,
                       ),
                       value: includeInGroupBalance,
-                      onChanged: (value) =>
-                          setDialogState(() => includeInGroupBalance = value),
+                      onChanged: AppHaptics.toggleHandler(
+                        (value) =>
+                            setDialogState(() => includeInGroupBalance = value),
+                      ),
                     ),
                     Divider(
                       height: 1,
@@ -15551,8 +15873,10 @@ Future<void> showAccountDialog(BuildContext context) async {
                         style: fieldValueStyle,
                       ),
                       value: includeInNetWorth,
-                      onChanged: (value) =>
-                          setDialogState(() => includeInNetWorth = value),
+                      onChanged: AppHaptics.toggleHandler(
+                        (value) =>
+                            setDialogState(() => includeInNetWorth = value),
+                      ),
                     ),
                   ],
                 ),
@@ -15681,6 +16005,8 @@ Future<void> showTransferDialog(
   var editLinkedSchedule = false;
   var scheduleFutureOccurrences =
       linkedSchedule == null && initialScheduleFutureOccurrences;
+  var transactionStatus =
+      transfer?.status ?? v2_transaction.TransactionStatus.cleared;
 
   final result =
       await showDialog<
@@ -15691,6 +16017,7 @@ Future<void> showTransferDialog(
           DateTime date,
           String note,
           int amountMinor,
+          v2_transaction.TransactionStatus status,
           bool scheduleFutureOccurrences,
           DateTime firstScheduledDate,
           int scheduledTimeMinutes,
@@ -15869,6 +16196,7 @@ Future<void> showTransferDialog(
                 ),
                 note: note.text.trim(),
                 amountMinor: amountMinor.abs(),
+                status: transactionStatus,
                 scheduleFutureOccurrences: scheduleFutureOccurrences,
                 firstScheduledDate: futureSchedule.parsedFirstDate(
                   DateTime.now(),
@@ -16100,6 +16428,16 @@ Future<void> showTransferDialog(
                     ),
                   ),
                   TransactionFormDivider(),
+                  const TransactionFormLabel('Status'),
+                  _TransactionStatusField(
+                    key: const ValueKey('transfer-status'),
+                    status: transactionStatus,
+                    onChanged: (value) {
+                      AppHaptics.toggleSelection();
+                      setDialogState(() => transactionStatus = value);
+                    },
+                  ),
+                  TransactionFormDivider(),
                   TransactionFormLabel('Notes'),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -16134,10 +16472,13 @@ Future<void> showTransferDialog(
                     InkWell(
                       key: const ValueKey('transfer-schedule-toggle'),
                       borderRadius: BorderRadius.circular(AppRadii.control),
-                      onTap: () => setDialogState(
-                        () => scheduleFutureOccurrences =
-                            !scheduleFutureOccurrences,
-                      ),
+                      onTap: () {
+                        AppHaptics.toggleSelection();
+                        setDialogState(
+                          () => scheduleFutureOccurrences =
+                              !scheduleFutureOccurrences,
+                        );
+                      },
                       child: Padding(
                         padding: EdgeInsets.symmetric(vertical: 2),
                         child: Row(
@@ -16152,8 +16493,10 @@ Future<void> showTransferDialog(
                             ),
                             Switch.adaptive(
                               value: scheduleFutureOccurrences,
-                              onChanged: (value) => setDialogState(
-                                () => scheduleFutureOccurrences = value,
+                              onChanged: AppHaptics.toggleHandler(
+                                (value) => setDialogState(
+                                  () => scheduleFutureOccurrences = value,
+                                ),
                               ),
                             ),
                           ],
@@ -16241,6 +16584,7 @@ Future<void> showTransferDialog(
         payee: result.payee,
         amountMinor: result.amountMinor,
         note: result.note,
+        status: result.status,
         scheduledTransactionId: scheduleId,
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
       );
@@ -16288,6 +16632,7 @@ Future<void> showTransferDialog(
         payee: result.payee,
         amountMinor: result.amountMinor,
         note: result.note,
+        status: result.status,
       );
     }
   } else if (result.scheduleFutureOccurrences) {
@@ -16300,7 +16645,9 @@ Future<void> showTransferDialog(
       payee: result.payee,
       amountMinor: result.amountMinor,
       note: result.note,
+      status: result.status,
       scheduledTransactionId: scheduleId,
+      sync: transfer.sync.touched(deviceId: dataStore.deviceId),
       clearCategory: true,
     );
     final schedule = v2_scheduled.ScheduledTransactionRecord(
@@ -16349,6 +16696,8 @@ Future<void> showTransferDialog(
         payee: result.payee,
         amountMinor: result.amountMinor,
         note: result.note,
+        status: result.status,
+        sync: transfer.sync.touched(deviceId: dataStore.deviceId),
         clearCategory: true,
       ),
     );
@@ -17243,10 +17592,13 @@ Future<bool> showScheduledTransactionDialog(
                             borderRadius: BorderRadius.circular(
                               AppRadii.control,
                             ),
-                            onTap: () => setDialogState(
-                              () => repeatAlertUntilResolved =
-                                  !repeatAlertUntilResolved,
-                            ),
+                            onTap: () {
+                              AppHaptics.toggleSelection();
+                              setDialogState(
+                                () => repeatAlertUntilResolved =
+                                    !repeatAlertUntilResolved,
+                              );
+                            },
                             child: Padding(
                               padding: EdgeInsets.symmetric(vertical: 2),
                               child: Row(
@@ -17263,8 +17615,10 @@ Future<bool> showScheduledTransactionDialog(
                                   ),
                                   Switch.adaptive(
                                     value: repeatAlertUntilResolved,
-                                    onChanged: (value) => setDialogState(
-                                      () => repeatAlertUntilResolved = value,
+                                    onChanged: AppHaptics.toggleHandler(
+                                      (value) => setDialogState(
+                                        () => repeatAlertUntilResolved = value,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -18244,6 +18598,7 @@ Future<void> markScheduledTransactionPaid(
       : <SplitLineDraft>[];
   var isSubmitting = false;
   String? errorMessage;
+  var transactionStatus = v2_transaction.TransactionStatus.cleared;
 
   v2_account.AccountRecord? accountById(String? id) {
     return dataStore.accounts.where((account) => account.id == id).firstOrNull;
@@ -18440,6 +18795,7 @@ Future<void> markScheduledTransactionPaid(
                   : payee.text.trim(),
               note: note.text.trim(),
               splitLines: buildPaymentSplitLines(),
+              status: transactionStatus,
             );
             if (dialogContext.mounted) Navigator.pop(dialogContext);
           } catch (_) {
@@ -18560,6 +18916,16 @@ Future<void> markScheduledTransactionPaid(
                     ],
                   ),
                 ),
+              ),
+              TransactionFormDivider(),
+              const TransactionFormLabel('Status'),
+              _TransactionStatusField(
+                key: const ValueKey('mark-paid-status'),
+                status: transactionStatus,
+                onChanged: (value) {
+                  AppHaptics.toggleSelection();
+                  setDialogState(() => transactionStatus = value);
+                },
               ),
               TransactionFormDivider(),
               TransactionFormLabel(isTransfer ? 'From Account' : 'Account'),
@@ -18807,6 +19173,8 @@ Future<TransactionRecord> completeScheduledTransactionPayment(
   required String payee,
   required String note,
   List<TransactionSplitLine> splitLines = const [],
+  v2_transaction.TransactionStatus status =
+      v2_transaction.TransactionStatus.cleared,
 }) async {
   final occurrenceDate = scheduledDate ?? item.nextDate;
   final occurrenceAmount = plannedAmountMinor ?? item.amountMinor;
@@ -18834,6 +19202,7 @@ Future<TransactionRecord> completeScheduledTransactionPayment(
         payee: payee,
         note: note,
         splitLines: splitLines,
+        status: status,
       );
   final occurrence = v2_scheduled.ScheduledOccurrenceRecord(
     scheduledDate: occurrenceDate,
@@ -18862,6 +19231,7 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
   required String payee,
   required String note,
   required List<TransactionSplitLine> splitLines,
+  required v2_transaction.TransactionStatus status,
 }) async {
   switch (item.type) {
     case TransactionType.expense:
@@ -18879,6 +19249,7 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         scheduledTransactionId: item.id,
         scheduledOccurrenceDate: scheduledDate,
         scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
+        status: status,
       );
     case TransactionType.income:
       if (item.categoryId == null) {
@@ -18895,6 +19266,7 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         scheduledTransactionId: item.id,
         scheduledOccurrenceDate: scheduledDate,
         scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
+        status: status,
       );
     case TransactionType.transfer:
       if (item.transferAccountId == null ||
@@ -18911,6 +19283,7 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         scheduledTransactionId: item.id,
         scheduledOccurrenceDate: scheduledDate,
         scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
+        status: status,
       );
     case TransactionType.goalFunding:
       throw StateError('Goal Funding does not create a transaction record.');
@@ -19248,6 +19621,8 @@ Future<void> showTransactionDialog(
   var scheduleFutureOccurrences =
       linkedSchedule == null && initialScheduleFutureOccurrences;
 
+  var transactionStatus =
+      transaction?.status ?? v2_transaction.TransactionStatus.cleared;
   final result =
       await showDialog<
         ({
@@ -19258,6 +19633,7 @@ Future<void> showTransactionDialog(
           DateTime date,
           int amountMinor,
           bool isExpense,
+          v2_transaction.TransactionStatus status,
           List<TransactionSplitLine> splitLines,
           bool scheduleFutureOccurrences,
           DateTime firstScheduledDate,
@@ -19692,6 +20068,7 @@ Future<void> showTransactionDialog(
                 ),
                 amountMinor: amountMinor.abs(),
                 isExpense: isExpense,
+                status: transactionStatus,
                 splitLines: splitMode
                     ? buildSplitLines()
                     : const <TransactionSplitLine>[],
@@ -20131,6 +20508,16 @@ Future<void> showTransactionDialog(
                     ),
                   ),
                   TransactionFormDivider(),
+                  const TransactionFormLabel('Status'),
+                  _TransactionStatusField(
+                    key: const ValueKey('transaction-status'),
+                    status: transactionStatus,
+                    onChanged: (value) {
+                      AppHaptics.toggleSelection();
+                      setDialogState(() => transactionStatus = value);
+                    },
+                  ),
+                  TransactionFormDivider(),
                   TransactionFormLabel('Notes'),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -20165,10 +20552,13 @@ Future<void> showTransactionDialog(
                     InkWell(
                       key: const ValueKey('transaction-schedule-toggle'),
                       borderRadius: BorderRadius.circular(AppRadii.control),
-                      onTap: () => setDialogState(
-                        () => scheduleFutureOccurrences =
-                            !scheduleFutureOccurrences,
-                      ),
+                      onTap: () {
+                        AppHaptics.toggleSelection();
+                        setDialogState(
+                          () => scheduleFutureOccurrences =
+                              !scheduleFutureOccurrences,
+                        );
+                      },
                       child: Padding(
                         padding: EdgeInsets.symmetric(vertical: 2),
                         child: Row(
@@ -20183,8 +20573,10 @@ Future<void> showTransactionDialog(
                             ),
                             Switch.adaptive(
                               value: scheduleFutureOccurrences,
-                              onChanged: (value) => setDialogState(
-                                () => scheduleFutureOccurrences = value,
+                              onChanged: AppHaptics.toggleHandler(
+                                (value) => setDialogState(
+                                  () => scheduleFutureOccurrences = value,
+                                ),
                               ),
                             ),
                           ],
@@ -20278,6 +20670,7 @@ Future<void> showTransactionDialog(
         payee: result.payee,
         amountMinor: result.amountMinor,
         note: result.note,
+        status: result.status,
         splitLines: result.splitLines,
         scheduledTransactionId: scheduleId,
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
@@ -20328,6 +20721,7 @@ Future<void> showTransactionDialog(
         amountMinor: result.amountMinor,
         note: result.note,
         splitLines: result.splitLines,
+        status: result.status,
       );
     } else {
       await dataStore.addIncome(
@@ -20338,6 +20732,7 @@ Future<void> showTransactionDialog(
         amountMinor: result.amountMinor,
         note: result.note,
         splitLines: result.splitLines,
+        status: result.status,
       );
     }
   } else if (result.scheduleFutureOccurrences) {
@@ -20351,7 +20746,9 @@ Future<void> showTransactionDialog(
       note: result.note,
       amountMinor: result.amountMinor,
       splitLines: result.splitLines,
+      status: result.status,
       scheduledTransactionId: scheduleId,
+      sync: transaction.sync.touched(deviceId: dataStore.deviceId),
       clearTransferAccount: true,
     );
     final schedule = v2_scheduled.ScheduledTransactionRecord(
@@ -20404,6 +20801,8 @@ Future<void> showTransactionDialog(
         note: result.note,
         amountMinor: result.amountMinor,
         splitLines: result.splitLines,
+        status: result.status,
+        sync: transaction.sync.touched(deviceId: dataStore.deviceId),
         clearTransferAccount: true,
       ),
     );

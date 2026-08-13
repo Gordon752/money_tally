@@ -131,7 +131,7 @@ class LocalNotificationScheduler implements NotificationScheduler {
 
   @override
   Future<void> updateBadgeCount(int dueOrOverdueCount) async {
-    // Money Tally renders its due count in-app. System notifications are
+    // Trackmark renders its due count in-app. System notifications are
     // scheduled independently and iOS manages their presentation.
   }
 }

@@ -2162,8 +2162,11 @@ Future<bool> showScheduledGoalFundingDialog(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Repeat until funded or skipped'),
                     value: repeatAlertUntilResolved,
-                    onChanged: (value) =>
-                        setDialogState(() => repeatAlertUntilResolved = value),
+                    onChanged: AppHaptics.toggleHandler(
+                      (value) => setDialogState(
+                        () => repeatAlertUntilResolved = value,
+                      ),
+                    ),
                   ),
                 ],
                 const TransactionFormDivider(),

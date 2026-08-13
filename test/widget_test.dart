@@ -1241,6 +1241,124 @@ void main() {
     );
   });
 
+  testWidgets('pending Ledger row shows status and quick actions clear it', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final source = migrated.transactions.firstWhere(
+      (transaction) =>
+          transaction.type == v2_transaction.TransactionType.expense,
+    );
+    final pending = source.copyWith(
+      payee: 'Pending Ledger Test',
+      status: v2_transaction.TransactionStatus.pending,
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(
+        transactions: [
+          for (final transaction in migrated.transactions)
+            if (transaction.id == pending.id) pending else transaction,
+        ],
+      ),
+    );
+    final originalBalance = dataStore.balanceForAccount(pending.accountId);
+
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(ValueKey('ledger-pending-indicator-${pending.id}')),
+      findsOneWidget,
+    );
+    await tester.longPress(ledgerRowWithText('Pending Ledger Test'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mark Cleared'), findsOneWidget);
+    await tester.tap(find.text('Mark Cleared'));
+    await tester.pumpAndSettle();
+
+    expect(
+      dataStore.transactions
+          .singleWhere((item) => item.id == pending.id)
+          .status,
+      v2_transaction.TransactionStatus.cleared,
+    );
+    expect(dataStore.balanceForAccount(pending.accountId), originalBalance);
+    expect(
+      find.byKey(ValueKey('ledger-pending-indicator-${pending.id}')),
+      findsNothing,
+    );
+
+    await tester.longPress(ledgerRowWithText('Pending Ledger Test'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark Pending'));
+    await tester.pumpAndSettle();
+    expect(
+      dataStore.transactions
+          .singleWhere((item) => item.id == pending.id)
+          .status,
+      v2_transaction.TransactionStatus.pending,
+    );
+    await tester.drag(
+      ledgerRowWithText('Pending Ledger Test'),
+      const Offset(-260, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      dataStore.transactions
+          .singleWhere((item) => item.id == pending.id)
+          .status,
+      v2_transaction.TransactionStatus.cleared,
+    );
+    expect(dataStore.balanceForAccount(pending.accountId), originalBalance);
+  });
+
+  testWidgets('scheduled payment can create a pending linked transaction', (
+    tester,
+  ) async {
+    final legacyStore = FinanceStore.seeded();
+    final dueDate = DateTime.now();
+    final schedule = rentSchedule(nextDate: dueDate);
+    final migrated = const V1SnapshotMigrator().migrate(
+      legacyStore.snapshot().toJson(),
+    );
+    final dataStore = FinanceDataStore(
+      dataSet: migrated.copyWith(scheduledTransactions: [schedule]),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+    await tester.tap(find.text('Scheduled').last);
+    await tester.pumpAndSettle();
+    await collapseScheduledCalendar(tester);
+    await tester.longPress(find.text('Rent'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Paid'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('mark-paid-status')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pending').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.pumpAndSettle();
+
+    final generated = dataStore.transactions.singleWhere(
+      (transaction) => transaction.scheduledTransactionId == schedule.id,
+    );
+    expect(generated.status, v2_transaction.TransactionStatus.pending);
+    expect(generated.scheduledOccurrenceDate, isNotNull);
+    expect(dataStore.scheduledTransactions.single.occurrences, hasLength(1));
+    expect(
+      dataStore.scheduledTransactions.single.occurrences.single.transactionId,
+      generated.id,
+    );
+  });
+
   test('scheduled undo uses type-specific labels', () {
     expect(
       undoScheduledTransactionLabel(v2_transaction.TransactionType.expense),
@@ -9042,7 +9160,10 @@ void main() {
 
     expect(exportFileService.recordedShares, hasLength(2));
     final backupShare = exportFileService.recordedShares.last;
-    expect(backupShare.fileName, 'money_tally_backup_2026-07-23_2245.json');
+    expect(
+      backupShare.fileName,
+      'trackmark_money_backup_2026-07-23_224500.json',
+    );
     expect(backupShare.mimeType, 'application/json');
     expect(backupShare.content, contains('"accounts"'));
     expect(

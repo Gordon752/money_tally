@@ -137,6 +137,35 @@ void main() {
     },
   );
 
+  test('transaction status changes use normal per-record cloud sync', () async {
+    final remote = FakeRecordRepository();
+    final store = FinanceDataStore(
+      dataSet: _dataSet(),
+      remoteRepository: remote,
+      userId: 'user',
+    );
+    final pending = await store.addExpense(
+      accountId: 'checking',
+      categoryId: 'dining',
+      date: DateTime(2026, 7, 6),
+      payee: 'Pending',
+      amountMinor: 1000,
+      status: TransactionStatus.pending,
+    );
+    final balance = store.balanceForAccount('checking');
+    remote.savedTransactions.clear();
+
+    final cleared = await store.setTransactionStatus(
+      pending.id,
+      TransactionStatus.cleared,
+    );
+
+    expect(cleared.status, TransactionStatus.cleared);
+    expect(remote.savedTransactions, hasLength(1));
+    expect(remote.savedTransactions.single.status, TransactionStatus.cleared);
+    expect(store.balanceForAccount('checking'), balance);
+  });
+
   test('deleted transactions are ignored by balances and summaries', () async {
     final store = FinanceDataStore(dataSet: _dataSet());
 

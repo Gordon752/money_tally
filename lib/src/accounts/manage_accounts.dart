@@ -450,7 +450,10 @@ class _CompactInclusionSwitch extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
-      child: Switch.adaptive(value: value, onChanged: onChanged),
+      child: Switch.adaptive(
+        value: value,
+        onChanged: AppHaptics.toggleHandler(onChanged),
+      ),
     );
   }
 }

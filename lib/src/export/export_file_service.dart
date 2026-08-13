@@ -139,29 +139,75 @@ class BackupSafetyFileService {
   final BackupDirectoryProvider _directoryProvider;
   final BackupRestoreValidator _validator;
 
-  Future<ExportedFile> savePreRestoreBackup({
-    required String content,
-    required DateTime createdAt,
-  }) async {
-    _validator.validate(content);
+  Future<Directory> backupDirectory() async {
     final root = await _directoryProvider();
     final directory = Directory(
       '${root.path}${Platform.pathSeparator}Trackmark Backups',
     );
     await directory.create(recursive: true);
-    final fileName = preRestoreBackupFileName(createdAt);
+    return directory;
+  }
+
+  Future<ExportedFile> savePreRestoreBackup({
+    required String content,
+    required DateTime createdAt,
+  }) async {
+    return saveVerifiedBackup(
+      content: content,
+      fileName: preRestoreBackupFileName(createdAt),
+    );
+  }
+
+  Future<ExportedFile> saveVerifiedBackup({
+    required String content,
+    required String fileName,
+  }) async {
+    _validator.validate(content);
+    final directory = await backupDirectory();
     final file = File('${directory.path}${Platform.pathSeparator}$fileName');
-    await file.writeAsString(content, encoding: utf8, flush: true);
-    final verified = await file.readAsString(encoding: utf8);
-    if (verified != content) {
-      throw const FileSystemException('Safety backup verification failed');
+    final pending = File('${file.path}.pending');
+    await pending.writeAsString(content, encoding: utf8, flush: true);
+    try {
+      final verified = await pending.readAsString(encoding: utf8);
+      if (verified != content) {
+        throw const FileSystemException('Safety backup verification failed');
+      }
+      _validator.validate(verified);
+      await pending.rename(file.path);
+    } on Object {
+      if (await pending.exists()) await pending.delete();
+      rethrow;
     }
-    _validator.validate(verified);
     return ExportedFile(
       path: file.path,
       fileName: fileName,
       mimeType: 'application/json',
     );
+  }
+
+  Future<void> verifyExistingBackup(File file) async {
+    final content = await file.readAsString(encoding: utf8);
+    _validator.validate(content);
+  }
+
+  Future<void> prune({
+    required bool Function(String fileName) matches,
+    required int retain,
+  }) async {
+    final directory = await backupDirectory();
+    final files = await directory
+        .list()
+        .where((entry) => entry is File && matches(_baseName(entry.path)))
+        .cast<File>()
+        .toList();
+    final datedFiles = <({File file, DateTime modifiedAt})>[];
+    for (final file in files) {
+      datedFiles.add((file: file, modifiedAt: await file.lastModified()));
+    }
+    datedFiles.sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
+    for (final entry in datedFiles.skip(retain)) {
+      await entry.file.delete();
+    }
   }
 }
 
@@ -170,18 +216,48 @@ String csvExportFileName(DateTime createdAt) {
 }
 
 String backupExportFileName(DateTime createdAt) {
-  final hour = createdAt.hour.toString().padLeft(2, '0');
-  final minute = createdAt.minute.toString().padLeft(2, '0');
-  return 'money_tally_backup_${_fileDate(createdAt)}_$hour$minute.json';
+  return 'trackmark_money_backup_${_fileTimestamp(createdAt)}.json';
 }
 
 String preRestoreBackupFileName(DateTime createdAt) {
-  final hour = createdAt.hour.toString().padLeft(2, '0');
-  final minute = createdAt.minute.toString().padLeft(2, '0');
-  final second = createdAt.second.toString().padLeft(2, '0');
-  return 'Trackmark Pre-Restore Backup - ${_fileDate(createdAt)} '
-      '$hour$minute$second.json';
+  return 'trackmark_money_pre_restore_backup_${_fileTimestamp(createdAt)}.json';
 }
+
+String automaticBackupFileName(DateTime createdAt) {
+  return 'trackmark_money_automatic_backup_${_fileTimestamp(createdAt)}.json';
+}
+
+String preUpdateBackupFileName({
+  required String oldVersion,
+  required String newVersion,
+  required DateTime createdAt,
+}) {
+  return 'trackmark_money_pre_update_backup_'
+      '${_safeFileComponent(oldVersion)}_to_${_safeFileComponent(newVersion)}_'
+      '${_fileTimestamp(createdAt)}.json';
+}
+
+bool isTrackmarkAutomaticBackupFileName(String fileName) => RegExp(
+  r'^trackmark_money_automatic_backup_\d{4}-\d{2}-\d{2}_\d{6}\.json$',
+).hasMatch(fileName);
+
+bool isTrackmarkPreUpdateBackupFileName(String fileName) => RegExp(
+  r'^trackmark_money_pre_update_backup_.+_to_.+_\d{4}-\d{2}-\d{2}_\d{6}\.json$',
+).hasMatch(fileName);
+
+String _fileTimestamp(DateTime date) {
+  final hour = date.hour.toString().padLeft(2, '0');
+  final minute = date.minute.toString().padLeft(2, '0');
+  final second = date.second.toString().padLeft(2, '0');
+  return '${_fileDate(date)}_$hour$minute$second';
+}
+
+String _safeFileComponent(String value) => value
+    .trim()
+    .replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '_')
+    .replaceAll(RegExp(r'_+'), '_');
+
+String _baseName(String path) => path.split(Platform.pathSeparator).last;
 
 String _fileDate(DateTime date) {
   final year = date.year.toString().padLeft(4, '0');

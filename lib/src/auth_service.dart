@@ -155,6 +155,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   FinanceDataStore? _currentDataStore;
   MoneyTallyUser? _currentUser;
   CloudSyncCoordinator? _syncCoordinator;
+  final AutomaticBackupService _automaticBackupService =
+      AutomaticBackupService();
   late final Stream<MoneyTallyUser?> _authStateStream;
 
   @override
@@ -185,6 +187,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       _foregroundCatchUpAttempt = null;
       final user = _currentUser;
       final store = _currentDataStore;
+      if (store != null) {
+        unawaited(_runAutomaticBackupCatchUp(store));
+      }
       if (user != null && store != null && !user.isLocalOnly) {
         unawaited(_refreshSyncStateAndCatchUp(user, store));
       }
@@ -206,16 +211,12 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   void _handleDataStoreChanged() {
     final user = _currentUser;
     final dataStore = _currentDataStore;
-    if (user == null || user.isLocalOnly || dataStore == null) return;
-    unawaited(_applyAutomaticSyncPreferences(user, dataStore));
-  }
-
-  Future<void> _applyAutomaticSyncPreferences(
-    MoneyTallyUser user,
-    FinanceDataStore dataStore,
-  ) async {
-    await _configureAutomaticSync(dataStore.preferences);
-    await _runForegroundCatchUp(user, dataStore);
+    if (dataStore == null) return;
+    unawaited(_configureAutomaticSync(dataStore.preferences));
+    unawaited(_runAutomaticBackupCatchUp(dataStore));
+    if (user != null && !user.isLocalOnly) {
+      unawaited(_runForegroundCatchUp(user, dataStore));
+    }
   }
 
   void _bindDataStore(FinanceDataStore? dataStore) {
@@ -225,23 +226,21 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     dataStore?.addListener(_handleDataStoreChanged);
   }
 
-  void _disableAutomaticSyncForUnauthenticatedState() {
-    const unavailable = 'unavailable';
-    if (_automaticSyncConfiguration == unavailable) return;
-    _automaticSyncConfiguration = unavailable;
-    unawaited(widget.automaticSyncScheduler.cancel());
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_localOnly) {
-      FinanceDataStoreScope.read(context).detachRemoteSync();
+      final dataStore = FinanceDataStoreScope.read(context);
+      dataStore.detachRemoteSync();
       _syncedUid = null;
       _autoSyncAttemptedUid = null;
       _loadedSyncStateUid = null;
       _currentUser = null;
-      _bindDataStore(null);
-      _disableAutomaticSyncForUnauthenticatedState();
+      _bindDataStore(dataStore);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_configureAutomaticSync(dataStore.preferences));
+        unawaited(_runAutomaticBackupCatchUp(dataStore));
+      });
       return const FinanceHome(syncLabel: 'Local only');
     }
 
@@ -255,13 +254,18 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
           return const _FullScreenProgress(message: 'Checking sign-in');
         }
         if (user == null) {
-          FinanceDataStoreScope.read(context).detachRemoteSync();
+          final dataStore = FinanceDataStoreScope.read(context);
+          dataStore.detachRemoteSync();
           _syncedUid = null;
           _autoSyncAttemptedUid = null;
           _loadedSyncStateUid = null;
           _currentUser = null;
-          _bindDataStore(null);
-          _disableAutomaticSyncForUnauthenticatedState();
+          _bindDataStore(dataStore);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            unawaited(_configureAutomaticSync(dataStore.preferences));
+            unawaited(_runAutomaticBackupCatchUp(dataStore));
+          });
           return SignInView(
             isSigningIn: _isSigningIn,
             errorMessage: _authError,
@@ -347,12 +351,14 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
   Future<void> _configureAutomaticSync(UserPreferences preferences) async {
     final signature =
-        '${preferences.automaticSyncEnabled}:${preferences.preferredDailySyncMinutes}';
+        '${preferences.automaticSyncEnabled}:${preferences.preferredDailySyncMinutes}:'
+        '${preferences.automaticBackupsEnabled}:${preferences.preferredAutomaticBackupMinutes}';
     if (_automaticSyncConfiguration == signature) return;
     try {
-      if (preferences.automaticSyncEnabled) {
+      final preferred = preferredAutomaticMaintenanceMinutes(preferences);
+      if (preferred != null) {
         await widget.automaticSyncScheduler.schedule(
-          preferredMinutes: preferences.preferredDailySyncMinutes,
+          preferredMinutes: preferred,
         );
       } else {
         await widget.automaticSyncScheduler.cancel();
@@ -360,6 +366,17 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       _automaticSyncConfiguration = signature;
     } on Object catch (error) {
       debugPrint('Could not update automatic sync schedule: $error');
+    }
+  }
+
+  Future<void> _runAutomaticBackupCatchUp(FinanceDataStore dataStore) async {
+    try {
+      await _automaticBackupService.createIfDue(
+        dataSet: dataStore.dataSet,
+        now: DateTime.now(),
+      );
+    } on Object catch (error) {
+      debugPrint('Automatic backup failed: $error');
     }
   }
 

@@ -6,4 +6,14 @@ import 'package:flutter/services.dart';
 /// gesture. This intentionally stays separate from tap and save feedback.
 abstract final class AppHaptics {
   static void longPressAction() => HapticFeedback.lightImpact();
+
+  static void toggleSelection() => HapticFeedback.selectionClick();
+
+  static ValueChanged<bool>? toggleHandler(ValueChanged<bool>? onChanged) {
+    if (onChanged == null) return null;
+    return (value) {
+      toggleSelection();
+      onChanged(value);
+    };
+  }
 }

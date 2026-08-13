@@ -5,7 +5,8 @@ import 'package:flutter/material.dart';
 /// A deliberately curated category-icon choice.
 ///
 /// [key] is persisted, so existing keys must never be renamed. The first
-/// twelve entries retain Money Tally's original SF-symbol-style storage keys.
+/// Twelve entries retain the original SF-symbol-style storage keys for
+/// backward compatibility.
 @immutable
 class AppCategoryIcon {
   const AppCategoryIcon({
