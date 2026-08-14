@@ -1011,7 +1011,7 @@ class TransactionFormDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Divider(
         height: 1,
         color: Theme.of(
@@ -1022,8 +1022,8 @@ class TransactionFormDivider extends StatelessWidget {
   }
 }
 
-class _TransactionStatusField extends StatelessWidget {
-  const _TransactionStatusField({
+class _TransactionPendingToggle extends StatelessWidget {
+  const _TransactionPendingToggle({
     required this.status,
     required this.onChanged,
     super.key,
@@ -1032,69 +1032,63 @@ class _TransactionStatusField extends StatelessWidget {
   final v2_transaction.TransactionStatus status;
   final ValueChanged<v2_transaction.TransactionStatus> onChanged;
 
+  void _setPending(bool pending) {
+    AppHaptics.toggleSelection();
+    onChanged(
+      pending
+          ? v2_transaction.TransactionStatus.pending
+          : v2_transaction.TransactionStatus.cleared,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final visibleStatus = status == v2_transaction.TransactionStatus.pending
-        ? v2_transaction.TransactionStatus.pending
-        : v2_transaction.TransactionStatus.cleared;
-    return PopupMenuButton<v2_transaction.TransactionStatus>(
-      tooltip: 'Choose transaction status',
-      initialValue: visibleStatus,
-      onSelected: onChanged,
-      itemBuilder: (context) => [
-        for (final option in const [
-          v2_transaction.TransactionStatus.cleared,
-          v2_transaction.TransactionStatus.pending,
-        ])
-          PopupMenuItem(
-            value: option,
-            child: Row(
-              children: [
-                Icon(
-                  option == v2_transaction.TransactionStatus.cleared
-                      ? AppIcon.checkRounded
-                      : Icons.schedule_rounded,
-                  color: option == v2_transaction.TransactionStatus.pending
-                      ? AppColors.warning
-                      : AppTheme.accent,
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Text(
-                    option == v2_transaction.TransactionStatus.pending
-                        ? 'Pending'
-                        : 'Cleared',
-                  ),
-                ),
-                if (option == visibleStatus)
-                  Icon(AppIcon.check, color: AppTheme.accent),
-              ],
-            ),
-          ),
-      ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          children: [
-            TransactionFormIcon(
-              visibleStatus == v2_transaction.TransactionStatus.pending
-                  ? Icons.schedule_rounded
-                  : AppIcon.checkRounded,
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Text(
-                visibleStatus == v2_transaction.TransactionStatus.pending
-                    ? 'Pending'
-                    : 'Cleared',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w400,
+    final isPending = status == v2_transaction.TransactionStatus.pending;
+    final theme = Theme.of(context);
+    return Semantics(
+      label: 'Mark as Pending',
+      hint: 'Use for transactions that haven’t cleared yet',
+      toggled: isPending,
+      button: true,
+      excludeSemantics: true,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        onTap: () => _setPending(!isPending),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 1),
+          child: Row(
+            children: [
+              const TransactionFormIcon(
+                Icons.schedule_rounded,
+                color: AppColors.warning,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Mark as Pending',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Use for transactions that haven’t cleared yet',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.15,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            Icon(AppIcon.chevronDown, size: AppIconSize.hero),
-          ],
+              Switch.adaptive(value: isPending, onChanged: _setPending),
+            ],
+          ),
         ),
       ),
     );
@@ -2619,12 +2613,16 @@ class LedgerView extends StatefulWidget {
     this.initialAccountFilterId,
     this.initialManagementFilter,
     this.initialDrillDownFilter,
+    this.initialPendingTransactionIds,
+    this.showPendingSummary = true,
     super.key,
   });
 
   final String? initialAccountFilterId;
   final ManagementLedgerFilter? initialManagementFilter;
   final LedgerDrillDownFilter? initialDrillDownFilter;
+  final Set<String>? initialPendingTransactionIds;
+  final bool showPendingSummary;
 
   @override
   State<LedgerView> createState() => _LedgerViewState();
@@ -2731,6 +2729,15 @@ class _LedgerViewState extends State<LedgerView> {
             .where((transaction) => !transaction.isDeleted)
             .where(
               (transaction) =>
+                  widget.initialPendingTransactionIds == null ||
+                  (transaction.status ==
+                          v2_transaction.TransactionStatus.pending &&
+                      widget.initialPendingTransactionIds!.contains(
+                        transaction.id,
+                      )),
+            )
+            .where(
+              (transaction) =>
                   managementTransactionIds == null ||
                   managementTransactionIds.contains(transaction.id),
             )
@@ -2768,11 +2775,13 @@ class _LedgerViewState extends State<LedgerView> {
       unprojectedTransactions,
       categoryScope: categoryScope,
     );
+    final pendingSummary = summarizePendingLedgerTransactions(transactions);
     final goalFundingEvents =
         store.goalFundingEvents
             .where((event) => event.isActive)
             .where(
               (event) =>
+                  widget.initialPendingTransactionIds == null &&
                   managementFilter == null &&
                   drillDownFilter == null &&
                   typeFilterName.isEmpty &&
@@ -3139,6 +3148,27 @@ class _LedgerViewState extends State<LedgerView> {
             ),
           ],
         ),
+        if (widget.showPendingSummary && !pendingSummary.isEmpty) ...[
+          const SizedBox(height: AppSpacing.sm),
+          _PendingTransactionsCard(
+            summary: pendingSummary,
+            currency: store.preferences.currency,
+            onTap: () {
+              _dismissSearchFocus();
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => FinanceDataStoreScope(
+                    store: store,
+                    child: PendingLedgerScreen(
+                      transactionIds: pendingSummary.transactionIds,
+                      accountId: singleAccountId,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
         const SizedBox(height: 12),
         if (transactions.isEmpty && goalFundingEvents.isEmpty)
           AppCard(
@@ -3161,6 +3191,8 @@ class _LedgerViewState extends State<LedgerView> {
               store: store,
               accountsById: accountsById,
               categoriesById: categoriesById,
+              scopedAccountId: singleAccountId,
+              reservePendingIndicatorSpace: !pendingSummary.isEmpty,
               runningBalances: showRunningBalance ? runningBalances : null,
               isCollapsed: _collapsedMonthKeys.contains(ledgerMonthKey(month)),
               onDismissFocus: _dismissSearchFocus,
@@ -3478,6 +3510,186 @@ class FilteredLedgerScreen extends StatelessWidget {
   }
 }
 
+class PendingLedgerScreen extends StatelessWidget {
+  const PendingLedgerScreen({
+    required this.transactionIds,
+    this.accountId,
+    super.key,
+  });
+
+  final Set<String> transactionIds;
+  final String? accountId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      key: const ValueKey('pending-ledger-screen'),
+      appBar: AppBar(
+        title: const Text('Pending Transactions'),
+        scrolledUnderElevation: 0,
+      ),
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+          child: LedgerView(
+            key: const ValueKey('pending-filtered-ledger'),
+            initialAccountFilterId: accountId,
+            initialPendingTransactionIds: transactionIds,
+            showPendingSummary: false,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingTransactionsCard extends StatelessWidget {
+  const _PendingTransactionsCard({
+    required this.summary,
+    required this.currency,
+    required this.onTap,
+  });
+
+  final PendingLedgerSummary summary;
+  final CurrencyFormatSettings currency;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pendingColor = theme.brightness == Brightness.dark
+        ? const Color(0xFFE2AA4A)
+        : const Color(0xFF9A650E);
+    return Semantics(
+      button: true,
+      label: 'Pending Transactions, ${summary.count}',
+      hint: 'View pending transactions',
+      child: Material(
+        key: const ValueKey('ledger-pending-summary-card'),
+        color: Color.alphaBlend(
+          pendingColor.withValues(
+            alpha: theme.brightness == Brightness.dark ? 0.10 : 0.065,
+          ),
+          theme.colorScheme.surface,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          side: BorderSide(color: pendingColor.withValues(alpha: 0.24)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Icon(AppIcon.schedule, size: 17, color: pendingColor),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        'Pending Transactions',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${summary.count}',
+                      key: const ValueKey('ledger-pending-summary-count'),
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: pendingColor,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    Icon(
+                      AppIcon.chevronRight,
+                      size: 16,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+                if (summary.expensesMinor > 0)
+                  _PendingSummaryAmountRow(
+                    label: 'Expenses',
+                    amountMinor: -summary.expensesMinor,
+                    currency: currency,
+                  ),
+                if (summary.incomeMinor > 0)
+                  _PendingSummaryAmountRow(
+                    label: 'Income',
+                    amountMinor: summary.incomeMinor,
+                    currency: currency,
+                    showPositiveSign: true,
+                  ),
+                if (summary.transfersMinor > 0)
+                  _PendingSummaryAmountRow(
+                    label: 'Transfers',
+                    amountMinor: summary.transfersMinor,
+                    currency: currency,
+                  ),
+                if (summary.goalsMinor > 0)
+                  _PendingSummaryAmountRow(
+                    label: 'Goals',
+                    amountMinor: summary.goalsMinor,
+                    currency: currency,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingSummaryAmountRow extends StatelessWidget {
+  const _PendingSummaryAmountRow({
+    required this.label,
+    required this.amountMinor,
+    required this.currency,
+    this.showPositiveSign = false,
+  });
+
+  final String label;
+  final int amountMinor;
+  final CurrencyFormatSettings currency;
+  final bool showPositiveSign;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 25, top: 5),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          MoneyText(
+            key: ValueKey('ledger-pending-summary-${label.toLowerCase()}'),
+            amountMinor: amountMinor,
+            currency: currency,
+            showPositiveSign: showPositiveSign,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ReportLedgerScreen extends StatelessWidget {
   const ReportLedgerScreen({required this.filter, super.key});
 
@@ -3595,6 +3807,8 @@ class LedgerMonthSection extends StatelessWidget {
     required this.store,
     required this.accountsById,
     required this.categoriesById,
+    this.scopedAccountId,
+    this.reservePendingIndicatorSpace = false,
     this.runningBalances,
     required this.isCollapsed,
     required this.onDismissFocus,
@@ -3608,6 +3822,8 @@ class LedgerMonthSection extends StatelessWidget {
   final FinanceDataStore store;
   final Map<String, v2_account.AccountRecord> accountsById;
   final Map<String, v2_category.CategoryRecord> categoriesById;
+  final String? scopedAccountId;
+  final bool reservePendingIndicatorSpace;
   final AccountRunningBalances? runningBalances;
   final bool isCollapsed;
   final VoidCallback onDismissFocus;
@@ -3767,6 +3983,9 @@ class LedgerMonthSection extends StatelessWidget {
                             store: store,
                             accountsById: accountsById,
                             categoriesById: categoriesById,
+                            scopedAccountId: scopedAccountId,
+                            reservePendingIndicatorSpace:
+                                reservePendingIndicatorSpace,
                             runningBalances: runningBalances,
                             onDismissFocus: onDismissFocus,
                           ),
@@ -3790,6 +4009,8 @@ class _LedgerDayCard extends StatelessWidget {
     required this.store,
     required this.accountsById,
     required this.categoriesById,
+    this.scopedAccountId,
+    this.reservePendingIndicatorSpace = false,
     this.runningBalances,
     required this.onDismissFocus,
   });
@@ -3806,6 +4027,8 @@ class _LedgerDayCard extends StatelessWidget {
   final FinanceDataStore store;
   final Map<String, v2_account.AccountRecord> accountsById;
   final Map<String, v2_category.CategoryRecord> categoriesById;
+  final String? scopedAccountId;
+  final bool reservePendingIndicatorSpace;
   final AccountRunningBalances? runningBalances;
   final VoidCallback onDismissFocus;
 
@@ -3857,6 +4080,19 @@ class _LedgerDayCard extends StatelessWidget {
                         projection.transaction,
                         categoriesById,
                       ),
+                  metadataDetails: _ledgerMetadataDetails(
+                    projection.transaction,
+                    scopedAccountId: scopedAccountId,
+                    accountsById: accountsById,
+                    categoryName:
+                        projection.categoryScope?.label ??
+                        _ledgerTransactionCategoryNames(
+                          projection.transaction,
+                          categoriesById,
+                        ),
+                  ),
+                  isAccountScoped: scopedAccountId != null,
+                  reservePendingIndicatorSpace: reservePendingIndicatorSpace,
                   runningBalanceMinor: runningBalances
                       ?.afterTransaction[projection.transaction.id],
                   showIcon: store.preferences.showLedgerIcons,
@@ -3892,6 +4128,8 @@ class _LedgerDayCard extends StatelessWidget {
                       accountsById[activities[index]
                           .fundingEvent!
                           .sourceAccountId],
+                  isAccountScoped: scopedAccountId != null,
+                  reservePendingIndicatorSpace: reservePendingIndicatorSpace,
                   currency: store.preferences.currency,
                   runningBalanceMinor:
                       runningBalances?.afterGoalFundingEvent[activities[index]
@@ -3899,6 +4137,8 @@ class _LedgerDayCard extends StatelessWidget {
                           .id],
                   showIcon: store.preferences.showLedgerIcons,
                   showTimestamp: store.preferences.showLedgerTimestamps,
+                  showSplitIndicator:
+                      store.preferences.showLedgerSplitIndicator,
                   onTap: () => showGoalFundingDetails(
                     context,
                     activities[index].fundingEvent!.id,
@@ -4169,7 +4409,10 @@ class LedgerJournalRow extends StatelessWidget {
     this.account,
     this.category,
     this.categoryName,
+    this.metadataDetails,
     this.runningBalanceMinor,
+    this.isAccountScoped = false,
+    this.reservePendingIndicatorSpace = false,
     this.showDateContext = true,
     this.showIcon = true,
     this.showTimestamp = true,
@@ -4183,7 +4426,10 @@ class LedgerJournalRow extends StatelessWidget {
   final v2_account.AccountRecord? account;
   final v2_category.CategoryRecord? category;
   final String? categoryName;
+  final String? metadataDetails;
   final int? runningBalanceMinor;
+  final bool isAccountScoped;
+  final bool reservePendingIndicatorSpace;
   final bool showDateContext;
   final bool showIcon;
   final bool showTimestamp;
@@ -4195,22 +4441,25 @@ class LedgerJournalRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final signedAmount = projection.displayedAmountMinor;
     final timeLabel = ledgerTransactionTimeLabel(context, transaction.date);
-    final metadataDetails = [
-      if (account != null) account!.name,
-      if (categoryName != null) categoryName,
-      if (transaction.type == TransactionType.adjustment)
-        'Manual balance adjustment',
-      if (transaction.isTransfer) 'Transfer',
-    ].join(' • ');
+    final resolvedMetadataDetails =
+        metadataDetails ??
+        [
+          if (account != null) account!.name,
+          if (categoryName != null) categoryName,
+          if (transaction.type == TransactionType.adjustment)
+            'Manual balance adjustment',
+          if (transaction.isTransfer) 'Transfer',
+        ].join(' • ');
     final hasSplit = projection.isPartOfSplit || transaction.isSplit;
     final secondaryStyle =
         Theme.of(context).textTheme.bodySmall?.copyWith(
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ) ??
         const TextStyle(fontSize: 12);
-    final secondaryAmountSlotWidth = MediaQuery.sizeOf(context).width < 600
-        ? 84.0
-        : 104.0;
+    final isCompact = MediaQuery.sizeOf(context).width < 600;
+    final secondaryAmountSlotWidth = isAccountScoped
+        ? (isCompact ? 80.0 : 96.0)
+        : (isCompact ? 44.0 : 56.0);
 
     return Dismissible(
       key: ValueKey('ledger-swipe-${transaction.id}'),
@@ -4316,16 +4565,6 @@ class LedgerJournalRow extends StatelessWidget {
                                   ),
                             ),
                           ),
-                          if (transaction.status ==
-                              v2_transaction.TransactionStatus.pending) ...[
-                            const SizedBox(width: 6),
-                            KeyedSubtree(
-                              key: ValueKey(
-                                'ledger-pending-indicator-${transaction.id}',
-                              ),
-                              child: const _LedgerPendingCapsule(),
-                            ),
-                          ],
                           const SizedBox(width: AppSpacing.sm),
                           SizedBox(
                             width: 104,
@@ -4346,16 +4585,21 @@ class LedgerJournalRow extends StatelessWidget {
                           ),
                         ],
                       ),
-                      if (metadataDetails.isNotEmpty) ...[
+                      if (resolvedMetadataDetails.isNotEmpty) ...[
                         const SizedBox(height: 3),
                         Row(
                           children: [
                             Expanded(
                               child: _LedgerMetadataLine(
                                 rowId: transaction.id,
-                                details: metadataDetails,
+                                details: resolvedMetadataDetails,
                                 timeLabel: showTimestamp ? timeLabel : null,
                                 reserveTimestampSpace: showTimestamp,
+                                showPending:
+                                    transaction.status ==
+                                    v2_transaction.TransactionStatus.pending,
+                                reservePendingSpace:
+                                    reservePendingIndicatorSpace,
                                 showSplit: showSplitIndicator && hasSplit,
                                 reserveSplitSpace: showSplitIndicator,
                                 style: secondaryStyle,
@@ -4417,6 +4661,42 @@ String? _ledgerTransactionCategoryNames(
   return categoryId == null ? null : categoriesById[categoryId]?.name;
 }
 
+String _ledgerMetadataDetails(
+  TransactionRecord transaction, {
+  required String? scopedAccountId,
+  required Map<String, v2_account.AccountRecord> accountsById,
+  required String? categoryName,
+}) {
+  if (scopedAccountId == null) {
+    return [
+      accountsById[transaction.accountId]?.name,
+      categoryName,
+      if (transaction.type == TransactionType.adjustment)
+        'Manual balance adjustment',
+      if (transaction.isTransfer) 'Transfer',
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' • ');
+  }
+  if (transaction.isTransfer) {
+    final otherAccountId = transaction.accountId == scopedAccountId
+        ? transaction.transferAccountId
+        : transaction.accountId;
+    final otherAccountName = accountsById[otherAccountId]?.name;
+    return [
+      'Transfer',
+      if (otherAccountName != null && otherAccountName.isNotEmpty)
+        otherAccountName,
+    ].join(' • ');
+  }
+  if (transaction.type == TransactionType.adjustment) {
+    return categoryName?.isNotEmpty == true
+        ? categoryName!
+        : 'Manual balance adjustment';
+  }
+  return categoryName?.isNotEmpty == true
+      ? categoryName!
+      : transactionTypeLabel(transaction.type);
+}
+
 class _LedgerMetadataLine extends StatelessWidget {
   const _LedgerMetadataLine({
     required this.rowId,
@@ -4424,8 +4704,10 @@ class _LedgerMetadataLine extends StatelessWidget {
     required this.timeLabel,
     required this.style,
     this.showSplit = false,
+    this.showPending = false,
     this.reserveTimestampSpace = true,
     this.reserveSplitSpace = true,
+    this.reservePendingSpace = false,
   });
 
   final String rowId;
@@ -4433,17 +4715,21 @@ class _LedgerMetadataLine extends StatelessWidget {
   final String? timeLabel;
   final TextStyle style;
   final bool showSplit;
+  final bool showPending;
   final bool reserveTimestampSpace;
   final bool reserveSplitSpace;
+  final bool reservePendingSpace;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         const splitWidth = 41.0;
+        const pendingWidth = 16.0;
         const metadataGap = 6.0;
         const indicatorGap = 5.0;
-        final hasTrailingIndicator = reserveSplitSpace;
+        final hasPendingSlot = reservePendingSpace || showPending;
+        final hasTrailingIndicator = reserveSplitSpace || hasPendingSlot;
         final preferredTimestampWidth = _ledgerTimestampSlotWidth(
           context,
           timeLabel,
@@ -4456,63 +4742,68 @@ class _LedgerMetadataLine extends StatelessWidget {
                   0.0,
                   constraints.maxWidth -
                       (reserveSplitSpace ? splitWidth : 0) -
+                      (hasPendingSlot ? pendingWidth : 0) -
                       metadataGap -
-                      (hasTrailingIndicator ? indicatorGap : 0),
+                      (hasPendingSlot ? indicatorGap : 0) -
+                      (reserveSplitSpace ? indicatorGap : 0),
                 ),
               )
             : 0.0;
-        return Stack(
-          clipBehavior: Clip.none,
+        return Row(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    key: ValueKey('ledger-metadata-details-$rowId'),
-                    details,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.left,
-                    style: style,
-                  ),
-                ),
-                if (reserveTimestampSpace) ...[
-                  const SizedBox(width: metadataGap),
-                  SizedBox(
-                    key: ValueKey('ledger-timestamp-slot-$rowId'),
-                    width: timestampWidth,
-                    child: Text(
-                      timeLabel ?? '',
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.clip,
-                      textAlign: TextAlign.right,
-                      style: style,
-                    ),
-                  ),
-                  if (hasTrailingIndicator) const SizedBox(width: indicatorGap),
-                ] else if (hasTrailingIndicator) ...[
-                  const SizedBox(width: metadataGap),
-                ],
-                if (reserveSplitSpace)
-                  SizedBox(
-                    key: ValueKey('ledger-split-slot-$rowId'),
-                    width: splitWidth,
-                  ),
-              ],
+            Expanded(
+              child: Text(
+                key: ValueKey('ledger-metadata-details-$rowId'),
+                details,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.left,
+                style: style,
+              ),
             ),
-            if (showSplit)
-              Positioned(
-                right: 0,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: KeyedSubtree(
-                    key: ValueKey('ledger-split-indicator-$rowId'),
-                    child: const _LedgerSplitCapsule(),
-                  ),
+            if (hasTrailingIndicator || reserveTimestampSpace)
+              const SizedBox(width: metadataGap),
+            if (hasPendingSlot) ...[
+              SizedBox(
+                key: ValueKey('ledger-pending-slot-$rowId'),
+                width: pendingWidth,
+                child: showPending
+                    ? KeyedSubtree(
+                        key: ValueKey('ledger-pending-indicator-$rowId'),
+                        child: const _LedgerPendingIndicator(),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: indicatorGap),
+            ],
+            if (reserveTimestampSpace)
+              SizedBox(
+                key: ValueKey('ledger-timestamp-slot-$rowId'),
+                width: timestampWidth,
+                child: Text(
+                  timeLabel ?? '',
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.clip,
+                  textAlign: TextAlign.right,
+                  style: style,
                 ),
               ),
+            if (reserveSplitSpace) ...[
+              const SizedBox(width: indicatorGap),
+              SizedBox(
+                key: ValueKey('ledger-split-slot-$rowId'),
+                width: splitWidth,
+                child: showSplit
+                    ? Center(
+                        child: KeyedSubtree(
+                          key: ValueKey('ledger-split-indicator-$rowId'),
+                          child: const _LedgerSplitCapsule(),
+                        ),
+                      )
+                    : null,
+              ),
+            ],
           ],
         );
       },
@@ -4572,8 +4863,8 @@ class _LedgerSplitCapsule extends StatelessWidget {
   }
 }
 
-class _LedgerPendingCapsule extends StatelessWidget {
-  const _LedgerPendingCapsule();
+class _LedgerPendingIndicator extends StatelessWidget {
+  const _LedgerPendingIndicator();
 
   @override
   Widget build(BuildContext context) {
@@ -4582,24 +4873,9 @@ class _LedgerPendingCapsule extends StatelessWidget {
         : const Color(0xFF9A650E);
     return Semantics(
       label: 'Pending transaction',
-      child: Container(
-        height: 18,
-        padding: const EdgeInsets.symmetric(horizontal: 7),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(99),
-          border: Border.all(color: color.withValues(alpha: 0.62)),
-        ),
-        child: Text(
-          'Pending',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: color,
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            height: 1,
-          ),
-        ),
+      child: Tooltip(
+        message: 'Pending transaction',
+        child: Icon(AppIcon.schedule, size: 14, color: color),
       ),
     );
   }
@@ -4647,6 +4923,9 @@ class GoalFundingLedgerRow extends StatelessWidget {
     this.runningBalanceMinor,
     this.showIcon = true,
     this.showTimestamp = true,
+    this.showSplitIndicator = true,
+    this.isAccountScoped = false,
+    this.reservePendingIndicatorSpace = false,
     super.key,
   });
 
@@ -4657,6 +4936,9 @@ class GoalFundingLedgerRow extends StatelessWidget {
   final int? runningBalanceMinor;
   final bool showIcon;
   final bool showTimestamp;
+  final bool showSplitIndicator;
+  final bool isAccountScoped;
+  final bool reservePendingIndicatorSpace;
   final VoidCallback onTap;
 
   @override
@@ -4671,7 +4953,7 @@ class GoalFundingLedgerRow extends StatelessWidget {
     };
     final timeLabel = ledgerTransactionTimeLabel(context, event.date);
     final metadataDetails = [
-      if (account != null) account!.name,
+      if (!isAccountScoped && account != null) account!.name,
       allocationSummary,
     ].join(' • ');
 
@@ -4728,7 +5010,8 @@ class GoalFundingLedgerRow extends StatelessWidget {
                       details: metadataDetails,
                       timeLabel: showTimestamp ? timeLabel : null,
                       reserveTimestampSpace: showTimestamp,
-                      reserveSplitSpace: false,
+                      reserveSplitSpace: showSplitIndicator,
+                      reservePendingSpace: reservePendingIndicatorSpace,
                       style:
                           Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(
@@ -16484,44 +16767,11 @@ Future<void> showTransferDialog(
                     ),
                   ),
                   TransactionFormDivider(),
-                  const TransactionFormLabel('Status'),
-                  _TransactionStatusField(
-                    key: const ValueKey('transfer-status'),
+                  _TransactionPendingToggle(
+                    key: const ValueKey('transfer-pending-toggle'),
                     status: transactionStatus,
-                    onChanged: (value) {
-                      AppHaptics.toggleSelection();
-                      setDialogState(() => transactionStatus = value);
-                    },
-                  ),
-                  TransactionFormDivider(),
-                  TransactionFormLabel('Notes'),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TransactionFormIcon(AppIcon.notes),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: TextField(
-                          key: const ValueKey('transfer-note'),
-                          controller: note,
-                          textCapitalization: TextCapitalization.sentences,
-                          decoration: InputDecoration(
-                            hintText: 'Add a note (optional)',
-                            hintStyle: fieldHintStyle,
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: 8,
-                            ),
-                          ),
-                          style: fieldValueStyle,
-                          minLines: 1,
-                          maxLines: 3,
-                        ),
-                      ),
-                    ],
+                    onChanged: (value) =>
+                        setDialogState(() => transactionStatus = value),
                   ),
                   if (linkedSchedule == null) ...[
                     const TransactionFormDivider(),
@@ -16604,6 +16854,36 @@ Future<void> showTransferDialog(
                       ),
                     ),
                   ],
+                  const TransactionFormDivider(),
+                  const TransactionFormLabel('Notes'),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TransactionFormIcon(AppIcon.notes),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          key: const ValueKey('transfer-note'),
+                          controller: note,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: InputDecoration(
+                            hintText: 'Add a note (optional)',
+                            hintStyle: fieldHintStyle,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 8,
+                            ),
+                          ),
+                          style: fieldValueStyle,
+                          minLines: 1,
+                          maxLines: 3,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             );
@@ -18974,14 +19254,11 @@ Future<void> markScheduledTransactionPaid(
                 ),
               ),
               TransactionFormDivider(),
-              const TransactionFormLabel('Status'),
-              _TransactionStatusField(
-                key: const ValueKey('mark-paid-status'),
+              _TransactionPendingToggle(
+                key: const ValueKey('mark-paid-pending-toggle'),
                 status: transactionStatus,
-                onChanged: (value) {
-                  AppHaptics.toggleSelection();
-                  setDialogState(() => transactionStatus = value);
-                },
+                onChanged: (value) =>
+                    setDialogState(() => transactionStatus = value),
               ),
               TransactionFormDivider(),
               TransactionFormLabel(isTransfer ? 'From Account' : 'Account'),
@@ -20516,6 +20793,7 @@ Future<void> showTransactionDialog(
                   const TransactionFormDivider(),
                   const TransactionFormLabel('Date'),
                   InkWell(
+                    key: const ValueKey('transaction-date'),
                     borderRadius: BorderRadius.circular(AppRadii.control),
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
@@ -20564,44 +20842,11 @@ Future<void> showTransactionDialog(
                     ),
                   ),
                   TransactionFormDivider(),
-                  const TransactionFormLabel('Status'),
-                  _TransactionStatusField(
-                    key: const ValueKey('transaction-status'),
+                  _TransactionPendingToggle(
+                    key: const ValueKey('transaction-pending-toggle'),
                     status: transactionStatus,
-                    onChanged: (value) {
-                      AppHaptics.toggleSelection();
-                      setDialogState(() => transactionStatus = value);
-                    },
-                  ),
-                  TransactionFormDivider(),
-                  TransactionFormLabel('Notes'),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TransactionFormIcon(AppIcon.notes),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: TextField(
-                          key: const ValueKey('transaction-note'),
-                          controller: note,
-                          textCapitalization: TextCapitalization.sentences,
-                          decoration: InputDecoration(
-                            hintText: 'Add a note (optional)',
-                            hintStyle: fieldHintStyle,
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: 8,
-                            ),
-                          ),
-                          style: fieldValueStyle,
-                          minLines: 1,
-                          maxLines: 3,
-                        ),
-                      ),
-                    ],
+                    onChanged: (value) =>
+                        setDialogState(() => transactionStatus = value),
                   ),
                   if (linkedSchedule == null) ...[
                     const TransactionFormDivider(),
@@ -20686,6 +20931,36 @@ Future<void> showTransactionDialog(
                       ),
                     ),
                   ],
+                  const TransactionFormDivider(),
+                  const TransactionFormLabel('Notes'),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TransactionFormIcon(AppIcon.notes),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          key: const ValueKey('transaction-note'),
+                          controller: note,
+                          textCapitalization: TextCapitalization.sentences,
+                          decoration: InputDecoration(
+                            hintText: 'Add a note (optional)',
+                            hintStyle: fieldHintStyle,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 8,
+                            ),
+                          ),
+                          style: fieldValueStyle,
+                          minLines: 1,
+                          maxLines: 3,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             );

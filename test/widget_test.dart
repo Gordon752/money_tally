@@ -1089,7 +1089,7 @@ void main() {
 
       await tester.enterText(find.byType(TextField).first, 'Walmart');
       await tester.pumpAndSettle();
-      expect(ledgerRowWithText('Walmart'), findsOneWidget);
+      expect(ledgerRowWithText('Walmart'), findsWidgets);
       expect(
         find.byKey(ValueKey('ledger-running-balance-${walmart.id}')),
         findsOneWidget,
@@ -1272,7 +1272,7 @@ void main() {
     );
     expect(splitSecondaryAmountSlot, findsOneWidget);
     expect(comparisonSecondaryAmountSlot, findsOneWidget);
-    expect(tester.getSize(splitSecondaryAmountSlot).width, 84);
+    expect(tester.getSize(splitSecondaryAmountSlot).width, 44);
     expect(
       tester.getTopLeft(splitSecondaryAmountSlot).dx,
       tester.getTopLeft(comparisonSecondaryAmountSlot).dx,
@@ -1281,7 +1281,7 @@ void main() {
     tester.view.physicalSize = const Size(1024, 1366);
     await tester.pumpAndSettle();
     final tabletMetadataWidth = tester.getSize(find.byKey(detailsKey)).width;
-    expect(tester.getSize(splitSecondaryAmountSlot).width, 104);
+    expect(tester.getSize(splitSecondaryAmountSlot).width, 56);
     expect(tabletMetadataWidth, greaterThan(phoneMetadataWidth));
 
     await dataStore.savePreferences(
@@ -1314,6 +1314,124 @@ void main() {
       greaterThan(tabletMetadataWidth),
     );
   });
+
+  testWidgets(
+    'account Ledger metadata omits current account and names transfer peer',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 1500);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final legacyStore = FinanceStore.seeded();
+      final migrated = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final currentAccount = migrated.accounts.first;
+      final otherAccount = migrated.accounts.firstWhere(
+        (account) => account.id != currentAccount.id,
+      );
+      final category = migrated.categories.firstWhere(
+        (item) => item.kind == v2_category.CategoryKind.expense,
+      );
+      final now = DateTime(2026, 8, 14, 13, 45);
+      final expense = v2_transaction.TransactionRecord(
+        id: 'account-metadata-expense',
+        type: v2_transaction.TransactionType.expense,
+        accountId: currentAccount.id,
+        categoryId: category.id,
+        date: now,
+        payee: 'Account Metadata Expense',
+        amountMinor: 1250,
+        status: v2_transaction.TransactionStatus.pending,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+      );
+      final unrelatedPending = v2_transaction.TransactionRecord(
+        id: 'other-account-pending',
+        type: v2_transaction.TransactionType.expense,
+        accountId: otherAccount.id,
+        categoryId: category.id,
+        date: now.subtract(const Duration(minutes: 2)),
+        payee: 'Other Account Pending',
+        amountMinor: 9900,
+        status: v2_transaction.TransactionStatus.pending,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+      );
+      final transfer = v2_transaction.TransactionRecord(
+        id: 'account-metadata-transfer',
+        type: v2_transaction.TransactionType.transfer,
+        accountId: currentAccount.id,
+        transferAccountId: otherAccount.id,
+        date: now.subtract(const Duration(minutes: 1)),
+        payee: 'Account Metadata Transfer',
+        amountMinor: 5000,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+      );
+      final dataStore = FinanceDataStore(
+        dataSet: migrated.copyWith(
+          accounts: [currentAccount, otherAccount],
+          transactions: [expense, transfer, unrelatedPending],
+          preferences: migrated.preferences.copyWith(showRunningBalance: true),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FinanceDataStoreScope(
+            store: dataStore,
+            child: Scaffold(
+              body: SingleChildScrollView(
+                child: LedgerView(initialAccountFilterId: currentAccount.id),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final expenseMetadata = tester.widget<Text>(
+        find.byKey(
+          const ValueKey('ledger-metadata-details-account-metadata-expense'),
+        ),
+      );
+      final transferMetadata = tester.widget<Text>(
+        find.byKey(
+          const ValueKey('ledger-metadata-details-account-metadata-transfer'),
+        ),
+      );
+      expect(expenseMetadata.data, category.name);
+      expect(expenseMetadata.data, isNot(contains(currentAccount.name)));
+      expect(transferMetadata.data, 'Transfer • ${otherAccount.name}');
+      expect(
+        find.byKey(
+          const ValueKey('ledger-running-balance-account-metadata-transfer'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('ledger-pending-summary-count')),
+            )
+            .data,
+        '1',
+      );
+      expect(find.text('Other Account Pending'), findsNothing);
+      await tester.tap(
+        find.byKey(const ValueKey('ledger-pending-summary-card')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Account Metadata Expense'), findsOneWidget);
+      expect(find.text('Other Account Pending'), findsNothing);
+      expect(
+        tester
+            .widget<LedgerView>(
+              find.byKey(const ValueKey('pending-filtered-ledger')),
+            )
+            .initialAccountFilterId,
+        currentAccount.id,
+      );
+    },
+  );
 
   testWidgets('pending Ledger row shows status and quick actions clear it', (
     tester,
@@ -1350,6 +1468,22 @@ void main() {
       find.byKey(ValueKey('ledger-pending-indicator-${pending.id}')),
       findsOneWidget,
     );
+    expect(
+      find.byKey(const ValueKey('ledger-pending-summary-card')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('ledger-pending-summary-count')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('ledger-pending-summary-card')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('pending-ledger-screen')), findsOneWidget);
+    expect(ledgerRowWithText('Pending Ledger Test'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('pending-ledger-screen')), findsNothing);
+    expect(ledgerRowWithText('Pending Ledger Test'), findsOneWidget);
     await tester.longPress(ledgerRowWithText('Pending Ledger Test'));
     await tester.pumpAndSettle();
     expect(find.text('Mark Cleared'), findsOneWidget);
@@ -1365,6 +1499,10 @@ void main() {
     expect(dataStore.balanceForAccount(pending.accountId), originalBalance);
     expect(
       find.byKey(ValueKey('ledger-pending-indicator-${pending.id}')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('ledger-pending-summary-card')),
       findsNothing,
     );
 
@@ -1414,9 +1552,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Mark as Paid'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('mark-paid-status')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Pending').last);
+    await tester.tap(find.byKey(const ValueKey('mark-paid-pending-toggle')));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
     await tester.pumpAndSettle();
@@ -1431,6 +1567,282 @@ void main() {
       dataStore.scheduledTransactions.single.occurrences.single.transactionId,
       generated.id,
     );
+  });
+
+  testWidgets(
+    'transaction form uses an independent Pending toggle and keeps Notes last',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final legacyStore = FinanceStore.seeded();
+      final dataStore = FinanceDataStore(
+        dataSet: const V1SnapshotMigrator().migrate(
+          legacyStore.snapshot().toJson(),
+        ),
+      );
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+      await tester.tap(find.byTooltip('Add'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Expense'));
+      await tester.pumpAndSettle();
+
+      final pendingToggle = find.byKey(
+        const ValueKey('transaction-pending-toggle'),
+      );
+      final pendingSwitch = find.descendant(
+        of: pendingToggle,
+        matching: find.byType(Switch),
+      );
+      final scheduleToggle = find.byKey(
+        const ValueKey('transaction-schedule-toggle'),
+      );
+      expect(pendingToggle, findsOneWidget);
+      expect(tester.widget<Switch>(pendingSwitch).value, isFalse);
+      expect(
+        find.text('Use for transactions that haven’t cleared yet'),
+        findsOneWidget,
+      );
+      expect(find.text('Status'), findsNothing);
+      expect(find.text('Cleared'), findsNothing);
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('transaction-date'))).dy,
+        lessThan(tester.getTopLeft(pendingToggle).dy),
+      );
+      expect(
+        tester.getTopLeft(pendingToggle).dy,
+        lessThan(tester.getTopLeft(scheduleToggle).dy),
+      );
+      expect(
+        tester.getTopLeft(scheduleToggle).dy,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('transaction-note'))).dy,
+        ),
+      );
+
+      final hapticCalls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            hapticCalls.add(call);
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+      await tester.tap(pendingToggle);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(pendingSwitch).value, isTrue);
+      expect(
+        hapticCalls.where(
+          (call) =>
+              call.method == 'HapticFeedback.vibrate' &&
+              call.arguments == 'HapticFeedbackType.selectionClick',
+        ),
+        hasLength(1),
+      );
+      expect(
+        tester
+            .widget<Switch>(
+              find.descendant(
+                of: scheduleToggle,
+                matching: find.byType(Switch),
+              ),
+            )
+            .value,
+        isFalse,
+      );
+
+      await tester.tap(scheduleToggle);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(pendingSwitch).value, isTrue);
+      expect(
+        tester
+            .widget<Switch>(
+              find.descendant(
+                of: scheduleToggle,
+                matching: find.byType(Switch),
+              ),
+            )
+            .value,
+        isTrue,
+      );
+
+      await tester.tap(find.text('Choose account'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Checking').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('transaction-payee')),
+        'Pending scheduled note',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('transaction-amount')),
+        '4321',
+      );
+      await tester.tap(find.text('Choose category'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dining').last);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('transaction-note')),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('transaction-note')),
+        'Pending with a future schedule',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      final saved = dataStore.transactions.singleWhere(
+        (transaction) => transaction.payee == 'Pending scheduled note',
+      );
+      expect(saved.status, v2_transaction.TransactionStatus.pending);
+      expect(saved.note, 'Pending with a future schedule');
+      expect(saved.scheduledTransactionId, isNotNull);
+      expect(
+        dataStore.scheduledTransactions.any(
+          (schedule) => schedule.id == saved.scheduledTransactionId,
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets(
+    'editing a Pending transaction loads silently and clearing changes status only',
+    (tester) async {
+      final legacyStore = FinanceStore.seeded();
+      final migrated = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final original = migrated.transactions.firstWhere(
+        (transaction) => transaction.payee == 'Walmart',
+      );
+      final pending = original.copyWith(
+        status: v2_transaction.TransactionStatus.pending,
+      );
+      final dataStore = FinanceDataStore(
+        dataSet: migrated.copyWith(
+          transactions: [
+            for (final transaction in migrated.transactions)
+              if (transaction.id == pending.id) pending else transaction,
+          ],
+        ),
+      );
+      final originalBalance = dataStore.balanceForAccount(pending.accountId);
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+      await tester.tap(find.text('Ledger').last);
+      await tester.pumpAndSettle();
+      await tester.longPress(find.text('Walmart').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+
+      final pendingToggle = find.byKey(
+        const ValueKey('transaction-pending-toggle'),
+      );
+      final pendingSwitch = find.descendant(
+        of: pendingToggle,
+        matching: find.byType(Switch),
+      );
+      expect(tester.widget<Switch>(pendingSwitch).value, isTrue);
+      final hapticCalls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            hapticCalls.add(call);
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+      await tester.pump();
+      expect(hapticCalls, isEmpty);
+
+      await tester.ensureVisible(pendingToggle);
+      await tester.pumpAndSettle();
+      await tester.tap(pendingToggle);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(pendingSwitch).value, isFalse);
+      expect(
+        hapticCalls.where(
+          (call) =>
+              call.method == 'HapticFeedback.vibrate' &&
+              call.arguments == 'HapticFeedbackType.selectionClick',
+        ),
+        hasLength(1),
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      final saved = dataStore.transactions.singleWhere(
+        (transaction) => transaction.id == pending.id,
+      );
+      expect(saved.status, v2_transaction.TransactionStatus.cleared);
+      expect(saved.amountMinor, pending.amountMinor);
+      expect(saved.categoryId, pending.categoryId);
+      expect(saved.note, pending.note);
+      expect(dataStore.balanceForAccount(pending.accountId), originalBalance);
+    },
+  );
+
+  testWidgets('Pending transaction form remains usable across iOS widths', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    for (final size in const [
+      Size(320, 568),
+      Size(390, 844),
+      Size(1024, 768),
+    ]) {
+      tester.view.physicalSize = size;
+      final legacyStore = FinanceStore.seeded();
+      await tester.pumpWidget(
+        MoneyTallyApp(
+          store: legacyStore,
+          dataStore: FinanceDataStore(
+            dataSet: const V1SnapshotMigrator().migrate(
+              legacyStore.snapshot().toJson(),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byTooltip('Add'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Expense'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('transaction-pending-toggle')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('transaction-schedule-toggle')),
+        findsOneWidget,
+      );
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('transaction-note')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('transaction-note')), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Cancel'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Save'), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: 'Failed at $size');
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Cancel'));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    }
   });
 
   test('scheduled undo uses type-specific labels', () {
@@ -1682,6 +2094,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<Switch>(
+            find.descendant(
+              of: find.byKey(const ValueKey('transaction-pending-toggle')),
+              matching: find.byType(Switch),
+            ),
+          )
+          .value,
+      isFalse,
+    );
 
     await tester.enterText(
       find.byKey(const ValueKey('transaction-payee')),
