@@ -1143,6 +1143,10 @@ void main() {
   testWidgets('Ledger display preferences reclaim optional row columns', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final legacyStore = FinanceStore.seeded();
     final migrated = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
@@ -1156,6 +1160,7 @@ void main() {
         .take(2)
         .toList(growable: false);
     final splitTransaction = sourceTransaction.copyWith(
+      status: v2_transaction.TransactionStatus.pending,
       splitLines: [
         v2_transaction.TransactionSplitLine(
           id: 'display-split-a',
@@ -1205,10 +1210,79 @@ void main() {
       find.byKey(ValueKey('ledger-split-indicator-${splitTransaction.id}')),
       findsOneWidget,
     );
+    expect(
+      find.byKey(ValueKey('ledger-pending-indicator-${splitTransaction.id}')),
+      findsOneWidget,
+    );
     final detailsKey = ValueKey(
       'ledger-metadata-details-${splitTransaction.id}',
     );
-    final originalWidth = tester.getSize(find.byKey(detailsKey)).width;
+    final timestampSlotKey = ValueKey(
+      'ledger-timestamp-slot-${splitTransaction.id}',
+    );
+    final splitSlotKey = ValueKey('ledger-split-slot-${splitTransaction.id}');
+    final phoneMetadataWidth = tester.getSize(find.byKey(detailsKey)).width;
+    final timestampSlotWidth = tester
+        .getSize(find.byKey(timestampSlotKey))
+        .width;
+
+    // The protected timestamp column follows the real localized label and
+    // remains visible; metadata is still the first zone to yield on a narrow
+    // screen or under a wide test font.
+    expect(timestampSlotWidth, greaterThan(0));
+    expect(phoneMetadataWidth, greaterThan(0));
+    expect(
+      tester.widget<Text>(find.byKey(detailsKey)).data,
+      contains(splitCategories.first.name),
+    );
+    expect(
+      tester.widget<Text>(find.byKey(detailsKey)).data,
+      contains(splitCategories.last.name),
+    );
+
+    final comparisonTransaction = dataStore.transactions.firstWhere(
+      (transaction) =>
+          transaction.id != splitTransaction.id &&
+          transaction.date.hour != 0 &&
+          !transaction.isDeleted,
+    );
+    final comparisonTimestampKey = ValueKey(
+      'ledger-timestamp-slot-${comparisonTransaction.id}',
+    );
+    final comparisonSplitSlotKey = ValueKey(
+      'ledger-split-slot-${comparisonTransaction.id}',
+    );
+    expect(find.byKey(comparisonTimestampKey), findsOneWidget);
+    expect(find.byKey(comparisonSplitSlotKey), findsOneWidget);
+    // Timestamp glyphs remain aligned to one protected trailing edge even
+    // though shorter labels no longer reserve unused leading width.
+    expect(
+      tester.getTopRight(find.byKey(timestampSlotKey)).dx,
+      tester.getTopRight(find.byKey(comparisonTimestampKey)).dx,
+    );
+    expect(
+      tester.getTopLeft(find.byKey(splitSlotKey)).dx,
+      tester.getTopLeft(find.byKey(comparisonSplitSlotKey)).dx,
+    );
+    final splitSecondaryAmountSlot = find.byKey(
+      ValueKey('ledger-secondary-amount-slot-${splitTransaction.id}'),
+    );
+    final comparisonSecondaryAmountSlot = find.byKey(
+      ValueKey('ledger-secondary-amount-slot-${comparisonTransaction.id}'),
+    );
+    expect(splitSecondaryAmountSlot, findsOneWidget);
+    expect(comparisonSecondaryAmountSlot, findsOneWidget);
+    expect(tester.getSize(splitSecondaryAmountSlot).width, 84);
+    expect(
+      tester.getTopLeft(splitSecondaryAmountSlot).dx,
+      tester.getTopLeft(comparisonSecondaryAmountSlot).dx,
+    );
+
+    tester.view.physicalSize = const Size(1024, 1366);
+    await tester.pumpAndSettle();
+    final tabletMetadataWidth = tester.getSize(find.byKey(detailsKey)).width;
+    expect(tester.getSize(splitSecondaryAmountSlot).width, 104);
+    expect(tabletMetadataWidth, greaterThan(phoneMetadataWidth));
 
     await dataStore.savePreferences(
       dataStore.preferences.copyWith(
@@ -1237,7 +1311,7 @@ void main() {
     );
     expect(
       tester.getSize(find.byKey(detailsKey)).width,
-      greaterThan(originalWidth),
+      greaterThan(tabletMetadataWidth),
     );
   });
 

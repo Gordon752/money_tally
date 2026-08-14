@@ -3853,10 +3853,10 @@ class _LedgerDayCard extends StatelessWidget {
                           projection.transaction.categoryId],
                   categoryName:
                       projection.categoryScope?.label ??
-                      (projection.transaction.categoryId == null
-                          ? null
-                          : categoriesById[projection.transaction.categoryId]
-                                ?.name),
+                      _ledgerTransactionCategoryNames(
+                        projection.transaction,
+                        categoriesById,
+                      ),
                   runningBalanceMinor: runningBalances
                       ?.afterTransaction[projection.transaction.id],
                   showIcon: store.preferences.showLedgerIcons,
@@ -4208,6 +4208,9 @@ class LedgerJournalRow extends StatelessWidget {
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ) ??
         const TextStyle(fontSize: 12);
+    final secondaryAmountSlotWidth = MediaQuery.sizeOf(context).width < 600
+        ? 84.0
+        : 104.0;
 
     return Dismissible(
       key: ValueKey('ledger-swipe-${transaction.id}'),
@@ -4323,60 +4326,69 @@ class LedgerJournalRow extends StatelessWidget {
                               child: const _LedgerPendingCapsule(),
                             ),
                           ],
+                          const SizedBox(width: AppSpacing.sm),
+                          SizedBox(
+                            width: 104,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: MoneyText(
+                                amountMinor: signedAmount,
+                                currency: currency,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                showPositiveSign:
+                                    transaction.type == TransactionType.income,
+                                color: signedAmount < 0
+                                    ? AppColors.danger
+                                    : null,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                       if (metadataDetails.isNotEmpty) ...[
                         const SizedBox(height: 3),
-                        _LedgerMetadataLine(
-                          rowId: transaction.id,
-                          details: metadataDetails,
-                          timeLabel: showTimestamp ? timeLabel : null,
-                          reserveTimestampSpace: showTimestamp,
-                          showSplit: showSplitIndicator && hasSplit,
-                          reserveSplitSpace: showSplitIndicator,
-                          style: secondaryStyle,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _LedgerMetadataLine(
+                                rowId: transaction.id,
+                                details: metadataDetails,
+                                timeLabel: showTimestamp ? timeLabel : null,
+                                reserveTimestampSpace: showTimestamp,
+                                showSplit: showSplitIndicator && hasSplit,
+                                reserveSplitSpace: showSplitIndicator,
+                                style: secondaryStyle,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            SizedBox(
+                              key: ValueKey(
+                                'ledger-secondary-amount-slot-${transaction.id}',
+                              ),
+                              width: secondaryAmountSlotWidth,
+                              height: 18,
+                              child: runningBalanceMinor == null
+                                  ? null
+                                  : Align(
+                                      alignment: Alignment.centerRight,
+                                      child: MoneyText(
+                                        key: ValueKey(
+                                          'ledger-running-balance-${transaction.id}',
+                                        ),
+                                        amountMinor: runningBalanceMinor!,
+                                        currency: currency,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                            ),
+                          ],
                         ),
                       ],
-                    ],
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                SizedBox(
-                  width: 104,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      MoneyText(
-                        amountMinor: signedAmount,
-                        currency: currency,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        showPositiveSign:
-                            transaction.type == TransactionType.income,
-                        color: signedAmount < 0 ? AppColors.danger : null,
-                      ),
-                      const SizedBox(height: 3),
-                      SizedBox(
-                        height: 18,
-                        child: runningBalanceMinor == null
-                            ? null
-                            : Align(
-                                alignment: Alignment.centerRight,
-                                child: MoneyText(
-                                  key: ValueKey(
-                                    'ledger-running-balance-${transaction.id}',
-                                  ),
-                                  amountMinor: runningBalanceMinor!,
-                                  currency: currency,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                      ),
                     ],
                   ),
                 ),
@@ -4387,6 +4399,22 @@ class LedgerJournalRow extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _ledgerTransactionCategoryNames(
+  TransactionRecord transaction,
+  Map<String, v2_category.CategoryRecord> categoriesById,
+) {
+  final categoryNames = <String>[];
+  for (final allocation in transaction.effectiveCategoryAllocations) {
+    final name = categoriesById[allocation.categoryId]?.name;
+    if (name != null && name.isNotEmpty && !categoryNames.contains(name)) {
+      categoryNames.add(name);
+    }
+  }
+  if (categoryNames.isNotEmpty) return categoryNames.join(' • ');
+  final categoryId = transaction.categoryId;
+  return categoryId == null ? null : categoriesById[categoryId]?.name;
 }
 
 class _LedgerMetadataLine extends StatelessWidget {
@@ -4413,17 +4441,23 @@ class _LedgerMetadataLine extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         const splitWidth = 41.0;
-        const timestampGap = 6.0;
-        const splitGap = 3.0;
+        const metadataGap = 6.0;
+        const indicatorGap = 5.0;
+        final hasTrailingIndicator = reserveSplitSpace;
+        final preferredTimestampWidth = _ledgerTimestampSlotWidth(
+          context,
+          timeLabel,
+          style,
+        );
         final timestampWidth = reserveTimestampSpace
             ? min(
-                66.0,
+                preferredTimestampWidth,
                 max(
                   0.0,
                   constraints.maxWidth -
                       (reserveSplitSpace ? splitWidth : 0) -
-                      timestampGap -
-                      splitGap,
+                      metadataGap -
+                      (hasTrailingIndicator ? indicatorGap : 0),
                 ),
               )
             : 0.0;
@@ -4443,7 +4477,7 @@ class _LedgerMetadataLine extends StatelessWidget {
                   ),
                 ),
                 if (reserveTimestampSpace) ...[
-                  const SizedBox(width: timestampGap),
+                  const SizedBox(width: metadataGap),
                   SizedBox(
                     key: ValueKey('ledger-timestamp-slot-$rowId'),
                     width: timestampWidth,
@@ -4456,7 +4490,9 @@ class _LedgerMetadataLine extends StatelessWidget {
                       style: style,
                     ),
                   ),
-                  const SizedBox(width: splitGap),
+                  if (hasTrailingIndicator) const SizedBox(width: indicatorGap),
+                ] else if (hasTrailingIndicator) ...[
+                  const SizedBox(width: metadataGap),
                 ],
                 if (reserveSplitSpace)
                   SizedBox(
@@ -4482,6 +4518,26 @@ class _LedgerMetadataLine extends StatelessWidget {
       },
     );
   }
+}
+
+double _ledgerTimestampSlotWidth(
+  BuildContext context,
+  String? label,
+  TextStyle style,
+) {
+  if (label == null || label.isEmpty) return 0;
+  final textDirection = Directionality.of(context);
+  final textScaler = MediaQuery.textScalerOf(context);
+  final painter = TextPainter(
+    text: TextSpan(text: label, style: style),
+    maxLines: 1,
+    textDirection: textDirection,
+    textScaler: textScaler,
+  )..layout();
+  // One logical point on either side protects glyph bearings without keeping
+  // unused leading space from the old fixed-width reservation. Timestamp
+  // right edges remain fixed by the trailing indicator slot.
+  return painter.width.ceilToDouble() + 2;
 }
 
 class _LedgerSplitCapsule extends StatelessWidget {
