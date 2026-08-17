@@ -15,6 +15,7 @@ class AccountCard extends StatelessWidget {
     required this.account,
     required this.balanceMinor,
     this.transactions = const [],
+    this.nextScheduledPaymentDueDate,
     this.currency = const CurrencyFormatSettings(),
     this.groupLabel,
     this.subtitle,
@@ -33,6 +34,7 @@ class AccountCard extends StatelessWidget {
   final AccountRecord account;
   final int balanceMinor;
   final Iterable<TransactionRecord> transactions;
+  final DateTime? nextScheduledPaymentDueDate;
   final CurrencyFormatSettings currency;
   final String? groupLabel;
   final String? subtitle;
@@ -123,6 +125,7 @@ class AccountCard extends StatelessWidget {
                 account: account,
                 currentBalanceMinor: balanceMinor,
                 transactions: transactions,
+                nextScheduledPaymentDueDate: nextScheduledPaymentDueDate,
                 currency: currency,
               ),
             ],
@@ -200,12 +203,14 @@ class _CreditInsightsPreview extends StatelessWidget {
     required this.account,
     required this.currentBalanceMinor,
     required this.transactions,
+    required this.nextScheduledPaymentDueDate,
     required this.currency,
   });
 
   final AccountRecord account;
   final int currentBalanceMinor;
   final Iterable<TransactionRecord> transactions;
+  final DateTime? nextScheduledPaymentDueDate;
   final CurrencyFormatSettings currency;
 
   @override
@@ -220,10 +225,12 @@ class _CreditInsightsPreview extends StatelessWidget {
       currentBalanceMinor: currentBalanceMinor,
       today: now,
     );
-    final nextPaymentDueDate = calculator.nextPaymentDueDate(
-      paymentDueDay: account.paymentDueDay,
-      today: now,
-    );
+    final nextPaymentDueDate =
+        nextScheduledPaymentDueDate ??
+        calculator.nextPaymentDueDate(
+          paymentDueDay: account.paymentDueDay,
+          today: now,
+        );
     final completeness = estimate.estimateCompleteness;
     final isPartial =
         completeness == CreditInsightsEstimateCompleteness.partial;

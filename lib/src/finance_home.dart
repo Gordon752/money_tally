@@ -2198,6 +2198,9 @@ class AccountGroupCard extends StatelessWidget {
         child: AccountCard(
           account: account,
           transactions: store.transactions,
+          nextScheduledPaymentDueDate: store.nextCreditCardPaymentDueDate(
+            account.id,
+          ),
           balanceMinor: store.balanceForAccount(account.id),
           currency: store.preferences.currency,
           subtitle: lastAccountActivitySubtitle(store, account.id),
@@ -14279,10 +14282,12 @@ class _CreditCardAccountDetails extends StatelessWidget {
       currentBalanceMinor: balanceMinor,
       today: now,
     );
-    final dueDate = calculator.nextPaymentDueDate(
-      paymentDueDay: account.paymentDueDay,
-      today: now,
-    );
+    final dueDate =
+        store.nextCreditCardPaymentDueDate(account.id, now: now) ??
+        calculator.nextPaymentDueDate(
+          paymentDueDay: account.paymentDueDay,
+          today: now,
+        );
     final completeness = estimate.estimateCompleteness;
     final isPartial =
         completeness == CreditInsightsEstimateCompleteness.partial;

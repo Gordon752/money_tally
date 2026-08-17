@@ -552,6 +552,42 @@ class FinanceDataStore extends ChangeNotifier {
     return result;
   }
 
+  /// Returns the earliest unresolved scheduled payment transfer whose
+  /// destination is [creditCardAccountId]. The schedule relationship is
+  /// identified by stable account IDs; payee/display text is intentionally
+  /// not considered.
+  DateTime? nextCreditCardPaymentDueDate(
+    String creditCardAccountId, {
+    DateTime? now,
+  }) {
+    final account = accounts
+        .where(
+          (item) =>
+              item.id == creditCardAccountId &&
+              item.type == AccountType.creditCard &&
+              item.isVisible,
+        )
+        .firstOrNull;
+    if (account == null) return null;
+
+    DateTime? earliest;
+    for (final scheduledTransaction in scheduledTransactions) {
+      if (scheduledTransaction.type != TransactionType.transfer ||
+          scheduledTransaction.transferAccountId != creditCardAccountId) {
+        continue;
+      }
+      final candidate = nextActionableScheduledDate(
+        scheduledTransaction,
+        now: now,
+      );
+      if (candidate != null &&
+          (earliest == null || candidate.isBefore(earliest))) {
+        earliest = candidate;
+      }
+    }
+    return earliest;
+  }
+
   Future<void> resetScheduledHistory({DateTime? now}) async {
     final anchor = now ?? DateTime.now();
     final updatedSchedules = <ScheduledTransactionRecord>[];

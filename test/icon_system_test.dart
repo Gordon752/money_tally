@@ -4,9 +4,68 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/src/design/app_icons.dart';
 import 'package:money_tally/src/design/category_icon_catalog.dart';
+import 'package:money_tally/src/design/credit_card_appearance.dart';
 import 'package:money_tally/src/design/widgets/category_icon_badge.dart';
 import 'package:money_tally/src/design/widgets/category_icon_picker.dart';
+import 'package:money_tally/src/domain/account.dart';
 import 'package:money_tally/src/domain/category.dart';
+
+const _phaseOneCategoryGlyphs = <String, IconData>{
+  'finance.wallet': Icons.wallet_outlined,
+  'finance.investment': Icons.trending_up_outlined,
+  'food.fast': Icons.fastfood_outlined,
+  'food.drink': Icons.local_drink_outlined,
+  'food.delivery': Icons.delivery_dining_outlined,
+  'fuelpump': Icons.local_gas_station_outlined,
+  'fuel.ev': Icons.ev_station_outlined,
+  'fuel.charger': Icons.electrical_services_outlined,
+  'fuel.carwash': Icons.local_car_wash_outlined,
+  'cart': Icons.shopping_bag_outlined,
+  'shopping.clothes': Icons.checkroom_outlined,
+  'shopping.store': Icons.storefront_outlined,
+  'shopping.jewelry': Icons.diamond_outlined,
+  'cross.case': Icons.medical_services_outlined,
+  'medical.pharmacy': Icons.local_pharmacy_outlined,
+  'medical.fitness': Icons.fitness_center_outlined,
+  'medical.therapy': Icons.psychology_outlined,
+  'housing.rent': Icons.key_outlined,
+  'housing.mortgage': Icons.real_estate_agent_outlined,
+  'housing.property': Icons.other_houses_outlined,
+  'housing.furniture': Icons.chair_outlined,
+  'housing.garden': Icons.yard_outlined,
+  'housing.cleaning': Icons.cleaning_services_outlined,
+  'business.invoice': Icons.receipt_long_outlined,
+  'business.payroll': Icons.payments_outlined,
+  'business.subscription': Icons.handshake_outlined,
+  'technology.storage': Icons.storage_outlined,
+  'technology.repair': Icons.phonelink_setup_outlined,
+  'travel.luggage': Icons.luggage_outlined,
+  'travel.camping': Icons.festival_outlined,
+  'entertainment.sports': Icons.sports_basketball_outlined,
+  'education.course': Icons.cast_for_education_outlined,
+  'education.childcare': Icons.child_care_outlined,
+  'education.library': Icons.local_library_outlined,
+  'education.graduation': Icons.school_outlined,
+  'taxes.sales': Icons.point_of_sale_outlined,
+  'maintenance.auto': Icons.car_repair_outlined,
+  'maintenance.home': Icons.home_repair_service_outlined,
+  'personal.wellness': Icons.self_improvement_outlined,
+  'personal.children': Icons.child_friendly_outlined,
+  'personal.donation': Icons.volunteer_activism_outlined,
+  'misc.membership': Icons.card_membership_outlined,
+};
+
+const _phaseTwoCategoryGlyphs = <String, IconData>{
+  'medical.medicine': Icons.medication_outlined,
+  'technology.software': Icons.code_outlined,
+  'pets.food': Icons.set_meal_outlined,
+  'pets.vet': Icons.vaccines_outlined,
+  'pets.boarding': Icons.night_shelter_outlined,
+  'taxes.receipt': Icons.receipt_outlined,
+  'taxes.federal': Icons.assured_workload_outlined,
+  'insurance.health': Icons.health_and_safety_outlined,
+  'insurance.claim': Icons.fact_check_outlined,
+};
 
 void main() {
   tearDown(() {
@@ -65,6 +124,60 @@ void main() {
       expect(CategoryIconCatalog.find(newKey), isNotNull);
     }
     expect(CategoryIconCatalog.find('old-unknown-icon'), isNull);
+
+    for (final icon in CategoryIconCatalog.icons) {
+      expect(
+        CategoryIconCatalog.find(icon.key),
+        same(icon),
+        reason: 'Persisted semantic key ${icon.key} must continue to resolve.',
+      );
+    }
+  });
+
+  test('Phase 1 category semantic keys resolve to approved iOS glyphs', () {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+    for (final entry in _phaseOneCategoryGlyphs.entries) {
+      expect(
+        CategoryIconCatalog.find(entry.key)?.icon,
+        entry.value,
+        reason: '${entry.key} must retain its key and use its approved glyph.',
+      );
+    }
+  });
+
+  test('Phase 2 category semantic keys resolve to approved iOS glyphs', () {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+    for (final entry in _phaseTwoCategoryGlyphs.entries) {
+      expect(
+        CategoryIconCatalog.find(entry.key)?.icon,
+        entry.value,
+        reason: '${entry.key} must retain its key and use its approved glyph.',
+      );
+    }
+    expect(
+      CategoryIconCatalog.find('medical.dental')?.icon,
+      CupertinoIcons.smiley,
+      reason: 'Dental stays unchanged until a genuine dental glyph exists.',
+    );
+  });
+
+  test('Phase 1 account appearance IDs resolve to approved glyphs', () {
+    final expectations = <(AccountType, String), IconData>{
+      (AccountType.checking, 'checking'): Icons.account_balance_wallet_outlined,
+      (AccountType.savings, 'savings'): Icons.savings_outlined,
+      (AccountType.checking, 'portfolio'): Icons.trending_up_outlined,
+      (AccountType.cash, 'cashWallet'): Icons.wallet_outlined,
+      (AccountType.loan, 'loanFinance'): Icons.request_quote_outlined,
+    };
+
+    for (final entry in expectations.entries) {
+      final (type, id) = entry.key;
+      final option = AccountAppearanceCatalog.iconFor(type, id);
+      expect(option.id, id, reason: 'Persisted account icon ID must survive.');
+      expect(option.icon, entry.value);
+    }
   });
 
   test(
@@ -117,6 +230,154 @@ void main() {
       expect(matches.map((icon) => icon.key), contains(entry.value));
       expect(matches.map((icon) => icon.key).toSet().length, matches.length);
     }
+  });
+
+  test('Phase 1 aliases find the intended semantic entries', () {
+    final expectations = <String, String>{
+      'billfold': 'finance.wallet',
+      'brokerage': 'finance.investment',
+      'drive thru': 'food.fast',
+      'fountain drink': 'food.drink',
+      'delivery app': 'food.delivery',
+      'gasoline': 'fuelpump',
+      'detailing': 'fuel.carwash',
+      'apparel': 'shopping.clothes',
+      'storefront': 'shopping.store',
+      'health care': 'cross.case',
+      'drugstore': 'medical.pharmacy',
+      'landlord': 'housing.rent',
+      'home loan': 'housing.mortgage',
+      'sofa': 'housing.furniture',
+      'landscaping': 'housing.garden',
+      'housekeeping': 'housing.cleaning',
+      'receivable': 'business.invoice',
+      'paycheck': 'business.payroll',
+      'phone repair': 'technology.repair',
+      'suitcase': 'travel.luggage',
+      'campground': 'travel.camping',
+      'athletics': 'entertainment.sports',
+      'lesson': 'education.course',
+      'daycare': 'education.childcare',
+      'reading': 'education.library',
+      'point of sale': 'taxes.sales',
+      'mechanic': 'maintenance.auto',
+      'handyman': 'maintenance.home',
+    };
+
+    for (final entry in expectations.entries) {
+      expect(
+        CategoryIconCatalog.matching(entry.key).map((icon) => icon.key),
+        contains(entry.value),
+        reason: 'Search alias ${entry.key} must find ${entry.value}.',
+      );
+    }
+  });
+
+  test('Phase 2 aliases find the intended semantic entries', () {
+    final expectations = <String, String>{
+      'capsule': 'medical.medicine',
+      'dentistry': 'medical.dental',
+      'coding': 'technology.software',
+      'kibble': 'pets.food',
+      'animal doctor': 'pets.vet',
+      'kennel': 'pets.boarding',
+      'tax filing': 'taxes.receipt',
+      'irs': 'taxes.federal',
+      'health coverage': 'insurance.health',
+      'claim review': 'insurance.claim',
+    };
+
+    for (final entry in expectations.entries) {
+      expect(
+        CategoryIconCatalog.matching(entry.key).map((icon) => icon.key),
+        contains(entry.value),
+        reason: 'Search alias ${entry.key} must find ${entry.value}.',
+      );
+    }
+  });
+
+  testWidgets('Phase 1 iOS glyphs render at Ledger and picker sizes', (
+    tester,
+  ) async {
+    const sizes = <double>[14, 17, 20];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: Wrap(
+              children: [
+                for (final size in sizes)
+                  for (final key in _phaseOneCategoryGlyphs.keys)
+                    SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: Icon(
+                        CategoryIconCatalog.find(key)!.cupertinoIcon,
+                        key: ValueKey('$key@$size'),
+                        size: size,
+                      ),
+                    ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    for (final size in sizes) {
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is Icon && widget.size == size,
+        ),
+        findsNWidgets(_phaseOneCategoryGlyphs.length),
+      );
+    }
+    expect(
+      find.byKey(const ValueKey('technology.repair@14.0')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Phase 2 iOS glyphs render at Ledger and picker sizes', (
+    tester,
+  ) async {
+    const sizes = <double>[14, 17, 20];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: Wrap(
+              children: [
+                for (final size in sizes)
+                  for (final key in _phaseTwoCategoryGlyphs.keys)
+                    SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: Icon(
+                        CategoryIconCatalog.find(key)!.cupertinoIcon,
+                        key: ValueKey('phase2:$key@$size'),
+                        size: size,
+                      ),
+                    ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    for (final size in sizes) {
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is Icon && widget.size == size,
+        ),
+        findsNWidgets(_phaseTwoCategoryGlyphs.length),
+      );
+    }
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('category badge uses assigned color and safe unknown fallback', (

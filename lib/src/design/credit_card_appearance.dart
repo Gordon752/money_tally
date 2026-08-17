@@ -56,17 +56,17 @@ abstract final class AccountAppearanceCatalog {
     AccountIconOption(
       id: 'checking',
       label: 'Checking',
-      icon: CupertinoIcons.creditcard,
+      icon: Icons.account_balance_wallet_outlined,
     ),
     AccountIconOption(
       id: 'savings',
       label: 'Savings',
-      icon: CupertinoIcons.money_dollar_circle,
+      icon: Icons.savings_outlined,
     ),
     AccountIconOption(
       id: 'portfolio',
       label: 'Portfolio',
-      icon: CupertinoIcons.briefcase,
+      icon: Icons.trending_up_outlined,
     ),
   ];
 
@@ -89,7 +89,7 @@ abstract final class AccountAppearanceCatalog {
     AccountIconOption(
       id: 'cashWallet',
       label: 'Wallet',
-      icon: CupertinoIcons.creditcard,
+      icon: Icons.wallet_outlined,
     ),
   ];
 
@@ -112,7 +112,7 @@ abstract final class AccountAppearanceCatalog {
     AccountIconOption(
       id: 'loanFinance',
       label: 'Finance',
-      icon: CupertinoIcons.money_dollar_circle,
+      icon: Icons.request_quote_outlined,
     ),
   ];
 

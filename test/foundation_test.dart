@@ -789,6 +789,274 @@ void main() {
     );
   });
 
+  test(
+    'credit card payment due follows the earliest unresolved linked transfer',
+    () {
+      final base = _dataSet();
+      final sync = SyncMetadata.fresh(now: DateTime(2026, 8, 1));
+      final card = AccountRecord(
+        id: 'credit-card',
+        name: 'Credit Card',
+        type: AccountType.creditCard,
+        openingBalanceMinor: -50000,
+        paymentDueDay: 28,
+        sync: sync,
+      );
+      ScheduledTransactionRecord paymentSchedule({
+        required String id,
+        required DateTime nextDate,
+      }) => ScheduledTransactionRecord(
+        id: id,
+        type: TransactionType.transfer,
+        accountId: 'checking',
+        transferAccountId: card.id,
+        payee: 'Card payment',
+        amountMinor: 10000,
+        nextDate: nextDate,
+        frequency: RecurrenceFrequency.monthly,
+        sync: sync,
+      );
+      final store = FinanceDataStore(
+        dataSet: base.copyWith(
+          accounts: [...base.accounts, card],
+          scheduledTransactions: [
+            paymentSchedule(
+              id: 'later-payment',
+              nextDate: DateTime(2026, 9, 5),
+            ),
+            paymentSchedule(
+              id: 'august-payment',
+              nextDate: DateTime(2026, 8, 28),
+            ),
+          ],
+        ),
+      );
+
+      expect(
+        store.nextCreditCardPaymentDueDate(card.id, now: DateTime(2026, 8, 14)),
+        DateTime(2026, 8, 28),
+      );
+      expect(
+        store.nextCreditCardPaymentDueDate(
+          'checking',
+          now: DateTime(2026, 8, 14),
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'paid card occurrence advances regardless of Pending or Cleared status',
+    () {
+      final base = _dataSet();
+      final dueDate = DateTime(2026, 8, 28);
+      final nextDate = DateTime(2026, 9, 28);
+      final sync = SyncMetadata.fresh(now: DateTime(2026, 8, 1));
+      final card = AccountRecord(
+        id: 'credit-card',
+        name: 'Credit Card',
+        type: AccountType.creditCard,
+        openingBalanceMinor: -50000,
+        sync: sync,
+      );
+      final occurrence = ScheduledOccurrenceRecord(
+        scheduledDate: dueDate,
+        plannedAmountMinor: 10000,
+        status: ScheduledOccurrenceStatus.paid,
+        actualAmountMinor: 10000,
+        actualPaymentDate: DateTime(2026, 8, 14),
+        transactionId: 'card-payment',
+      );
+      final schedule = ScheduledTransactionRecord(
+        id: 'card-payment-schedule',
+        type: TransactionType.transfer,
+        accountId: 'checking',
+        transferAccountId: card.id,
+        payee: 'Card payment',
+        amountMinor: 10000,
+        nextDate: nextDate,
+        frequency: RecurrenceFrequency.monthly,
+        occurrences: [occurrence],
+        sync: sync,
+      );
+
+      for (final status in [
+        TransactionStatus.pending,
+        TransactionStatus.cleared,
+      ]) {
+        final transaction = TransactionRecord(
+          id: 'card-payment',
+          type: TransactionType.transfer,
+          accountId: 'checking',
+          transferAccountId: card.id,
+          date: DateTime(2026, 8, 14),
+          payee: 'Card payment',
+          amountMinor: 10000,
+          status: status,
+          scheduledTransactionId: schedule.id,
+          scheduledOccurrenceDate: dueDate,
+          scheduledPlannedAmountMinor: 10000,
+          sync: sync,
+        );
+        final store = FinanceDataStore(
+          dataSet: base.copyWith(
+            accounts: [...base.accounts, card],
+            transactions: [transaction],
+            scheduledTransactions: [schedule],
+          ),
+        );
+
+        expect(
+          store.nextCreditCardPaymentDueDate(
+            card.id,
+            now: DateTime(2026, 8, 14),
+          ),
+          nextDate,
+          reason: 'Ledger status $status must not keep August due',
+        );
+      }
+    },
+  );
+
+  test('undo card payment restores the earlier unresolved due date', () async {
+    final base = _dataSet();
+    final dueDate = DateTime(2026, 8, 28);
+    final sync = SyncMetadata.fresh(now: DateTime(2026, 8, 1));
+    final card = AccountRecord(
+      id: 'credit-card',
+      name: 'Credit Card',
+      type: AccountType.creditCard,
+      openingBalanceMinor: -50000,
+      sync: sync,
+    );
+    final transaction = TransactionRecord(
+      id: 'card-payment',
+      type: TransactionType.transfer,
+      accountId: 'checking',
+      transferAccountId: card.id,
+      date: DateTime(2026, 8, 14),
+      payee: 'Card payment',
+      amountMinor: 10000,
+      status: TransactionStatus.pending,
+      scheduledTransactionId: 'card-payment-schedule',
+      scheduledOccurrenceDate: dueDate,
+      scheduledPlannedAmountMinor: 10000,
+      sync: sync,
+    );
+    final schedule = ScheduledTransactionRecord(
+      id: 'card-payment-schedule',
+      type: TransactionType.transfer,
+      accountId: 'checking',
+      transferAccountId: card.id,
+      payee: 'Card payment',
+      amountMinor: 10000,
+      nextDate: DateTime(2026, 9, 28),
+      frequency: RecurrenceFrequency.monthly,
+      occurrences: [
+        ScheduledOccurrenceRecord(
+          scheduledDate: dueDate,
+          plannedAmountMinor: 10000,
+          status: ScheduledOccurrenceStatus.paid,
+          actualAmountMinor: 10000,
+          actualPaymentDate: transaction.date,
+          transactionId: transaction.id,
+        ),
+      ],
+      sync: sync,
+    );
+    final store = FinanceDataStore(
+      dataSet: base.copyWith(
+        accounts: [...base.accounts, card],
+        transactions: [transaction],
+        scheduledTransactions: [schedule],
+      ),
+    );
+
+    expect(
+      store.nextCreditCardPaymentDueDate(card.id, now: DateTime(2026, 8, 14)),
+      DateTime(2026, 9, 28),
+    );
+    await store.undoScheduledPayment(
+      transaction.id,
+      now: DateTime(2026, 8, 14),
+    );
+    expect(
+      store.nextCreditCardPaymentDueDate(card.id, now: DateTime(2026, 8, 14)),
+      dueDate,
+    );
+  });
+
+  test(
+    'card payment due handles no future occurrence and stored month end',
+    () {
+      final base = _dataSet();
+      final sync = SyncMetadata.fresh(now: DateTime(2028, 1, 1));
+      final card = AccountRecord(
+        id: 'credit-card',
+        name: 'Credit Card',
+        type: AccountType.creditCard,
+        openingBalanceMinor: -50000,
+        sync: sync,
+      );
+      ScheduledTransactionRecord schedule({
+        required String id,
+        required DateTime nextDate,
+        RecurrenceFrequency frequency = RecurrenceFrequency.monthly,
+        ScheduledAction lastAction = ScheduledAction.none,
+        SyncMetadata? recordSync,
+      }) => ScheduledTransactionRecord(
+        id: id,
+        type: TransactionType.transfer,
+        accountId: 'checking',
+        transferAccountId: card.id,
+        payee: 'Card payment',
+        amountMinor: 10000,
+        nextDate: nextDate,
+        frequency: frequency,
+        lastAction: lastAction,
+        sync: recordSync ?? sync,
+      );
+      final monthEndStore = FinanceDataStore(
+        dataSet: base.copyWith(
+          accounts: [...base.accounts, card],
+          scheduledTransactions: [
+            schedule(id: 'february-leap', nextDate: DateTime(2028, 2, 29)),
+            schedule(id: 'march-31', nextDate: DateTime(2028, 3, 31)),
+          ],
+        ),
+      );
+      expect(
+        monthEndStore.nextCreditCardPaymentDueDate(
+          card.id,
+          now: DateTime(2028, 2, 1),
+        ),
+        DateTime(2028, 2, 29),
+      );
+
+      final completedOnce = schedule(
+        id: 'completed-once',
+        nextDate: DateTime(2028, 2, 29),
+        frequency: RecurrenceFrequency.once,
+        lastAction: ScheduledAction.paid,
+        recordSync: sync.deleted(now: DateTime(2028, 2, 1)),
+      );
+      final completedStore = FinanceDataStore(
+        dataSet: base.copyWith(
+          accounts: [...base.accounts, card],
+          scheduledTransactions: [completedOnce],
+        ),
+      );
+      expect(
+        completedStore.nextCreditCardPaymentDueDate(
+          card.id,
+          now: DateTime(2028, 2, 1),
+        ),
+        isNull,
+      );
+    },
+  );
+
   test('split transactions must match the parent amount', () async {
     final store = FinanceDataStore(dataSet: _dataSet());
 

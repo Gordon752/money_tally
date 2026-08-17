@@ -5128,6 +5128,132 @@ void main() {
     );
   });
 
+  testWidgets(
+    'credit card Payment Due follows paid schedule and Undo immediately',
+    (tester) async {
+      tester.view.physicalSize = const Size(393, 852);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final sync = v2_sync.SyncMetadata.fresh(
+        now: DateTime(2026, 8, 1),
+        deviceId: 'test',
+      );
+      final checking = v2_account.AccountRecord(
+        id: 'payment-source',
+        name: 'Checking',
+        type: v2_account.AccountType.checking,
+        openingBalanceMinor: 100000,
+        sync: sync,
+      );
+      final card = v2_account.AccountRecord(
+        id: 'payment-card',
+        name: 'Payment Card',
+        type: v2_account.AccountType.creditCard,
+        openingBalanceMinor: -50000,
+        creditLimitMinor: 200000,
+        interestEstimationEnabled: true,
+        annualPercentageRate: 24,
+        statementClosingDay: 8,
+        paymentDueDay: 28,
+        sync: sync,
+      );
+      final dueDate = DateTime(2026, 8, 28);
+      final schedule = v2_scheduled.ScheduledTransactionRecord(
+        id: 'payment-card-schedule',
+        type: v2_transaction.TransactionType.transfer,
+        accountId: checking.id,
+        transferAccountId: card.id,
+        payee: 'Payment Card',
+        amountMinor: 10000,
+        nextDate: dueDate,
+        frequency: v2_scheduled.RecurrenceFrequency.monthly,
+        sync: sync,
+      );
+      final dataStore = FinanceDataStore(
+        dataSet: FinanceDataSet(
+          accounts: [checking, card],
+          categories: const [],
+          transactions: const [],
+          scheduledTransactions: [schedule],
+          budgets: const [],
+          preferences: const UserPreferences(),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FinanceDataStoreScope(
+            store: dataStore,
+            child: Builder(
+              builder: (context) {
+                final watchedStore = FinanceDataStoreScope.watch(context);
+                return Scaffold(
+                  body: AccountCard(
+                    account: card,
+                    balanceMinor: watchedStore.balanceForAccount(card.id),
+                    transactions: watchedStore.transactions,
+                    nextScheduledPaymentDueDate: watchedStore
+                        .nextCreditCardPaymentDueDate(card.id),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Aug 28'), findsOneWidget);
+
+      final transaction = await completeScheduledTransactionPayment(
+        dataStore,
+        schedule,
+        scheduledDate: dueDate,
+        actualAmountMinor: 10000,
+        paymentDate: DateTime(2026, 8, 14, 9, 30),
+        payee: 'Payment Card',
+        note: 'Paid early',
+        status: v2_transaction.TransactionStatus.pending,
+      );
+      await tester.pumpAndSettle();
+
+      expect(transaction.status, v2_transaction.TransactionStatus.pending);
+      expect(find.text('Aug 28'), findsNothing);
+      expect(find.text('Sep 28'), findsOneWidget);
+
+      await dataStore.undoScheduledPayment(
+        transaction.id,
+        now: DateTime(2026, 8, 14),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Aug 28'), findsOneWidget);
+      expect(find.text('Sep 28'), findsNothing);
+
+      final syncedSchedule = schedule.copyWith(
+        nextDate: DateTime(2026, 9, 28),
+        occurrences: [
+          v2_scheduled.ScheduledOccurrenceRecord(
+            scheduledDate: dueDate,
+            plannedAmountMinor: 10000,
+            status: v2_scheduled.ScheduledOccurrenceStatus.paid,
+            actualAmountMinor: 10000,
+            actualPaymentDate: DateTime(2026, 8, 14, 9, 30),
+            transactionId: 'synced-payment',
+          ),
+        ],
+        sync: schedule.sync.touched(
+          now: DateTime(2026, 8, 15),
+          deviceId: 'remote',
+        ),
+      );
+      await dataStore.replaceDataSet(
+        dataStore.dataSet.copyWith(scheduledTransactions: [syncedSchedule]),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Sep 28'), findsOneWidget);
+    },
+  );
+
   testWidgets('complete Credit Insights estimate has no status indicator', (
     tester,
   ) async {
