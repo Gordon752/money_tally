@@ -550,8 +550,8 @@ void main() {
       expect(estimate.cycleEnd, DateTime(2026, 8, 31));
       expect(estimate.daysRepresented, 30);
       expect(estimate.averageDailyBalanceMinor, 100000);
-      expect(estimate.estimatedInterestMinor, 1973);
-      expect(estimate.projectedStatementMinor, -101973);
+      expect(estimate.estimatedInterestMinor, 2038);
+      expect(estimate.projectedStatementMinor, -102038);
       expect(
         estimate.estimateCompleteness,
         CreditInsightsEstimateCompleteness.complete,
@@ -577,8 +577,8 @@ void main() {
         today: DateTime(2026, 8, 30),
       );
 
-      expect(estimate.averageDailyBalanceMinor, 125000);
-      expect(estimate.estimatedInterestMinor, 2466);
+      expect(estimate.averageDailyBalanceMinor, closeTo(125806.45, 0.01));
+      expect(estimate.estimatedInterestMinor, 2564);
     });
 
     test('mid-cycle payment reduces debt from its date forward', () {
@@ -600,8 +600,8 @@ void main() {
         today: DateTime(2026, 8, 30),
       );
 
-      expect(estimate.averageDailyBalanceMinor, 175000);
-      expect(estimate.estimatedInterestMinor, 3452);
+      expect(estimate.averageDailyBalanceMinor, closeTo(174193.55, 0.01));
+      expect(estimate.estimatedInterestMinor, 3551);
     });
 
     test('multiple purchases and payments reconstruct end-of-day balances', () {
@@ -635,7 +635,7 @@ void main() {
       );
 
       // EOD debt: 1000, 1000, 1500, 1500, 1250, 1250, 1350, 1350.
-      expect(estimate.averageDailyBalanceMinor, 127500);
+      expect(estimate.averageDailyBalanceMinor, closeTo(133064.52, 0.01));
       expect(estimate.daysRepresented, 8);
     });
 

@@ -110,12 +110,16 @@ class CreditInsightsCalculator {
     }
 
     final dailyDeltas = <DateTime, int>{};
+    var futureDeltasMinor = 0;
     for (final transaction in transactions) {
       if (transaction.isDeleted) continue;
       final delta = transaction.deltaForAccount(account.id);
       if (delta == 0) continue;
       final date = _calendarDate(transaction.date);
       dailyDeltas[date] = (dailyDeltas[date] ?? 0) + delta;
+      if (date.isAfter(referenceDate)) {
+        futureDeltasMinor += delta;
+      }
     }
 
     var signedBalanceMinor = account.openingBalanceMinor;
@@ -139,10 +143,26 @@ class CreditInsightsCalculator {
       representedDay = _nextCalendarDay(representedDay);
     }
 
-    final averageDailyBalanceMinor = summedDailyDebtMinor / daysRepresented;
+    // The ordinary account balance includes every recorded transaction,
+    // including future-dated records. Credit Insights must not let those
+    // records affect the balance before their transaction date.
+    final currentBalanceAsOfTodayMinor =
+        currentBalanceMinor - futureDeltasMinor;
+    final projectedDailyDebtMinor = currentBalanceAsOfTodayMinor < 0
+        ? currentBalanceAsOfTodayMinor.abs()
+        : 0;
+    final remainingCycleDays = _calendarDayDifference(
+      representedEnd,
+      cycle.end,
+    );
+    final projectedSummedDailyDebtMinor =
+        summedDailyDebtMinor + projectedDailyDebtMinor * remainingCycleDays;
+    final projectedDaysRepresented = daysRepresented + remainingCycleDays;
+    final averageDailyBalanceMinor =
+        projectedSummedDailyDebtMinor / projectedDaysRepresented;
     final dailyPeriodicRate = apr / 100 / 365;
-    final estimatedInterestMinor = (summedDailyDebtMinor * dailyPeriodicRate)
-        .round();
+    final estimatedInterestMinor =
+        (projectedSummedDailyDebtMinor * dailyPeriodicRate).round();
 
     return CreditInsightsEstimate(
       nextStatementClosingDate: closingDate,
@@ -155,7 +175,8 @@ class CreditInsightsCalculator {
       totalCycleDays: totalCycleDays,
       averageDailyBalanceMinor: averageDailyBalanceMinor,
       estimatedInterestMinor: estimatedInterestMinor,
-      projectedStatementMinor: currentBalanceMinor - estimatedInterestMinor,
+      projectedStatementMinor:
+          currentBalanceAsOfTodayMinor - estimatedInterestMinor,
       estimateCompleteness: historyStart.isAfter(cycle.start)
           ? CreditInsightsEstimateCompleteness.partial
           : CreditInsightsEstimateCompleteness.complete,
