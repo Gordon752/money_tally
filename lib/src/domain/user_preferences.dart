@@ -25,6 +25,8 @@ enum AccountDefaultMode { lastUsed, none, specific, useTransactionDefault }
 
 enum AutomaticBackupFrequency { daily, weekly }
 
+enum AutomaticBackupLocation { local, iCloud }
+
 const defaultAccountGroupOrderNames = [
   'banking',
   'cash',
@@ -56,6 +58,7 @@ class UserPreferences {
     this.automaticBackupsEnabled = false,
     this.automaticBackupFrequency = AutomaticBackupFrequency.weekly,
     this.preferredAutomaticBackupMinutes = 23 * 60,
+    this.automaticBackupLocation = AutomaticBackupLocation.local,
     this.showLedgerIcons = true,
     this.showLedgerTimestamps = true,
     this.showLedgerSplitIndicator = true,
@@ -96,6 +99,7 @@ class UserPreferences {
 
   /// Minutes after local midnight. Background execution remains best-effort.
   final int preferredAutomaticBackupMinutes;
+  final AutomaticBackupLocation automaticBackupLocation;
   final bool showLedgerIcons;
   final bool showLedgerTimestamps;
   final bool showLedgerSplitIndicator;
@@ -135,6 +139,7 @@ class UserPreferences {
     bool? automaticBackupsEnabled,
     AutomaticBackupFrequency? automaticBackupFrequency,
     int? preferredAutomaticBackupMinutes,
+    AutomaticBackupLocation? automaticBackupLocation,
     bool? showLedgerIcons,
     bool? showLedgerTimestamps,
     bool? showLedgerSplitIndicator,
@@ -189,6 +194,8 @@ class UserPreferences {
       preferredAutomaticBackupMinutes:
           preferredAutomaticBackupMinutes ??
           this.preferredAutomaticBackupMinutes,
+      automaticBackupLocation:
+          automaticBackupLocation ?? this.automaticBackupLocation,
       showLedgerIcons: showLedgerIcons ?? this.showLedgerIcons,
       showLedgerTimestamps: showLedgerTimestamps ?? this.showLedgerTimestamps,
       showLedgerSplitIndicator:
@@ -232,6 +239,7 @@ class UserPreferences {
       'automaticBackupsEnabled': automaticBackupsEnabled,
       'automaticBackupFrequency': automaticBackupFrequency.name,
       'preferredAutomaticBackupMinutes': preferredAutomaticBackupMinutes,
+      'automaticBackupLocation': automaticBackupLocation.name,
       'showLedgerIcons': showLedgerIcons,
       'showLedgerTimestamps': showLedgerTimestamps,
       'showLedgerSplitIndicator': showLedgerSplitIndicator,
@@ -320,6 +328,11 @@ class UserPreferences {
       preferredAutomaticBackupMinutes: _validPreferredMinutes(
         json['preferredAutomaticBackupMinutes'],
         fallback: 23 * 60,
+      ),
+      automaticBackupLocation: enumByName(
+        AutomaticBackupLocation.values,
+        json['automaticBackupLocation'],
+        AutomaticBackupLocation.local,
       ),
       showLedgerIcons: json['showLedgerIcons'] as bool? ?? true,
       showLedgerTimestamps: json['showLedgerTimestamps'] as bool? ?? true,

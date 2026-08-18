@@ -8677,6 +8677,7 @@ class SettingsView extends StatefulWidget {
     this.exportFileService,
     this.backupImportFileService,
     this.backupSafetyFileService,
+    this.iCloudBackupStorage,
     this.backupRestoreValidator = const BackupRestoreValidator(),
     this.now,
     super.key,
@@ -8690,6 +8691,7 @@ class SettingsView extends StatefulWidget {
   final ExportFileService? exportFileService;
   final BackupImportFileService? backupImportFileService;
   final BackupSafetyFileService? backupSafetyFileService;
+  final BackupStorage? iCloudBackupStorage;
   final BackupRestoreValidator backupRestoreValidator;
   final DateTime Function()? now;
 
@@ -8721,6 +8723,7 @@ class _SettingsViewState extends State<SettingsView> {
   _ExportKind? _sharingExport;
   var _isImportingBackup = false;
   AutomaticBackupStatus? _automaticBackupStatus;
+  ICloudBackupStorage? _defaultICloudBackupStorage;
 
   @override
   void initState() {
@@ -8729,9 +8732,15 @@ class _SettingsViewState extends State<SettingsView> {
   }
 
   Future<void> _loadAutomaticBackupStatus() async {
-    final status = await const AutomaticBackupStateStore().loadStatus();
+    final status = await AutomaticBackupService(
+      iCloudStorage: _iCloudBackupStorage,
+    ).loadStatus();
     if (mounted) setState(() => _automaticBackupStatus = status);
   }
+
+  BackupStorage get _iCloudBackupStorage =>
+      widget.iCloudBackupStorage ??
+      (_defaultICloudBackupStorage ??= ICloudBackupStorage());
 
   ExportFileService get _exportFileService =>
       widget.exportFileService ??
@@ -9138,17 +9147,20 @@ class _SettingsViewState extends State<SettingsView> {
                 ).format(context),
                 onTap: () => _pickPreferredAutomaticBackupTime(store),
               ),
+              SettingsActionRow(
+                key: const ValueKey('automatic-backup-location'),
+                icon: AppIcon.cloud,
+                title: 'Automatic Backup Location',
+                subtitle: _automaticBackupLocationLabel(
+                  preferences.automaticBackupLocation,
+                ),
+                onTap: () => _pickAutomaticBackupLocation(store),
+              ),
             ],
             SettingsActionRow(
               icon: AppIcon.history,
               title: 'Last Automatic Backup',
-              subtitle: _automaticBackupStatus?.lastSuccessfulAt == null
-                  ? (_automaticBackupStatus?.lastFailureAt == null
-                        ? 'Never'
-                        : 'Backup needs attention')
-                  : _backupStatusDateLabel(
-                      _automaticBackupStatus!.lastSuccessfulAt!,
-                    ),
+              subtitle: _automaticBackupStatusLabel(),
             ),
             SettingsActionRow(
               icon: AppIcon.shield,
@@ -9164,7 +9176,7 @@ class _SettingsViewState extends State<SettingsView> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: Text(
-            'Backups stored on this device may be removed if Trackmark is uninstalled. Export or share a backup externally for disaster recovery.',
+            'Backups saved On My Device may be removed if Trackmark is uninstalled. iCloud Drive backups are stored in your personal iCloud Drive. Export or share a backup externally for additional disaster recovery.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -9177,6 +9189,91 @@ class _SettingsViewState extends State<SettingsView> {
   String _backupStatusDateLabel(DateTime value) {
     final local = value.toLocal();
     return '${shortDate(local)} · ${TimeOfDay.fromDateTime(local).format(context)}';
+  }
+
+  String _automaticBackupLocationLabel(AutomaticBackupLocation value) =>
+      switch (value) {
+        AutomaticBackupLocation.local => 'On My Device',
+        AutomaticBackupLocation.iCloud => 'iCloud Drive',
+      };
+
+  String _automaticBackupStatusLabel() {
+    final status = _automaticBackupStatus;
+    if (status == null) return 'Never';
+    final at = status.lastResultAt ?? status.lastSuccessfulAt;
+    final resultLabel = switch (status.lastResult) {
+      AutomaticBackupResult.savedOnDevice => 'Saved on this device',
+      AutomaticBackupResult.uploadedToICloud => 'Uploaded to iCloud',
+      AutomaticBackupResult.waitingForICloud => 'Waiting for iCloud',
+      AutomaticBackupResult.iCloudUnavailableSavedOnDevice =>
+        'iCloud unavailable — saved on this device',
+      AutomaticBackupResult.backupFailed => 'Backup failed',
+      null => status.lastFailureAt == null ? null : 'Backup needs attention',
+    };
+    if (at == null) return resultLabel ?? 'Never';
+    final date = _backupStatusDateLabel(at);
+    return resultLabel == null ? date : '$date\n$resultLabel';
+  }
+
+  Future<void> _pickAutomaticBackupLocation(FinanceDataStore store) async {
+    final current = store.preferences.automaticBackupLocation;
+    final selected = await showPolishedChoicePicker<AutomaticBackupLocation>(
+      context,
+      title: 'Automatic Backup Location',
+      selected: current,
+      choices: [
+        PolishedChoice(
+          value: AutomaticBackupLocation.local,
+          label: 'On My Device',
+          subtitle: 'Store automatic backups in Trackmark on this device',
+          leading: Icon(AppIcon.backup),
+        ),
+        PolishedChoice(
+          value: AutomaticBackupLocation.iCloud,
+          label: 'iCloud Drive',
+          subtitle: 'Store automatic backups in your personal iCloud Drive',
+          leading: Icon(AppIcon.cloud),
+        ),
+      ],
+    );
+    if (!mounted || selected == null || selected == current) return;
+
+    if (selected == AutomaticBackupLocation.iCloud) {
+      BackupStorageStatus availability;
+      try {
+        availability = await _iCloudBackupStorage.status();
+      } on Object {
+        availability = const BackupStorageStatus(
+          state: BackupStorageState.unavailable,
+        );
+      }
+      if (!mounted) return;
+      if (availability.state != BackupStorageState.available &&
+          availability.state != BackupStorageState.uploaded &&
+          availability.state != BackupStorageState.waitingForUpload) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('iCloud Drive is unavailable'),
+            content: const Text(
+              "Trackmark couldn't access iCloud Drive. Check that you're signed into iCloud and that iCloud Drive is enabled.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
+
+    AppHaptics.toggleSelection();
+    await store.savePreferences(
+      store.preferences.copyWith(automaticBackupLocation: selected),
+    );
   }
 
   Future<void> _pickPreferredDailySyncTime(FinanceDataStore store) async {
@@ -21485,11 +21582,13 @@ class PolishedChoice<T> {
     required this.value,
     required this.label,
     this.leading,
+    this.subtitle,
   });
 
   final T value;
   final String label;
   final Widget? leading;
+  final String? subtitle;
 }
 
 Future<T?> showPolishedChoicePicker<T>(
@@ -21538,6 +21637,9 @@ Future<T?> showPolishedChoicePicker<T>(
                               child: choice.leading!,
                             ),
                       title: Text(choice.label),
+                      subtitle: choice.subtitle == null
+                          ? null
+                          : Text(choice.subtitle!),
                       trailing: choice.value == selected
                           ? Icon(AppIcon.check, color: AppTheme.accent)
                           : null,

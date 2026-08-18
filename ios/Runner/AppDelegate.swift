@@ -16,11 +16,21 @@ import workmanager_apple
     WorkmanagerPlugin.registerLaunchHandlers()
     WorkmanagerPlugin.setPluginRegistrantCallback { registry in
       GeneratedPluginRegistrant.register(with: registry)
+      if let registrar = registry.registrar(
+        forPlugin: "TrackmarkICloudBackupPlugin"
+      ) {
+        TrackmarkICloudBackupPlugin.register(with: registrar)
+      }
     }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    if let registrar = engineBridge.pluginRegistry.registrar(
+      forPlugin: "TrackmarkICloudBackupPlugin"
+    ) {
+      TrackmarkICloudBackupPlugin.register(with: registrar)
+    }
   }
 }

@@ -1176,12 +1176,20 @@ void main() {
         ),
       ],
     );
+    final comparisonTransaction = migrated.transactions
+        .firstWhere(
+          (transaction) =>
+              transaction.id != splitTransaction.id && !transaction.isDeleted,
+        )
+        .copyWith(date: DateTime(2026, 8, 14, 9, 21));
     final dataStore = FinanceDataStore(
       dataSet: migrated.copyWith(
         transactions: [
           for (final transaction in migrated.transactions)
             if (transaction.id == splitTransaction.id)
               splitTransaction
+            else if (transaction.id == comparisonTransaction.id)
+              comparisonTransaction
             else
               transaction,
         ],
@@ -1240,12 +1248,6 @@ void main() {
       contains(splitCategories.last.name),
     );
 
-    final comparisonTransaction = dataStore.transactions.firstWhere(
-      (transaction) =>
-          transaction.id != splitTransaction.id &&
-          transaction.date.hour != 0 &&
-          !transaction.isDeleted,
-    );
     final comparisonTimestampKey = ValueKey(
       'ledger-timestamp-slot-${comparisonTransaction.id}',
     );

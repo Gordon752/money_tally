@@ -7,12 +7,25 @@ import '../domain/finance_data_set.dart';
 import '../domain/user_preferences.dart';
 import '../export/export_file_service.dart';
 import 'backup_codec.dart';
+import 'backup_restore_service.dart';
+import 'backup_storage.dart';
+
+enum AutomaticBackupResult {
+  savedOnDevice,
+  uploadedToICloud,
+  waitingForICloud,
+  iCloudUnavailableSavedOnDevice,
+  backupFailed,
+}
 
 class AutomaticBackupStatus {
   const AutomaticBackupStatus({
     this.lastSuccessfulAt,
     this.lastFailureAt,
     this.lastFailureMessage,
+    this.lastResultAt,
+    this.lastResult,
+    this.lastFileName,
     this.latestSafetyBackupAt,
     this.latestSafetyBackupVersion,
   });
@@ -20,6 +33,9 @@ class AutomaticBackupStatus {
   final DateTime? lastSuccessfulAt;
   final DateTime? lastFailureAt;
   final String? lastFailureMessage;
+  final DateTime? lastResultAt;
+  final AutomaticBackupResult? lastResult;
+  final String? lastFileName;
   final DateTime? latestSafetyBackupAt;
   final String? latestSafetyBackupVersion;
 }
@@ -31,6 +47,9 @@ class AutomaticBackupStateStore {
   static const _lastFailureKey = 'trackmark_automatic_backup_last_failure';
   static const _lastFailureMessageKey =
       'trackmark_automatic_backup_last_failure_message';
+  static const _lastResultAtKey = 'trackmark_automatic_backup_last_result_at';
+  static const _lastResultKey = 'trackmark_automatic_backup_last_result';
+  static const _lastFileNameKey = 'trackmark_automatic_backup_last_file_name';
   static const _lastLaunchedVersionKey =
       'trackmark_last_successful_app_version_build';
   static const _pendingUpdateVersionKey =
@@ -47,14 +66,24 @@ class AutomaticBackupStateStore {
       lastSuccessfulAt: _date(storage.getString(_lastSuccessKey)),
       lastFailureAt: _date(storage.getString(_lastFailureKey)),
       lastFailureMessage: storage.getString(_lastFailureMessageKey),
+      lastResultAt: _date(storage.getString(_lastResultAtKey)),
+      lastResult: _result(storage.getString(_lastResultKey)),
+      lastFileName: storage.getString(_lastFileNameKey),
       latestSafetyBackupAt: _date(storage.getString(_latestSafetyAtKey)),
       latestSafetyBackupVersion: storage.getString(_latestSafetyVersionKey),
     );
   }
 
-  Future<void> recordAutomaticSuccess(DateTime at) async {
+  Future<void> recordAutomaticSuccess(
+    DateTime at, {
+    required AutomaticBackupResult result,
+    required String fileName,
+  }) async {
     final storage = await SharedPreferences.getInstance();
     await storage.setString(_lastSuccessKey, at.toIso8601String());
+    await storage.setString(_lastResultAtKey, at.toIso8601String());
+    await storage.setString(_lastResultKey, result.name);
+    await storage.setString(_lastFileNameKey, fileName);
     await storage.remove(_lastFailureKey);
     await storage.remove(_lastFailureMessageKey);
   }
@@ -63,6 +92,11 @@ class AutomaticBackupStateStore {
     final storage = await SharedPreferences.getInstance();
     await storage.setString(_lastFailureKey, at.toIso8601String());
     await storage.setString(_lastFailureMessageKey, error.toString());
+    await storage.setString(_lastResultAtKey, at.toIso8601String());
+    await storage.setString(
+      _lastResultKey,
+      AutomaticBackupResult.backupFailed.name,
+    );
   }
 
   Future<String?> loadLastSuccessfulAppVersion() async {
@@ -99,6 +133,14 @@ class AutomaticBackupStateStore {
 
   static DateTime? _date(String? value) =>
       value == null ? null : DateTime.tryParse(value);
+
+  static AutomaticBackupResult? _result(String? value) {
+    if (value == null) return null;
+    for (final result in AutomaticBackupResult.values) {
+      if (result.name == value) return result;
+    }
+    return null;
+  }
 }
 
 abstract final class AutomaticBackupPolicy {
@@ -141,14 +183,56 @@ abstract final class AutomaticBackupPolicy {
 class AutomaticBackupService {
   AutomaticBackupService({
     BackupSafetyFileService? fileService,
+    BackupStorage? storage,
+    BackupStorage? localStorage,
+    BackupStorage? iCloudStorage,
     this.stateStore = const AutomaticBackupStateStore(),
     this.codec = const BackupCodec(),
-  }) : fileService = fileService ?? BackupSafetyFileService();
+    this.validator = const BackupRestoreValidator(),
+  }) : assert(fileService == null || storage == null),
+       assert(fileService == null || localStorage == null),
+       localStorage =
+           storage ??
+           localStorage ??
+           LocalBackupStorage(
+             fileService: fileService ?? BackupSafetyFileService(),
+           ),
+       iCloudStorage = storage ?? iCloudStorage ?? ICloudBackupStorage();
 
-  final BackupSafetyFileService fileService;
+  final BackupStorage localStorage;
+  final BackupStorage iCloudStorage;
   final AutomaticBackupStateStore stateStore;
   final BackupCodec codec;
+  final BackupRestoreValidator validator;
   bool _isRunning = false;
+
+  /// Kept for source compatibility with Stage 1 callers. Production routing
+  /// is selected per execution from [UserPreferences.automaticBackupLocation].
+  BackupStorage get storage => localStorage;
+
+  Future<AutomaticBackupStatus> loadStatus() async {
+    var status = await stateStore.loadStatus();
+    if (status.lastResult != AutomaticBackupResult.waitingForICloud ||
+        status.lastFileName == null ||
+        status.lastSuccessfulAt == null) {
+      return status;
+    }
+    try {
+      final current = await iCloudStorage.entryStatus(status.lastFileName!);
+      if (current.state == BackupStorageState.uploaded) {
+        await stateStore.recordAutomaticSuccess(
+          status.lastSuccessfulAt!,
+          result: AutomaticBackupResult.uploadedToICloud,
+          fileName: status.lastFileName!,
+        );
+        status = await stateStore.loadStatus();
+      }
+    } on Object {
+      // A status refresh must never invalidate a verified backup or disturb
+      // Settings. The next automatic opportunity will retry normally.
+    }
+    return status;
+  }
 
   Future<bool> createIfDue({
     required FinanceDataSet dataSet,
@@ -166,25 +250,146 @@ class AutomaticBackupService {
     _isRunning = true;
     try {
       final content = codec.encodeJson(dataSet, exportedAt: now);
-      await fileService.saveVerifiedBackup(
-        content: content,
-        fileName: automaticBackupFileName(now),
-      );
+      validator.validate(content);
+      final fileName = automaticBackupFileName(now);
       final retain = switch (dataSet.preferences.automaticBackupFrequency) {
         AutomaticBackupFrequency.daily => 7,
         AutomaticBackupFrequency.weekly => 4,
       };
-      await fileService.prune(
+
+      if (dataSet.preferences.automaticBackupLocation ==
+          AutomaticBackupLocation.iCloud) {
+        final iCloudEntry = await _tryCreateICloud(
+          content: content,
+          fileName: fileName,
+        );
+        if (iCloudEntry != null) {
+          final uploadStatus = await _safeEntryStatus(
+            iCloudStorage,
+            iCloudEntry.fileName,
+            fallback: iCloudEntry.status,
+          );
+          final uploaded = uploadStatus.state == BackupStorageState.uploaded;
+          if (uploaded) {
+            // Pruning happens only after the new backup is verified and known
+            // to be uploaded. Enumeration failure deliberately leaves extras.
+            try {
+              await iCloudStorage.prune(
+                matches: isTrackmarkAutomaticBackupFileName,
+                retain: retain,
+              );
+            } on Object {
+              // Retaining too many known-good backups is safer than deleting
+              // from an incomplete shared iCloud enumeration.
+            }
+          }
+          await stateStore.recordAutomaticSuccess(
+            now,
+            result: uploaded
+                ? AutomaticBackupResult.uploadedToICloud
+                : AutomaticBackupResult.waitingForICloud,
+            fileName: iCloudEntry.fileName,
+          );
+          return true;
+        }
+
+        final fallback = await _createVerified(
+          localStorage,
+          content: content,
+          fileName: fileName,
+        );
+        await localStorage.prune(
+          matches: isTrackmarkAutomaticBackupFileName,
+          retain: retain,
+        );
+        await stateStore.recordAutomaticSuccess(
+          now,
+          result: AutomaticBackupResult.iCloudUnavailableSavedOnDevice,
+          fileName: fallback.fileName,
+        );
+        return true;
+      }
+
+      final local = await _createVerified(
+        localStorage,
+        content: content,
+        fileName: fileName,
+      );
+      await localStorage.prune(
         matches: isTrackmarkAutomaticBackupFileName,
         retain: retain,
       );
-      await stateStore.recordAutomaticSuccess(now);
+      await stateStore.recordAutomaticSuccess(
+        now,
+        result: AutomaticBackupResult.savedOnDevice,
+        fileName: local.fileName,
+      );
       return true;
     } on Object catch (error) {
       await stateStore.recordAutomaticFailure(now, error);
       rethrow;
     } finally {
       _isRunning = false;
+    }
+  }
+
+  Future<BackupStorageEntry?> _tryCreateICloud({
+    required String content,
+    required String fileName,
+  }) async {
+    try {
+      final availability = await iCloudStorage.status();
+      if (availability.state != BackupStorageState.available &&
+          availability.state != BackupStorageState.uploaded &&
+          availability.state != BackupStorageState.waitingForUpload) {
+        return null;
+      }
+      return await _createVerified(
+        iCloudStorage,
+        content: content,
+        fileName: fileName,
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<BackupStorageEntry> _createVerified(
+    BackupStorage target, {
+    required String content,
+    required String fileName,
+  }) async {
+    validator.validate(content);
+    final entry = await target.write(content: content, fileName: fileName);
+    try {
+      final reread = await target.read(entry.fileName);
+      validator.validate(reread);
+      if (reread != content) {
+        throw const BackupStorageException(
+          'verification_failed',
+          'The stored backup did not match the Trackmark backup payload.',
+        );
+      }
+      return entry;
+    } on Object {
+      try {
+        await target.delete(entry.fileName);
+      } on Object {
+        // Preserve the verification error while leaving prior backups intact.
+      }
+      rethrow;
+    }
+  }
+
+  Future<BackupStorageStatus> _safeEntryStatus(
+    BackupStorage target,
+    String fileName, {
+    required BackupStorageStatus fallback,
+  }) async {
+    try {
+      return await target.entryStatus(fileName);
+    } on Object {
+      return fallback;
     }
   }
 }
