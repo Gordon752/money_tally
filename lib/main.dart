@@ -31,6 +31,7 @@ import 'src/design/widgets/money_text.dart';
 import 'src/design/widgets/percentage_entry_field.dart';
 import 'src/design/widgets/scheduled_transaction_row.dart';
 import 'src/design/widgets/transaction_row.dart';
+import 'src/design/widgets/trackmark_switch.dart';
 import 'src/budgets/budget_calculator.dart';
 import 'src/credit/credit_insights_calculator.dart';
 import 'src/credit/credit_insights_completeness_ui.dart';
@@ -485,6 +486,7 @@ class MoneyTallyApp extends StatelessWidget {
             theme: AppTheme.light(),
             darkTheme: AppTheme.dark(),
             themeMode: themeModeFor(preferences.appearanceMode),
+            navigatorObservers: [TrackmarkNavigationObserver()],
             home: AuthGate(
               authService: authService,
               remoteRepository: remoteRepository,

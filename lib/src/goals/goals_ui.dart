@@ -219,14 +219,14 @@ class GoalPreviewRow extends StatelessWidget {
 }
 
 Future<void> openGoalsPage(BuildContext context) {
-  HapticFeedback.selectionClick();
+  AppHaptics.navigation();
   return Navigator.of(
     context,
   ).push(MaterialPageRoute<void>(builder: (context) => const GoalsPage()));
 }
 
 Future<void> openInactiveGoalsPage(BuildContext context) {
-  HapticFeedback.selectionClick();
+  AppHaptics.navigation();
   return Navigator.of(context).push(
     MaterialPageRoute<void>(builder: (context) => const InactiveGoalsPage()),
   );
@@ -2158,7 +2158,7 @@ Future<bool> showScheduledGoalFundingDialog(
                 ),
                 if (alertPreference != v2_scheduled.AlertPreference.none) ...[
                   const TransactionFormDivider(),
-                  SwitchListTile.adaptive(
+                  TrackmarkSwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Repeat until funded or skipped'),
                     value: repeatAlertUntilResolved,

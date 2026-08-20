@@ -4,6 +4,7 @@ import 'package:money_tally/main.dart';
 import 'package:money_tally/src/domain/account.dart' as account_domain;
 import 'package:money_tally/src/domain/sync_metadata.dart' as sync_domain;
 import 'package:money_tally/src/domain/user_preferences.dart';
+import 'package:money_tally/src/design/widgets/trackmark_switch.dart';
 import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
@@ -214,6 +215,53 @@ void main() {
     expect(dataStore.preferences.defaultTransactionAccountId, 'checking');
     expect(find.text('Checking'), findsOneWidget);
   });
+
+  testWidgets(
+    'Account Inclusion labels and switch columns map correctly at small width',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final legacyStore = FinanceStore.seeded();
+      final migrated = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final dataStore = FinanceDataStore(dataSet: migrated);
+
+      await tester.pumpWidget(
+        FinanceDataStoreScope(
+          store: dataStore,
+          child: const MaterialApp(home: AccountInclusionScreen()),
+        ),
+      );
+
+      expect(find.text('Group\nTotals'), findsOneWidget);
+      expect(find.text('Net Worth'), findsOneWidget);
+      expect(
+        find.text(
+          'Choose which accounts are included in group totals and net worth.',
+        ),
+        findsOneWidget,
+      );
+
+      final account = dataStore.activeAccountsInDisplayOrder.first;
+      final row = find.byKey(ValueKey('account-inclusion-${account.id}'));
+      final switches = find.descendant(
+        of: row,
+        matching: find.byType(TrackmarkSwitch),
+      );
+      expect(switches, findsNWidgets(2));
+      final originalNetWorth = account.includeInNetWorth;
+      await tester.tap(switches.first);
+      await tester.pumpAndSettle();
+
+      final updated = dataStore.accountById(account.id);
+      expect(updated.includeInGroupBalance, !account.includeInGroupBalance);
+      expect(updated.includeInNetWorth, originalNetWorth);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('overdraw confirmation is explicit and cancelable', (
     tester,

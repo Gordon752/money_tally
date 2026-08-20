@@ -12,6 +12,7 @@ import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/design/widgets/category_icon_badge.dart';
 import 'package:money_tally/src/design/widgets/percentage_entry_field.dart';
+import 'package:money_tally/src/design/widgets/trackmark_switch.dart';
 import 'package:money_tally/src/design/money_format.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/budget.dart';
@@ -1131,7 +1132,7 @@ void main() {
     await tester.tap(
       find.ancestor(
         of: find.text('Show Running Balance'),
-        matching: find.byType(SwitchListTile),
+        matching: find.byType(TrackmarkSwitchListTile),
       ),
     );
     await tester.pumpAndSettle();
@@ -1998,6 +1999,75 @@ void main() {
       expect(side(clearedButton), BorderSide.none);
     },
   );
+
+  testWidgets(
+    'filtered main Ledger edge swipe clears filters only after commit',
+    (tester) async {
+      tester.view.physicalSize = const Size(393, 852);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await tester.pumpWidget(MoneyTallyApp());
+      await tester.tap(find.text('Ledger').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('ledger-filter-account-row')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Credit Card').last);
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Filters active (1)'), findsOneWidget);
+      expect(ledgerRowWithText('Walmart'), findsNothing);
+
+      final swipeRegion = find.byKey(
+        const ValueKey('filtered-ledger-back-swipe'),
+      );
+      expect(tester.widget<Listener>(swipeRegion).onPointerDown, isNotNull);
+      final swipeRect = tester.getRect(swipeRegion);
+      expect(swipeRect.left, 0);
+      await tester.dragFrom(
+        Offset(swipeRect.left + 5, swipeRect.center.dy),
+        const Offset(30, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Filters active (1)'), findsOneWidget);
+
+      await tester.dragFrom(
+        Offset(swipeRect.left + 5, swipeRect.center.dy),
+        const Offset(140, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Filters'), findsOneWidget);
+      expect(find.text('Ledger'), findsWidgets);
+      expect(ledgerRowWithText('Walmart'), findsOneWidget);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets('filtered main Ledger X uses the same clear-filter result', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MoneyTallyApp());
+    await tester.tap(find.text('Ledger').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-filter-type-row')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Income').last);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Filters active (1)'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Clear filters'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Filters'), findsOneWidget);
+    expect(find.text('Ledger'), findsWidgets);
+    expect(ledgerRowWithText('Walmart'), findsOneWidget);
+  });
 
   testWidgets('ledger active filter treatment remains distinct in dark mode', (
     tester,
@@ -3812,11 +3882,11 @@ void main() {
     await tester.enterText(fields.at(0), 'Travel Fund');
     await tester.enterText(fields.at(1), '123.45');
     final groupBalanceOption = find.widgetWithText(
-      SwitchListTile,
-      'Include in group balance',
+      TrackmarkSwitchListTile,
+      'Include in Group Totals',
     );
     final netWorthOption = find.widgetWithText(
-      SwitchListTile,
+      TrackmarkSwitchListTile,
       'Include in net worth',
     );
     await tester.ensureVisible(groupBalanceOption);
@@ -4815,11 +4885,11 @@ void main() {
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
     final groupBalanceSwitch = find.widgetWithText(
-      SwitchListTile,
-      'Include in group balance',
+      TrackmarkSwitchListTile,
+      'Include in Group Totals',
     );
     final netWorthSwitch = find.widgetWithText(
-      SwitchListTile,
+      TrackmarkSwitchListTile,
       'Include in net worth',
     );
     await tester.ensureVisible(groupBalanceSwitch);
@@ -5003,7 +5073,10 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: details, matching: find.byType(SwitchListTile)),
+      find.descendant(
+        of: details,
+        matching: find.byType(TrackmarkSwitchListTile),
+      ),
       findsNothing,
     );
   });
@@ -9324,7 +9397,7 @@ void main() {
       await tester.tap(
         find.ancestor(
           of: find.text(label),
-          matching: find.byType(SwitchListTile),
+          matching: find.byType(TrackmarkSwitchListTile),
         ),
       );
       await tester.pumpAndSettle();
@@ -9456,7 +9529,10 @@ void main() {
     await tester.tap(find.widgetWithText(ListTile, 'Sync now'));
     await tester.pumpAndSettle();
     expect(syncCount, 1);
-    final automaticSync = find.widgetWithText(SwitchListTile, 'Automatic Sync');
+    final automaticSync = find.widgetWithText(
+      TrackmarkSwitchListTile,
+      'Automatic Sync',
+    );
     await tester.ensureVisible(automaticSync);
     await tester.tap(automaticSync);
     await tester.pumpAndSettle();
@@ -9598,7 +9674,7 @@ void main() {
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
     final notifications = find.widgetWithText(
-      SwitchListTile,
+      TrackmarkSwitchListTile,
       'Scheduled transaction alerts',
     );
     await tester.ensureVisible(notifications);

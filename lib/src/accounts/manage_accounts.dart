@@ -172,9 +172,9 @@ class ManageAccountsScreen extends StatelessWidget {
               children: [
                 SettingsSwitch(
                   icon: AppIcon.bank,
-                  label: 'Include in group balance',
+                  label: 'Include in Group Totals',
                   subtitle:
-                      'Automatically include new accounts in their account-type total.',
+                      'Automatically include new accounts in Group Totals.',
                   value: preferences.newAccountIncludeInGroupBalance,
                   onChanged: (value) => store.savePreferences(
                     preferences.copyWith(
@@ -202,23 +202,29 @@ class ManageAccountsScreen extends StatelessWidget {
                   icon: AppIcon.pieChart,
                   title: 'Account inclusion',
                   subtitle:
-                      'Choose which accounts are included in totals and net worth.',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const AccountInclusionScreen(),
-                    ),
-                  ),
+                      'Choose which accounts are included in group totals and net worth.',
+                  onTap: () {
+                    AppHaptics.navigation();
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const AccountInclusionScreen(),
+                      ),
+                    );
+                  },
                 ),
                 SettingsActionRow(
                   icon: AppIcon.numberedList,
                   title: 'Account order',
                   subtitle: 'Reorder active accounts within each account type.',
                   showDivider: false,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const AccountOrderScreen(),
-                    ),
-                  ),
+                  onTap: () {
+                    AppHaptics.navigation();
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const AccountOrderScreen(),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -233,11 +239,14 @@ class ManageAccountsScreen extends StatelessWidget {
                       'View, restore, or permanently delete archived accounts.',
                   trailingText: archivedCount == 0 ? null : '$archivedCount',
                   showDivider: false,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const ArchivedAccountsScreen(),
-                    ),
-                  ),
+                  onTap: () {
+                    AppHaptics.navigation();
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ArchivedAccountsScreen(),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -359,6 +368,26 @@ class AccountInclusionScreen extends StatelessWidget {
             40,
           ),
           children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.sm,
+                AppSpacing.sm,
+              ),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Choose which accounts are included in group totals and net worth.',
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  const _InclusionColumnHeading('Group\nTotals'),
+                  const _InclusionColumnHeading('Net Worth'),
+                ],
+              ),
+            ),
             for (final group in store.accountGroupsInDisplayOrder)
               if (accounts.any((account) => account.group == group)) ...[
                 SettingsSectionCard(
@@ -417,7 +446,7 @@ class _AccountInclusionRow extends StatelessWidget {
             ),
           ),
           _CompactInclusionSwitch(
-            tooltip: 'Include ${account.name} in group balance',
+            tooltip: 'Include ${account.name} in Group Totals',
             value: account.includeInGroupBalance,
             onChanged: (value) => store.saveAccount(
               account.copyWith(includeInGroupBalance: value),
@@ -448,11 +477,42 @@ class _CompactInclusionSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Switch.adaptive(
-        value: value,
-        onChanged: AppHaptics.toggleHandler(onChanged),
+    return SizedBox(
+      width: _inclusionSwitchColumnWidth,
+      child: Tooltip(
+        message: tooltip,
+        child: TrackmarkSwitch(
+          value: value,
+          onChanged: AppHaptics.toggleHandler(onChanged),
+        ),
+      ),
+    );
+  }
+}
+
+const _inclusionSwitchColumnWidth = 64.0;
+
+class _InclusionColumnHeading extends StatelessWidget {
+  const _InclusionColumnHeading(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      header: true,
+      child: SizedBox(
+        width: _inclusionSwitchColumnWidth,
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w800,
+            height: 1.05,
+          ),
+        ),
       ),
     );
   }
@@ -544,7 +604,7 @@ class _AccountOrderGroup extends StatelessWidget {
               final reordered = [...accounts];
               final moving = reordered.removeAt(oldIndex);
               reordered.insert(newIndex, moving);
-              HapticFeedback.selectionClick();
+              AppHaptics.selection();
               store.reorderAccountsWithinGroup(
                 group: group,
                 orderedAccountIds: [

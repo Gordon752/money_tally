@@ -276,7 +276,7 @@ class _FinanceHomeState extends State<FinanceHome> {
                   ? compactSections.indexOf(selected)
                   : 0,
               onDestinationSelected: (index) {
-                HapticFeedback.selectionClick();
+                AppHaptics.selection();
                 setState(() {
                   selected = compactSections[index];
                   if (selected == FinanceSection.ledger) {
@@ -308,7 +308,7 @@ class _FinanceHomeState extends State<FinanceHome> {
           extended: MediaQuery.sizeOf(context).width >= 1100,
           selectedIndex: FinanceSection.values.indexOf(selected),
           onDestinationSelected: (index) {
-            HapticFeedback.selectionClick();
+            AppHaptics.selection();
             setState(() {
               selected = FinanceSection.values[index];
               if (selected == FinanceSection.ledger) {
@@ -342,7 +342,7 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   Future<void> _openManagementSection(FinanceSection section) async {
-    HapticFeedback.selectionClick();
+    AppHaptics.navigation();
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => FinanceManagementScreen(section: section),
@@ -351,6 +351,7 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   Future<void> _openAccountLedger(String accountId) async {
+    AppHaptics.navigation();
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (routeContext) => AccountLedgerScreen(
@@ -366,13 +367,18 @@ class _FinanceHomeState extends State<FinanceHome> {
     );
   }
 
+  void _openSettings() {
+    if (selected == FinanceSection.settings) return;
+    AppHaptics.navigation();
+    setState(() => selected = FinanceSection.settings);
+  }
+
   Widget _sectionBody() {
     if (selected == FinanceSection.plan) {
       return PlanView(
         selectedSegment: _planSegment,
         onSegmentChanged: _setPlanSegment,
-        onOpenSettings: () =>
-            setState(() => selected = FinanceSection.settings),
+        onOpenSettings: _openSettings,
       );
     }
     return NotificationListener<ScrollNotification>(
@@ -380,11 +386,7 @@ class _FinanceHomeState extends State<FinanceHome> {
       child: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
-            child: PageHeader(
-              section: selected,
-              onOpenSettings: () =>
-                  setState(() => selected = FinanceSection.settings),
-            ),
+            child: PageHeader(section: selected, onOpenSettings: _openSettings),
           ),
           if (widget.syncLabel == 'Sync issue')
             SliverToBoxAdapter(
@@ -398,17 +400,16 @@ class _FinanceHomeState extends State<FinanceHome> {
                     leading: Icon(AppIcon.cloudOff),
                     title: Text('Cloud sync needs attention'),
                     trailing: Icon(AppIcon.chevronRight),
-                    onTap: () =>
-                        setState(() => selected = FinanceSection.settings),
+                    onTap: _openSettings,
                   ),
                 ),
               ),
             ),
           SliverPadding(
             padding: EdgeInsets.fromLTRB(
-              16,
+              selected == FinanceSection.ledger ? 0 : 16,
               0,
-              16,
+              selected == FinanceSection.ledger ? 0 : 16,
               selected.supportsFloatingAdd ? 112 : 24,
             ),
             sliver: SliverToBoxAdapter(
@@ -433,6 +434,8 @@ class _FinanceHomeState extends State<FinanceHome> {
                     'ledger-${ledgerAccountFilterId ?? 'all-accounts'}',
                   ),
                   initialAccountFilterId: ledgerAccountFilterId,
+                  enableMainFilterBackSwipe: ledgerAccountFilterId == null,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                 ),
                 FinanceSection.plan => const SizedBox.shrink(),
                 FinanceSection.scheduled => ScheduledView(
@@ -1086,7 +1089,7 @@ class _TransactionPendingToggle extends StatelessWidget {
                   ],
                 ),
               ),
-              Switch.adaptive(value: isPending, onChanged: _setPending),
+              TrackmarkSwitch(value: isPending, onChanged: _setPending),
             ],
           ),
         ),
@@ -1255,7 +1258,7 @@ class _ManagementSwipeRowState extends State<ManagementSwipeRow> {
                           child: InkWell(
                             onTap: () {
                               _close();
-                              HapticFeedback.selectionClick();
+                              AppHaptics.selection();
                               action.onPressed();
                             },
                             child: Column(
@@ -1924,7 +1927,7 @@ class AccountGroupCard extends StatelessWidget {
                 key: ValueKey('account-group-${group.name}'),
                 borderRadius: BorderRadius.circular(AppRadii.card),
                 onTap: () {
-                  HapticFeedback.selectionClick();
+                  AppHaptics.selection();
                   toggleAccountGroupCollapsed(
                     context,
                     group,
@@ -2011,7 +2014,7 @@ class AccountGroupCard extends StatelessWidget {
                               destructive: true,
                             ),
                             confirmDismiss: (direction) async {
-                              HapticFeedback.selectionClick();
+                              AppHaptics.selection();
                               await showAccountOptions(
                                 context,
                                 accounts[index].id,
@@ -2084,7 +2087,7 @@ class AccountGroupCard extends StatelessWidget {
               key: ValueKey('account-group-${group.name}'),
               borderRadius: BorderRadius.circular(14),
               onTap: () {
-                HapticFeedback.selectionClick();
+                AppHaptics.selection();
                 toggleAccountGroupCollapsed(
                   context,
                   group,
@@ -2185,7 +2188,7 @@ class AccountGroupCard extends StatelessWidget {
           destructive: true,
         ),
         confirmDismiss: (direction) async {
-          HapticFeedback.selectionClick();
+          AppHaptics.selection();
           await showAccountOptions(
             context,
             account.id,
@@ -2618,6 +2621,8 @@ class LedgerView extends StatefulWidget {
     this.initialDrillDownFilter,
     this.initialPendingTransactionIds,
     this.showPendingSummary = true,
+    this.enableMainFilterBackSwipe = false,
+    this.contentPadding = EdgeInsets.zero,
     super.key,
   });
 
@@ -2626,6 +2631,8 @@ class LedgerView extends StatefulWidget {
   final LedgerDrillDownFilter? initialDrillDownFilter;
   final Set<String>? initialPendingTransactionIds;
   final bool showPendingSummary;
+  final bool enableMainFilterBackSwipe;
+  final EdgeInsetsGeometry contentPadding;
 
   @override
   State<LedgerView> createState() => _LedgerViewState();
@@ -2870,7 +2877,7 @@ class _LedgerViewState extends State<LedgerView> {
       _monthAnchors.putIfAbsent(ledgerMonthKey(month), () => GlobalKey());
     }
 
-    return Column(
+    final ledger = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (accountFilterId.isNotEmpty &&
@@ -3158,6 +3165,7 @@ class _LedgerViewState extends State<LedgerView> {
             currency: store.preferences.currency,
             onTap: () {
               _dismissSearchFocus();
+              AppHaptics.navigation();
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
                   builder: (_) => FinanceDataStoreScope(
@@ -3201,7 +3209,7 @@ class _LedgerViewState extends State<LedgerView> {
               onDismissFocus: _dismissSearchFocus,
               onToggle: () {
                 _dismissSearchFocus();
-                HapticFeedback.selectionClick();
+                AppHaptics.selection();
                 setState(() {
                   final key = ledgerMonthKey(month);
                   if (!_collapsedMonthKeys.add(key)) {
@@ -3214,9 +3222,26 @@ class _LedgerViewState extends State<LedgerView> {
           ],
       ],
     );
+    return _FilteredLedgerBackSwipe(
+      enabled:
+          Theme.of(context).platform == TargetPlatform.iOS &&
+          widget.enableMainFilterBackSwipe &&
+          activeFilterCount > 0,
+      onCommitted: clearFilters,
+      child: Padding(padding: widget.contentPadding, child: ledger),
+    );
   }
 
   void clearFilters() {
+    final hadFilters =
+        typeFilterName.isNotEmpty ||
+        accountFilterId.isNotEmpty ||
+        categoryFilterId.isNotEmpty ||
+        dateFilter != LedgerDateFilter.all ||
+        managementFilter != null ||
+        drillDownFilter != null;
+    if (!hadFilters) return;
+    AppHaptics.navigation();
     _dismissSearchFocus();
     setState(() {
       typeFilterName = '';
@@ -3488,6 +3513,100 @@ class _LedgerViewState extends State<LedgerView> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _FilteredLedgerBackSwipe extends StatefulWidget {
+  const _FilteredLedgerBackSwipe({
+    required this.enabled,
+    required this.onCommitted,
+    required this.child,
+  });
+
+  final bool enabled;
+  final VoidCallback onCommitted;
+  final Widget child;
+
+  @override
+  State<_FilteredLedgerBackSwipe> createState() =>
+      _FilteredLedgerBackSwipeState();
+}
+
+class _FilteredLedgerBackSwipeState extends State<_FilteredLedgerBackSwipe> {
+  static const _edgeWidth = 24.0;
+  static const _commitDistance = 72.0;
+  static const _quickCommitDistance = 36.0;
+  static const _quickCommitDuration = Duration(milliseconds: 350);
+  int? _pointer;
+  Offset? _origin;
+  Duration? _startedAt;
+  var _eligible = false;
+  var _disqualified = false;
+
+  void _reset() {
+    _pointer = null;
+    _origin = null;
+    _startedAt = null;
+    _eligible = false;
+    _disqualified = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      key: const ValueKey('filtered-ledger-back-swipe'),
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: widget.enabled
+          ? (event) {
+              if (_pointer != null || event.position.dx > _edgeWidth) return;
+              _pointer = event.pointer;
+              _origin = event.position;
+              _startedAt = event.timeStamp;
+              _eligible = true;
+              _disqualified = false;
+            }
+          : null,
+      onPointerMove: widget.enabled
+          ? (event) {
+              if (event.pointer != _pointer || !_eligible) return;
+              final origin = _origin;
+              if (origin == null) return;
+              final delta = event.position - origin;
+              if (delta.dx < -8 ||
+                  (delta.dy.abs() > 18 &&
+                      delta.dy.abs() > delta.dx.abs() * 0.8)) {
+                _disqualified = true;
+              }
+            }
+          : null,
+      onPointerCancel: widget.enabled
+          ? (event) {
+              if (event.pointer == _pointer) _reset();
+            }
+          : null,
+      onPointerUp: widget.enabled
+          ? (event) {
+              if (event.pointer != _pointer) return;
+              final origin = _origin;
+              final startedAt = _startedAt;
+              final distance = origin == null
+                  ? 0.0
+                  : event.position.dx - origin.dx;
+              final duration = startedAt == null
+                  ? Duration.zero
+                  : event.timeStamp - startedAt;
+              final committed =
+                  _eligible &&
+                  !_disqualified &&
+                  (distance >= _commitDistance ||
+                      (distance >= _quickCommitDistance &&
+                          duration <= _quickCommitDuration));
+              _reset();
+              if (committed) widget.onCommitted();
+            }
+          : null,
+      child: widget.child,
     );
   }
 }
@@ -7077,7 +7196,7 @@ class _PlanViewState extends State<PlanView> {
                 ],
                 selected: {widget.selectedSegment},
                 onSelectionChanged: (selection) {
-                  HapticFeedback.selectionClick();
+                  AppHaptics.selection();
                   widget.onSegmentChanged(selection.single);
                 },
               ),
@@ -7495,7 +7614,7 @@ class _ScheduledViewState extends State<ScheduledView> {
         destructive: true,
       ),
       confirmDismiss: (direction) async {
-        HapticFeedback.selectionClick();
+        AppHaptics.selection();
         await showScheduledTransactionActions(
           context,
           item,
@@ -7649,7 +7768,7 @@ class _ScheduledViewState extends State<ScheduledView> {
               activitySummaryByDay: activitySummaryByDay,
               activityFilter: _activityFilter,
               onActivityFilterChanged: (filter) {
-                HapticFeedback.selectionClick();
+                AppHaptics.selection();
                 setState(() {
                   _dateAnchors.clear();
                   _activityFilter = filter;
@@ -7808,7 +7927,7 @@ class ScheduledCalendarPreview extends StatelessWidget {
               IconButton(
                 tooltip: isCollapsed ? 'Expand calendar' : 'Collapse calendar',
                 onPressed: () {
-                  HapticFeedback.selectionClick();
+                  AppHaptics.selection();
                   onToggleCollapsed();
                 },
                 icon: AnimatedRotation(
@@ -8609,7 +8728,7 @@ class _CategoriesViewState extends State<CategoriesView> {
                                               ? 'Collapse ${category.name}'
                                               : 'Expand ${category.name}',
                                           onPressed: () {
-                                            HapticFeedback.selectionClick();
+                                            AppHaptics.selection();
                                             setState(() {
                                               if (isExpanded) {
                                                 _collapsedCategoryIds.add(
@@ -9017,7 +9136,7 @@ class _SettingsViewState extends State<SettingsView> {
               title: 'Manage accounts',
               subtitle: 'Defaults, ordering, archived accounts, and warnings',
               onTap: () {
-                HapticFeedback.selectionClick();
+                AppHaptics.navigation();
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const ManageAccountsScreen(),
@@ -9037,7 +9156,7 @@ class _SettingsViewState extends State<SettingsView> {
               title: 'Manage payees',
               subtitle: 'Active and archived payees',
               onTap: () {
-                HapticFeedback.selectionClick();
+                AppHaptics.navigation();
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (context) => PayeesManagementScreen(),
@@ -10077,7 +10196,7 @@ class _PayeesManagementScreenState extends State<PayeesManagementScreen> {
                           child: Icon(AppIcon.chevronDown),
                         ),
                         onTap: () {
-                          HapticFeedback.selectionClick();
+                          AppHaptics.selection();
                           setState(
                             () => _archivedExpanded = !_archivedExpanded,
                           );
@@ -10180,6 +10299,7 @@ class _PayeeEditorScreenState extends State<PayeeEditorScreen> {
   void _save() {
     final value = _controller.text.trim();
     if (value.isEmpty) return;
+    AppHaptics.suppressNextNavigation();
     HapticFeedback.mediumImpact();
     Navigator.pop(context, value);
   }
@@ -10286,6 +10406,7 @@ Future<void> openManagementLedger(
   BuildContext context,
   ManagementLedgerFilter filter,
 ) {
+  AppHaptics.navigation();
   return Navigator.of(context).push<void>(
     MaterialPageRoute(
       builder: (context) => FilteredLedgerScreen(filter: filter),
@@ -10432,7 +10553,7 @@ Future<void> archiveManagedPayee(BuildContext context, String payee) async {
       deletedPayeeNames: deleted,
     ),
   );
-  HapticFeedback.selectionClick();
+  AppHaptics.selection();
 }
 
 Future<void> restoreManagedPayee(BuildContext context, String payee) async {
@@ -10447,7 +10568,7 @@ Future<void> restoreManagedPayee(BuildContext context, String payee) async {
       deletedPayeeNames: deleted,
     ),
   );
-  HapticFeedback.selectionClick();
+  AppHaptics.selection();
 }
 
 Future<void> deleteManagedPayee(BuildContext context, String payee) async {
@@ -10667,6 +10788,7 @@ class _ReportsViewState extends State<ReportsView> {
   }
 
   Future<void> _openReportLedger(LedgerDrillDownFilter filter) {
+    AppHaptics.navigation();
     return Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (context) => ReportLedgerScreen(filter: filter),
@@ -11268,7 +11390,10 @@ class ReportExpansionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TextButton.icon(
-      onPressed: onPressed,
+      onPressed: () {
+        AppHaptics.selection();
+        onPressed();
+      },
       iconAlignment: IconAlignment.end,
       icon: AnimatedRotation(
         turns: expanded ? .5 : 0,
@@ -11935,7 +12060,7 @@ class SettingsSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SwitchListTile(
+    return TrackmarkSwitchListTile(
       contentPadding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
         vertical: 2,
@@ -11951,7 +12076,6 @@ class SettingsSwitch extends StatelessWidget {
               ),
             ),
       value: value,
-      activeThumbColor: AppTheme.accent,
       onChanged: AppHaptics.toggleHandler(onChanged),
     );
   }
@@ -12761,7 +12885,7 @@ class BudgetProgressRow extends StatelessWidget {
         destructive: true,
       ),
       confirmDismiss: (direction) async {
-        HapticFeedback.selectionClick();
+        AppHaptics.selection();
         await showBudgetActions(
           context,
           budget,
@@ -13367,7 +13491,7 @@ Future<void> showBudgetDialog(
                     ),
               )) ...[
                 const TransactionFormDivider(),
-                SwitchListTile.adaptive(
+                TrackmarkSwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text(
                     'Include subcategories',
@@ -13435,7 +13559,7 @@ Future<void> showBudgetDialog(
                 ),
               ),
               const TransactionFormDivider(),
-              SwitchListTile.adaptive(
+              TrackmarkSwitchListTile(
                 key: const ValueKey('budget-rollover'),
                 contentPadding: EdgeInsets.zero,
                 title: const Text(
@@ -13451,7 +13575,7 @@ Future<void> showBudgetDialog(
                 ),
               ),
               const TransactionFormDivider(),
-              SwitchListTile.adaptive(
+              TrackmarkSwitchListTile(
                 key: const ValueKey('budget-low-alert'),
                 contentPadding: EdgeInsets.zero,
                 title: const Text(
@@ -13832,7 +13956,7 @@ Future<void> showAdjustBalanceDialog(
                         selected: {isDebtBalance},
                         showSelectedIcon: false,
                         onSelectionChanged: (selection) {
-                          HapticFeedback.selectionClick();
+                          AppHaptics.selection();
                           setSheetState(() => isDebtBalance = selection.first);
                         },
                       ),
@@ -14227,7 +14351,7 @@ class _AccountDetailsView extends StatelessWidget {
                   title: 'Balance Options',
                   children: [
                     _AccountDetailsRow(
-                      label: 'Included in group balance',
+                      label: 'Included in Group Totals',
                       value: account.includeInGroupBalance ? 'Yes' : 'No',
                     ),
                     _AccountDetailsRow(
@@ -14739,7 +14863,7 @@ class _CreditInsightsFormSectionState extends State<CreditInsightsFormSection> {
             ),
           ],
         ),
-        SwitchListTile.adaptive(
+        TrackmarkSwitchListTile(
           contentPadding: EdgeInsets.zero,
           secondary: TransactionFormIcon(AppIcon.insights),
           title: Text('Enable Credit Insights', style: widget.fieldValueStyle),
@@ -15701,11 +15825,11 @@ Future<void> showEditAccountDialog(
                     ),
                     TransactionFormDivider(),
                     TransactionFormLabel('Balance options'),
-                    SwitchListTile.adaptive(
+                    TrackmarkSwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       secondary: TransactionFormIcon(AppIcon.bank),
                       title: Text(
-                        'Include in group balance',
+                        'Include in Group Totals',
                         style: fieldValueStyle,
                       ),
                       value: includeInGroupBalance,
@@ -15721,7 +15845,7 @@ Future<void> showEditAccountDialog(
                         alpha: 0.38,
                       ),
                     ),
-                    SwitchListTile.adaptive(
+                    TrackmarkSwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       secondary: TransactionFormIcon(AppIcon.pieChart),
                       title: Text(
@@ -15863,7 +15987,7 @@ Future<void> showFloatingAddMenu(
   );
 
   if (!context.mounted || selected == null) return;
-  HapticFeedback.selectionClick();
+  AppHaptics.selection();
   final store = FinanceDataStoreScope.read(context);
   switch (selected) {
     case 'expense':
@@ -16286,11 +16410,11 @@ Future<void> showAccountDialog(BuildContext context) async {
                     ),
                     TransactionFormDivider(),
                     TransactionFormLabel('Balance options'),
-                    SwitchListTile.adaptive(
+                    TrackmarkSwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       secondary: TransactionFormIcon(AppIcon.bank),
                       title: Text(
-                        'Include in group balance',
+                        'Include in Group Totals',
                         style: fieldValueStyle,
                       ),
                       value: includeInGroupBalance,
@@ -16306,7 +16430,7 @@ Future<void> showAccountDialog(BuildContext context) async {
                         alpha: 0.38,
                       ),
                     ),
-                    SwitchListTile.adaptive(
+                    TrackmarkSwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       secondary: TransactionFormIcon(AppIcon.pieChart),
                       title: Text(
@@ -16695,6 +16819,7 @@ Future<void> showTransferDialog(
                         onSelectionChanged: (values) {
                           final selectedType = values.first;
                           if (selectedType == TransactionType.transfer) return;
+                          AppHaptics.selection();
                           switchToType = selectedType;
                           Navigator.pop(context);
                         },
@@ -16899,7 +17024,7 @@ Future<void> showTransferDialog(
                                 style: fieldValueStyle,
                               ),
                             ),
-                            Switch.adaptive(
+                            TrackmarkSwitch(
                               value: scheduleFutureOccurrences,
                               onChanged: AppHaptics.toggleHandler(
                                 (value) => setDialogState(
@@ -17674,33 +17799,36 @@ Future<bool> showScheduledTransactionDialog(
                             ),
                         ],
                         selected: {type},
-                        onSelectionChanged: (values) => setDialogState(() {
+                        onSelectionChanged: (values) {
                           final nextType = values.first;
                           if (nextType == type) return;
-                          final previousType = type;
-                          type = nextType;
-                          if (type != TransactionType.transfer &&
-                              previousType != TransactionType.transfer &&
-                              previousType != type) {
-                            categoryId = null;
-                            for (final draft in splitDrafts.skip(1)) {
-                              draft.note.dispose();
+                          AppHaptics.selection();
+                          setDialogState(() {
+                            final previousType = type;
+                            type = nextType;
+                            if (type != TransactionType.transfer &&
+                                previousType != TransactionType.transfer &&
+                                previousType != type) {
+                              categoryId = null;
+                              for (final draft in splitDrafts.skip(1)) {
+                                draft.note.dispose();
+                              }
+                              if (splitDrafts.length > 1) {
+                                splitDrafts.removeRange(1, splitDrafts.length);
+                              }
+                              splitDrafts.first
+                                ..categoryId = ''
+                                ..amountMinor = amountMinor.abs();
+                              firstSplitAutoRemainder = true;
+                              splitMode = false;
+                              autofocusSplitAmountIndex = null;
                             }
-                            if (splitDrafts.length > 1) {
-                              splitDrafts.removeRange(1, splitDrafts.length);
+                            if (type == TransactionType.transfer &&
+                                transferAccountId == accountId) {
+                              transferAccountId = null;
                             }
-                            splitDrafts.first
-                              ..categoryId = ''
-                              ..amountMinor = amountMinor.abs();
-                            firstSplitAutoRemainder = true;
-                            splitMode = false;
-                            autofocusSplitAmountIndex = null;
-                          }
-                          if (type == TransactionType.transfer &&
-                              transferAccountId == accountId) {
-                            transferAccountId = null;
-                          }
-                        }),
+                          });
+                        },
                       ),
                     ),
                   ),
@@ -18051,7 +18179,7 @@ Future<bool> showScheduledTransactionDialog(
                                       style: fieldValueStyle,
                                     ),
                                   ),
-                                  Switch.adaptive(
+                                  TrackmarkSwitch(
                                     value: repeatAlertUntilResolved,
                                     onChanged: AppHaptics.toggleHandler(
                                       (value) => setDialogState(
@@ -20744,6 +20872,12 @@ Future<void> showTransactionDialog(
                         },
                         onSelectionChanged: (values) {
                           final selectedType = values.first;
+                          final previousType = isExpense
+                              ? TransactionType.expense
+                              : TransactionType.income;
+                          if (selectedType != previousType) {
+                            AppHaptics.selection();
+                          }
                           if (selectedType == TransactionType.transfer) {
                             switchToTransfer = true;
                             Navigator.pop(context);
@@ -20974,7 +21108,7 @@ Future<void> showTransactionDialog(
                                 style: fieldValueStyle,
                               ),
                             ),
-                            Switch.adaptive(
+                            TrackmarkSwitch(
                               value: scheduleFutureOccurrences,
                               onChanged: AppHaptics.toggleHandler(
                                 (value) => setDialogState(
@@ -21643,7 +21777,10 @@ Future<T?> showPolishedChoicePicker<T>(
                       trailing: choice.value == selected
                           ? Icon(AppIcon.check, color: AppTheme.accent)
                           : null,
-                      onTap: () => Navigator.pop(sheetContext, choice.value),
+                      onTap: () {
+                        if (choice.value != selected) AppHaptics.selection();
+                        Navigator.pop(sheetContext, choice.value);
+                      },
                     ),
                 ],
               ),
@@ -22183,7 +22320,7 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
           );
         }
         _rememberPayee(widget.controller.text.trim());
-        HapticFeedback.selectionClick();
+        AppHaptics.selection();
         _dismissSuggestions();
       },
       fieldViewBuilder: (context, controller, focusNode, onSubmitted) {
@@ -22464,7 +22601,7 @@ class _PayeeAutocompleteFieldState extends State<PayeeAutocompleteField> {
       text: value,
       selection: TextSelection.collapsed(offset: value.length),
     );
-    HapticFeedback.selectionClick();
+    AppHaptics.selection();
     if (mounted) {
       setState(() {
         _lastQuery = value;
@@ -23733,7 +23870,7 @@ Future<_TransactionCategoryPickerResult?> _showTransactionCategoryPickerSheet(
                             ? 'Collapse ${category.name}'
                             : 'Expand ${category.name}',
                         onPressed: () {
-                          HapticFeedback.selectionClick();
+                          AppHaptics.selection();
                           final wasExpanded = isExpanded;
                           setSheetState(() {
                             if (isExpanded) {
