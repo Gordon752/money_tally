@@ -10,12 +10,33 @@ import '../domain/finance_data_set.dart';
 import '../domain/goal.dart';
 import '../domain/goal_funding.dart';
 import '../domain/scheduled_transaction.dart';
+import '../domain/scheduled_occurrence_authority.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
 import 'finance_record_repository.dart';
 
+Map<String, Object?> _scheduledDefinitionJson(
+  ScheduledTransactionRecord scheduledTransaction,
+) {
+  final json = _scheduledCloudJson(scheduledTransaction);
+  json.remove('occurrenceStates');
+  return json;
+}
+
+Map<String, Object?> _scheduledCloudJson(
+  ScheduledTransactionRecord scheduledTransaction,
+) {
+  final json = scheduledTransaction.toJson();
+  json.remove('scheduledNotificationIds');
+  json.remove('lastReminderScheduledAt');
+  return json;
+}
+
 class FirestoreRecordRepository
-    implements FinanceRecordRepository, BulkFinanceRecordRepository {
+    implements
+        FinanceRecordRepository,
+        BulkFinanceRecordRepository,
+        ScheduledOccurrenceStateRepository {
   FirestoreRecordRepository({FirebaseFirestore? firestore})
     : firestore = firestore ?? FirebaseFirestore.instance;
 
@@ -181,8 +202,52 @@ class FirestoreRecordRepository
       userId,
       'scheduledTransactions',
       scheduledTransaction.id,
-      scheduledTransaction.toJson(),
+      _scheduledDefinitionJson(scheduledTransaction),
     );
+  }
+
+  @override
+  Future<ScheduledOccurrenceState> saveScheduledOccurrenceState({
+    required String userId,
+    required String scheduledTransactionId,
+    required String dayKey,
+    required ScheduledOccurrenceState occurrenceState,
+  }) async {
+    final generation = await _activeGeneration(userId);
+    final reference = generation == null
+        ? _collection(
+            userId,
+            'scheduledTransactions',
+          ).doc(scheduledTransactionId)
+        : _generationCollection(
+            userId,
+            generation,
+            'scheduledTransactions',
+          ).doc(_encodedDocumentId(scheduledTransactionId));
+    return firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(reference);
+      if (!snapshot.exists) {
+        throw StateError(
+          'The scheduled transaction is unavailable for occurrence update.',
+        );
+      }
+      final rawStates = snapshot.data()?['occurrenceStates'];
+      ScheduledOccurrenceState? remoteState;
+      if (rawStates is Map && rawStates[dayKey] is Map) {
+        remoteState = ScheduledOccurrenceState.fromJson(
+          Map<String, Object?>.from(rawStates[dayKey] as Map),
+        );
+      }
+      final winner = remoteState == null
+          ? occurrenceState
+          : authoritativeOccurrenceState(remoteState, occurrenceState);
+      if (identical(winner, occurrenceState)) {
+        transaction.update(reference, {
+          'occurrenceStates.$dayKey': occurrenceState.toJson(),
+        });
+      }
+      return winner;
+    });
   }
 
   @override
@@ -303,7 +368,7 @@ class FirestoreRecordRepository
       dataSet.scheduledTransactions,
       baseline?.scheduledTransactions ?? const <ScheduledTransactionRecord>[],
       (item) => item.id,
-      (item) => item.toJson(),
+      (item) => _scheduledDefinitionJson(item),
     );
     addRecords(
       'budgets',
@@ -368,6 +433,16 @@ class FirestoreRecordRepository
       );
       debugPrint('Cloud sync upload: saved documents $offset–${end - 1}');
     }
+    for (final schedule in dataSet.scheduledTransactions) {
+      for (final entry in occurrenceAuthorityFor(schedule).entries) {
+        await saveScheduledOccurrenceState(
+          userId: userId,
+          scheduledTransactionId: schedule.id,
+          dayKey: entry.key,
+          occurrenceState: entry.value,
+        );
+      }
+    }
   }
 
   @override
@@ -421,7 +496,7 @@ class FirestoreRecordRepository
       'scheduledTransactions',
       dataSet.scheduledTransactions,
       (item) => item.id,
-      (item) => item.toJson(),
+      (item) => _scheduledCloudJson(item),
     );
     addRecords(
       'budgets',

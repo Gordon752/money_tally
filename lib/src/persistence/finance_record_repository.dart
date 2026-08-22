@@ -83,3 +83,15 @@ abstract interface class BulkFinanceRecordRepository {
     FinanceDataSet? baseline,
   });
 }
+
+/// Optional capability for causally ordered, field-scoped schedule occurrence
+/// writes. Implementations must compare occurrence authority remotely rather
+/// than replacing an enclosing schedule snapshot.
+abstract interface class ScheduledOccurrenceStateRepository {
+  Future<ScheduledOccurrenceState> saveScheduledOccurrenceState({
+    required String userId,
+    required String scheduledTransactionId,
+    required String dayKey,
+    required ScheduledOccurrenceState occurrenceState,
+  });
+}

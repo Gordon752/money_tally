@@ -4633,8 +4633,14 @@ class LedgerJournalRow extends StatelessWidget {
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ) ??
         const TextStyle(fontSize: 12);
-    final isCompact = MediaQuery.sizeOf(context).width < 600;
-    final secondaryAmountSlotWidth = isAccountScoped
+    final mediaSize = MediaQuery.sizeOf(context);
+    final isCompact = mediaSize.width < 600;
+    final isIPadLayout =
+        Theme.of(context).platform == TargetPlatform.iOS &&
+        mediaSize.shortestSide >= 600;
+    final secondaryAmountSlotWidth = isIPadLayout
+        ? (isAccountScoped ? 220.0 : 230.0)
+        : isAccountScoped
         ? (isCompact ? 80.0 : 96.0)
         : (isCompact ? 44.0 : 56.0);
 
@@ -7829,9 +7835,12 @@ class _ScheduledViewState extends State<ScheduledView> {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            actionableRow,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: actionableRow,
+            ),
             Positioned(
-              left: -8,
+              left: 8,
               top: 8,
               bottom: 8,
               child: IgnorePointer(
@@ -7995,14 +8004,7 @@ class _ScheduledViewState extends State<ScheduledView> {
                 color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
               ),
               for (var index = 0; index < occurrences.length; index++) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _buildOccurrenceRow(
-                    context,
-                    occurrences[index],
-                    currency,
-                  ),
-                ),
+                _buildOccurrenceRow(context, occurrences[index], currency),
                 if (index < occurrences.length - 1)
                   Divider(
                     height: 1,
@@ -20441,15 +20443,9 @@ Future<void> recordScheduledOccurrence(
     return;
   }
 
-  final occurrences = [
-    for (final existing in item.occurrences)
-      if (!isSameCalendarDay(existing.scheduledDate, occurrence.scheduledDate))
-        existing,
-    occurrence,
-  ];
-  await dataStore.saveScheduledTransaction(
-    item.copyWith(
-      occurrences: occurrences,
+  await dataStore.saveScheduledOccurrence(
+    occurrence: occurrence,
+    scheduledTransaction: item.copyWith(
       scheduledNotificationIds: const [],
       sync: item.sync.touched(deviceId: dataStore.deviceId),
       clearLastReminderScheduledAt: true,
@@ -20463,33 +20459,25 @@ Future<void> advanceOrCloseScheduledTransaction(
   v2_scheduled.ScheduledAction action, {
   v2_scheduled.ScheduledOccurrenceRecord? occurrence,
 }) async {
-  final occurrences = occurrence == null
-      ? [...item.occurrences]
-      : [
-          for (final existing in item.occurrences)
-            if (!isSameCalendarDay(
-              existing.scheduledDate,
-              occurrence.scheduledDate,
-            ))
-              existing,
-          occurrence,
-        ];
+  if (occurrence == null) {
+    throw StateError('A scheduled occurrence is required.');
+  }
   final nextDate = nextScheduledDate(item);
   if (nextDate == null || nextDate.isAfter(item.endDate ?? DateTime(9999))) {
-    await dataStore.saveScheduledTransaction(
-      item.copyWith(
+    await dataStore.saveScheduledOccurrence(
+      occurrence: occurrence,
+      scheduledTransaction: item.copyWith(
         lastAction: action,
-        occurrences: occurrences,
         sync: item.sync.deleted(deviceId: dataStore.deviceId),
       ),
     );
     return;
   }
-  await dataStore.saveScheduledTransaction(
-    item.copyWith(
+  await dataStore.saveScheduledOccurrence(
+    occurrence: occurrence,
+    scheduledTransaction: item.copyWith(
       nextDate: nextDate,
       lastAction: v2_scheduled.ScheduledAction.none,
-      occurrences: occurrences,
       sync: item.sync.touched(deviceId: dataStore.deviceId),
     ),
   );

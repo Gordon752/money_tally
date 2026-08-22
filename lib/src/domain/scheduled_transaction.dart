@@ -46,6 +46,113 @@ enum ScheduledAction { none, paid, skipped }
 
 enum ScheduledOccurrenceStatus { pending, paid, skipped }
 
+/// Independently versioned authority for one recurring schedule occurrence.
+///
+/// The enclosing schedule's [SyncMetadata] remains the authority for edits to
+/// the schedule definition. Occurrence completion is instead ordered by
+/// [revision], then by [operationId]. [changedAt] is diagnostic only and is
+/// deliberately excluded from conflict resolution.
+class ScheduledOccurrenceState {
+  const ScheduledOccurrenceState({
+    required this.scheduledDate,
+    required this.plannedAmountMinor,
+    required this.status,
+    required this.revision,
+    required this.operationId,
+    required this.changedAt,
+    required this.deviceId,
+    this.actualAmountMinor,
+    this.actualPaymentDate,
+    this.transactionId,
+    this.goalFundingEventId,
+  });
+
+  final DateTime scheduledDate;
+  final int plannedAmountMinor;
+  final ScheduledOccurrenceStatus status;
+  final int? actualAmountMinor;
+  final DateTime? actualPaymentDate;
+  final String? transactionId;
+  final String? goalFundingEventId;
+  final int revision;
+  final String operationId;
+  final DateTime changedAt;
+  final String deviceId;
+
+  bool get isResolved =>
+      status == ScheduledOccurrenceStatus.paid ||
+      status == ScheduledOccurrenceStatus.skipped;
+
+  Map<String, Object?> toJson() => {
+    'scheduledDate': scheduledDate.toIso8601String(),
+    'plannedAmountMinor': plannedAmountMinor,
+    'status': status.name,
+    'actualAmountMinor': actualAmountMinor,
+    'actualPaymentDate': actualPaymentDate?.toIso8601String(),
+    'transactionId': transactionId,
+    'goalFundingEventId': goalFundingEventId,
+    'revision': revision,
+    'operationId': operationId,
+    'changedAt': changedAt.toUtc().toIso8601String(),
+    'deviceId': deviceId,
+  };
+
+  factory ScheduledOccurrenceState.fromJson(Map<String, Object?> json) {
+    final scheduledDate = dateTimeFromJson(json['scheduledDate']);
+    final revision = json['revision'] as int? ?? 0;
+    return ScheduledOccurrenceState(
+      scheduledDate: scheduledDate,
+      plannedAmountMinor: json['plannedAmountMinor'] as int? ?? 0,
+      status: enumByName(
+        ScheduledOccurrenceStatus.values,
+        json['status'],
+        ScheduledOccurrenceStatus.pending,
+      ),
+      actualAmountMinor: json['actualAmountMinor'] as int?,
+      actualPaymentDate: json['actualPaymentDate'] == null
+          ? null
+          : dateTimeFromJson(json['actualPaymentDate']),
+      transactionId: json['transactionId'] as String?,
+      goalFundingEventId: json['goalFundingEventId'] as String?,
+      revision: revision,
+      // Old/hand-authored additive payloads remain deterministic even if they
+      // omitted the operation id. New writes always supply a random id.
+      operationId:
+          json['operationId'] as String? ??
+          'legacy_${occurrenceDayKey(scheduledDate)}_$revision',
+      changedAt: json['changedAt'] == null
+          ? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)
+          : dateTimeFromJson(json['changedAt']).toUtc(),
+      deviceId: json['deviceId'] as String? ?? 'legacy',
+    );
+  }
+
+  ScheduledOccurrenceRecord toLegacyRecord() => ScheduledOccurrenceRecord(
+    scheduledDate: scheduledDate,
+    plannedAmountMinor: plannedAmountMinor,
+    status: status,
+    actualAmountMinor: actualAmountMinor,
+    actualPaymentDate: actualPaymentDate,
+    transactionId: transactionId,
+    goalFundingEventId: goalFundingEventId,
+  );
+}
+
+String occurrenceDayKey(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}'
+    '${date.month.toString().padLeft(2, '0')}'
+    '${date.day.toString().padLeft(2, '0')}';
+
+ScheduledOccurrenceState authoritativeOccurrenceState(
+  ScheduledOccurrenceState left,
+  ScheduledOccurrenceState right,
+) {
+  if (left.revision != right.revision) {
+    return left.revision > right.revision ? left : right;
+  }
+  return left.operationId.compareTo(right.operationId) >= 0 ? left : right;
+}
+
 class ScheduledOccurrenceRecord {
   const ScheduledOccurrenceRecord({
     required this.scheduledDate,
@@ -122,6 +229,7 @@ class ScheduledTransactionRecord {
     this.lastReminderScheduledAt,
     this.lastAction = ScheduledAction.none,
     this.occurrences = const [],
+    this.occurrenceStates = const {},
   });
 
   final String id;
@@ -150,6 +258,7 @@ class ScheduledTransactionRecord {
   final DateTime? lastReminderScheduledAt;
   final ScheduledAction lastAction;
   final List<ScheduledOccurrenceRecord> occurrences;
+  final Map<String, ScheduledOccurrenceState> occurrenceStates;
   final SyncMetadata sync;
 
   bool get hasAlert => alertPreference != AlertPreference.none;
@@ -226,6 +335,7 @@ class ScheduledTransactionRecord {
     DateTime? lastReminderScheduledAt,
     ScheduledAction? lastAction,
     List<ScheduledOccurrenceRecord>? occurrences,
+    Map<String, ScheduledOccurrenceState>? occurrenceStates,
     SyncMetadata? sync,
     bool clearTransferAccount = false,
     bool clearCategory = false,
@@ -265,6 +375,7 @@ class ScheduledTransactionRecord {
           : lastReminderScheduledAt ?? this.lastReminderScheduledAt,
       lastAction: lastAction ?? this.lastAction,
       occurrences: occurrences ?? this.occurrences,
+      occurrenceStates: occurrenceStates ?? this.occurrenceStates,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -294,6 +405,11 @@ class ScheduledTransactionRecord {
       'lastReminderScheduledAt': lastReminderScheduledAt?.toIso8601String(),
       'lastAction': lastAction.name,
       'occurrences': occurrences.map((item) => item.toJson()).toList(),
+      if (occurrenceStates.isNotEmpty)
+        'occurrenceStates': {
+          for (final entry in occurrenceStates.entries)
+            entry.key: entry.value.toJson(),
+        },
       'sync': sync.toJson(),
     };
   }
@@ -351,6 +467,13 @@ class ScheduledTransactionRecord {
       occurrences: stringMapList(
         json['occurrences'],
       ).map(ScheduledOccurrenceRecord.fromJson).toList(),
+      occurrenceStates: {
+        for (final entry in stringMap(json['occurrenceStates']).entries)
+          if (entry.value is Map)
+            entry.key: ScheduledOccurrenceState.fromJson(
+              stringMap(entry.value),
+            ),
+      },
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

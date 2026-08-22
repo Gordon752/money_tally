@@ -1,4 +1,5 @@
 import '../domain/scheduled_transaction.dart';
+import '../domain/scheduled_occurrence_authority.dart';
 import '../domain/transaction.dart';
 
 abstract interface class NotificationScheduler {
@@ -148,18 +149,22 @@ class ScheduledNotificationPlanner {
     required DateTime now,
   }) {
     if (scheduledTransaction.isDeleted ||
-        scheduledTransaction.alertPreference == AlertPreference.none ||
-        scheduledTransaction.lastAction != ScheduledAction.none) {
+        scheduledTransaction.alertPreference == AlertPreference.none) {
       return null;
     }
 
-    final scheduledFor = alertDateTimeFor(scheduledTransaction);
+    final occurrenceDate = effectiveNextActionableDate(scheduledTransaction);
+    if (occurrenceDate == null) return null;
+    final scheduledFor = alertDateTimeForOccurrence(
+      scheduledTransaction,
+      occurrenceDate,
+    );
     if (!scheduledFor.isAfter(now)) return null;
 
     return ScheduledNotificationRequest(
       id: notificationIdFor(scheduledTransaction.id),
       scheduledTransactionId: scheduledTransaction.id,
-      occurrenceDate: scheduledTransaction.nextDate,
+      occurrenceDate: occurrenceDate,
       title: notificationTitleFor(scheduledTransaction),
       body: notificationBodyFor(scheduledTransaction),
       scheduledFor: scheduledFor,

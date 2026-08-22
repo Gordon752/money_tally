@@ -7,6 +7,7 @@ import '../domain/user_preferences.dart';
 import '../notifications/notification_scheduler.dart';
 import '../persistence/finance_record_repository.dart';
 import '../persistence/local_finance_data_set_repository.dart';
+import '../persistence/scheduled_notification_state_repository.dart';
 import '../store/finance_data_store.dart';
 import 'v1_snapshot_migrator.dart';
 
@@ -74,6 +75,8 @@ class FinanceDataBootstrapper {
       preferRemoteOnFirstSync: _didImportLegacyThisLaunch,
       userId: userId,
       deviceId: deviceId,
+      notificationStateRepository:
+          const SharedPreferencesScheduledNotificationStateRepository(),
     );
     await store.migrateLegacyGoalsToAccounts();
     return store;

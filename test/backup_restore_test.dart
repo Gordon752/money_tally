@@ -45,8 +45,9 @@ void main() {
 
       expect(validated.exportedAt, DateTime.utc(2026, 8, 8, 12, 34, 56));
       expect(validated.sourceSchemaVersion, currentBackupSchemaVersion);
-      expect(store.dataSet.toJson(), original.toJson());
-      expect(reloaded?.toJson(), original.toJson());
+      final expected = _withoutDeviceLocalNotificationMetadata(original);
+      expect(store.dataSet.toJson(), expected.toJson());
+      expect(reloaded?.toJson(), expected.toJson());
       expect(store.balanceForAccount('checking'), 502500);
       expect(store.balanceForAccount('card'), -125000);
       expect(
@@ -71,6 +72,55 @@ void main() {
       );
     });
 
+    test(
+      'occurrence authority round trips while device notification state is omitted',
+      () {
+        final original = _richDataSet();
+        final schedule = original.scheduledTransactions.first;
+        final occurrenceDate = DateTime(2026, 8, 8);
+        final withAuthority = original.copyWith(
+          scheduledTransactions: [
+            schedule.copyWith(
+              occurrenceStates: {
+                occurrenceDayKey(occurrenceDate): ScheduledOccurrenceState(
+                  scheduledDate: occurrenceDate,
+                  plannedAmountMinor: 10000,
+                  status: ScheduledOccurrenceStatus.paid,
+                  actualAmountMinor: 10000,
+                  actualPaymentDate: occurrenceDate,
+                  transactionId: 'scheduled-ledger-1',
+                  revision: 3,
+                  operationId: 'operation-a',
+                  changedAt: DateTime.utc(2026, 8, 8, 12),
+                  deviceId: 'phone',
+                ),
+              },
+              sync: schedule.sync,
+            ),
+            ...original.scheduledTransactions.skip(1),
+          ],
+        );
+
+        final encoded = const BackupCodec().encodeJson(withAuthority);
+        final raw = jsonDecode(encoded) as Map<String, Object?>;
+        final rawSchedule =
+            (raw['scheduledTransactions'] as List<Object?>).first
+                as Map<String, Object?>;
+        expect(rawSchedule, isNot(contains('scheduledNotificationIds')));
+        expect(rawSchedule, isNot(contains('lastReminderScheduledAt')));
+
+        final restored = const BackupRestoreValidator().validate(encoded);
+        final state = restored
+            .dataSet
+            .scheduledTransactions
+            .first
+            .occurrenceStates[occurrenceDayKey(occurrenceDate)];
+        expect(state?.revision, 3);
+        expect(state?.operationId, 'operation-a');
+        expect(state?.transactionId, 'scheduled-ledger-1');
+      },
+    );
+
     test('existing local data is replaced rather than merged', () async {
       final store = FinanceDataStore(dataSet: _fictionalDataSet());
 
@@ -80,7 +130,10 @@ void main() {
         store.accounts.map((item) => item.id),
         isNot(contains('fictional')),
       );
-      expect(store.dataSet.toJson(), _richDataSet().toJson());
+      expect(
+        store.dataSet.toJson(),
+        _withoutDeviceLocalNotificationMetadata(_richDataSet()).toJson(),
+      );
     });
 
     test(
@@ -418,7 +471,10 @@ void main() {
 
         expect(remote.authoritativeWrites, 1);
         expect(remote.remoteDataSet.toJson(), _richDataSet().toJson());
-        expect(store.dataSet.toJson(), _richDataSet().toJson());
+        expect(
+          store.dataSet.toJson(),
+          _withoutDeviceLocalNotificationMetadata(_richDataSet()).toJson(),
+        );
         expect(
           store.accounts.map((item) => item.id),
           isNot(contains('fictional')),
@@ -450,7 +506,10 @@ void main() {
 
         await store.restoreBackupDataSet(_richDataSet());
 
-        expect(store.dataSet.toJson(), _richDataSet().toJson());
+        expect(
+          store.dataSet.toJson(),
+          _withoutDeviceLocalNotificationMetadata(_richDataSet()).toJson(),
+        );
         expect(remote.remoteDataSet.toJson(), _richDataSet().toJson());
         expect(store.accounts.where((item) => item.id == 'fictional'), isEmpty);
         expect(
@@ -492,7 +551,10 @@ void main() {
           userId: 'user-1',
         );
 
-        expect(secondDevice.dataSet.toJson(), datasetB.toJson());
+        expect(
+          secondDevice.dataSet.toJson(),
+          _withoutDeviceLocalNotificationMetadata(datasetB).toJson(),
+        );
         expect(
           secondDevice.accounts.map((item) => item.id),
           isNot(contains('fictional')),
@@ -589,7 +651,7 @@ void main() {
       expect(await File(saved.path).readAsString(), content);
       expect(
         const BackupRestoreValidator().validate(content).dataSet.toJson(),
-        _richDataSet().toJson(),
+        _withoutDeviceLocalNotificationMetadata(_richDataSet()).toJson(),
       );
     });
 
@@ -613,6 +675,20 @@ void main() {
       },
     );
   });
+}
+
+FinanceDataSet _withoutDeviceLocalNotificationMetadata(FinanceDataSet dataSet) {
+  return dataSet.copyWith(
+    scheduledTransactions: dataSet.scheduledTransactions
+        .map(
+          (schedule) => schedule.copyWith(
+            scheduledNotificationIds: const [],
+            clearLastReminderScheduledAt: true,
+            sync: schedule.sync,
+          ),
+        )
+        .toList(growable: false),
+  );
 }
 
 FinanceDataSet _richDataSet() {

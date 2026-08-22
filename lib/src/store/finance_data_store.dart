@@ -11,6 +11,7 @@ import '../domain/finance_data_set.dart';
 import '../domain/goal.dart';
 import '../domain/goal_funding.dart';
 import '../domain/scheduled_transaction.dart';
+import '../domain/scheduled_occurrence_authority.dart';
 import '../domain/sync_metadata.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
@@ -18,6 +19,7 @@ import '../goals/goal_calculator.dart';
 import '../notifications/notification_scheduler.dart';
 import '../persistence/finance_record_repository.dart';
 import '../persistence/local_finance_data_set_repository.dart';
+import '../persistence/scheduled_notification_state_repository.dart';
 
 class AuthoritativeRestoreLocalInstallException implements Exception {
   const AuthoritativeRestoreLocalInstallException(this.cause);
@@ -60,6 +62,7 @@ class FinanceDataStore extends ChangeNotifier {
     bool preferRemoteOnFirstSync = false,
     String? userId,
     String deviceId = 'local',
+    ScheduledNotificationStateRepository? notificationStateRepository,
   }) {
     return FinanceDataStore._(
       dataSet,
@@ -69,6 +72,9 @@ class FinanceDataStore extends ChangeNotifier {
       preferRemoteOnFirstSync: preferRemoteOnFirstSync,
       userId: userId,
       deviceId: deviceId,
+      notificationStateRepository:
+          notificationStateRepository ??
+          InMemoryScheduledNotificationStateRepository(),
     );
   }
 
@@ -80,6 +86,7 @@ class FinanceDataStore extends ChangeNotifier {
     this.preferRemoteOnFirstSync = false,
     this.userId,
     this.deviceId = 'local',
+    required this.notificationStateRepository,
   });
 
   factory FinanceDataStore.empty({
@@ -89,6 +96,7 @@ class FinanceDataStore extends ChangeNotifier {
         const NoopNotificationScheduler(),
     String? userId,
     String deviceId = 'local',
+    ScheduledNotificationStateRepository? notificationStateRepository,
   }) {
     return FinanceDataStore(
       dataSet: const FinanceDataSet(
@@ -104,6 +112,7 @@ class FinanceDataStore extends ChangeNotifier {
       notificationScheduler: notificationScheduler,
       userId: userId,
       deviceId: deviceId,
+      notificationStateRepository: notificationStateRepository,
     );
   }
 
@@ -115,6 +124,7 @@ class FinanceDataStore extends ChangeNotifier {
         const NoopNotificationScheduler(),
     String? userId,
     String deviceId = 'local',
+    ScheduledNotificationStateRepository? notificationStateRepository,
   }) async {
     final localData = await localRepository.load();
     final store = FinanceDataStore(
@@ -133,6 +143,7 @@ class FinanceDataStore extends ChangeNotifier {
       notificationScheduler: notificationScheduler,
       userId: userId,
       deviceId: deviceId,
+      notificationStateRepository: notificationStateRepository,
     );
     await store.migrateLegacyGoalsToAccounts();
     return store;
@@ -148,6 +159,7 @@ class FinanceDataStore extends ChangeNotifier {
 
   bool get hasRemoteSync => remoteRepository != null && userId != null;
   final String deviceId;
+  final ScheduledNotificationStateRepository notificationStateRepository;
   final ValueNotifier<BudgetLowAlert?> budgetLowAlertNotifier =
       ValueNotifier<BudgetLowAlert?>(null);
   final List<BudgetLowAlert> _pendingBudgetLowAlerts = [];
@@ -504,31 +516,24 @@ class FinanceDataStore extends ChangeNotifier {
     final alerts = <ScheduledAlertOccurrence>[];
     for (final schedule in scheduledTransactions) {
       if (schedule.isDeleted ||
-          schedule.lastAction != ScheduledAction.none ||
           !schedule.hasAlert ||
           !hasActionableScheduledAccounts(schedule)) {
         continue;
       }
       final unresolved = <String, ({DateTime date, int amount})>{};
-      for (final occurrence in schedule.occurrences) {
-        if (occurrence.status != ScheduledOccurrenceStatus.pending) continue;
-        unresolved[scheduledDayKey(occurrence.scheduledDate)] = (
-          date: occurrence.scheduledDate,
-          amount: occurrence.plannedAmountMinor,
+      for (final state in occurrenceAuthorityFor(schedule).values) {
+        if (state.status != ScheduledOccurrenceStatus.pending) continue;
+        unresolved[scheduledDayKey(state.scheduledDate)] = (
+          date: state.scheduledDate,
+          amount: state.plannedAmountMinor,
         );
       }
-      final nextDateKey = scheduledDayKey(schedule.nextDate);
-      final recordedNext = schedule.occurrences
-          .where(
-            (occurrence) =>
-                scheduledDayKey(occurrence.scheduledDate) == nextDateKey,
-          )
-          .firstOrNull;
-      if (recordedNext == null ||
-          recordedNext.status == ScheduledOccurrenceStatus.pending) {
+      final effectiveDate = effectiveNextActionableDate(schedule);
+      if (effectiveDate != null) {
+        final nextDateKey = scheduledDayKey(effectiveDate);
         unresolved.putIfAbsent(
           nextDateKey,
-          () => (date: schedule.nextDate, amount: schedule.amountMinor),
+          () => (date: effectiveDate, amount: schedule.amountMinor),
         );
       }
       for (final occurrence in unresolved.values) {
@@ -574,7 +579,12 @@ class FinanceDataStore extends ChangeNotifier {
           !hasActionableScheduledAccounts(schedule)) {
         continue;
       }
-      final candidate = planner.alertDateTimeFor(schedule);
+      final effectiveDate = effectiveNextActionableDate(schedule);
+      if (effectiveDate == null) continue;
+      final candidate = planner.alertDateTimeForOccurrence(
+        schedule,
+        effectiveDate,
+      );
       if (!candidate.isAfter(anchor)) continue;
       if (next == null || candidate.isBefore(next)) next = candidate;
     }
@@ -607,10 +617,7 @@ class FinanceDataStore extends ChangeNotifier {
         !hasActionableScheduledAccounts(scheduledTransaction)) {
       return null;
     }
-    return firstUnresolvedScheduledDate(
-      scheduledTransaction,
-      today: now ?? DateTime.now(),
-    );
+    return effectiveNextActionableDate(scheduledTransaction);
   }
 
   List<ScheduledTransactionRecord> actionableScheduledTransactions({
@@ -690,6 +697,7 @@ class FinanceDataStore extends ChangeNotifier {
         nextDate: nextDate,
         lastAction: lastAction,
         occurrences: const [],
+        occurrenceStates: const {},
         scheduledNotificationIds: const [],
         sync: resetSync,
         clearLastReminderScheduledAt: true,
@@ -823,12 +831,75 @@ class FinanceDataStore extends ChangeNotifier {
     FinanceDataSet dataSet, {
     bool persistLocal = true,
   }) async {
-    if (persistLocal) {
-      await localRepository?.save(dataSet);
+    final previousSchedules = scheduledTransactions;
+    // Old local data and backups may still carry notification bookkeeping in
+    // the schedule record. Treat it only as device-local migration input so
+    // reconciliation can cancel those requests before the fields are removed
+    // from semantic storage.
+    for (final schedule in dataSet.scheduledTransactions) {
+      if (schedule.scheduledNotificationIds.isEmpty &&
+          schedule.lastReminderScheduledAt == null) {
+        continue;
+      }
+      await notificationStateRepository.save(
+        schedule.id,
+        DeviceScheduledNotificationState(
+          notificationIds: schedule.scheduledNotificationIds,
+          lastScheduledAt: schedule.lastReminderScheduledAt,
+        ),
+      );
     }
-    _dataSet = dataSet;
-    await refreshScheduledNotificationBadge();
+    final semanticDataSet = dataSet.copyWith(
+      scheduledTransactions: [
+        for (final schedule in dataSet.scheduledTransactions)
+          schedule.scheduledNotificationIds.isEmpty &&
+                  schedule.lastReminderScheduledAt == null
+              ? schedule
+              : schedule.copyWith(
+                  scheduledNotificationIds: const [],
+                  clearLastReminderScheduledAt: true,
+                  sync: schedule.sync,
+                ),
+      ],
+    );
+    if (persistLocal) {
+      await localRepository?.save(semanticDataSet);
+    }
+    _dataSet = semanticDataSet;
+    await _reconcileScheduledNotifications(previousSchedules);
     notifyListeners();
+  }
+
+  Future<void> _reconcileScheduledNotifications(
+    Iterable<ScheduledTransactionRecord> previousSchedules,
+  ) async {
+    final byId = <String, ScheduledTransactionRecord>{
+      for (final schedule in previousSchedules) schedule.id: schedule,
+      for (final schedule in scheduledTransactions) schedule.id: schedule,
+    };
+    for (final schedule in byId.values) {
+      final stored = await notificationStateRepository.load(schedule.id);
+      final ids = <int>{
+        notificationIdFor(schedule.id),
+        ...schedule.scheduledNotificationIds,
+        ...?stored?.notificationIds,
+      };
+      await notificationScheduler.cancelScheduledTransaction(
+        schedule.copyWith(
+          scheduledNotificationIds: ids.toList(growable: false),
+          sync: schedule.sync,
+        ),
+      );
+      await notificationStateRepository.remove(schedule.id);
+    }
+
+    final reconciled = <ScheduledTransactionRecord>[];
+    for (final schedule in scheduledTransactions) {
+      reconciled.add(await _applyScheduledNotificationState(schedule));
+    }
+    _dataSet = _dataSet.copyWith(scheduledTransactions: reconciled);
+    await localRepository?.save(_dataSet);
+    await refreshScheduledNotificationBadge();
   }
 
   /// A JSON backup is already a v2 data set. Its successful restoration forms
@@ -1194,6 +1265,20 @@ class FinanceDataStore extends ChangeNotifier {
         userId: currentUserId,
         scheduledTransaction: scheduledTransaction,
       );
+      if (remote is ScheduledOccurrenceStateRepository) {
+        final occurrenceRepository =
+            remote as ScheduledOccurrenceStateRepository;
+        for (final entry in occurrenceAuthorityFor(
+          scheduledTransaction,
+        ).entries) {
+          await occurrenceRepository.saveScheduledOccurrenceState(
+            userId: currentUserId,
+            scheduledTransactionId: scheduledTransaction.id,
+            dayKey: entry.key,
+            occurrenceState: entry.value,
+          );
+        }
+      }
     }
     for (final budget in budgets) {
       await remote.saveBudget(userId: currentUserId, budget: budget);
@@ -1965,37 +2050,49 @@ class FinanceDataStore extends ChangeNotifier {
         );
       }
     }
-    final occurrence = ScheduledOccurrenceRecord(
+    var occurrenceState = nextOccurrenceOperation(
+      schedule: schedule,
       scheduledDate: day,
       plannedAmountMinor: amount,
       status: ScheduledOccurrenceStatus.paid,
       actualAmountMinor: amount,
       actualPaymentDate: event.date,
       goalFundingEventId: event.id,
+      deviceId: deviceId,
     );
-    final occurrences = [
-      for (final item in schedule.occurrences)
-        if (!isSameScheduledDay(item.scheduledDate, day)) item,
-      occurrence,
-    ];
+    final remote = remoteRepository;
+    final currentUserId = userId;
+    if (remote is ScheduledOccurrenceStateRepository && currentUserId != null) {
+      occurrenceState = await (remote as ScheduledOccurrenceStateRepository)
+          .saveScheduledOccurrenceState(
+            userId: currentUserId,
+            scheduledTransactionId: schedule.id,
+            dayKey: occurrenceDayKey(day),
+            occurrenceState: occurrenceState,
+          );
+    }
     final nextDate = nextScheduledRecurrenceDate(
       schedule.nextDate,
       schedule.frequency,
     );
     final updatedSchedule =
         nextDate == null || nextDate.isAfter(schedule.endDate ?? DateTime(9999))
-        ? schedule.copyWith(
-            lastAction: ScheduledAction.paid,
-            occurrences: occurrences,
-            sync: schedule.sync.deleted(deviceId: deviceId),
+        ? withOccurrenceAuthority(
+            schedule.copyWith(
+              lastAction: ScheduledAction.paid,
+              sync: schedule.sync.deleted(deviceId: deviceId),
+            ),
+            occurrenceState,
           )
-        : schedule.copyWith(
-            nextDate: nextDate,
-            lastAction: ScheduledAction.none,
-            occurrences: occurrences,
-            scheduledNotificationIds: const [],
-            sync: schedule.sync.touched(deviceId: deviceId),
-            clearLastReminderScheduledAt: true,
+        : withOccurrenceAuthority(
+            schedule.copyWith(
+              nextDate: nextDate,
+              lastAction: ScheduledAction.none,
+              scheduledNotificationIds: const [],
+              sync: schedule.sync.touched(deviceId: deviceId),
+              clearLastReminderScheduledAt: true,
+            ),
+            occurrenceState,
           );
     final previousDataSet = _dataSet;
     try {
@@ -2132,29 +2229,37 @@ class FinanceDataStore extends ChangeNotifier {
           wasAutomaticallyClosed ||
           (!occurrenceDay.isBefore(todayDay) &&
               occurrenceDay.isBefore(schedule.nextDate));
-      final restoredOccurrences = [
-        for (final occurrence in schedule.occurrences)
-          if (!isSameScheduledDay(
-            occurrence.scheduledDate,
-            event.scheduledOccurrenceDate!,
-          ))
-            occurrence,
-        ScheduledOccurrenceRecord(
-          scheduledDate: occurrenceDay,
-          plannedAmountMinor:
-              event.scheduledPlannedAmountMinor ?? event.totalAmountMinor,
-          status: ScheduledOccurrenceStatus.pending,
+      var restoredState = nextOccurrenceOperation(
+        schedule: schedule,
+        scheduledDate: occurrenceDay,
+        plannedAmountMinor:
+            event.scheduledPlannedAmountMinor ?? event.totalAmountMinor,
+        status: ScheduledOccurrenceStatus.pending,
+        deviceId: deviceId,
+      );
+      final remote = remoteRepository;
+      final currentUserId = userId;
+      if (remote is ScheduledOccurrenceStateRepository &&
+          currentUserId != null) {
+        restoredState = await (remote as ScheduledOccurrenceStateRepository)
+            .saveScheduledOccurrenceState(
+              userId: currentUserId,
+              scheduledTransactionId: schedule.id,
+              dayKey: occurrenceDayKey(occurrenceDay),
+              occurrenceState: restoredState,
+            );
+      }
+      restoredSchedule = withOccurrenceAuthority(
+        schedule.copyWith(
+          nextDate: shouldRestoreAsNext ? occurrenceDay : schedule.nextDate,
+          lastAction: ScheduledAction.none,
+          scheduledNotificationIds: const [],
+          sync: schedule.isDeleted
+              ? schedule.sync.restored(deviceId: deviceId)
+              : schedule.sync.touched(deviceId: deviceId),
+          clearLastReminderScheduledAt: true,
         ),
-      ];
-      restoredSchedule = schedule.copyWith(
-        nextDate: shouldRestoreAsNext ? occurrenceDay : schedule.nextDate,
-        lastAction: ScheduledAction.none,
-        occurrences: restoredOccurrences,
-        scheduledNotificationIds: const [],
-        sync: schedule.isDeleted
-            ? schedule.sync.restored(deviceId: deviceId)
-            : schedule.sync.touched(deviceId: deviceId),
-        clearLastReminderScheduledAt: true,
+        restoredState,
       );
     }
     final previousDataSet = _dataSet;
@@ -2604,6 +2709,16 @@ class FinanceDataStore extends ChangeNotifier {
   Future<void> saveScheduledTransaction(
     ScheduledTransactionRecord scheduledTransaction,
   ) async {
+    final existing = scheduledTransactions
+        .where((item) => item.id == scheduledTransaction.id)
+        .firstOrNull;
+    if (existing != null) {
+      scheduledTransaction = mergeScheduledTransactionAuthority(
+        incoming: existing,
+        current: scheduledTransaction,
+        preferCurrentOnDefinitionTie: true,
+      );
+    }
     scheduledTransaction = _withStableScheduledSplitLineIds(
       scheduledTransaction,
     );
@@ -2617,6 +2732,61 @@ class FinanceDataStore extends ChangeNotifier {
       (item) => item.id,
     );
     _dataSet = _dataSet.copyWith(scheduledTransactions: updated);
+    await _commit(scheduledTransaction: notificationAdjusted);
+    await refreshScheduledNotificationBadge();
+  }
+
+  Future<void> saveScheduledOccurrence({
+    required ScheduledTransactionRecord scheduledTransaction,
+    required ScheduledOccurrenceRecord occurrence,
+  }) async {
+    final current = scheduledTransactions
+        .where((item) => item.id == scheduledTransaction.id)
+        .firstOrNull;
+    if (current == null) {
+      throw const FinanceDataValidationException(
+        'The scheduled transaction is unavailable.',
+      );
+    }
+    var state = nextOccurrenceOperation(
+      schedule: current,
+      scheduledDate: occurrence.scheduledDate,
+      plannedAmountMinor: occurrence.plannedAmountMinor,
+      status: occurrence.status,
+      actualAmountMinor: occurrence.actualAmountMinor,
+      actualPaymentDate: occurrence.actualPaymentDate,
+      transactionId: occurrence.transactionId,
+      goalFundingEventId: occurrence.goalFundingEventId,
+      deviceId: deviceId,
+    );
+    final remote = remoteRepository;
+    final currentUserId = userId;
+    if (remote is ScheduledOccurrenceStateRepository && currentUserId != null) {
+      state = await (remote as ScheduledOccurrenceStateRepository)
+          .saveScheduledOccurrenceState(
+            userId: currentUserId,
+            scheduledTransactionId: scheduledTransaction.id,
+            dayKey: occurrenceDayKey(occurrence.scheduledDate),
+            occurrenceState: state,
+          );
+    }
+    var updated = withOccurrenceAuthority(
+      scheduledTransaction,
+      state,
+      normalizeNextDate: true,
+    );
+    updated = _withStableScheduledSplitLineIds(updated);
+    _validateScheduledTransaction(updated);
+    final notificationAdjusted = await _applyScheduledNotificationState(
+      updated,
+    );
+    _dataSet = _dataSet.copyWith(
+      scheduledTransactions: _upsert(
+        scheduledTransactions,
+        notificationAdjusted,
+        (item) => item.id,
+      ),
+    );
     await _commit(scheduledTransaction: notificationAdjusted);
     await refreshScheduledNotificationBadge();
   }
@@ -2733,33 +2903,38 @@ class FinanceDataStore extends ChangeNotifier {
         wasAutomaticallyClosed ||
         (!occurrenceDay.isBefore(today) &&
             occurrenceDay.isBefore(scheduledTransaction.nextDate));
-    final restoredOccurrence = ScheduledOccurrenceRecord(
+    var restoredState = nextOccurrenceOperation(
+      schedule: scheduledTransaction,
       scheduledDate: occurrence.scheduledDate,
       plannedAmountMinor: occurrence.plannedAmountMinor,
       status: ScheduledOccurrenceStatus.pending,
+      deviceId: deviceId,
     );
-    final restoredOccurrences = [
-      for (final existing in scheduledTransaction.occurrences)
-        if (existing.transactionId != transaction.id ||
-            !isSameScheduledDay(
-              existing.scheduledDate,
-              occurrence.scheduledDate,
-            ))
-          existing,
-      restoredOccurrence,
-    ];
+    final remote = remoteRepository;
+    final currentUserId = userId;
+    if (remote is ScheduledOccurrenceStateRepository && currentUserId != null) {
+      restoredState = await (remote as ScheduledOccurrenceStateRepository)
+          .saveScheduledOccurrenceState(
+            userId: currentUserId,
+            scheduledTransactionId: scheduledTransaction.id,
+            dayKey: occurrenceDayKey(occurrence.scheduledDate),
+            occurrenceState: restoredState,
+          );
+    }
     final scheduleSync = scheduledTransaction.isDeleted
         ? scheduledTransaction.sync.restored(deviceId: deviceId)
         : scheduledTransaction.sync.touched(deviceId: deviceId);
-    var restoredSchedule = scheduledTransaction.copyWith(
-      nextDate: shouldRestoreAsNext
-          ? occurrence.scheduledDate
-          : scheduledTransaction.nextDate,
-      lastAction: ScheduledAction.none,
-      occurrences: restoredOccurrences,
-      scheduledNotificationIds: const [],
-      sync: scheduleSync,
-      clearLastReminderScheduledAt: true,
+    var restoredSchedule = withOccurrenceAuthority(
+      scheduledTransaction.copyWith(
+        nextDate: shouldRestoreAsNext
+            ? occurrence.scheduledDate
+            : scheduledTransaction.nextDate,
+        lastAction: ScheduledAction.none,
+        scheduledNotificationIds: const [],
+        sync: scheduleSync,
+        clearLastReminderScheduledAt: true,
+      ),
+      restoredState,
     );
     final reversedTransaction = transaction.copyWith(
       sync: transaction.sync.deleted(deviceId: deviceId),
@@ -2857,8 +3032,20 @@ class FinanceDataStore extends ChangeNotifier {
     ScheduledTransactionRecord scheduledTransaction,
   ) async {
     final existing = _existingScheduledTransaction(scheduledTransaction.id);
-    if (existing != null && existing.scheduledNotificationIds.isNotEmpty) {
-      await notificationScheduler.cancelScheduledTransaction(existing);
+    final storedState = await notificationStateRepository.load(
+      scheduledTransaction.id,
+    );
+    final legacyIds = existing?.scheduledNotificationIds ?? const <int>[];
+    final existingIds = storedState?.notificationIds.isNotEmpty == true
+        ? storedState!.notificationIds
+        : legacyIds;
+    if (existingIds.isNotEmpty) {
+      await notificationScheduler.cancelScheduledTransaction(
+        scheduledTransaction.copyWith(
+          scheduledNotificationIds: existingIds,
+          sync: scheduledTransaction.sync,
+        ),
+      );
     }
 
     final shouldSchedule =
@@ -2866,8 +3053,9 @@ class FinanceDataStore extends ChangeNotifier {
         !scheduledTransaction.isDeleted &&
         hasActionableScheduledAccounts(scheduledTransaction) &&
         scheduledTransaction.hasAlert &&
-        scheduledTransaction.lastAction == ScheduledAction.none;
+        effectiveNextActionableDate(scheduledTransaction) != null;
     if (!shouldSchedule) {
+      await notificationStateRepository.remove(scheduledTransaction.id);
       if (scheduledTransaction.scheduledNotificationIds.isEmpty &&
           scheduledTransaction.lastReminderScheduledAt == null) {
         return scheduledTransaction;
@@ -2875,23 +3063,34 @@ class FinanceDataStore extends ChangeNotifier {
       return scheduledTransaction.copyWith(
         scheduledNotificationIds: const [],
         clearLastReminderScheduledAt: true,
+        sync: scheduledTransaction.sync,
       );
     }
 
     final hasPermission = await notificationScheduler
         .requestPermissionIfNeeded();
     if (!hasPermission) {
+      await notificationStateRepository.remove(scheduledTransaction.id);
       return scheduledTransaction.copyWith(
         scheduledNotificationIds: const [],
         clearLastReminderScheduledAt: true,
+        sync: scheduledTransaction.sync,
       );
     }
 
     final notificationIds = await notificationScheduler
         .scheduleScheduledTransaction(scheduledTransaction);
+    await notificationStateRepository.save(
+      scheduledTransaction.id,
+      DeviceScheduledNotificationState(
+        notificationIds: notificationIds,
+        lastScheduledAt: DateTime.now(),
+      ),
+    );
     return scheduledTransaction.copyWith(
-      scheduledNotificationIds: notificationIds,
-      lastReminderScheduledAt: DateTime.now(),
+      scheduledNotificationIds: const [],
+      clearLastReminderScheduledAt: true,
+      sync: scheduledTransaction.sync,
     );
   }
 
@@ -3678,11 +3877,10 @@ FinanceDataSet mergeFinanceDataSetsPreferCurrent({
       idOf: (item) => item.id,
       syncOf: (item) => item.sync,
     ),
-    scheduledTransactions: mergeFinanceRecordsPreferCurrent(
+    scheduledTransactions: mergeScheduledTransactions(
       incoming: incoming.scheduledTransactions,
       current: current.scheduledTransactions,
-      idOf: (item) => item.id,
-      syncOf: (item) => item.sync,
+      preferCurrentOnDefinitionTie: true,
     ),
     budgets: mergeFinanceRecordsPreferCurrent(
       incoming: incoming.budgets,
@@ -3735,10 +3933,10 @@ FinanceDataSet mergeFinanceDataSetsPreferIncoming({
       current: current.transactions,
       idOf: (item) => item.id,
     ),
-    scheduledTransactions: mergeFinanceRecordsPreferIncoming(
+    scheduledTransactions: mergeScheduledTransactions(
       incoming: incoming.scheduledTransactions,
       current: current.scheduledTransactions,
-      idOf: (item) => item.id,
+      preferCurrentOnDefinitionTie: false,
     ),
     budgets: mergeFinanceRecordsPreferIncoming(
       incoming: incoming.budgets,
@@ -3799,6 +3997,28 @@ List<T> mergeFinanceRecordsPreferIncoming<T>({
     ...incoming,
     for (final item in current)
       if (!incomingIds.contains(idOf(item))) item,
+  ];
+}
+
+List<ScheduledTransactionRecord> mergeScheduledTransactions({
+  required List<ScheduledTransactionRecord> incoming,
+  required List<ScheduledTransactionRecord> current,
+  required bool preferCurrentOnDefinitionTie,
+}) {
+  final currentById = {for (final item in current) item.id: item};
+  final incomingIds = incoming.map((item) => item.id).toSet();
+  return [
+    for (final item in incoming)
+      if (currentById[item.id] case final currentItem?)
+        mergeScheduledTransactionAuthority(
+          incoming: item,
+          current: currentItem,
+          preferCurrentOnDefinitionTie: preferCurrentOnDefinitionTie,
+        )
+      else
+        item,
+    for (final item in current)
+      if (!incomingIds.contains(item.id)) item,
   ];
 }
 

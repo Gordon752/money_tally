@@ -7,8 +7,15 @@ class BackupCodec {
   const BackupCodec();
 
   String encodeJson(FinanceDataSet dataSet, {DateTime? exportedAt}) {
+    final data = dataSet.toJson();
+    data['scheduledTransactions'] = [
+      for (final schedule in dataSet.scheduledTransactions)
+        schedule.toJson()
+          ..remove('scheduledNotificationIds')
+          ..remove('lastReminderScheduledAt'),
+    ];
     return const JsonEncoder.withIndent('  ').convert({
-      ...dataSet.toJson(),
+      ...data,
       'exportedAt': (exportedAt ?? DateTime.now()).toUtc().toIso8601String(),
     });
   }

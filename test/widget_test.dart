@@ -1145,6 +1145,8 @@ void main() {
   testWidgets('Ledger display preferences reclaim optional row columns', (
     tester,
   ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     tester.view.physicalSize = const Size(430, 932);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -1285,7 +1287,7 @@ void main() {
     tester.view.physicalSize = const Size(1024, 1366);
     await tester.pumpAndSettle();
     final tabletMetadataWidth = tester.getSize(find.byKey(detailsKey)).width;
-    expect(tester.getSize(splitSecondaryAmountSlot).width, 56);
+    expect(tester.getSize(splitSecondaryAmountSlot).width, 230);
     expect(tabletMetadataWidth, greaterThan(phoneMetadataWidth));
 
     await dataStore.savePreferences(
@@ -1317,6 +1319,7 @@ void main() {
       tester.getSize(find.byKey(detailsKey)).width,
       greaterThan(tabletMetadataWidth),
     );
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets(
@@ -1380,6 +1383,7 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.iOS),
           home: FinanceDataStoreScope(
             store: dataStore,
             child: Scaffold(
@@ -1410,6 +1414,18 @@ void main() {
           const ValueKey('ledger-running-balance-account-metadata-transfer'),
         ),
         findsOneWidget,
+      );
+      expect(
+        tester
+            .getSize(
+              find.byKey(
+                const ValueKey(
+                  'ledger-secondary-amount-slot-account-metadata-transfer',
+                ),
+              ),
+            )
+            .width,
+        220,
       );
       expect(
         tester
@@ -7883,7 +7899,22 @@ void main() {
       currentProjection.subtract(const Duration(days: 1)),
     );
     expect(originalAfterEdit.amountMinor, 25000);
-    expect(originalAfterEdit.occurrences, contains(historicalOccurrence));
+    final retainedHistory = originalAfterEdit.occurrences.singleWhere(
+      (item) =>
+          item.scheduledDate.year == historicalOccurrence.scheduledDate.year &&
+          item.scheduledDate.month ==
+              historicalOccurrence.scheduledDate.month &&
+          item.scheduledDate.day == historicalOccurrence.scheduledDate.day,
+    );
+    expect(retainedHistory.status, historicalOccurrence.status);
+    expect(
+      retainedHistory.actualAmountMinor,
+      historicalOccurrence.actualAmountMinor,
+    );
+    expect(
+      retainedHistory.actualPaymentDate,
+      historicalOccurrence.actualPaymentDate,
+    );
     expect(edited.nextDate, currentProjection);
     expect(edited.amountMinor, 30000);
     expect(edited.occurrences, isEmpty);
@@ -7908,7 +7939,18 @@ void main() {
     );
     expect(ended.isDeleted, isFalse);
     expect(ended.endDate, futureProjection.subtract(const Duration(days: 1)));
-    expect(ended.occurrences, contains(historicalOccurrence));
+    expect(
+      ended.occurrences.any(
+        (item) =>
+            item.scheduledDate.year ==
+                historicalOccurrence.scheduledDate.year &&
+            item.scheduledDate.month ==
+                historicalOccurrence.scheduledDate.month &&
+            item.scheduledDate.day == historicalOccurrence.scheduledDate.day &&
+            item.status == historicalOccurrence.status,
+      ),
+      isTrue,
+    );
     expect(deleteRow, findsNothing);
   });
 
@@ -7967,6 +8009,12 @@ void main() {
         (highlighted.decoration! as BoxDecoration).color,
         isNot(Colors.transparent),
       );
+      final highlightRect = tester.getRect(find.byKey(highlightKey));
+      final dayCardRect = tester.getRect(
+        find.byKey(ValueKey('scheduled-day-card-${calendarDateId(dueDate)}')),
+      );
+      expect(highlightRect.left, closeTo(dayCardRect.left + 1, 0.1));
+      expect(highlightRect.right, closeTo(dayCardRect.right - 1, 0.1));
       final occurrenceMarker = tester.widget<AnimatedContainer>(
         find.byKey(
           ValueKey(

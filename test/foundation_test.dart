@@ -16,6 +16,7 @@ import 'package:money_tally/src/notifications/notification_scheduler.dart';
 import 'package:money_tally/src/persistence/backup_codec.dart';
 import 'package:money_tally/src/persistence/finance_record_repository.dart';
 import 'package:money_tally/src/persistence/local_finance_data_set_repository.dart';
+import 'package:money_tally/src/persistence/scheduled_notification_state_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 
 void main() {
@@ -1823,16 +1824,20 @@ void main() {
       ),
       isNull,
     );
-    expect(
-      planner.planOne(
-        base.copyWith(
-          alertPreference: AlertPreference.sameDay,
-          lastAction: ScheduledAction.skipped,
-        ),
-        now: DateTime(2026, 7, 20),
+    final afterSkipped = planner.planOne(
+      base.copyWith(
+        alertPreference: AlertPreference.sameDay,
+        occurrences: [
+          ScheduledOccurrenceRecord(
+            scheduledDate: base.nextDate,
+            plannedAmountMinor: base.amountMinor,
+            status: ScheduledOccurrenceStatus.skipped,
+          ),
+        ],
       ),
-      isNull,
+      now: DateTime(2026, 7, 20),
     );
+    expect(afterSkipped?.occurrenceDate, DateTime(2026, 9, 1));
     expect(
       planner.planOne(
         base.copyWith(
@@ -1849,11 +1854,14 @@ void main() {
     'store schedules and cancels scheduled transaction notifications',
     () async {
       final scheduler = RecordingNotificationScheduler(idsToReturn: [42]);
+      final localNotificationState =
+          InMemoryScheduledNotificationStateRepository();
       final store = FinanceDataStore(
         dataSet: _dataSet().copyWith(
           preferences: const UserPreferences(notificationsEnabled: true),
         ),
         notificationScheduler: scheduler,
+        notificationStateRepository: localNotificationState,
       );
 
       await store.saveScheduledTransaction(
@@ -1874,8 +1882,12 @@ void main() {
       final scheduled = store.scheduledTransactions.single;
       expect(scheduler.permissionRequests, 1);
       expect(scheduler.scheduledIds, ['sched-rent']);
-      expect(scheduled.scheduledNotificationIds, [42]);
-      expect(scheduled.lastReminderScheduledAt, isNotNull);
+      expect(scheduled.scheduledNotificationIds, isEmpty);
+      expect(scheduled.lastReminderScheduledAt, isNull);
+      expect(
+        (await localNotificationState.load('sched-rent'))?.notificationIds,
+        [42],
+      );
 
       await store.savePreferences(
         store.preferences.copyWith(notificationsEnabled: false),
@@ -2254,7 +2266,10 @@ void main() {
 
       remote.remoteDataSet = before;
       await store.attachRemoteSync(remoteRepository: remote, userId: 'user');
-      expect(store.scheduledTransactions.single.occurrences, isEmpty);
+      // The injected remote snapshot contains explicit legacy Paid/Skipped
+      // evidence but no causal reset marker. Preserve that evidence rather
+      // than allowing an empty, unversioned history to erase it.
+      expect(store.scheduledTransactions.single.occurrences, hasLength(2));
       expect(
         store.transactions
             .singleWhere((item) => item.id == 'generated')
@@ -2734,7 +2749,7 @@ void main() {
       );
 
       final restored = store.scheduledTransactions.single;
-      expect(restored.nextDate, DateTime(2026, 9, 21));
+      expect(restored.nextDate, restoredDate);
       expect(
         restored.occurrences
             .singleWhere(
