@@ -50,6 +50,7 @@ class ScheduledNotificationRequest {
   const ScheduledNotificationRequest({
     required this.id,
     required this.scheduledTransactionId,
+    required this.occurrenceDate,
     required this.title,
     required this.body,
     required this.scheduledFor,
@@ -58,10 +59,70 @@ class ScheduledNotificationRequest {
 
   final int id;
   final String scheduledTransactionId;
+  final DateTime occurrenceDate;
   final String title;
   final String body;
   final DateTime scheduledFor;
   final bool repeatUntilResolved;
+
+  String get payload => ScheduledNotificationPayload(
+    scheduledTransactionId: scheduledTransactionId,
+    occurrenceDate: occurrenceDate,
+  ).encode();
+}
+
+class ScheduledNotificationPayload {
+  const ScheduledNotificationPayload({
+    required this.scheduledTransactionId,
+    this.occurrenceDate,
+  });
+
+  static const _prefix = 'trackmark-scheduled-v1';
+
+  final String scheduledTransactionId;
+  final DateTime? occurrenceDate;
+
+  String encode() {
+    final date = occurrenceDate;
+    if (date == null) return scheduledTransactionId;
+    final day = DateTime(date.year, date.month, date.day);
+    return '$_prefix|${Uri.encodeComponent(scheduledTransactionId)}|${day.toIso8601String()}';
+  }
+
+  static ScheduledNotificationPayload? tryParse(String? payload) {
+    if (payload == null || payload.trim().isEmpty || payload == 'scheduled') {
+      return null;
+    }
+    final parts = payload.split('|');
+    if (parts.length == 3 && parts.first == _prefix) {
+      final date = DateTime.tryParse(parts[2]);
+      if (date == null) return null;
+      return ScheduledNotificationPayload(
+        scheduledTransactionId: Uri.decodeComponent(parts[1]),
+        occurrenceDate: DateTime(date.year, date.month, date.day),
+      );
+    }
+    // Backward compatibility for notifications scheduled by older builds,
+    // whose payload contained only the stable schedule id.
+    return ScheduledNotificationPayload(scheduledTransactionId: payload);
+  }
+}
+
+class ScheduledAlertOccurrence {
+  const ScheduledAlertOccurrence({
+    required this.scheduledTransaction,
+    required this.occurrenceDate,
+    required this.plannedAmountMinor,
+    required this.alertDateTime,
+  });
+
+  final ScheduledTransactionRecord scheduledTransaction;
+  final DateTime occurrenceDate;
+  final int plannedAmountMinor;
+  final DateTime alertDateTime;
+
+  String get identity =>
+      '${scheduledTransaction.id}:${occurrenceDate.year}-${occurrenceDate.month}-${occurrenceDate.day}';
 }
 
 class ScheduledNotificationPlanner {
@@ -98,6 +159,7 @@ class ScheduledNotificationPlanner {
     return ScheduledNotificationRequest(
       id: notificationIdFor(scheduledTransaction.id),
       scheduledTransactionId: scheduledTransaction.id,
+      occurrenceDate: scheduledTransaction.nextDate,
       title: notificationTitleFor(scheduledTransaction),
       body: notificationBodyFor(scheduledTransaction),
       scheduledFor: scheduledFor,
@@ -106,7 +168,16 @@ class ScheduledNotificationPlanner {
   }
 
   DateTime alertDateTimeFor(ScheduledTransactionRecord scheduledTransaction) {
-    final dueDate = scheduledTransaction.nextDate;
+    return alertDateTimeForOccurrence(
+      scheduledTransaction,
+      scheduledTransaction.nextDate,
+    );
+  }
+
+  DateTime alertDateTimeForOccurrence(
+    ScheduledTransactionRecord scheduledTransaction,
+    DateTime dueDate,
+  ) {
     final offsetDays = switch (scheduledTransaction.alertPreference) {
       AlertPreference.none => 0,
       AlertPreference.sameDay => 0,

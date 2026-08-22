@@ -223,7 +223,7 @@ class FinanceDataStore extends ChangeNotifier {
     if (account.type != AccountType.creditCard || creditLimit == null) {
       return null;
     }
-    return creditLimit - balanceForAccount(accountId).abs();
+    return creditLimit - creditUsedMinorForAccount(accountId);
   }
 
   int creditAvailableMinorForGroup(AccountGroup group) {
@@ -237,7 +237,7 @@ class FinanceDataStore extends ChangeNotifier {
         )
         .fold(0, (total, account) {
           final limit = account.creditLimitMinor ?? 0;
-          return total + limit - balanceForAccount(account.id).abs();
+          return total + limit - creditUsedMinorForAccount(account.id);
         });
   }
 
@@ -495,6 +495,90 @@ class FinanceDataStore extends ChangeNotifier {
     return scheduledTransactions
         .where((item) => isScheduledDueOrOverdue(item, today))
         .length;
+  }
+
+  List<ScheduledAlertOccurrence> activeScheduledAlerts({DateTime? now}) {
+    if (!preferences.notificationsEnabled) return const [];
+    final anchor = now ?? DateTime.now();
+    const planner = ScheduledNotificationPlanner();
+    final alerts = <ScheduledAlertOccurrence>[];
+    for (final schedule in scheduledTransactions) {
+      if (schedule.isDeleted ||
+          schedule.lastAction != ScheduledAction.none ||
+          !schedule.hasAlert ||
+          !hasActionableScheduledAccounts(schedule)) {
+        continue;
+      }
+      final unresolved = <String, ({DateTime date, int amount})>{};
+      for (final occurrence in schedule.occurrences) {
+        if (occurrence.status != ScheduledOccurrenceStatus.pending) continue;
+        unresolved[scheduledDayKey(occurrence.scheduledDate)] = (
+          date: occurrence.scheduledDate,
+          amount: occurrence.plannedAmountMinor,
+        );
+      }
+      final nextDateKey = scheduledDayKey(schedule.nextDate);
+      final recordedNext = schedule.occurrences
+          .where(
+            (occurrence) =>
+                scheduledDayKey(occurrence.scheduledDate) == nextDateKey,
+          )
+          .firstOrNull;
+      if (recordedNext == null ||
+          recordedNext.status == ScheduledOccurrenceStatus.pending) {
+        unresolved.putIfAbsent(
+          nextDateKey,
+          () => (date: schedule.nextDate, amount: schedule.amountMinor),
+        );
+      }
+      for (final occurrence in unresolved.values) {
+        final alertDateTime = planner.alertDateTimeForOccurrence(
+          schedule,
+          occurrence.date,
+        );
+        if (alertDateTime.isAfter(anchor)) continue;
+        alerts.add(
+          ScheduledAlertOccurrence(
+            scheduledTransaction: schedule,
+            occurrenceDate: occurrence.date,
+            plannedAmountMinor: occurrence.amount,
+            alertDateTime: alertDateTime,
+          ),
+        );
+      }
+    }
+    alerts.sort((left, right) {
+      final byAlert = left.alertDateTime.compareTo(right.alertDateTime);
+      if (byAlert != 0) return byAlert;
+      final byDate = left.occurrenceDate.compareTo(right.occurrenceDate);
+      if (byDate != 0) return byDate;
+      return left.scheduledTransaction.id.compareTo(
+        right.scheduledTransaction.id,
+      );
+    });
+    return alerts;
+  }
+
+  int scheduledActiveAlertCount({DateTime? now}) =>
+      activeScheduledAlerts(now: now).length;
+
+  DateTime? nextScheduledAlertDateTime({DateTime? now}) {
+    if (!preferences.notificationsEnabled) return null;
+    final anchor = now ?? DateTime.now();
+    const planner = ScheduledNotificationPlanner();
+    DateTime? next;
+    for (final schedule in scheduledTransactions) {
+      if (schedule.isDeleted ||
+          schedule.lastAction != ScheduledAction.none ||
+          !schedule.hasAlert ||
+          !hasActionableScheduledAccounts(schedule)) {
+        continue;
+      }
+      final candidate = planner.alertDateTimeFor(schedule);
+      if (!candidate.isAfter(anchor)) continue;
+      if (next == null || candidate.isBefore(next)) next = candidate;
+    }
+    return next;
   }
 
   bool hasActionableScheduledAccounts(
@@ -2765,9 +2849,7 @@ class FinanceDataStore extends ChangeNotifier {
   }
 
   Future<void> refreshScheduledNotificationBadge({DateTime? now}) async {
-    final count = preferences.notificationsEnabled
-        ? scheduledDueOrOverdueCount(now: now)
-        : 0;
+    final count = scheduledActiveAlertCount(now: now);
     await notificationScheduler.updateBadgeCount(count);
   }
 

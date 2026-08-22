@@ -5,10 +5,11 @@ import '../../credit/credit_insights_completeness_ui.dart';
 import '../../domain/account.dart';
 import '../../domain/money.dart';
 import '../../domain/transaction.dart';
+import '../account_balance_presentation.dart';
 import '../app_icons.dart';
 import '../design_tokens.dart';
 import '../money_format.dart';
-import 'money_text.dart';
+import 'account_balance_text.dart';
 
 class AccountCard extends StatelessWidget {
   const AccountCard({
@@ -91,13 +92,28 @@ class AccountCard extends StatelessWidget {
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      if (accountBalancePresentation(
+                        account.type,
+                        balanceMinor,
+                      ).needsAttention)
+                        Text(
+                          'Needs attention',
+                          key: ValueKey(
+                            'account-needs-attention-${account.id}',
+                          ),
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: AppColors.danger,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
                     ],
                   ),
                 ),
-                MoneyText(
-                  amountMinor: balanceMinor,
+                AccountBalanceText(
+                  accountType: account.type,
+                  signedBalanceMinor: balanceMinor,
                   currency: currency,
-                  color: balanceMinor < 0 ? AppColors.danger : null,
                   fontSize: balanceFontSize,
                   fontWeight: FontWeight.w700,
                 ),
@@ -154,7 +170,7 @@ class AccountCard extends StatelessWidget {
         final limit = account.creditLimitMinor;
         if (limit == null || limit <= 0) return null;
         final used = balanceMinor.isNegative ? balanceMinor.abs() : 0;
-        final available = limit - balanceMinor.abs();
+        final available = limit - used;
         final progress = (used / limit).clamp(0.0, 1.0).toDouble();
         return _AccountMetric(
           label:
@@ -303,10 +319,19 @@ class _CreditInsightsPreview extends StatelessWidget {
                 flex: 30,
                 child: _CreditInsightMetric(
                   label: 'Projected Statement',
-                  value: estimate.projectedStatementMinor == null
-                      ? '–'
-                      : formatter.formatMinor(
-                          estimate.projectedStatementMinor!,
+                  value: estimate.projectedStatementMinor == null ? '–' : '',
+                  valueWidget: estimate.projectedStatementMinor == null
+                      ? null
+                      : AccountBalanceText(
+                          accountType: AccountType.creditCard,
+                          signedBalanceMinor: estimate.projectedStatementMinor!,
+                          currency: currency,
+                          // Match the peer metric values. The surrounding
+                          // FittedBox still scales down only when a long value
+                          // genuinely cannot fit on a compact screen.
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          compactCreditLabel: true,
                         ),
                 ),
               ),
@@ -388,12 +413,12 @@ class _CreditInsightMetric extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             height: 22,
-            child:
-                valueWidget ??
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.center,
-                  child: Text(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.center,
+              child:
+                  valueWidget ??
+                  Text(
                     value,
                     maxLines: 1,
                     softWrap: false,
@@ -403,7 +428,7 @@ class _CreditInsightMetric extends StatelessWidget {
                       fontFeatures: const [AppTextStyles.tabularFigures],
                     ),
                   ),
-                ),
+            ),
           ),
           const SizedBox(height: 2),
           SizedBox(

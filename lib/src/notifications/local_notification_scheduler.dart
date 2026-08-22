@@ -106,7 +106,7 @@ class LocalNotificationScheduler implements NotificationScheduler {
       scheduledDate: tz.TZDateTime.from(request.scheduledFor, tz.local),
       notificationDetails: details,
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      payload: request.scheduledTransactionId,
+      payload: request.payload,
     );
     return [request.id];
   }

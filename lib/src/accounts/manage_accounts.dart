@@ -15,18 +15,46 @@ bool accountIsAsset(v2_account.AccountRecord account) {
   };
 }
 
+bool shouldWarnAssetAccountOverdraw({
+  required v2_account.AccountRecord account,
+  required int projectedBalanceMinor,
+  required bool warningEnabled,
+}) {
+  return warningEnabled && accountIsAsset(account) && projectedBalanceMinor < 0;
+}
+
+String accountContextBalanceLabel(
+  v2_account.AccountRecord account,
+  int signedBalanceMinor,
+  CurrencyFormatSettings currency,
+) {
+  final presentation = accountBalancePresentation(
+    account.type,
+    signedBalanceMinor,
+  );
+  final formatted = money(presentation.amountMinor, currency);
+  return presentation.isCredit ? '$formatted credit' : formatted;
+}
+
 Future<bool> confirmAssetAccountOverdraw(
   BuildContext context, {
   required v2_account.AccountRecord account,
   required int projectedBalanceMinor,
+  required CurrencyFormatSettings currency,
 }) async {
-  final currency = FinanceDataStoreScope.read(context).preferences.currency;
+  // The transaction editor is itself a dialog. Clear any focused field before
+  // pushing the confirmation so the iPhone keyboard cannot keep the nested
+  // route constrained to the editor's keyboard-sized viewport.
+  FocusManager.instance.primaryFocus?.unfocus();
+  await WidgetsBinding.instance.endOfFrame;
+  if (!context.mounted) return false;
   final confirmed = await showDialog<bool>(
     context: context,
+    useRootNavigator: true,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('Overdraw this account?'),
+      title: Text('This will overdraw ${account.name}'),
       content: Text(
-        'Saving this transaction will leave ${account.name} with a balance of ${money(projectedBalanceMinor, currency)}.',
+        'This transaction will leave ${account.name} with a balance of ${money(projectedBalanceMinor, currency)}.',
       ),
       actions: [
         TextButton(
@@ -730,7 +758,7 @@ class _ArchivedAccountRow extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         subtitle: Text(
-          '${v2AccountTypeLabel(account.type)} · ${money(store.balanceForAccount(account.id), store.preferences.currency)}',
+          '${v2AccountTypeLabel(account.type)} · ${accountContextBalanceLabel(account, store.balanceForAccount(account.id), store.preferences.currency)}',
         ),
         trailing: PopupMenuButton<String>(
           tooltip: 'Actions for ${account.name}',

@@ -9,6 +9,7 @@ import 'package:money_tally/src/design/app_icons.dart';
 import 'package:money_tally/src/design/credit_card_appearance.dart';
 import 'package:money_tally/src/design/design_tokens.dart';
 import 'package:money_tally/src/design/widgets/amount_entry_field.dart';
+import 'package:money_tally/src/design/widgets/account_balance_text.dart';
 import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/design/widgets/category_icon_badge.dart';
 import 'package:money_tally/src/design/widgets/percentage_entry_field.dart';
@@ -5201,7 +5202,75 @@ void main() {
           .flex,
       30,
     );
+
+    final projectedMetric = find
+        .ancestor(
+          of: find.text('Projected Statement'),
+          matching: find.byType(Expanded),
+        )
+        .first;
+    final projectedValue = tester.widget<AccountBalanceText>(
+      find.descendant(
+        of: projectedMetric,
+        matching: find.byType(AccountBalanceText),
+      ),
+    );
+    expect(projectedValue.fontSize, 14);
+    expect(projectedValue.fontWeight, FontWeight.w700);
+    expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'long Projected Statement keeps peer base style and scales safely',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final account = v2_account.AccountRecord(
+        id: 'large-projected-statement',
+        name: 'Large Card',
+        type: v2_account.AccountType.creditCard,
+        openingBalanceMinor: -987654321,
+        creditLimitMinor: 1200000000,
+        interestEstimationEnabled: true,
+        annualPercentageRate: 29.99,
+        statementClosingDay: 28,
+        paymentDueDay: 20,
+        sync: v2_sync.SyncMetadata.fresh(
+          now: DateTime.now().subtract(const Duration(days: 90)),
+          deviceId: 'test',
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: AccountCard(account: account, balanceMinor: -987654321),
+            ),
+          ),
+        ),
+      );
+
+      final projectedMetric = find
+          .ancestor(
+            of: find.text('Projected Statement'),
+            matching: find.byType(Expanded),
+          )
+          .first;
+      final projectedValue = tester.widget<AccountBalanceText>(
+        find.descendant(
+          of: projectedMetric,
+          matching: find.byType(AccountBalanceText),
+        ),
+      );
+      expect(projectedValue.fontSize, 14);
+      expect(projectedValue.fontWeight, FontWeight.w700);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'credit card Payment Due follows paid schedule and Undo immediately',
@@ -7362,6 +7431,16 @@ void main() {
       final highlightedDecoration =
           tester.widget<AnimatedContainer>(card).decoration as BoxDecoration;
       expect(highlightedDecoration.color, isNot(initialDecoration.color));
+      for (final scheduleId in ['sched-rent', 'sched-utilities']) {
+        final marker = tester.widget<AnimatedContainer>(
+          find.byKey(
+            ValueKey(
+              'scheduled-occurrence-marker-$scheduleId-${calendarDateId(date)}',
+            ),
+          ),
+        );
+        expect(marker.constraints?.maxWidth, 0);
+      }
 
       await tester.pump(const Duration(milliseconds: 1600));
       expect(
@@ -7833,6 +7912,131 @@ void main() {
     expect(deleteRow, findsNothing);
   });
 
+  testWidgets(
+    'scheduled active alert card targets exact occurrence and clears on skip',
+    (tester) async {
+      final legacyStore = FinanceStore.seeded();
+      final now = DateTime.now();
+      final dueDate = DateTime(now.year, now.month, now.day);
+      final schedule = rentSchedule(nextDate: dueDate).copyWith(
+        alertPreference: v2_scheduled.AlertPreference.sameDay,
+        customAlertTimeMinutes: 0,
+      );
+      final migrated = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final dataStore = FinanceDataStore(
+        dataSet: migrated.copyWith(
+          preferences: migrated.preferences.copyWith(
+            notificationsEnabled: true,
+          ),
+          scheduledTransactions: [schedule],
+        ),
+      );
+
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+      expect(find.byType(CountBadge), findsOneWidget);
+      await tester.tap(find.text('Scheduled').last);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('scheduled-needs-attention-card')),
+        findsOneWidget,
+      );
+      expect(find.text('Needs Attention'), findsOneWidget);
+      expect(
+        find.text(
+          'Payment due ${shortMonthName(dueDate.month)} ${dueDate.day}',
+        ),
+        findsOneWidget,
+      );
+      final alertKey = ValueKey(
+        'scheduled-alert-${schedule.id}:${dueDate.year}-${dueDate.month}-${dueDate.day}',
+      );
+      await tester.tap(find.byKey(alertKey));
+      await tester.pump(const Duration(milliseconds: 400));
+      final highlightKey = ValueKey(
+        'scheduled-occurrence-highlight-${schedule.id}-${calendarDateId(dueDate)}',
+      );
+      final highlighted = tester.widget<AnimatedContainer>(
+        find.byKey(highlightKey),
+      );
+      expect(
+        (highlighted.decoration! as BoxDecoration).color,
+        isNot(Colors.transparent),
+      );
+      final occurrenceMarker = tester.widget<AnimatedContainer>(
+        find.byKey(
+          ValueKey(
+            'scheduled-occurrence-marker-${schedule.id}-${calendarDateId(dueDate)}',
+          ),
+        ),
+      );
+      expect(occurrenceMarker.constraints?.maxWidth, 3);
+
+      final occurrenceRow = find.byKey(
+        ValueKey('scheduled-row-${schedule.id}-${calendarDateId(dueDate)}'),
+      );
+      await tester.ensureVisible(occurrenceRow);
+      await tester.pumpAndSettle();
+      await tester.longPress(occurrenceRow);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Skip Once'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('scheduled-needs-attention-card')),
+        findsNothing,
+      );
+      expect(dataStore.scheduledActiveAlertCount(), 0);
+    },
+  );
+
+  testWidgets(
+    'notification target opens Scheduled and highlights exact occurrence',
+    (tester) async {
+      final legacyStore = FinanceStore.seeded();
+      final now = DateTime.now();
+      final dueDate = DateTime(now.year, now.month, now.day + 2);
+      final schedule = rentSchedule(
+        nextDate: dueDate,
+      ).copyWith(alertPreference: v2_scheduled.AlertPreference.oneWeekBefore);
+      final migrated = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final dataStore = FinanceDataStore(
+        dataSet: migrated.copyWith(
+          preferences: migrated.preferences.copyWith(
+            notificationsEnabled: true,
+          ),
+          scheduledTransactions: [schedule],
+        ),
+      );
+      scheduledNotificationLaunchPayload.value = ScheduledNotificationPayload(
+        scheduledTransactionId: schedule.id,
+        occurrenceDate: dueDate,
+      ).encode();
+
+      await tester.pumpWidget(
+        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      );
+      await tester.pump(const Duration(milliseconds: 450));
+
+      expect(find.text('Scheduled occurrences'), findsOneWidget);
+      expect(
+        find.byKey(
+          ValueKey(
+            'scheduled-occurrence-highlight-${schedule.id}-${calendarDateId(dueDate)}',
+          ),
+        ),
+        findsOneWidget,
+      );
+      scheduledNotificationLaunchPayload.value = null;
+    },
+  );
+
   testWidgets('mark as paid records actual amount and occurrence once', (
     tester,
   ) async {
@@ -7863,8 +8067,11 @@ void main() {
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
     await collapseScheduledCalendar(tester);
-    await tester.ensureVisible(find.text('Rent'));
-    await tester.longPress(find.text('Rent'));
+    final scheduledRentRow = find.byKey(
+      ValueKey('scheduled-row-${schedule.id}-${calendarDateId(dueDate)}'),
+    );
+    await tester.ensureVisible(scheduledRentRow);
+    await tester.longPress(scheduledRentRow);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Mark as Paid'));
     await tester.pumpAndSettle();

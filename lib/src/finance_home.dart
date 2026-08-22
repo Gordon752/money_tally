@@ -61,6 +61,9 @@ class _FinanceHomeState extends State<FinanceHome> {
   var _appliedLaunchPreference = false;
   var _isScrolling = false;
   Timer? _scrollSettleTimer;
+  Timer? _scheduledAlertRefreshTimer;
+  DateTime? _scheduledAlertRefreshAt;
+  ScheduledNotificationPayload? _scheduledNavigationTarget;
   FinanceDataStore? _budgetAlertStore;
 
   void _setPlanSegment(PlanSegment segment) {
@@ -101,9 +104,17 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   void _openScheduledFromNotification() {
-    if (scheduledNotificationLaunchPayload.value == null) return;
+    final rawPayload = scheduledNotificationLaunchPayload.value;
+    if (rawPayload == null) return;
     scheduledNotificationLaunchPayload.value = null;
-    if (mounted) setState(() => selected = FinanceSection.scheduled);
+    if (mounted) {
+      setState(() {
+        selected = FinanceSection.scheduled;
+        _scheduledNavigationTarget = ScheduledNotificationPayload.tryParse(
+          rawPayload,
+        );
+      });
+    }
   }
 
   @override
@@ -128,6 +139,9 @@ class _FinanceHomeState extends State<FinanceHome> {
       _ => preferences.preferredPlanSegment,
     };
     if (scheduledNotificationLaunchPayload.value != null) {
+      _scheduledNavigationTarget = ScheduledNotificationPayload.tryParse(
+        scheduledNotificationLaunchPayload.value,
+      );
       scheduledNotificationLaunchPayload.value = null;
       selected = FinanceSection.scheduled;
     }
@@ -137,6 +151,7 @@ class _FinanceHomeState extends State<FinanceHome> {
   @override
   void dispose() {
     _scrollSettleTimer?.cancel();
+    _scheduledAlertRefreshTimer?.cancel();
     _budgetAlertStore?.budgetLowAlertNotifier.removeListener(
       _showBudgetLowAlert,
     );
@@ -217,7 +232,8 @@ class _FinanceHomeState extends State<FinanceHome> {
     final isWide = MediaQuery.sizeOf(context).width >= 880;
     final dataStore = FinanceDataStoreScope.watch(context);
     final preferences = dataStore.preferences;
-    final dueScheduledCount = dataStore.scheduledDueOrOverdueCount();
+    _scheduleScheduledAlertRefresh(dataStore);
+    final dueScheduledCount = dataStore.scheduledActiveAlertCount();
 
     return Scaffold(
       body: SafeArea(child: isWide ? _wideLayout() : _compactLayout()),
@@ -299,9 +315,9 @@ class _FinanceHomeState extends State<FinanceHome> {
   }
 
   Widget _wideLayout() {
-    final dueScheduledCount = FinanceDataStoreScope.watch(
-      context,
-    ).scheduledDueOrOverdueCount();
+    final store = FinanceDataStoreScope.watch(context);
+    _scheduleScheduledAlertRefresh(store);
+    final dueScheduledCount = store.scheduledActiveAlertCount();
     return Row(
       children: [
         NavigationRail(
@@ -439,6 +455,7 @@ class _FinanceHomeState extends State<FinanceHome> {
                 ),
                 FinanceSection.plan => const SizedBox.shrink(),
                 FinanceSection.scheduled => ScheduledView(
+                  navigationTarget: _scheduledNavigationTarget,
                   onSelectedDateChanged: (date) {
                     final now = DateTime.now();
                     final today = DateTime(now.year, now.month, now.day);
@@ -468,6 +485,25 @@ class _FinanceHomeState extends State<FinanceHome> {
           ),
         ],
       ),
+    );
+  }
+
+  void _scheduleScheduledAlertRefresh(FinanceDataStore store) {
+    final next = store.nextScheduledAlertDateTime();
+    if (next == _scheduledAlertRefreshAt) return;
+    _scheduledAlertRefreshTimer?.cancel();
+    _scheduledAlertRefreshAt = next;
+    if (next == null) return;
+    final delay = next.difference(DateTime.now());
+    _scheduledAlertRefreshTimer = Timer(
+      delay.isNegative
+          ? Duration.zero
+          : delay + const Duration(milliseconds: 50),
+      () {
+        if (!mounted) return;
+        _scheduledAlertRefreshAt = null;
+        setState(() {});
+      },
     );
   }
 }
@@ -2901,11 +2937,25 @@ class _LedgerViewState extends State<LedgerView> {
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      if (accountBalancePresentation(
+                        accountsById[accountFilterId]!.type,
+                        store.balanceForAccount(accountFilterId),
+                      ).needsAttention)
+                        Text(
+                          'Needs attention',
+                          key: const ValueKey('ledger-account-needs-attention'),
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: AppColors.danger,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
                     ],
                   ),
                 ),
-                MoneyText(
-                  amountMinor: store.balanceForAccount(accountFilterId),
+                AccountBalanceText(
+                  accountType: accountsById[accountFilterId]!.type,
+                  signedBalanceMinor: store.balanceForAccount(accountFilterId),
                   currency: store.preferences.currency,
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
@@ -4217,6 +4267,9 @@ class _LedgerDayCard extends StatelessWidget {
                   reservePendingIndicatorSpace: reservePendingIndicatorSpace,
                   runningBalanceMinor: runningBalances
                       ?.afterTransaction[projection.transaction.id],
+                  runningBalanceAccount: scopedAccountId == null
+                      ? null
+                      : accountsById[scopedAccountId],
                   showIcon: store.preferences.showLedgerIcons,
                   showTimestamp: store.preferences.showLedgerTimestamps,
                   showSplitIndicator:
@@ -4533,6 +4586,7 @@ class LedgerJournalRow extends StatelessWidget {
     this.categoryName,
     this.metadataDetails,
     this.runningBalanceMinor,
+    this.runningBalanceAccount,
     this.isAccountScoped = false,
     this.reservePendingIndicatorSpace = false,
     this.showDateContext = true,
@@ -4550,6 +4604,7 @@ class LedgerJournalRow extends StatelessWidget {
   final String? categoryName;
   final String? metadataDetails;
   final int? runningBalanceMinor;
+  final v2_account.AccountRecord? runningBalanceAccount;
   final bool isAccountScoped;
   final bool reservePendingIndicatorSpace;
   final bool showDateContext;
@@ -4738,18 +4793,39 @@ class LedgerJournalRow extends StatelessWidget {
                                   ? null
                                   : Align(
                                       alignment: Alignment.centerRight,
-                                      child: MoneyText(
-                                        key: ValueKey(
-                                          'ledger-running-balance-${transaction.id}',
-                                        ),
-                                        amountMinor: runningBalanceMinor!,
-                                        currency: currency,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
-                                      ),
+                                      child: runningBalanceAccount == null
+                                          ? MoneyText(
+                                              key: ValueKey(
+                                                'ledger-running-balance-${transaction.id}',
+                                              ),
+                                              amountMinor: runningBalanceMinor!,
+                                              currency: currency,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                            )
+                                          : FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              alignment: Alignment.centerRight,
+                                              child: AccountBalanceText(
+                                                key: ValueKey(
+                                                  'ledger-running-balance-${transaction.id}',
+                                                ),
+                                                accountType:
+                                                    runningBalanceAccount!.type,
+                                                signedBalanceMinor:
+                                                    runningBalanceMinor!,
+                                                currency: currency,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w500,
+                                                compactCreditLabel: true,
+                                                neutralColor: Theme.of(
+                                                  context,
+                                                ).colorScheme.onSurfaceVariant,
+                                              ),
+                                            ),
                                     ),
                             ),
                           ],
@@ -5166,18 +5242,33 @@ class GoalFundingLedgerRow extends StatelessWidget {
                           ? null
                           : Align(
                               alignment: Alignment.centerRight,
-                              child: MoneyText(
-                                key: ValueKey(
-                                  'ledger-running-balance-goal-${event.id}',
-                                ),
-                                amountMinor: runningBalanceMinor!,
-                                currency: currency,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
+                              child: account == null
+                                  ? MoneyText(
+                                      key: ValueKey(
+                                        'ledger-running-balance-goal-${event.id}',
+                                      ),
+                                      amountMinor: runningBalanceMinor!,
+                                      currency: currency,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    )
+                                  : AccountBalanceText(
+                                      key: ValueKey(
+                                        'ledger-running-balance-goal-${event.id}',
+                                      ),
+                                      accountType: account!.type,
+                                      signedBalanceMinor: runningBalanceMinor!,
+                                      currency: currency,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                      compactCreditLabel: true,
+                                      neutralColor: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
                             ),
                     ),
                   ],
@@ -7215,9 +7306,14 @@ class _PlanViewState extends State<PlanView> {
 }
 
 class ScheduledView extends StatefulWidget {
-  const ScheduledView({this.onSelectedDateChanged, super.key});
+  const ScheduledView({
+    this.onSelectedDateChanged,
+    this.navigationTarget,
+    super.key,
+  });
 
   final ValueChanged<DateTime>? onSelectedDateChanged;
+  final ScheduledNotificationPayload? navigationTarget;
 
   @override
   State<ScheduledView> createState() => _ScheduledViewState();
@@ -7448,8 +7544,10 @@ class _ScheduledViewState extends State<ScheduledView> {
   var _calendarCollapsed = false;
   var _activityFilter = CalendarActivityFilter.all;
   final Map<String, GlobalKey> _dateAnchors = {};
+  final Map<String, GlobalKey> _occurrenceAnchors = {};
   Timer? _dayHighlightTimer;
   String? _highlightedDateKey;
+  String? _highlightedOccurrenceKey;
   late DateTime _visibleMonth = DateTime(
     DateTime.now().year,
     DateTime.now().month,
@@ -7461,6 +7559,37 @@ class _ScheduledViewState extends State<ScheduledView> {
   );
 
   String _dateKey(DateTime date) => calendarDateId(date);
+
+  String _occurrenceKey(String scheduleId, DateTime date) =>
+      '$scheduleId-${_dateKey(date)}';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _navigateToTarget(widget.navigationTarget);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant ScheduledView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.navigationTarget, oldWidget.navigationTarget)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _navigateToTarget(widget.navigationTarget);
+      });
+    }
+  }
+
+  void _navigateToTarget(ScheduledNotificationPayload? target) {
+    if (target == null) return;
+    final store = FinanceDataStoreScope.read(context);
+    final schedule = store.scheduledTransactions
+        .where((item) => item.id == target.scheduledTransactionId)
+        .firstOrNull;
+    if (schedule == null) return;
+    _selectOccurrence(schedule.id, target.occurrenceDate ?? schedule.nextDate);
+  }
 
   void _scrollToDate(DateTime date, [int attempt = 0]) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -7481,12 +7610,37 @@ class _ScheduledViewState extends State<ScheduledView> {
     });
   }
 
+  void _scrollToOccurrence(
+    String scheduleId,
+    DateTime date, [
+    int attempt = 0,
+  ]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final anchorContext =
+          _occurrenceAnchors[_occurrenceKey(scheduleId, date)]?.currentContext;
+      if (anchorContext == null) {
+        if (attempt < 3) _scrollToOccurrence(scheduleId, date, attempt + 1);
+        return;
+      }
+      Scrollable.ensureVisible(
+        anchorContext,
+        duration: MediaQuery.of(context).disableAnimations
+            ? Duration.zero
+            : const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+        alignment: 0.18,
+      );
+    });
+  }
+
   void _selectDate(DateTime date) {
     _dayHighlightTimer?.cancel();
     setState(() {
       _selectedDate = date;
       _visibleMonth = DateTime(date.year, date.month);
       _highlightedDateKey = _dateKey(date);
+      _highlightedOccurrenceKey = null;
     });
     _dayHighlightTimer = Timer(const Duration(milliseconds: 1600), () {
       if (!mounted || _highlightedDateKey != _dateKey(date)) return;
@@ -7494,6 +7648,27 @@ class _ScheduledViewState extends State<ScheduledView> {
     });
     widget.onSelectedDateChanged?.call(date);
     _scrollToDate(date);
+  }
+
+  void _selectOccurrence(String scheduleId, DateTime date) {
+    _dayHighlightTimer?.cancel();
+    final occurrenceKey = _occurrenceKey(scheduleId, date);
+    setState(() {
+      _selectedDate = date;
+      _visibleMonth = DateTime(date.year, date.month);
+      _activityFilter = CalendarActivityFilter.all;
+      _highlightedDateKey = _dateKey(date);
+      _highlightedOccurrenceKey = occurrenceKey;
+    });
+    _dayHighlightTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (!mounted || _highlightedOccurrenceKey != occurrenceKey) return;
+      setState(() {
+        _highlightedDateKey = null;
+        _highlightedOccurrenceKey = null;
+      });
+    });
+    widget.onSelectedDateChanged?.call(date);
+    _scrollToOccurrence(scheduleId, date);
   }
 
   void _changeVisibleMonth(int delta) {
@@ -7506,6 +7681,7 @@ class _ScheduledViewState extends State<ScheduledView> {
     );
     setState(() {
       _dateAnchors.clear();
+      _occurrenceAnchors.clear();
       _visibleMonth = nextMonth;
       _selectedDate = nextSelectedDate;
       _highlightedDateKey = null;
@@ -7524,6 +7700,8 @@ class _ScheduledViewState extends State<ScheduledView> {
     ScheduledCalendarOccurrence occurrence,
     CurrencyFormatSettings currency,
   ) {
+    final theme = Theme.of(context);
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
     final store = FinanceDataStoreScope.read(context);
     final item = occurrence.transaction;
     final dateKey = calendarDateId(occurrence.scheduledDate);
@@ -7594,39 +7772,164 @@ class _ScheduledViewState extends State<ScheduledView> {
         );
       },
     );
-    if (!isPendingOccurrence) return row;
-    return Dismissible(
-      key: ValueKey('scheduled-swipe-${item.id}-$dateKey'),
-      direction: DismissDirection.horizontal,
-      dismissThresholds: const {
-        DismissDirection.startToEnd: 0.22,
-        DismissDirection.endToStart: 0.22,
-      },
-      background: SwipeActionBackground(
-        alignment: Alignment.centerLeft,
-        icon: AppIcon.edit,
-        label: 'Edit',
+    final actionableRow = !isPendingOccurrence
+        ? row
+        : Dismissible(
+            key: ValueKey('scheduled-swipe-${item.id}-$dateKey'),
+            direction: DismissDirection.horizontal,
+            dismissThresholds: const {
+              DismissDirection.startToEnd: 0.22,
+              DismissDirection.endToStart: 0.22,
+            },
+            background: SwipeActionBackground(
+              alignment: Alignment.centerLeft,
+              icon: AppIcon.edit,
+              label: 'Edit',
+            ),
+            secondaryBackground: SwipeActionBackground(
+              alignment: Alignment.centerRight,
+              icon: AppIcon.skip,
+              label: 'Skip Once  Delete',
+              destructive: true,
+            ),
+            confirmDismiss: (direction) async {
+              AppHaptics.selection();
+              await showScheduledTransactionActions(
+                context,
+                item,
+                scheduledDate: occurrence.scheduledDate,
+                plannedAmountMinor: occurrence.plannedAmountMinor,
+                allowedActions: direction == DismissDirection.startToEnd
+                    ? const {'edit'}
+                    : const {'skip', 'delete'},
+              );
+              return false;
+            },
+            child: row,
+          );
+    final occurrenceKey = _occurrenceKey(item.id, occurrence.scheduledDate);
+    final isOccurrenceHighlighted = _highlightedOccurrenceKey == occurrenceKey;
+    return KeyedSubtree(
+      key: _occurrenceAnchors.putIfAbsent(occurrenceKey, () => GlobalKey()),
+      child: AnimatedContainer(
+        key: ValueKey('scheduled-occurrence-highlight-$occurrenceKey'),
+        duration: reduceMotion
+            ? Duration.zero
+            : isOccurrenceHighlighted
+            ? const Duration(milliseconds: 180)
+            : const Duration(milliseconds: 450),
+        curve: isOccurrenceHighlighted ? Curves.easeOutCubic : Curves.easeOut,
+        decoration: BoxDecoration(
+          color: isOccurrenceHighlighted
+              ? AppTheme.accent.withValues(
+                  alpha: theme.brightness == Brightness.dark ? 0.10 : 0.055,
+                )
+              : Colors.transparent,
+        ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            actionableRow,
+            Positioned(
+              left: -8,
+              top: 8,
+              bottom: 8,
+              child: IgnorePointer(
+                child: AnimatedContainer(
+                  key: ValueKey('scheduled-occurrence-marker-$occurrenceKey'),
+                  duration: reduceMotion
+                      ? Duration.zero
+                      : isOccurrenceHighlighted
+                      ? const Duration(milliseconds: 180)
+                      : const Duration(milliseconds: 450),
+                  curve: isOccurrenceHighlighted
+                      ? Curves.easeOutCubic
+                      : Curves.easeOut,
+                  width: isOccurrenceHighlighted ? 3 : 0,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accent,
+                    borderRadius: const BorderRadius.horizontal(
+                      right: Radius.circular(3),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
-      secondaryBackground: SwipeActionBackground(
-        alignment: Alignment.centerRight,
-        icon: AppIcon.skip,
-        label: 'Skip Once  Delete',
-        destructive: true,
+    );
+  }
+
+  Widget _buildNeedsAttentionCard(
+    BuildContext context,
+    List<ScheduledAlertOccurrence> alerts,
+  ) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Material(
+        key: const ValueKey('scheduled-needs-attention-card'),
+        color: AppTheme.accent.withValues(
+          alpha: theme.brightness == Brightness.dark ? 0.15 : 0.07,
+        ),
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: AppTheme.accent.withValues(alpha: 0.32)),
+            borderRadius: BorderRadius.circular(AppRadii.card),
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 13, 16, 9),
+                child: Row(
+                  children: [
+                    Icon(
+                      AppIcon.notificationImportant,
+                      size: 19,
+                      color: AppTheme.accent,
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        'Needs Attention',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${alerts.length}',
+                      key: const ValueKey('scheduled-needs-attention-count'),
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: AppTheme.accent,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              for (var index = 0; index < alerts.length; index++) ...[
+                if (index > 0)
+                  Divider(
+                    height: 1,
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.45,
+                    ),
+                  ),
+                _ScheduledNeedsAttentionRow(
+                  alert: alerts[index],
+                  onTap: () => _selectOccurrence(
+                    alerts[index].scheduledTransaction.id,
+                    alerts[index].occurrenceDate,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
-      confirmDismiss: (direction) async {
-        AppHaptics.selection();
-        await showScheduledTransactionActions(
-          context,
-          item,
-          scheduledDate: occurrence.scheduledDate,
-          plannedAmountMinor: occurrence.plannedAmountMinor,
-          allowedActions: direction == DismissDirection.startToEnd
-              ? const {'edit'}
-              : const {'skip', 'delete'},
-        );
-        return false;
-      },
-      child: row,
     );
   }
 
@@ -7720,6 +8023,7 @@ class _ScheduledViewState extends State<ScheduledView> {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
+    final activeAlerts = store.activeScheduledAlerts();
     final allScheduled = [...store.scheduledTransactions];
     final monthOccurrences = scheduledOccurrencesForMonth(
       allScheduled,
@@ -7763,6 +8067,8 @@ class _ScheduledViewState extends State<ScheduledView> {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Column(
           children: [
+            if (activeAlerts.isNotEmpty)
+              _buildNeedsAttentionCard(context, activeAlerts),
             ScheduledCalendarPreview(
               month: _visibleMonth,
               activitySummaryByDay: activitySummaryByDay,
@@ -7771,6 +8077,7 @@ class _ScheduledViewState extends State<ScheduledView> {
                 AppHaptics.selection();
                 setState(() {
                   _dateAnchors.clear();
+                  _occurrenceAnchors.clear();
                   _activityFilter = filter;
                 });
               },
@@ -7967,6 +8274,102 @@ class ScheduledCalendarPreview extends StatelessWidget {
     );
   }
 }
+
+class _ScheduledNeedsAttentionRow extends StatelessWidget {
+  const _ScheduledNeedsAttentionRow({required this.alert, required this.onTap});
+
+  final ScheduledAlertOccurrence alert;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final schedule = alert.scheduledTransaction;
+    final theme = Theme.of(context);
+    final dueDescription = switch (schedule.type) {
+      TransactionType.income => 'Income due',
+      TransactionType.transfer => 'Transfer due',
+      TransactionType.goalFunding => 'Goal funding due',
+      TransactionType.expense => 'Payment due',
+      TransactionType.adjustment => 'Adjustment due',
+    };
+    final occurrenceDate = alert.occurrenceDate;
+    final dueDate =
+        '${shortMonthName(occurrenceDate.month)} ${occurrenceDate.day}';
+    final reminder = switch (schedule.alertPreference) {
+      v2_scheduled.AlertPreference.none => 'Reminder',
+      v2_scheduled.AlertPreference.sameDay => 'Reminder: same day',
+      v2_scheduled.AlertPreference.oneDayBefore =>
+        'Reminder: 1 day before due date',
+      v2_scheduled.AlertPreference.threeDaysBefore =>
+        'Reminder: 3 days before due date',
+      v2_scheduled.AlertPreference.oneWeekBefore =>
+        'Reminder: 1 week before due date',
+      v2_scheduled.AlertPreference.custom => 'Reminder: custom',
+    };
+    final title = schedule.type == TransactionType.goalFunding
+        ? 'Goal Funding'
+        : schedule.payee.trim().isEmpty
+        ? dueDescription
+        : schedule.payee;
+    return Semantics(
+      button: true,
+      label: '$title. $dueDescription $dueDate. $reminder.',
+      child: InkWell(
+        key: ValueKey('scheduled-alert-${alert.identity}'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 12, 11),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$dueDescription $dueDate',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      reminder,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(AppIcon.chevronRight, size: 18, color: AppTheme.muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String shortMonthName(int month) => const [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+][month - 1];
 
 class ScheduledCalendarGrid extends StatelessWidget {
   const ScheduledCalendarGrid({
@@ -13894,8 +14297,13 @@ Future<void> showAdjustBalanceDialog(
                   : enteredBalanceMinor.abs())
             : enteredBalanceMinor;
         final adjustmentMinor = targetBalanceMinor - currentBalanceMinor;
+        final showOverdrawWarning = shouldWarnAssetAccountOverdraw(
+          account: account,
+          projectedBalanceMinor: targetBalanceMinor,
+          warningEnabled: dataStore.preferences.warnBeforeNegativeAssetBalance,
+        );
         final amountStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
-          color: targetBalanceMinor < 0 ? AppTheme.rose : null,
+          color: showOverdrawWarning ? AppTheme.rose : null,
           fontFeatures: const [FontFeature.tabularFigures()],
           fontWeight: FontWeight.w900,
         );
@@ -13928,7 +14336,7 @@ Future<void> showAdjustBalanceDialog(
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Current balance: ${money(currentBalanceMinor, dataStore.preferences.currency)}',
+                    'Current balance: ${accountContextBalanceLabel(account, currentBalanceMinor, dataStore.preferences.currency)}',
                     style: Theme.of(sheetContext).textTheme.bodyMedium
                         ?.copyWith(
                           color: Theme.of(
@@ -13936,6 +14344,24 @@ Future<void> showAdjustBalanceDialog(
                           ).colorScheme.onSurfaceVariant,
                         ),
                   ),
+                  if (showOverdrawWarning) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Insufficient funds',
+                      key: const ValueKey('adjustment-insufficient-funds'),
+                      style: Theme.of(sheetContext).textTheme.bodySmall
+                          ?.copyWith(
+                            color: AppColors.danger,
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    Text(
+                      'This adjustment would leave ${account.name} at ${money(targetBalanceMinor, dataStore.preferences.currency)}.',
+                      style: Theme.of(
+                        sheetContext,
+                      ).textTheme.bodySmall?.copyWith(color: AppColors.danger),
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.lg),
                   if (isCreditCard) ...[
                     DialogFieldGroup(
@@ -14031,10 +14457,24 @@ Future<void> showAdjustBalanceDialog(
                         child: FilledButton(
                           onPressed: targetBalanceMinor == currentBalanceMinor
                               ? null
-                              : () => Navigator.pop(
-                                  sheetContext,
-                                  targetBalanceMinor,
-                                ),
+                              : () async {
+                                  if (showOverdrawWarning &&
+                                      !await confirmAssetAccountOverdraw(
+                                        sheetContext,
+                                        account: account,
+                                        projectedBalanceMinor:
+                                            targetBalanceMinor,
+                                        currency:
+                                            dataStore.preferences.currency,
+                                      )) {
+                                    return;
+                                  }
+                                  if (!sheetContext.mounted) return;
+                                  Navigator.pop(
+                                    sheetContext,
+                                    targetBalanceMinor,
+                                  );
+                                },
                           child: const Text('Save'),
                         ),
                       ),
@@ -14463,13 +14903,25 @@ class _AccountDetailsHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 2),
-              MoneyText(
-                amountMinor: balanceMinor,
+              AccountBalanceText(
+                accountType: account.type,
+                signedBalanceMinor: balanceMinor,
                 currency: currency,
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
-                color: balanceMinor < 0 ? AppColors.danger : null,
               ),
+              if (accountBalancePresentation(
+                account.type,
+                balanceMinor,
+              ).needsAttention)
+                Text(
+                  'Needs attention',
+                  key: const ValueKey('account-details-needs-attention'),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: AppColors.danger,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
             ],
           ),
         ],
@@ -14599,11 +15051,15 @@ class _CreditCardAccountDetails extends StatelessWidget {
                 ),
               _AccountDetailsRow(
                 label: 'Projected Statement',
-                value: estimate.projectedStatementMinor == null
-                    ? '–'
-                    : money(
-                        estimate.projectedStatementMinor!,
-                        store.preferences.currency,
+                value: estimate.projectedStatementMinor == null ? '–' : null,
+                valueWidget: estimate.projectedStatementMinor == null
+                    ? null
+                    : AccountBalanceText(
+                        accountType: v2_account.AccountType.creditCard,
+                        signedBalanceMinor: estimate.projectedStatementMinor!,
+                        currency: store.preferences.currency,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                       ),
               ),
               _AccountDetailsRow(
@@ -16615,6 +17071,14 @@ Future<void> showTransferDialog(
                 selectedFromAccount != null &&
                 accountIsAsset(selectedFromAccount) &&
                 projectedSourceBalanceMinor < 0;
+            final showOverdrawSourceWarning =
+                selectedFromAccount != null &&
+                shouldWarnAssetAccountOverdraw(
+                  account: selectedFromAccount,
+                  projectedBalanceMinor: projectedSourceBalanceMinor,
+                  warningEnabled:
+                      dataStore.preferences.warnBeforeNegativeAssetBalance,
+                );
             final mutedStyle = theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
               height: 1.18,
@@ -16651,9 +17115,9 @@ Future<void> showTransferDialog(
               v2_account.AccountRecord account, {
               required bool isSource,
             }) {
-              if (!isSource || !wouldOverdrawSource) {
+              if (!isSource || !showOverdrawSourceWarning) {
                 return Text(
-                  'Balance ${money(dataStore.balanceForAccount(account.id), dataStore.preferences.currency)}',
+                  'Balance ${accountContextBalanceLabel(account, dataStore.balanceForAccount(account.id), dataStore.preferences.currency)}',
                   style: mutedStyle,
                 );
               }
@@ -16745,6 +17209,7 @@ Future<void> showTransferDialog(
                     context,
                     account: selectedFromAccount,
                     projectedBalanceMinor: projectedSourceBalanceMinor,
+                    currency: dataStore.preferences.currency,
                   )) {
                 return;
               }
@@ -20244,11 +20709,15 @@ Future<void> showTransactionDialog(
                 : isExpense
                 ? balanceWithoutExistingTransaction - amountMinor.abs()
                 : balanceWithoutExistingTransaction + amountMinor.abs();
-            final wouldOverdrawAsset =
+            final showOverdrawAssetWarning =
                 selectedAccount != null &&
-                accountIsAsset(selectedAccount) &&
                 isExpense &&
-                previewBalanceMinor < 0;
+                shouldWarnAssetAccountOverdraw(
+                  account: selectedAccount,
+                  projectedBalanceMinor: previewBalanceMinor,
+                  warningEnabled:
+                      dataStore.preferences.warnBeforeNegativeAssetBalance,
+                );
             final mutedStyle = theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
               height: 1.18,
@@ -20328,11 +20797,14 @@ Future<void> showTransactionDialog(
                         .length ==
                     splitDrafts.length;
             final splitIsBalanced = splitRowsComplete && remainingMinor == 0;
+            final categorySelectionIsValid = splitMode
+                ? splitIsBalanced
+                : categoryId.isNotEmpty;
             final canSaveTransaction =
                 !isCreatingCategory &&
                 accountId.isNotEmpty &&
                 absoluteAmountMinor > 0 &&
-                splitIsBalanced &&
+                categorySelectionIsValid &&
                 (!scheduleFutureOccurrences ||
                     isValidFutureScheduleDate(
                       futureSchedule.parsedFirstDate(DateTime.now()),
@@ -20589,31 +21061,16 @@ Future<void> showTransactionDialog(
             }
 
             Future<void> saveTransactionResult() async {
-              recalculateAutoRemainder();
-              syncPrimaryCategoryFromSplit();
-              final currentCategoryIds = splitDrafts
-                  .map((line) => line.categoryId)
-                  .where((id) => id.isNotEmpty)
-                  .toSet();
-              final currentSplitTotal = splitDrafts.fold<int>(
-                0,
-                (total, line) => total + line.amountMinor.abs(),
-              );
-              final splitsAreValid =
-                  splitDrafts.isNotEmpty &&
-                  splitDrafts.every(
-                    (line) =>
-                        line.categoryId.isNotEmpty && line.amountMinor > 0,
-                  ) &&
-                  currentCategoryIds.length == splitDrafts.length &&
-                  currentSplitTotal == amountMinor.abs();
-              if (!splitsAreValid) return;
-              if (wouldOverdrawAsset &&
-                  dataStore.preferences.warnBeforeNegativeAssetBalance &&
+              // The enabled button and submission must use the same validation
+              // snapshot. A second mutable split check here previously allowed
+              // a real Save tap to return silently before showing overdraft UI.
+              if (!canSaveTransaction) return;
+              if (showOverdrawAssetWarning &&
                   !await confirmAssetAccountOverdraw(
                     context,
                     account: selectedAccount,
                     projectedBalanceMinor: previewBalanceMinor,
+                    currency: dataStore.preferences.currency,
                   )) {
                 return;
               }
@@ -20652,13 +21109,19 @@ Future<void> showTransactionDialog(
                   final available = selectedAccount.creditLimitMinor == null
                       ? null
                       : selectedAccount.creditLimitMinor! -
-                            previewBalanceMinor.abs();
+                            (currentBalanceMinor.isNegative
+                                ? currentBalanceMinor.abs()
+                                : 0);
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Balance ${money(previewBalanceMinor, dataStore.preferences.currency)}',
-                        style: mutedStyle?.copyWith(color: AppColors.danger),
+                        'Balance ${accountContextBalanceLabel(selectedAccount, currentBalanceMinor, dataStore.preferences.currency)}',
+                        style: mutedStyle?.copyWith(
+                          color: currentBalanceMinor > 0
+                              ? AppTheme.accent
+                              : null,
+                        ),
                       ),
                       if (available != null)
                         Text(
@@ -20672,11 +21135,11 @@ Future<void> showTransactionDialog(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Balance Due ${money(previewBalanceMinor, dataStore.preferences.currency)}',
-                        style: mutedStyle?.copyWith(color: AppColors.danger),
+                        'Balance Due ${accountContextBalanceLabel(selectedAccount, currentBalanceMinor, dataStore.preferences.currency)}',
+                        style: mutedStyle,
                       ),
                       Text(
-                        'Remaining ${money(previewBalanceMinor.abs(), dataStore.preferences.currency)}',
+                        'Remaining ${money(currentBalanceMinor.abs(), dataStore.preferences.currency)}',
                         style: mutedStyle,
                       ),
                     ],
@@ -20689,12 +21152,10 @@ Future<void> showTransactionDialog(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Balance ${money(previewBalanceMinor, dataStore.preferences.currency)}',
-                        style: mutedStyle?.copyWith(
-                          color: wouldOverdrawAsset ? AppColors.danger : null,
-                        ),
+                        'Balance ${money(currentBalanceMinor, dataStore.preferences.currency)}',
+                        style: mutedStyle,
                       ),
-                      if (wouldOverdrawAsset) ...[
+                      if (showOverdrawAssetWarning) ...[
                         const SizedBox(height: 2),
                         Text(
                           'Insufficient funds',
@@ -20828,6 +21289,7 @@ Future<void> showTransactionDialog(
                 onCancel: () => Navigator.pop(context),
                 canSave: canSaveTransaction,
                 onSave: saveTransactionResult,
+                saveKey: const ValueKey('transaction-save'),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,

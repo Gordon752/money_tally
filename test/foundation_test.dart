@@ -1784,11 +1784,21 @@ void main() {
 
     expect(request, isNotNull);
     expect(request!.scheduledTransactionId, 'sched-rent');
+    expect(request.occurrenceDate, DateTime(2026, 8, 1));
     expect(request.title, 'Payment due');
     expect(request.body, 'Rent is due.');
     expect(request.scheduledFor, DateTime(2026, 7, 29, 9));
     expect(request.repeatUntilResolved, isTrue);
     expect(request.id, notificationIdFor('sched-rent'));
+    final payload = ScheduledNotificationPayload.tryParse(request.payload);
+    expect(payload?.scheduledTransactionId, 'sched-rent');
+    expect(payload?.occurrenceDate, DateTime(2026, 8, 1));
+  });
+
+  test('notification payload accepts legacy schedule-only identity', () {
+    final payload = ScheduledNotificationPayload.tryParse('sched-legacy');
+    expect(payload?.scheduledTransactionId, 'sched-legacy');
+    expect(payload?.occurrenceDate, isNull);
   });
 
   test('notification planner skips disabled and resolved schedules', () {
@@ -1910,20 +1920,151 @@ void main() {
       dataSet: _dataSet().copyWith(
         preferences: const UserPreferences(notificationsEnabled: true),
         scheduledTransactions: [
-          _scheduledTransaction(id: 'today', nextDate: DateTime(2026, 7, 6)),
-          _scheduledTransaction(id: 'future', nextDate: DateTime(2026, 7, 8)),
+          _scheduledTransaction(
+            id: 'today',
+            nextDate: DateTime(2026, 7, 6),
+          ).copyWith(alertPreference: AlertPreference.sameDay),
+          _scheduledTransaction(
+            id: 'future',
+            nextDate: DateTime(2026, 7, 8),
+          ).copyWith(alertPreference: AlertPreference.sameDay),
         ],
       ),
       notificationScheduler: scheduler,
     );
 
-    await store.refreshScheduledNotificationBadge(now: DateTime(2026, 7, 6));
+    await store.refreshScheduledNotificationBadge(
+      now: DateTime(2026, 7, 6, 18),
+    );
     expect(scheduler.badgeCounts, [1]);
 
     await store.savePreferences(
       store.preferences.copyWith(notificationsEnabled: false),
     );
     expect(scheduler.badgeCounts.last, 0);
+  });
+
+  test(
+    'active alerts are occurrence-specific and independent of OS permission',
+    () async {
+      final scheduler = RecordingNotificationScheduler(
+        permissionGranted: false,
+      );
+      final due = DateTime(2026, 7, 10);
+      final store = FinanceDataStore(
+        dataSet: _dataSet().copyWith(
+          preferences: const UserPreferences(notificationsEnabled: true),
+          scheduledTransactions: [
+            _scheduledTransaction(
+              id: 'rent',
+              nextDate: due,
+            ).copyWith(alertPreference: AlertPreference.threeDaysBefore),
+          ],
+        ),
+        notificationScheduler: scheduler,
+      );
+
+      await store.refreshScheduledNotifications();
+
+      expect(
+        store.scheduledTransactions.single.scheduledNotificationIds,
+        isEmpty,
+      );
+      final alerts = store.activeScheduledAlerts(now: DateTime(2026, 7, 7, 12));
+      expect(alerts, hasLength(1));
+      expect(alerts.single.scheduledTransaction.id, 'rent');
+      expect(alerts.single.occurrenceDate, due);
+      expect(store.scheduledActiveAlertCount(now: DateTime(2026, 7, 7, 12)), 1);
+    },
+  );
+
+  test('active alert lifecycle tracks resolution, undo, and recurrence', () {
+    final august = DateTime(2026, 8, 28);
+    final september = DateTime(2026, 9, 28);
+    final base = _scheduledTransaction(id: 'card-payment', nextDate: september)
+        .copyWith(
+          alertPreference: AlertPreference.oneWeekBefore,
+          occurrences: [
+            ScheduledOccurrenceRecord(
+              scheduledDate: august,
+              plannedAmountMinor: 25000,
+              status: ScheduledOccurrenceStatus.paid,
+            ),
+          ],
+        );
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        preferences: const UserPreferences(notificationsEnabled: true),
+        scheduledTransactions: [base],
+      ),
+    );
+
+    expect(store.activeScheduledAlerts(now: DateTime(2026, 8, 28)), isEmpty);
+    final next = store.activeScheduledAlerts(now: DateTime(2026, 9, 21, 12));
+    expect(next, hasLength(1));
+    expect(next.single.occurrenceDate, september);
+
+    final restored = base.copyWith(
+      nextDate: august,
+      occurrences: [
+        ScheduledOccurrenceRecord(
+          scheduledDate: august,
+          plannedAmountMinor: 25000,
+          status: ScheduledOccurrenceStatus.pending,
+        ),
+      ],
+    );
+    final restoredStore = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        preferences: const UserPreferences(notificationsEnabled: true),
+        scheduledTransactions: [restored],
+      ),
+    );
+    final restoredAlerts = restoredStore.activeScheduledAlerts(
+      now: DateTime(2026, 8, 28, 12),
+    );
+    expect(restoredAlerts, hasLength(1));
+    expect(restoredAlerts.single.occurrenceDate, august);
+  });
+
+  test('editing or deleting a schedule changes the derived active alert', () {
+    final original = _scheduledTransaction(
+      id: 'editable-alert',
+      nextDate: DateTime(2026, 8, 10),
+    ).copyWith(alertPreference: AlertPreference.sameDay);
+    final dataSet = _dataSet().copyWith(
+      preferences: const UserPreferences(notificationsEnabled: true),
+      scheduledTransactions: [original],
+    );
+    final originalStore = FinanceDataStore(dataSet: dataSet);
+    expect(
+      originalStore.scheduledActiveAlertCount(now: DateTime(2026, 8, 10, 12)),
+      1,
+    );
+
+    final editedStore = FinanceDataStore(
+      dataSet: dataSet.copyWith(
+        scheduledTransactions: [
+          original.copyWith(nextDate: DateTime(2026, 8, 20)),
+        ],
+      ),
+    );
+    expect(
+      editedStore.scheduledActiveAlertCount(now: DateTime(2026, 8, 10, 12)),
+      0,
+    );
+
+    final deletedStore = FinanceDataStore(
+      dataSet: dataSet.copyWith(
+        scheduledTransactions: [
+          original.copyWith(sync: original.sync.deleted(deviceId: 'test')),
+        ],
+      ),
+    );
+    expect(
+      deletedStore.scheduledActiveAlertCount(now: DateTime(2026, 8, 10, 12)),
+      0,
+    );
   });
 
   test(
