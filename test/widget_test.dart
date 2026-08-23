@@ -31,6 +31,7 @@ import 'package:money_tally/src/export/export_file_service.dart';
 import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
 import 'package:money_tally/src/notifications/notification_scheduler.dart';
 import 'package:money_tally/src/persistence/backup_codec.dart';
+import 'package:money_tally/src/persistence/backup_restore_service.dart';
 import 'package:money_tally/src/persistence/local_finance_data_set_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
@@ -110,6 +111,26 @@ class RecordingExportFileService extends ExportFileService {
         fileName: fileName,
         mimeType: mimeType,
       ),
+    );
+  }
+}
+
+class RecordingBackupSafetyFileService extends BackupSafetyFileService {
+  String? savedContent;
+  DateTime? savedAt;
+
+  @override
+  Future<ExportedFile> savePreResetBackup({
+    required String content,
+    required DateTime createdAt,
+  }) async {
+    const BackupRestoreValidator().validate(content);
+    savedContent = content;
+    savedAt = createdAt;
+    return ExportedFile(
+      path: '/temporary/${preResetBackupFileName(createdAt)}',
+      fileName: preResetBackupFileName(createdAt),
+      mimeType: 'application/json',
     );
   }
 }
@@ -7436,13 +7457,14 @@ void main() {
 
       final initialDecoration =
           tester.widget<AnimatedContainer>(card).decoration as BoxDecoration;
-      await tester.tap(
-        find.byKey(
-          ValueKey(
-            'scheduled-calendar-day-${date.year}-${date.month}-${date.day}',
-          ),
+      final calendarDay = find.byKey(
+        ValueKey(
+          'scheduled-calendar-day-${date.year}-${date.month}-${date.day}',
         ),
       );
+      await tester.ensureVisible(calendarDay);
+      await tester.pumpAndSettle();
+      await tester.tap(calendarDay.hitTestable());
       await tester.pump(const Duration(milliseconds: 260));
       final highlightedDecoration =
           tester.widget<AnimatedContainer>(card).decoration as BoxDecoration;
@@ -10128,6 +10150,81 @@ void main() {
       dataStore.dataSet.accounts.length,
     );
   });
+
+  testWidgets(
+    'settings reset requires typed confirmation and creates a safety backup',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final legacyStore = FinanceStore.seeded();
+      final original = const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      );
+      final dataStore = FinanceDataStore(dataSet: original);
+      final safetyService = RecordingBackupSafetyFileService();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FinanceDataStoreScope(
+            store: dataStore,
+            child: Scaffold(
+              body: SingleChildScrollView(
+                child: SettingsView(
+                  syncLabel: 'Local only',
+                  backupSafetyFileService: safetyService,
+                  now: () => DateTime(2026, 8, 23, 10, 11, 12),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final resetRow = find.byKey(const ValueKey('reset-trackmark-data-row'));
+      await tester.ensureVisible(resetRow);
+      await tester.tap(resetRow);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reset Trackmark Data?'), findsOneWidget);
+      final resetButton = tester.widget<FilledButton>(
+        find.byKey(const ValueKey('confirm-trackmark-data-reset')),
+      );
+      expect(resetButton.onPressed, isNull);
+      expect(dataStore.accounts, isNotEmpty);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('reset-trackmark-data-confirmation')),
+        'RESET',
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('confirm-trackmark-data-reset')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Trackmark Data Reset'), findsOneWidget);
+      expect(dataStore.accounts, isEmpty);
+      expect(dataStore.categories, isEmpty);
+      expect(dataStore.transactions, isEmpty);
+      expect(dataStore.scheduledTransactions, isEmpty);
+      expect(dataStore.budgets, isEmpty);
+      expect(dataStore.goals, isEmpty);
+      expect(dataStore.funds, isEmpty);
+      expect(dataStore.reservationOperations, isEmpty);
+      expect(
+        dataStore.preferences.currency.toJson(),
+        original.preferences.currency.toJson(),
+      );
+      expect(safetyService.savedAt, DateTime(2026, 8, 23, 10, 11, 12));
+      final restoredSafety = const BackupRestoreValidator().validate(
+        safetyService.savedContent!,
+      );
+      expect(restoredSafety.dataSet.accounts.length, original.accounts.length);
+    },
+  );
 
   testWidgets('settings reports temporary export creation failures', (
     tester,

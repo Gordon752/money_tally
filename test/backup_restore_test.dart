@@ -24,6 +24,59 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   group('authoritative backup restore', () {
+    test(
+      'reset replaces local and cloud financial data while preserving preferences',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final original = _richDataSet();
+        final remote = _AuthoritativeFakeRepository(original);
+        final store = FinanceDataStore(
+          dataSet: original,
+          remoteRepository: remote,
+          userId: 'user-1',
+        );
+
+        await store.resetTrackmarkData();
+
+        for (final dataSet in [store.dataSet, remote.remoteDataSet]) {
+          expect(dataSet.accounts, isEmpty);
+          expect(dataSet.categories, isEmpty);
+          expect(dataSet.transactions, isEmpty);
+          expect(dataSet.scheduledTransactions, isEmpty);
+          expect(dataSet.budgets, isEmpty);
+          expect(dataSet.goals, isEmpty);
+          expect(dataSet.funds, isEmpty);
+          expect(dataSet.reservationOperations, isEmpty);
+          expect(dataSet.goalContributions, isEmpty);
+          expect(dataSet.goalFundingEvents, isEmpty);
+          expect(
+            dataSet.preferences.toJson(),
+            original.preferences
+                .copyWith(legacyV1MigrationCompleted: true)
+                .toJson(),
+          );
+        }
+        expect(remote.authoritativeWrites, 1);
+      },
+    );
+
+    test('failed cloud reset retains the complete local data set', () async {
+      SharedPreferences.setMockInitialValues({});
+      final original = _richDataSet();
+      final remote = _AuthoritativeFakeRepository(original, failReplace: true);
+      final store = FinanceDataStore(
+        dataSet: original,
+        remoteRepository: remote,
+        userId: 'user-1',
+      );
+
+      await expectLater(store.resetTrackmarkData(), throwsStateError);
+
+      expect(store.dataSet.toJson(), original.toJson());
+      expect(remote.remoteDataSet.toJson(), original.toJson());
+      expect(remote.authoritativeWrites, 0);
+    });
+
     test('rich backup round trip preserves every persisted field', () async {
       SharedPreferences.setMockInitialValues({});
       final original = _richDataSet();
@@ -648,6 +701,32 @@ void main() {
       );
 
       expect(saved.fileName, startsWith('trackmark_money_pre_restore_backup_'));
+      expect(await File(saved.path).readAsString(), content);
+      expect(
+        const BackupRestoreValidator().validate(content).dataSet.toJson(),
+        _withoutDeviceLocalNotificationMetadata(_richDataSet()).toJson(),
+      );
+    });
+
+    test('pre-reset safety backup is written and verified', () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'trackmark_pre_reset_backup_',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final service = BackupSafetyFileService(
+        directoryProvider: () async => directory,
+      );
+      final content = const BackupCodec().encodeJson(
+        _richDataSet(),
+        exportedAt: DateTime.utc(2026, 8, 23, 9),
+      );
+
+      final saved = await service.savePreResetBackup(
+        content: content,
+        createdAt: DateTime(2026, 8, 23, 9, 5, 6),
+      );
+
+      expect(saved.fileName, startsWith('trackmark_money_pre_reset_backup_'));
       expect(await File(saved.path).readAsString(), content);
       expect(
         const BackupRestoreValidator().validate(content).dataSet.toJson(),

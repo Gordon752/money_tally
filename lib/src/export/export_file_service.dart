@@ -158,6 +158,16 @@ class BackupSafetyFileService {
     );
   }
 
+  Future<ExportedFile> savePreResetBackup({
+    required String content,
+    required DateTime createdAt,
+  }) async {
+    return saveVerifiedBackup(
+      content: content,
+      fileName: preResetBackupFileName(createdAt),
+    );
+  }
+
   Future<ExportedFile> saveVerifiedBackup({
     required String content,
     required String fileName,
@@ -221,6 +231,10 @@ String backupExportFileName(DateTime createdAt) {
 
 String preRestoreBackupFileName(DateTime createdAt) {
   return 'trackmark_money_pre_restore_backup_${_fileTimestamp(createdAt)}.json';
+}
+
+String preResetBackupFileName(DateTime createdAt) {
+  return 'trackmark_money_pre_reset_backup_${_fileTimestamp(createdAt)}.json';
 }
 
 String automaticBackupFileName(DateTime createdAt) {

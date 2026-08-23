@@ -1038,6 +1038,29 @@ class FinanceDataStore extends ChangeNotifier {
     }
   }
 
+  /// Replaces the financial data set with a clean, empty authority boundary.
+  ///
+  /// App preferences and sign-in remain intact. In cloud mode the empty data
+  /// set is activated remotely before local data changes, using the same
+  /// generation-safe path as an authoritative backup restore.
+  Future<void> resetTrackmarkData() {
+    return restoreBackupDataSet(
+      FinanceDataSet(
+        accounts: const [],
+        categories: const [],
+        transactions: const [],
+        scheduledTransactions: const [],
+        budgets: const [],
+        goals: const [],
+        funds: const [],
+        reservationOperations: const [],
+        goalContributions: const [],
+        goalFundingEvents: const [],
+        preferences: preferences,
+      ),
+    );
+  }
+
   Future<void> attachRemoteSync({
     required FinanceRecordRepository remoteRepository,
     required String userId,

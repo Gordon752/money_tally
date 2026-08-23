@@ -9298,6 +9298,7 @@ class _SettingsViewState extends State<SettingsView> {
   BackupSafetyFileService? _defaultBackupSafetyFileService;
   _ExportKind? _sharingExport;
   var _isImportingBackup = false;
+  var _isResettingData = false;
   AutomaticBackupStatus? _automaticBackupStatus;
   ICloudBackupStorage? _defaultICloudBackupStorage;
 
@@ -9685,7 +9686,22 @@ class _SettingsViewState extends State<SettingsView> {
                   ? 'Preparing restore…'
                   : 'Select, validate, and restore a Trackmark backup',
               trailingText: _isImportingBackup ? 'Working…' : null,
-              onTap: _isImportingBackup ? null : _importBackup,
+              onTap: _isImportingBackup || _isResettingData
+                  ? null
+                  : _importBackup,
+            ),
+            SettingsActionRow(
+              key: const ValueKey('reset-trackmark-data-row'),
+              icon: AppIcon.delete,
+              title: 'Reset Trackmark Data',
+              subtitle: _isResettingData
+                  ? 'Creating safety backup…'
+                  : 'Permanently start with an empty financial data set',
+              trailingText: _isResettingData ? 'Working…' : null,
+              destructive: true,
+              onTap: _isResettingData || _isImportingBackup
+                  ? null
+                  : _resetTrackmarkData,
             ),
             SettingsSwitch(
               icon: AppIcon.backup,
@@ -9742,7 +9758,7 @@ class _SettingsViewState extends State<SettingsView> {
               icon: AppIcon.shield,
               title: 'Safety Backups',
               subtitle: _automaticBackupStatus?.latestSafetyBackupAt == null
-                  ? 'Created after app updates and before restores'
+                  ? 'Created after updates and before restores or data resets'
                   : 'Latest created for update to ${_automaticBackupStatus!.latestSafetyBackupVersion}',
               showDivider: false,
             ),
@@ -9884,6 +9900,127 @@ class _SettingsViewState extends State<SettingsView> {
         preferredAutomaticBackupMinutes: selected.hour * 60 + selected.minute,
       ),
     );
+  }
+
+  Future<void> _resetTrackmarkData() async {
+    if (_isResettingData || _isImportingBackup) return;
+    final store = FinanceDataStoreScope.read(context);
+
+    final signedInForSync = widget.onSyncNow != null;
+    if (signedInForSync &&
+        (!store.hasRemoteSync || widget.syncLabel != 'Synced')) {
+      await _showBackupError(
+        context,
+        'Resolve cloud sync and complete a successful sync before resetting. '
+        'This prevents another device from restoring older data.',
+        title: 'Cloud Sync Must Be Healthy',
+      );
+      return;
+    }
+
+    final confirmed = await _showResetTrackmarkDataConfirmation(context);
+    if (!mounted || confirmed != true) return;
+
+    setState(() => _isResettingData = true);
+    final createdAt = widget.now?.call() ?? DateTime.now();
+    ExportedFile? safetyBackup;
+    try {
+      final safetyJson = const BackupCodec().encodeJson(
+        store.dataSet,
+        exportedAt: createdAt,
+      );
+      try {
+        safetyBackup = await _backupSafetyFileService.savePreResetBackup(
+          content: safetyJson,
+          createdAt: createdAt,
+        );
+      } on Object {
+        if (!mounted) return;
+        await _showBackupError(
+          context,
+          'Trackmark could not create and verify the required pre-reset '
+          'safety backup. Nothing was changed.',
+          title: 'Reset Stopped Safely',
+        );
+        return;
+      }
+
+      try {
+        await store.resetTrackmarkData();
+      } on AuthoritativeRestoreLocalInstallException {
+        if (!mounted) return;
+        await _showBackupError(
+          context,
+          'The empty data set is now authoritative in Trackmark cloud sync, '
+          'but this device could not finish saving its local copy. Your '
+          'pre-reset safety backup is ${safetyBackup.fileName}. Close and '
+          'reopen Trackmark, then sync again.',
+          title: 'Reset Needs Attention',
+        );
+        return;
+      } on Object {
+        if (!mounted) return;
+        await _showBackupError(
+          context,
+          'Trackmark could not complete the reset safely. Your existing data '
+          'was retained. The safety backup remains at '
+          '${safetyBackup.fileName}.',
+          title: 'Reset Stopped Safely',
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Trackmark Data Reset'),
+          content: Text(
+            [
+              if (store.hasRemoteSync)
+                'The empty financial data set is now authoritative for your '
+                    'Trackmark devices.'
+              else
+                'This device now has an empty financial data set.',
+              'Your app preferences and sign-in were preserved.',
+              'A verified pre-reset safety backup was saved as '
+                  '${safetyBackup!.fileName}.',
+            ].join('\n\n'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  _shareResetSafetyBackup(dialogContext, safetyBackup!),
+              child: const Text('Share Safety Backup'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isResettingData = false);
+    }
+  }
+
+  Future<void> _shareResetSafetyBackup(
+    BuildContext anchorContext,
+    ExportedFile safetyBackup,
+  ) async {
+    try {
+      await _exportFileService.shareExistingFile(
+        file: safetyBackup,
+        shareTitle: 'Trackmark pre-reset safety backup',
+        sharePositionOrigin: exportSharePositionOrigin(anchorContext),
+      );
+    } on Object {
+      if (!anchorContext.mounted) return;
+      ScaffoldMessenger.of(anchorContext).showSnackBar(
+        const SnackBar(content: Text('Could not share the safety backup file')),
+      );
+    }
   }
 
   Future<void> _importBackup() async {
@@ -10332,6 +10469,69 @@ Rect exportSharePositionOrigin(BuildContext context) {
     center: Offset(screenSize.width / 2, screenSize.height / 2),
     width: 1,
     height: 1,
+  );
+}
+
+Future<bool?> _showResetTrackmarkDataConfirmation(BuildContext context) async {
+  var confirmation = '';
+  return showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) => AlertDialog(
+        title: const Text('Reset Trackmark Data?'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Trackmark will first create and verify a safety backup. It '
+                'will then permanently replace accounts, transactions, '
+                'schedules, categories, budgets, Funds, Goals, and '
+                'reservation history with an empty data set.',
+              ),
+              const SizedBox(height: AppSpacing.md),
+              const Text(
+                'If cloud sync is enabled, the empty data set becomes '
+                'authoritative and will sync to your other devices. App '
+                'preferences, backup settings, and sign-in are preserved.',
+              ),
+              const SizedBox(height: AppSpacing.md),
+              const Text('Type RESET to continue.'),
+              const SizedBox(height: AppSpacing.sm),
+              TextField(
+                key: const ValueKey('reset-trackmark-data-confirmation'),
+                autocorrect: false,
+                enableSuggestions: false,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(labelText: 'RESET'),
+                onChanged: (value) => setDialogState(() {
+                  confirmation = value.trim();
+                }),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('confirm-trackmark-data-reset'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: confirmation == 'RESET'
+                ? () => Navigator.of(dialogContext).pop(true)
+                : null,
+            child: const Text('Reset Data'),
+          ),
+        ],
+      ),
+    ),
   );
 }
 
