@@ -22,6 +22,7 @@ Map<String, Object?> _scheduledDefinitionJson(
 ) {
   final json = _scheduledCloudJson(scheduledTransaction);
   json.remove('occurrenceStates');
+  json.remove('occurrenceHistoryEpoch');
   return json;
 }
 
@@ -34,12 +35,36 @@ Map<String, Object?> _scheduledCloudJson(
   return json;
 }
 
+@visibleForTesting
+Map<String, Object?> scheduledCloudJsonForSync({
+  required ScheduledTransactionRecord scheduledTransaction,
+  required bool existsInRemoteBaseline,
+}) => existsInRemoteBaseline
+    ? _scheduledDefinitionJson(scheduledTransaction)
+    : _scheduledCloudJson(scheduledTransaction);
+
+@visibleForTesting
+bool shouldAdvanceScheduledHistoryEpoch({
+  required ScheduledTransactionRecord scheduledTransaction,
+  required ScheduledTransactionRecord remoteBaseline,
+}) {
+  final incomingEpoch = occurrenceHistoryEpochFor(scheduledTransaction);
+  final baselineEpoch = occurrenceHistoryEpochFor(remoteBaseline);
+  if (sameOccurrenceHistoryEpoch(incomingEpoch, baselineEpoch)) return false;
+  final winner = authoritativeOccurrenceHistoryEpoch(
+    incomingEpoch,
+    baselineEpoch,
+  );
+  return sameOccurrenceHistoryEpoch(winner, incomingEpoch);
+}
+
 class FirestoreRecordRepository
     implements
         FinanceRecordRepository,
         BulkFinanceRecordRepository,
         ReservationRecordRepository,
-        ScheduledOccurrenceStateRepository {
+        ScheduledOccurrenceStateRepository,
+        ScheduledHistoryResetRepository {
   FirestoreRecordRepository({FirebaseFirestore? firestore})
     : firestore = firestore ?? FirebaseFirestore.instance;
 
@@ -246,6 +271,19 @@ class FirestoreRecordRepository
         );
       }
       final rawStates = snapshot.data()?['occurrenceStates'];
+      final remoteEpoch = snapshot.data()?['occurrenceHistoryEpoch'] is Map
+          ? ScheduledOccurrenceHistoryEpoch.fromJson(
+              Map<String, Object?>.from(
+                snapshot.data()!['occurrenceHistoryEpoch'] as Map,
+              ),
+            )
+          : ScheduledOccurrenceHistoryEpoch.legacy;
+      if (occurrenceState.historyEpochRevision != remoteEpoch.revision ||
+          occurrenceState.historyEpochOperationId != remoteEpoch.operationId) {
+        throw StateError(
+          'Scheduled history changed on another device. Sync and try again.',
+        );
+      }
       ScheduledOccurrenceState? remoteState;
       if (rawStates is Map && rawStates[dayKey] is Map) {
         remoteState = ScheduledOccurrenceState.fromJson(
@@ -261,6 +299,64 @@ class FirestoreRecordRepository
         });
       }
       return winner;
+    });
+  }
+
+  @override
+  Future<void> saveScheduledHistoryReset({
+    required String userId,
+    required ScheduledTransactionRecord scheduledTransaction,
+  }) async {
+    final incomingEpoch = scheduledTransaction.occurrenceHistoryEpoch;
+    if (incomingEpoch == null) {
+      throw ArgumentError('A scheduled-history reset requires an epoch.');
+    }
+    final generation = await _activeGeneration(userId);
+    final reference = generation == null
+        ? _collection(
+            userId,
+            'scheduledTransactions',
+          ).doc(scheduledTransaction.id)
+        : _generationCollection(
+            userId,
+            generation,
+            'scheduledTransactions',
+          ).doc(_encodedDocumentId(scheduledTransaction.id));
+    await firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(reference);
+      if (!snapshot.exists) {
+        throw StateError(
+          'The scheduled transaction is unavailable for history reset.',
+        );
+      }
+      final remoteEpoch = snapshot.data()?['occurrenceHistoryEpoch'] is Map
+          ? ScheduledOccurrenceHistoryEpoch.fromJson(
+              Map<String, Object?>.from(
+                snapshot.data()!['occurrenceHistoryEpoch'] as Map,
+              ),
+            )
+          : ScheduledOccurrenceHistoryEpoch.legacy;
+      final winner = authoritativeOccurrenceHistoryEpoch(
+        remoteEpoch,
+        incomingEpoch,
+      );
+      if (!sameOccurrenceHistoryEpoch(winner, incomingEpoch)) {
+        throw StateError(
+          'Scheduled history changed on another device. Sync and try again.',
+        );
+      }
+      if (sameOccurrenceHistoryEpoch(remoteEpoch, incomingEpoch)) return;
+
+      final data = _scheduledDefinitionJson(scheduledTransaction)
+        ..['occurrenceHistoryEpoch'] = incomingEpoch.toJson()
+        ..['occurrenceStates'] = {
+          for (final entry in scheduledTransaction.occurrenceStates.entries)
+            entry.key: entry.value.toJson(),
+        }
+        ..['occurrences'] = scheduledTransaction.occurrences
+            .map((occurrence) => occurrence.toJson())
+            .toList();
+      transaction.update(reference, data);
     });
   }
 
@@ -415,12 +511,26 @@ class FirestoreRecordRepository
       (item) => item.id,
       (item) => item.toJson(),
     );
+    final baselineSchedulesById = {
+      for (final schedule
+          in baseline?.scheduledTransactions ??
+              const <ScheduledTransactionRecord>[])
+        schedule.id: schedule,
+    };
     addRecords(
       'scheduledTransactions',
       dataSet.scheduledTransactions,
       baseline?.scheduledTransactions ?? const <ScheduledTransactionRecord>[],
       (item) => item.id,
-      (item) => _scheduledDefinitionJson(item),
+      // Definition-only writes intentionally cannot overwrite occurrence
+      // authority on an existing cloud schedule. A schedule that is absent
+      // from the remote baseline, however, must be created with its epoch and
+      // occurrence state atomically; otherwise the follow-up field-scoped
+      // occurrence write sees a legacy epoch and correctly rejects it.
+      (item) => scheduledCloudJsonForSync(
+        scheduledTransaction: item,
+        existsInRemoteBaseline: baselineSchedulesById.containsKey(item.id),
+      ),
     );
     addRecords(
       'budgets',
@@ -498,6 +608,24 @@ class FirestoreRecordRepository
             ),
       );
       debugPrint('Cloud sync upload: saved documents $offset–${end - 1}');
+    }
+    for (final schedule in dataSet.scheduledTransactions) {
+      final baselineSchedule = baselineSchedulesById[schedule.id];
+      if (baselineSchedule == null) continue;
+      if (!shouldAdvanceScheduledHistoryEpoch(
+        scheduledTransaction: schedule,
+        remoteBaseline: baselineSchedule,
+      )) {
+        continue;
+      }
+      // A normal definition write must never overwrite occurrence authority.
+      // When the merged data set carries a newer history epoch, advance it
+      // through the dedicated transactional reset before writing states that
+      // belong to that epoch.
+      await saveScheduledHistoryReset(
+        userId: userId,
+        scheduledTransaction: schedule,
+      );
     }
     for (final schedule in dataSet.scheduledTransactions) {
       for (final entry in occurrenceAuthorityFor(schedule).entries) {

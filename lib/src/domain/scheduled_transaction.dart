@@ -47,6 +47,66 @@ enum ScheduledAction { none, paid, skipped }
 
 enum ScheduledOccurrenceStatus { pending, paid, skipped }
 
+/// Causal authority boundary for scheduled-occurrence history.
+///
+/// Old schedules and backups implicitly belong to [legacy]. A history reset
+/// advances this epoch so occurrence states from an earlier epoch can remain
+/// in an offline/cloud replica without becoming authoritative again.
+class ScheduledOccurrenceHistoryEpoch {
+  const ScheduledOccurrenceHistoryEpoch({
+    required this.revision,
+    required this.operationId,
+    required this.changedAt,
+    required this.deviceId,
+  });
+
+  static final legacy = ScheduledOccurrenceHistoryEpoch(
+    revision: 0,
+    operationId: 'legacy',
+    changedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+    deviceId: 'legacy',
+  );
+
+  final int revision;
+  final String operationId;
+  final DateTime changedAt;
+  final String deviceId;
+
+  Map<String, Object?> toJson() => {
+    'revision': revision,
+    'operationId': operationId,
+    'changedAt': changedAt.toUtc().toIso8601String(),
+    'deviceId': deviceId,
+  };
+
+  factory ScheduledOccurrenceHistoryEpoch.fromJson(Map<String, Object?> json) {
+    final revision = json['revision'] as int? ?? 0;
+    return ScheduledOccurrenceHistoryEpoch(
+      revision: revision,
+      operationId: json['operationId'] as String? ?? 'legacy_$revision',
+      changedAt: json['changedAt'] == null
+          ? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)
+          : dateTimeFromJson(json['changedAt']).toUtc(),
+      deviceId: json['deviceId'] as String? ?? 'legacy',
+    );
+  }
+}
+
+ScheduledOccurrenceHistoryEpoch authoritativeOccurrenceHistoryEpoch(
+  ScheduledOccurrenceHistoryEpoch left,
+  ScheduledOccurrenceHistoryEpoch right,
+) {
+  if (left.revision != right.revision) {
+    return left.revision > right.revision ? left : right;
+  }
+  return left.operationId.compareTo(right.operationId) >= 0 ? left : right;
+}
+
+bool sameOccurrenceHistoryEpoch(
+  ScheduledOccurrenceHistoryEpoch left,
+  ScheduledOccurrenceHistoryEpoch right,
+) => left.revision == right.revision && left.operationId == right.operationId;
+
 /// Independently versioned authority for one recurring schedule occurrence.
 ///
 /// The enclosing schedule's [SyncMetadata] remains the authority for edits to
@@ -62,6 +122,8 @@ class ScheduledOccurrenceState {
     required this.operationId,
     required this.changedAt,
     required this.deviceId,
+    this.historyEpochRevision = 0,
+    this.historyEpochOperationId = 'legacy',
     this.actualAmountMinor,
     this.actualPaymentDate,
     this.transactionId,
@@ -79,6 +141,8 @@ class ScheduledOccurrenceState {
   final String operationId;
   final DateTime changedAt;
   final String deviceId;
+  final int historyEpochRevision;
+  final String historyEpochOperationId;
 
   bool get isResolved =>
       status == ScheduledOccurrenceStatus.paid ||
@@ -96,6 +160,8 @@ class ScheduledOccurrenceState {
     'operationId': operationId,
     'changedAt': changedAt.toUtc().toIso8601String(),
     'deviceId': deviceId,
+    'historyEpochRevision': historyEpochRevision,
+    'historyEpochOperationId': historyEpochOperationId,
   };
 
   factory ScheduledOccurrenceState.fromJson(Map<String, Object?> json) {
@@ -125,6 +191,9 @@ class ScheduledOccurrenceState {
           ? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)
           : dateTimeFromJson(json['changedAt']).toUtc(),
       deviceId: json['deviceId'] as String? ?? 'legacy',
+      historyEpochRevision: json['historyEpochRevision'] as int? ?? 0,
+      historyEpochOperationId:
+          json['historyEpochOperationId'] as String? ?? 'legacy',
     );
   }
 
@@ -231,6 +300,7 @@ class ScheduledTransactionRecord {
     this.lastAction = ScheduledAction.none,
     this.occurrences = const [],
     this.occurrenceStates = const {},
+    this.occurrenceHistoryEpoch,
     this.reservationContainerType,
     this.reservationContainerId,
   });
@@ -262,6 +332,7 @@ class ScheduledTransactionRecord {
   final ScheduledAction lastAction;
   final List<ScheduledOccurrenceRecord> occurrences;
   final Map<String, ScheduledOccurrenceState> occurrenceStates;
+  final ScheduledOccurrenceHistoryEpoch? occurrenceHistoryEpoch;
   final ReservationContainerType? reservationContainerType;
   final String? reservationContainerId;
   final SyncMetadata sync;
@@ -341,6 +412,7 @@ class ScheduledTransactionRecord {
     ScheduledAction? lastAction,
     List<ScheduledOccurrenceRecord>? occurrences,
     Map<String, ScheduledOccurrenceState>? occurrenceStates,
+    ScheduledOccurrenceHistoryEpoch? occurrenceHistoryEpoch,
     ReservationContainerType? reservationContainerType,
     String? reservationContainerId,
     SyncMetadata? sync,
@@ -384,6 +456,8 @@ class ScheduledTransactionRecord {
       lastAction: lastAction ?? this.lastAction,
       occurrences: occurrences ?? this.occurrences,
       occurrenceStates: occurrenceStates ?? this.occurrenceStates,
+      occurrenceHistoryEpoch:
+          occurrenceHistoryEpoch ?? this.occurrenceHistoryEpoch,
       reservationContainerType: clearReservationContainer
           ? null
           : reservationContainerType ?? this.reservationContainerType,
@@ -424,6 +498,8 @@ class ScheduledTransactionRecord {
           for (final entry in occurrenceStates.entries)
             entry.key: entry.value.toJson(),
         },
+      if (occurrenceHistoryEpoch != null)
+        'occurrenceHistoryEpoch': occurrenceHistoryEpoch!.toJson(),
       'reservationContainerType': reservationContainerType?.name,
       'reservationContainerId': reservationContainerId,
       'sync': sync.toJson(),
@@ -490,6 +566,11 @@ class ScheduledTransactionRecord {
               stringMap(entry.value),
             ),
       },
+      occurrenceHistoryEpoch: json['occurrenceHistoryEpoch'] is Map
+          ? ScheduledOccurrenceHistoryEpoch.fromJson(
+              stringMap(json['occurrenceHistoryEpoch']),
+            )
+          : null,
       reservationContainerType: json['reservationContainerType'] == null
           ? null
           : enumByName(

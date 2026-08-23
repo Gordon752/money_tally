@@ -62,7 +62,9 @@ class GoalRecord {
   bool get isDeleted => sync.isDeleted;
   bool get isActive => !isDeleted && status == GoalStatus.active;
   bool get isCompleted => !isDeleted && status == GoalStatus.completed;
+  bool get isAchieved => isCompleted;
   bool get isArchived => !isDeleted && status == GoalStatus.archived;
+  bool get isOnMainGoalsScreen => !isDeleted && !isArchived;
   bool get isAccountBacked => accountId != null && accountId!.isNotEmpty;
   bool get usesReservationModel => reservationModelVersion >= 1;
   String? get reservationFundingAccountId => defaultFundingAccountId;

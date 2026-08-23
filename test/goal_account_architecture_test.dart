@@ -105,6 +105,90 @@ void main() {
     },
   );
 
+  test(
+    'achieved Goal remains achieved after spending and returning reservation',
+    () async {
+      final store = _store();
+      final goal = await store.createGoal(
+        name: 'Vacation',
+        targetAmountMinor: 50000,
+        startingAmountMinor: 0,
+        targetDate: null,
+        defaultFundingAccountId: 'checking',
+      );
+      await store.allocateReservation(
+        containerType: ReservationContainerType.goal,
+        containerId: goal.id,
+        amountMinor: 50000,
+        date: DateTime(2026, 8, 23),
+      );
+
+      final achievedAt = store.goalById(goal.id).completedAt;
+      expect(store.goalById(goal.id).isAchieved, isTrue);
+      expect(achievedAt, isNotNull);
+      expect(store.activeGoals, contains(store.goalById(goal.id)));
+
+      await store.addExpense(
+        accountId: 'checking',
+        categoryId: 'maintenance',
+        date: DateTime(2026, 8, 23),
+        payee: 'Vacation expense',
+        amountMinor: 20000,
+        reservationContainerType: ReservationContainerType.goal,
+        reservationContainerId: goal.id,
+      );
+      expect(store.currentGoalAmountMinor(goal.id), 30000);
+      expect(store.goalById(goal.id).isAchieved, isTrue);
+      expect(store.goalById(goal.id).completedAt, achievedAt);
+
+      await store.returnReservation(
+        containerType: ReservationContainerType.goal,
+        containerId: goal.id,
+        amountMinor: 10000,
+        date: DateTime(2026, 8, 23),
+      );
+      expect(store.currentGoalAmountMinor(goal.id), 20000);
+      expect(store.goalById(goal.id).isAchieved, isTrue);
+      expect(store.goalById(goal.id).completedAt, achievedAt);
+      expect(store.activeGoals, contains(store.goalById(goal.id)));
+    },
+  );
+
+  test('Maintain Balance replenishes without changing lifecycle', () async {
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Emergency',
+      goalType: GoalType.maintainBalance,
+      targetAmountMinor: 50000,
+      startingAmountMinor: 50000,
+      targetDate: null,
+      defaultFundingAccountId: 'checking',
+    );
+
+    expect(store.goalById(goal.id).isActive, isTrue);
+    await store.addExpense(
+      accountId: 'checking',
+      categoryId: 'maintenance',
+      date: DateTime(2026, 8, 23),
+      payee: 'Emergency expense',
+      amountMinor: 10000,
+      reservationContainerType: ReservationContainerType.goal,
+      reservationContainerId: goal.id,
+    );
+    expect(store.currentGoalAmountMinor(goal.id), 40000);
+    expect(store.goalById(goal.id).isActive, isTrue);
+
+    await store.allocateReservation(
+      containerType: ReservationContainerType.goal,
+      containerId: goal.id,
+      amountMinor: 10000,
+      date: DateTime(2026, 8, 23),
+    );
+    expect(store.currentGoalAmountMinor(goal.id), 50000);
+    expect(store.goalById(goal.id).isActive, isTrue);
+    expect(store.goalById(goal.id).completedAt, isNull);
+  });
+
   test('returning more than a Goal reservation is rejected', () async {
     final store = _store();
     final goal = await store.createGoal(

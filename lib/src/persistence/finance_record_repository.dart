@@ -98,6 +98,17 @@ abstract interface class ScheduledOccurrenceStateRepository {
   });
 }
 
+/// Optional capability for a causal, field-scoped scheduled-history reset.
+///
+/// Implementations must compare [ScheduledTransactionRecord.occurrenceHistoryEpoch]
+/// remotely. A stale schedule definition must never overwrite a newer reset.
+abstract interface class ScheduledHistoryResetRepository {
+  Future<void> saveScheduledHistoryReset({
+    required String userId,
+    required ScheduledTransactionRecord scheduledTransaction,
+  });
+}
+
 /// Optional capability for repositories that understand the unified
 /// Goal/Fund reservation model. Keeping this separate allows older/local test
 /// repositories to remain valid while reservation-aware cloud repositories

@@ -5,6 +5,7 @@ import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/goal.dart';
 import 'package:money_tally/src/domain/goal_funding.dart';
+import 'package:money_tally/src/domain/reservation.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
 import 'package:money_tally/src/domain/transaction.dart';
 import 'package:money_tally/src/domain/user_preferences.dart';
@@ -147,8 +148,7 @@ void main() {
 
       await tester.longPress(find.byKey(ValueKey('goal-card-${goal.id}')));
       await tester.pumpAndSettle();
-      expect(find.text('Goal Actions'), findsOneWidget);
-      expect(find.text('Goal Activity'), findsWidgets);
+      expect(find.text('Goal Actions'), findsWidgets);
       expect(find.text('Archive'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);
 
@@ -161,57 +161,54 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Goal Activity schedules funding with the current Goal selected',
-    (tester) async {
-      await _setPhoneSize(tester);
-      final store = _store();
-      final goal = await store.createGoal(
-        name: 'Emergency Fund',
-        targetAmountMinor: 50000,
-        startingAmountMinor: 0,
-        targetDate: null,
-        defaultFundingAccountId: 'checking',
-      );
-      await tester.pumpWidget(
-        _testApp(
-          store,
-          Builder(
-            builder: (context) => FilledButton(
-              onPressed: () => showGoalActivitySheet(context, goal.id),
-              child: const Text('Open'),
-            ),
+  testWidgets('Goal Actions schedules funding with the current Goal selected', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Emergency Fund',
+      targetAmountMinor: 50000,
+      startingAmountMinor: 0,
+      targetDate: null,
+      defaultFundingAccountId: 'checking',
+    );
+    await tester.pumpWidget(
+      _testApp(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showGoalActionsSheet(context, goal.id),
+            child: const Text('Open'),
           ),
         ),
-      );
+      ),
+    );
 
-      await tester.tap(find.text('Open'));
-      await tester.pumpAndSettle();
-      expect(find.text('Schedule Funding'), findsOneWidget);
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Schedule Funding'), findsOneWidget);
 
-      await tester.tap(find.text('Schedule Funding'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Schedule Funding'));
+    await tester.pumpAndSettle();
 
-      expect(find.text('Create Scheduled Goal Funding'), findsOneWidget);
-      expect(find.text('Emergency Fund'), findsOneWidget);
+    expect(find.text('Create Scheduled Goal Funding'), findsOneWidget);
+    expect(find.text('Emergency Fund'), findsOneWidget);
 
-      await tester.enterText(
-        find.byKey(const ValueKey('scheduled-goal-funding-total')),
-        '10000',
-      );
-      await tester.pump();
-      await tester.tap(
-        find.byKey(const ValueKey('scheduled-goal-funding-save')),
-      );
-      await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('scheduled-goal-funding-total')),
+      '10000',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('scheduled-goal-funding-save')));
+    await tester.pumpAndSettle();
 
-      expect(store.scheduledTransactions, hasLength(1));
-      final schedule = store.scheduledTransactions.single;
-      expect(schedule.type, TransactionType.goalFunding);
-      expect(schedule.goalFundingAllocations.single.goalId, goal.id);
-      expect(schedule.accountId, 'checking');
-    },
-  );
+    expect(store.scheduledTransactions, hasLength(1));
+    final schedule = store.scheduledTransactions.single;
+    expect(schedule.type, TransactionType.goalFunding);
+    expect(schedule.goalFundingAllocations.single.goalId, goal.id);
+    expect(schedule.accountId, 'checking');
+  });
 
   testWidgets('active Goal delete explains a remaining-balance block', (
     tester,
@@ -420,7 +417,7 @@ void main() {
     );
   });
 
-  testWidgets('Goals page keeps inactive Goals on their dedicated page', (
+  testWidgets('Goals page keeps achieved Goals main and archives separate', (
     tester,
   ) async {
     await _setPhoneSize(tester);
@@ -434,63 +431,105 @@ void main() {
     await tester.pumpWidget(_testApp(store, const GoalsPage()));
 
     expect(find.text('Active'), findsOneWidget);
-    expect(find.text('View Inactive Goals (2)'), findsOneWidget);
-    expect(find.text('Done'), findsNothing);
+    expect(find.text('Archived Goals (1)'), findsOneWidget);
+    expect(find.text('Done'), findsOneWidget);
     expect(find.text('Old'), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('view-inactive-goals')));
+    await tester.tap(find.byKey(const ValueKey('view-archived-goals')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Inactive Goals'), findsOneWidget);
-    expect(find.text('Completed (1)'), findsOneWidget);
+    expect(find.text('Archived Goals'), findsOneWidget);
     expect(find.text('Archived (1)'), findsOneWidget);
-    expect(find.text('Done'), findsOneWidget);
+    expect(find.text('Done'), findsNothing);
     expect(find.text('Old'), findsOneWidget);
   });
 
+  testWidgets('Maintain a Balance stays current and shows Target met', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Truck Maintenance',
+      goalType: GoalType.maintainBalance,
+      startingAmountMinor: 100000,
+      targetAmountMinor: 100000,
+      targetDate: DateTime(2027, 6, 20),
+      defaultFundingAccountId: 'checking',
+    );
+    await tester.pumpWidget(_testApp(store, const GoalsPage()));
+
+    expect(find.text('Truck Maintenance'), findsOneWidget);
+    expect(find.text('Target met'), findsOneWidget);
+    expect(find.text('100% funded'), findsOneWidget);
+    expect(find.text('Completed (1)'), findsNothing);
+
+    await tester.pumpWidget(
+      _testApp(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showGoalDetails(context, goal.id),
+            child: const Text('Open details'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open details'));
+    await tester.pumpAndSettle();
+    expect(find.text('Goal Details'), findsOneWidget);
+    expect(find.text('Maintain a Balance'), findsOneWidget);
+    expect(find.text('Replenish by date'), findsOneWidget);
+    expect(find.text('Mark Complete'), findsNothing);
+    expect(find.byKey(const ValueKey('goal-details-archive')), findsOneWidget);
+  });
+
   testWidgets(
-    'Maintain a Balance card stays active and confirms Mark Complete',
+    'Achieved Goal stays current with spend return and Activity available',
     (tester) async {
       await _setPhoneSize(tester);
       final store = _store();
       final goal = await store.createGoal(
-        name: 'Truck Maintenance',
-        goalType: GoalType.maintainBalance,
-        startingAmountMinor: 100000,
-        targetAmountMinor: 100000,
-        targetDate: DateTime(2027, 6, 20),
+        name: 'Vacation',
+        targetAmountMinor: 50000,
+        startingAmountMinor: 0,
+        targetDate: null,
         defaultFundingAccountId: 'checking',
       );
-      await tester.pumpWidget(_testApp(store, const GoalsPage()));
-
-      expect(find.text('Truck Maintenance'), findsOneWidget);
-      expect(find.text('Fully funded'), findsOneWidget);
-      expect(find.text('100% funded'), findsOneWidget);
-      expect(find.text('Completed (1)'), findsNothing);
-
-      await tester.pumpWidget(
-        _testApp(
-          store,
-          Builder(
-            builder: (context) => FilledButton(
-              onPressed: () => showGoalDetails(context, goal.id),
-              child: const Text('Open details'),
-            ),
-          ),
-        ),
+      await store.allocateReservation(
+        containerType: ReservationContainerType.goal,
+        containerId: goal.id,
+        amountMinor: 50000,
+        date: DateTime(2026, 8, 23),
       );
-      await tester.tap(find.text('Open details'));
+
+      await tester.pumpWidget(_testApp(store, const GoalsPage()));
+      expect(find.text('Vacation'), findsOneWidget);
+      expect(find.textContaining('Achieved'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(ValueKey('goal-add-contribution-${goal.id}')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Goal Actions'), findsWidgets);
+      expect(find.text('Spend from Goal'), findsOneWidget);
+      expect(find.text('Return Reserved Money'), findsOneWidget);
+      expect(find.text('View Activity'), findsOneWidget);
+      expect(find.text('Restore as Active'), findsNothing);
+
+      await tester.tap(find.text('View Activity'));
       await tester.pumpAndSettle();
       expect(find.text('Goal Details'), findsOneWidget);
-      expect(find.text('Maintain a Balance'), findsOneWidget);
-      expect(find.text('Replenish by date'), findsOneWidget);
-      expect(find.text('Mark Complete'), findsOneWidget);
-
-      final complete = find.byKey(const ValueKey('goal-details-complete'));
-      await tester.ensureVisible(complete);
-      await tester.tap(complete);
-      await tester.pumpAndSettle();
-      expect(find.text('Complete this replenishing Goal?'), findsOneWidget);
+      expect(find.text('Activity'), findsOneWidget);
+      expect(find.textContaining('Allocated'), findsOneWidget);
+      expect(
+        find.byKey(
+          ValueKey(
+            'goal-reservation-activity-${store.reservationOperations.single.id}',
+          ),
+        ),
+        findsOneWidget,
+      );
     },
   );
 
@@ -548,7 +587,7 @@ void main() {
     expect(store.goalContributionById(contribution.id).isDeleted, isTrue);
   });
 
-  testWidgets('Goal Activity opens the dedicated Fund Goals sheet', (
+  testWidgets('Goal Actions opens the dedicated Fund Goals sheet', (
     tester,
   ) async {
     await _setPhoneSize(tester);
@@ -575,7 +614,7 @@ void main() {
     await tester.tap(find.text('Contribute'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Goal Activity'), findsOneWidget);
+    expect(find.text('Goal Actions'), findsOneWidget);
     await tester.tap(find.text('Fund Goal'));
     await tester.pumpAndSettle();
 
@@ -742,7 +781,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Goal Details'), findsOneWidget);
       expect(find.text('Emergency Fund'), findsWidgets);
-      expect(find.text('Goal Activity'), findsWidgets);
+      expect(find.text('Goal Actions'), findsWidgets);
 
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();

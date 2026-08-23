@@ -9,6 +9,7 @@ import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/goal.dart';
 import 'package:money_tally/src/domain/goal_funding.dart';
 import 'package:money_tally/src/domain/money.dart';
+import 'package:money_tally/src/domain/scheduled_occurrence_authority.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart';
 import 'package:money_tally/src/domain/transaction.dart';
@@ -131,9 +132,16 @@ void main() {
         final original = _richDataSet();
         final schedule = original.scheduledTransactions.first;
         final occurrenceDate = DateTime(2026, 8, 8);
+        final epoch = ScheduledOccurrenceHistoryEpoch(
+          revision: 2,
+          operationId: 'history-reset-a',
+          changedAt: DateTime.utc(2026, 8, 1),
+          deviceId: 'phone',
+        );
         final withAuthority = original.copyWith(
           scheduledTransactions: [
             schedule.copyWith(
+              occurrenceHistoryEpoch: epoch,
               occurrenceStates: {
                 occurrenceDayKey(occurrenceDate): ScheduledOccurrenceState(
                   scheduledDate: occurrenceDate,
@@ -146,6 +154,8 @@ void main() {
                   operationId: 'operation-a',
                   changedAt: DateTime.utc(2026, 8, 8, 12),
                   deviceId: 'phone',
+                  historyEpochRevision: epoch.revision,
+                  historyEpochOperationId: epoch.operationId,
                 ),
               },
               sync: schedule.sync,
@@ -171,8 +181,41 @@ void main() {
         expect(state?.revision, 3);
         expect(state?.operationId, 'operation-a');
         expect(state?.transactionId, 'scheduled-ledger-1');
+        expect(
+          restored
+              .dataSet
+              .scheduledTransactions
+              .first
+              .occurrenceHistoryEpoch
+              ?.operationId,
+          'history-reset-a',
+        );
+        expect(state?.historyEpochRevision, 2);
       },
     );
+
+    test('old backup without history epoch remains legacy-compatible', () {
+      final legacy = _richDataSet().toJson();
+      final schedules = legacy['scheduledTransactions']! as List<Object?>;
+      final schedule = Map<String, Object?>.from(schedules.first! as Map)
+        ..remove('occurrenceHistoryEpoch');
+      final rawStates = schedule['occurrenceStates'];
+      if (rawStates is Map) {
+        for (final value in rawStates.values.whereType<Map>()) {
+          value.remove('historyEpochRevision');
+          value.remove('historyEpochOperationId');
+        }
+      }
+      schedules[0] = schedule;
+
+      final restored = const BackupRestoreValidator().validate(
+        jsonEncode(legacy),
+      );
+      final restoredSchedule = restored.dataSet.scheduledTransactions.first;
+
+      expect(restoredSchedule.occurrenceHistoryEpoch, isNull);
+      expect(occurrenceHistoryEpochFor(restoredSchedule).revision, 0);
+    });
 
     test('existing local data is replaced rather than merged', () async {
       final store = FinanceDataStore(dataSet: _fictionalDataSet());

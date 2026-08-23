@@ -15,12 +15,48 @@ String newScheduledOccurrenceOperationId({Random? random}) {
   return buffer.toString();
 }
 
-Map<String, ScheduledOccurrenceState> occurrenceAuthorityFor(
+ScheduledOccurrenceHistoryEpoch occurrenceHistoryEpochFor(
   ScheduledTransactionRecord schedule,
+) => schedule.occurrenceHistoryEpoch ?? ScheduledOccurrenceHistoryEpoch.legacy;
+
+ScheduledOccurrenceHistoryEpoch nextOccurrenceHistoryEpoch({
+  required ScheduledTransactionRecord schedule,
+  required String deviceId,
+  String? operationId,
+  DateTime? changedAt,
+}) {
+  final current = occurrenceHistoryEpochFor(schedule);
+  return ScheduledOccurrenceHistoryEpoch(
+    revision: current.revision + 1,
+    operationId: operationId ?? newScheduledOccurrenceOperationId(),
+    changedAt: (changedAt ?? DateTime.now()).toUtc(),
+    deviceId: deviceId,
+  );
+}
+
+bool _stateBelongsToEpoch(
+  ScheduledOccurrenceState state,
+  ScheduledOccurrenceHistoryEpoch epoch,
+) =>
+    state.historyEpochRevision == epoch.revision &&
+    state.historyEpochOperationId == epoch.operationId;
+
+Map<String, ScheduledOccurrenceState> _occurrenceAuthorityForEpoch(
+  ScheduledTransactionRecord schedule,
+  ScheduledOccurrenceHistoryEpoch epoch,
 ) {
   final result = <String, ScheduledOccurrenceState>{
-    ...schedule.occurrenceStates,
+    for (final entry in schedule.occurrenceStates.entries)
+      if (_stateBelongsToEpoch(entry.value, epoch)) entry.key: entry.value,
   };
+  // Legacy occurrence mirrors have no epoch identity. They are authoritative
+  // only before the first explicit history reset.
+  if (!sameOccurrenceHistoryEpoch(
+    epoch,
+    ScheduledOccurrenceHistoryEpoch.legacy,
+  )) {
+    return result;
+  }
   for (final occurrence in schedule.occurrences) {
     final key = occurrenceDayKey(occurrence.scheduledDate);
     if (result.containsKey(key)) continue;
@@ -44,12 +80,21 @@ Map<String, ScheduledOccurrenceState> occurrenceAuthorityFor(
   return result;
 }
 
+Map<String, ScheduledOccurrenceState> occurrenceAuthorityFor(
+  ScheduledTransactionRecord schedule,
+) =>
+    _occurrenceAuthorityForEpoch(schedule, occurrenceHistoryEpochFor(schedule));
+
 Map<String, ScheduledOccurrenceState> mergeOccurrenceAuthority(
   ScheduledTransactionRecord left,
   ScheduledTransactionRecord right,
 ) {
-  final leftStates = occurrenceAuthorityFor(left);
-  final rightStates = occurrenceAuthorityFor(right);
+  final epoch = authoritativeOccurrenceHistoryEpoch(
+    occurrenceHistoryEpochFor(left),
+    occurrenceHistoryEpochFor(right),
+  );
+  final leftStates = _occurrenceAuthorityForEpoch(left, epoch);
+  final rightStates = _occurrenceAuthorityForEpoch(right, epoch);
   final keys = {...leftStates.keys, ...rightStates.keys};
   return {
     for (final key in keys)
@@ -96,6 +141,32 @@ ScheduledOccurrenceState nextOccurrenceOperation({
     operationId: operationId ?? newScheduledOccurrenceOperationId(),
     changedAt: (changedAt ?? DateTime.now()).toUtc(),
     deviceId: deviceId,
+    historyEpochRevision: occurrenceHistoryEpochFor(schedule).revision,
+    historyEpochOperationId: occurrenceHistoryEpochFor(schedule).operationId,
+  );
+}
+
+ScheduledOccurrenceState rebasePendingOccurrenceState(
+  ScheduledOccurrenceState state,
+  ScheduledOccurrenceHistoryEpoch epoch,
+) {
+  if (state.status != ScheduledOccurrenceStatus.pending) {
+    throw ArgumentError('Only Pending occurrence state can cross a reset.');
+  }
+  return ScheduledOccurrenceState(
+    scheduledDate: state.scheduledDate,
+    plannedAmountMinor: state.plannedAmountMinor,
+    status: state.status,
+    revision: state.revision,
+    operationId: state.operationId,
+    changedAt: state.changedAt,
+    deviceId: state.deviceId,
+    historyEpochRevision: epoch.revision,
+    historyEpochOperationId: epoch.operationId,
+    actualAmountMinor: state.actualAmountMinor,
+    actualPaymentDate: state.actualPaymentDate,
+    transactionId: state.transactionId,
+    goalFundingEventId: state.goalFundingEventId,
   );
 }
 
@@ -157,6 +228,10 @@ ScheduledTransactionRecord withOccurrenceAuthority(
   ScheduledOccurrenceState state, {
   bool normalizeNextDate = true,
 }) {
+  final epoch = occurrenceHistoryEpochFor(schedule);
+  if (!_stateBelongsToEpoch(state, epoch)) {
+    throw StateError('Occurrence operation belongs to stale history epoch.');
+  }
   final states = occurrenceAuthorityFor(schedule);
   final key = occurrenceDayKey(state.scheduledDate);
   final current = states[key];
@@ -188,6 +263,10 @@ ScheduledTransactionRecord mergeScheduledTransactionAuthority({
 }) {
   final incomingSync = incoming.sync;
   final currentSync = current.sync;
+  final historyEpoch = authoritativeOccurrenceHistoryEpoch(
+    occurrenceHistoryEpochFor(incoming),
+    occurrenceHistoryEpochFor(current),
+  );
   var definition =
       currentSync.updatedAt.isAfter(incomingSync.updatedAt) ||
           (preferCurrentOnDefinitionTie &&
@@ -199,7 +278,13 @@ ScheduledTransactionRecord mergeScheduledTransactionAuthority({
     final deleted = incoming.isDeleted ? incoming : current;
     final active = incoming.isDeleted ? current : incoming;
     final deletedStates = occurrenceAuthorityFor(deleted);
-    final activeStates = occurrenceAuthorityFor(active);
+    final activeStates =
+        sameOccurrenceHistoryEpoch(
+          occurrenceHistoryEpochFor(active),
+          historyEpoch,
+        )
+        ? _occurrenceAuthorityForEpoch(active, historyEpoch)
+        : const <String, ScheduledOccurrenceState>{};
     final hasCausalUndo = activeStates.entries.any((entry) {
       final activeState = entry.value;
       if (activeState.status != ScheduledOccurrenceStatus.pending ||
@@ -223,6 +308,11 @@ ScheduledTransactionRecord mergeScheduledTransactionAuthority({
   var merged = definition.copyWith(
     occurrenceStates: states,
     occurrences: legacyOccurrencesFromAuthority(states.values),
+    occurrenceHistoryEpoch:
+        incoming.occurrenceHistoryEpoch == null &&
+            current.occurrenceHistoryEpoch == null
+        ? null
+        : historyEpoch,
     // Notification bookkeeping is device local in the new model.
     scheduledNotificationIds: const [],
     clearLastReminderScheduledAt: true,

@@ -246,6 +246,13 @@ class AccountCard extends StatelessWidget {
             ? AppColors.warning
             : Theme.of(context).colorScheme.onSurfaceVariant,
         fontWeight: FontWeight.w600,
+        decoration: onAvailabilityTap == null
+            ? TextDecoration.none
+            : TextDecoration.underline,
+        decorationColor: Theme.of(
+          context,
+        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.42),
+        decorationThickness: 0.7,
       ),
     );
     if (onAvailabilityTap == null) {

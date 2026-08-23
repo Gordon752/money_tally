@@ -396,7 +396,7 @@ void main() {
       );
     });
 
-    test('funding completion and undo restore the Goal state', () async {
+    test('achievement remains historical after funding is undone', () async {
       final store = _store(openingBalanceMinor: 50000);
       final goal = await store.createGoal(
         name: 'Complete Me',
@@ -414,14 +414,18 @@ void main() {
       );
 
       expect(store.goalById(goal.id).isCompleted, isTrue);
+      final achievedAt = store.goalById(goal.id).completedAt;
 
       await store.undoGoalFunding(event.id);
 
-      expect(store.goalById(goal.id).isActive, isTrue);
+      expect(store.goalById(goal.id).isAchieved, isTrue);
+      expect(store.goalById(goal.id).completedAt, achievedAt);
+      expect(store.currentGoalAmountMinor(goal.id), 0);
+      expect(store.activeGoals, contains(store.goalById(goal.id)));
     });
 
     test(
-      'complete, archive, and restore preserve Goal history and lifecycle',
+      'achieve, archive, and restore preserve Goal history and lifecycle',
       () async {
         final store = _store();
         final goal = await store.createGoal(
@@ -439,22 +443,30 @@ void main() {
           allocations: [_allocation(goal.id, 25000)],
         );
 
-        await store.markGoalComplete(goal.id);
+        await store.fundGoals(
+          sourceAccountId: 'checking',
+          date: DateTime(2026, 7, 25),
+          totalAmountMinor: 75000,
+          allocations: [_allocation(goal.id, 75000)],
+        );
         expect(store.goalById(goal.id).isCompleted, isTrue);
         expect(store.goalById(goal.id).completedAt, isNotNull);
-        expect(store.activeGoals, isNot(contains(store.goalById(goal.id))));
-        expect(store.inactiveGoals, contains(store.goalById(goal.id)));
-
-        await store.restoreGoal(goal.id);
-        expect(store.goalById(goal.id).isActive, isTrue);
-        expect(store.goalById(goal.id).completedAt, isNull);
-        expect(store.currentGoalAmountMinor(goal.id), 25000);
+        final achievedAt = store.goalById(goal.id).completedAt;
+        expect(store.activeGoals, contains(store.goalById(goal.id)));
+        expect(store.inactiveGoals, isNot(contains(store.goalById(goal.id))));
         expect(store.goalFundingEventById(funding.id).isActive, isTrue);
 
         await store.archiveGoal(goal.id);
         expect(store.goalById(goal.id).isArchived, isTrue);
-        expect(store.goalById(goal.id).archivedAt, isNotNull);
-        expect(store.currentGoalAmountMinor(goal.id), 25000);
+        expect(store.goalById(goal.id).completedAt, achievedAt);
+        expect(store.inactiveGoals, contains(store.goalById(goal.id)));
+
+        await store.restoreGoal(goal.id);
+        expect(store.goalById(goal.id).isAchieved, isTrue);
+        expect(store.goalById(goal.id).completedAt, achievedAt);
+        expect(store.currentGoalAmountMinor(goal.id), 100000);
+        expect(store.goalFundingEventById(funding.id).isActive, isTrue);
+        expect(store.activeGoals, contains(store.goalById(goal.id)));
       },
     );
 

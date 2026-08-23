@@ -255,6 +255,130 @@ void main() {
       expect(merged.isDeleted, isFalse);
       expect(effectiveNextActionableDate(merged), base.nextDate);
     });
+
+    test(
+      'history epoch erases resolved states but preserves rebased Pending',
+      () {
+        final base = schedule();
+        final paid = state(
+          date: base.nextDate,
+          status: ScheduledOccurrenceStatus.paid,
+          revision: 1,
+          operationId: 'paid',
+        );
+        final pending = state(
+          date: DateTime(2027, 8, 29),
+          status: ScheduledOccurrenceStatus.pending,
+          revision: 2,
+          operationId: 'undo',
+        );
+        final before = base.copyWith(
+          nextDate: DateTime(2027, 8, 29),
+          occurrenceStates: {'20260829': paid, '20270829': pending},
+          occurrences: legacyOccurrencesFromAuthority([paid, pending]),
+          sync: base.sync,
+        );
+        final epoch = nextOccurrenceHistoryEpoch(
+          schedule: before,
+          deviceId: 'A',
+          operationId: 'reset-1',
+          changedAt: DateTime.utc(2026, 8, 30),
+        );
+        final rebasedPending = rebasePendingOccurrenceState(pending, epoch);
+        final reset = before.copyWith(
+          occurrenceHistoryEpoch: epoch,
+          occurrenceStates: {'20270829': rebasedPending},
+          occurrences: legacyOccurrencesFromAuthority([rebasedPending]),
+          sync: before.sync,
+        );
+
+        expect(occurrenceAuthorityFor(reset).keys, ['20270829']);
+        expect(effectiveNextActionableDate(reset), DateTime(2027, 8, 29));
+      },
+    );
+
+    test('stale epoch cannot resurrect erased Paid history', () {
+      final base = schedule();
+      final paid = withOccurrenceAuthority(
+        base.copyWith(nextDate: DateTime(2027, 8, 29), sync: base.sync),
+        state(
+          date: base.nextDate,
+          status: ScheduledOccurrenceStatus.paid,
+          revision: 1,
+          operationId: 'paid',
+        ),
+      );
+      final epoch = nextOccurrenceHistoryEpoch(
+        schedule: paid,
+        deviceId: 'A',
+        operationId: 'reset-1',
+      );
+      final reset = paid.copyWith(
+        occurrenceHistoryEpoch: epoch,
+        occurrenceStates: const {},
+        occurrences: const [],
+        sync: paid.sync,
+      );
+
+      var left = reset;
+      var right = paid.copyWith(
+        sync: paid.sync.touched(now: DateTime(2026, 9, 1)),
+      );
+      for (var cycle = 0; cycle < 5; cycle += 1) {
+        right = mergeScheduledTransactionAuthority(
+          incoming: left,
+          current: right,
+          preferCurrentOnDefinitionTie: true,
+        );
+        left = mergeScheduledTransactionAuthority(
+          incoming: right,
+          current: left,
+          preferCurrentOnDefinitionTie: true,
+        );
+      }
+
+      expect(left.occurrenceStates, isEmpty);
+      expect(right.occurrences, isEmpty);
+      expect(left.occurrenceHistoryEpoch?.operationId, 'reset-1');
+    });
+
+    test('post-reset Paid then Undo uses the new epoch', () {
+      final base = schedule();
+      final epoch = nextOccurrenceHistoryEpoch(
+        schedule: base,
+        deviceId: 'A',
+        operationId: 'reset-1',
+      );
+      final reset = base.copyWith(
+        occurrenceHistoryEpoch: epoch,
+        occurrenceStates: const {},
+        occurrences: const [],
+        sync: base.sync,
+      );
+      final paid = nextOccurrenceOperation(
+        schedule: reset,
+        scheduledDate: base.nextDate,
+        plannedAmountMinor: base.amountMinor,
+        status: ScheduledOccurrenceStatus.paid,
+        deviceId: 'A',
+        operationId: 'paid-after-reset',
+      );
+      final afterPaid = withOccurrenceAuthority(reset, paid);
+      final undo = nextOccurrenceOperation(
+        schedule: afterPaid,
+        scheduledDate: base.nextDate,
+        plannedAmountMinor: base.amountMinor,
+        status: ScheduledOccurrenceStatus.pending,
+        deviceId: 'B',
+        operationId: 'undo-after-reset',
+      );
+      final reopened = withOccurrenceAuthority(afterPaid, undo);
+
+      expect(paid.historyEpochRevision, 1);
+      expect(paid.historyEpochOperationId, 'reset-1');
+      expect(undo.historyEpochRevision, 1);
+      expect(effectiveNextActionableDate(reopened), base.nextDate);
+    });
   });
 }
 

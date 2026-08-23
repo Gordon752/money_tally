@@ -26,14 +26,14 @@ extension GoalProgressStatusLabel on GoalProgressStatus {
       GoalProgressStatus.behind => 'Behind',
       GoalProgressStatus.seriouslyBehind => 'Behind',
       GoalProgressStatus.noTargetDate => 'No deadline',
-      GoalProgressStatus.completed => 'Completed',
-      GoalProgressStatus.aboveReserveTarget => 'Above reserve target',
-      GoalProgressStatus.fullyFunded => 'Fully funded',
+      GoalProgressStatus.completed => 'Achieved',
+      GoalProgressStatus.aboveReserveTarget ||
+      GoalProgressStatus.fullyFunded => 'Target met',
       GoalProgressStatus.slightlyBelowTarget => 'Slightly below target',
       GoalProgressStatus.replenishing => 'Replenishing',
       GoalProgressStatus.needsAttention => 'Needs attention',
       GoalProgressStatus.restoreOverdue => 'Restore overdue',
-      GoalProgressStatus.noRestoreDate => 'No restore-by date',
+      GoalProgressStatus.noRestoreDate => 'No replenish-by date',
       GoalProgressStatus.archived => 'Archived',
     };
   }
@@ -130,7 +130,7 @@ class GoalCalculator {
     if (goal.status == GoalStatus.completed) {
       return GoalProgressMetrics(
         currentAmountMinor: current,
-        remainingAmountMinor: 0,
+        remainingAmountMinor: remaining,
         percentageComplete: percentage,
         expectedAmountMinor: target,
         aheadBehindMinor: current - target,

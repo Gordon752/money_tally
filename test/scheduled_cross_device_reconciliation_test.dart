@@ -183,6 +183,76 @@ void main() {
       expect(second.nextDate, DateTime(2100, 8, 29));
       expect(first.occurrenceStates, second.occurrenceStates);
     });
+
+    test(
+      'A resets history and stale B cannot resurrect it across repeated sync',
+      () async {
+        final historicalDate = DateTime(2098, 8, 29);
+        final pendingDate = DateTime(2099, 8, 29);
+        final paid = _state(
+          date: historicalDate,
+          status: ScheduledOccurrenceStatus.paid,
+          revision: 1,
+          operationId: 'paid-A',
+        );
+        final pending = _state(
+          date: pendingDate,
+          status: ScheduledOccurrenceStatus.pending,
+          revision: 2,
+          operationId: 'undo-B',
+        );
+        final original = _schedule(
+          nextDate: pendingDate,
+          occurrenceStates: {
+            occurrenceDayKey(historicalDate): paid,
+            occurrenceDayKey(pendingDate): pending,
+          },
+          updatedAt: DateTime(2099, 8, 20),
+        );
+        final remote = _SharedScheduleRepository(_dataSet(original));
+        final deviceA = FinanceDataStore(
+          dataSet: _dataSet(original),
+          remoteRepository: remote,
+          userId: 'user',
+          deviceId: 'A',
+        );
+        final deviceB = FinanceDataStore(
+          dataSet: _dataSet(original),
+          deviceId: 'B',
+        );
+
+        await deviceA.resetScheduledHistory(now: DateTime(2099, 8, 22, 12));
+        expect(deviceA.scheduledTransactions.single.occurrences, hasLength(1));
+        expect(
+          deviceA.scheduledTransactions.single.occurrences.single.status,
+          ScheduledOccurrenceStatus.pending,
+        );
+
+        for (var cycle = 0; cycle < 3; cycle += 1) {
+          await deviceB.attachRemoteSync(
+            remoteRepository: remote,
+            userId: 'user',
+          );
+          await deviceA.attachRemoteSync(
+            remoteRepository: remote,
+            userId: 'user',
+          );
+        }
+
+        for (final device in [deviceA, deviceB]) {
+          final schedule = device.scheduledTransactions.single;
+          expect(schedule.occurrenceHistoryEpoch?.revision, 1);
+          expect(schedule.occurrenceStates.keys, [
+            occurrenceDayKey(pendingDate),
+          ]);
+          expect(effectiveNextActionableDate(schedule), pendingDate);
+          expect(
+            device.activeScheduledAlerts(now: DateTime(2099, 8, 22, 12)),
+            hasLength(1),
+          );
+        }
+      },
+    );
   });
 }
 
@@ -302,7 +372,10 @@ class _StatefulNotificationScheduler implements NotificationScheduler {
 }
 
 class _SharedScheduleRepository
-    implements FinanceRecordRepository, ScheduledOccurrenceStateRepository {
+    implements
+        FinanceRecordRepository,
+        ScheduledOccurrenceStateRepository,
+        ScheduledHistoryResetRepository {
   _SharedScheduleRepository(this.dataSet);
 
   FinanceDataSet dataSet;
@@ -326,6 +399,11 @@ class _SharedScheduleRepository
     final schedule = dataSet.scheduledTransactions.singleWhere(
       (item) => item.id == scheduledTransactionId,
     );
+    final epoch = occurrenceHistoryEpochFor(schedule);
+    if (occurrenceState.historyEpochRevision != epoch.revision ||
+        occurrenceState.historyEpochOperationId != epoch.operationId) {
+      throw StateError('stale history epoch');
+    }
     final current = schedule.occurrenceStates[dayKey];
     final winner = current == null
         ? occurrenceState
@@ -349,12 +427,30 @@ class _SharedScheduleRepository
     final current = dataSet.scheduledTransactions.single;
     dataSet = dataSet.copyWith(
       scheduledTransactions: [
-        scheduledTransaction.copyWith(
-          occurrenceStates: current.occurrenceStates,
-          sync: scheduledTransaction.sync,
+        mergeScheduledTransactionAuthority(
+          incoming: scheduledTransaction,
+          current: current,
+          preferCurrentOnDefinitionTie: true,
         ),
       ],
     );
+  }
+
+  @override
+  Future<void> saveScheduledHistoryReset({
+    required String userId,
+    required ScheduledTransactionRecord scheduledTransaction,
+  }) async {
+    final current = dataSet.scheduledTransactions.single;
+    final incomingEpoch = occurrenceHistoryEpochFor(scheduledTransaction);
+    final winner = authoritativeOccurrenceHistoryEpoch(
+      occurrenceHistoryEpochFor(current),
+      incomingEpoch,
+    );
+    if (!sameOccurrenceHistoryEpoch(winner, incomingEpoch)) {
+      throw StateError('stale history reset');
+    }
+    dataSet = dataSet.copyWith(scheduledTransactions: [scheduledTransaction]);
   }
 
   @override

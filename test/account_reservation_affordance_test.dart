@@ -58,6 +58,11 @@ void main() {
     );
     expect(planningAction, findsOneWidget);
     expect(tester.getSize(planningAction).height, greaterThanOrEqualTo(44));
+    final planningText = tester.widget<Text>(
+      find.byKey(const ValueKey('account-availability-checking')),
+    );
+    expect(planningText.style?.decoration, TextDecoration.underline);
+    expect(planningText.style?.decorationThickness, lessThanOrEqualTo(0.7));
     await tester.tap(planningAction);
     await tester.pumpAndSettle();
     expect(ledgerOpenCount, 3);

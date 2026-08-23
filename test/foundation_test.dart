@@ -8,6 +8,7 @@ import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/goal.dart';
 import 'package:money_tally/src/domain/goal_funding.dart';
 import 'package:money_tally/src/domain/money.dart';
+import 'package:money_tally/src/domain/scheduled_occurrence_authority.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart';
 import 'package:money_tally/src/domain/transaction.dart';
@@ -2177,6 +2178,17 @@ void main() {
             nextDate: occurrenceDate,
           ).copyWith(
             scheduledNotificationIds: const [42],
+            occurrenceStates: {
+              '20260921': ScheduledOccurrenceState(
+                scheduledDate: DateTime(2026, 9, 21),
+                plannedAmountMinor: 25000,
+                status: ScheduledOccurrenceStatus.pending,
+                revision: 2,
+                operationId: 'undo-pending',
+                changedAt: DateTime.utc(2026, 8, 22),
+                deviceId: 'phone',
+              ),
+            },
             occurrences: [
               ScheduledOccurrenceRecord(
                 scheduledDate: occurrenceDate,
@@ -2233,7 +2245,11 @@ void main() {
       await store.resetScheduledHistory(now: DateTime(2026, 8, 22));
 
       final resetSchedule = store.scheduledTransactions.single;
-      expect(resetSchedule.occurrences, isEmpty);
+      expect(resetSchedule.occurrences.map((item) => item.status), [
+        ScheduledOccurrenceStatus.pending,
+      ]);
+      expect(resetSchedule.occurrenceHistoryEpoch?.revision, 1);
+      expect(resetSchedule.occurrenceStates.keys, ['20260921']);
       expect(resetSchedule.nextDate, DateTime(2026, 9, 21));
       expect(resetSchedule.lastAction, ScheduledAction.none);
       expect(resetSchedule.amountMinor, activeSchedule.amountMinor);
@@ -2255,27 +2271,127 @@ void main() {
       expect(retainedGenerated.scheduledPlannedAmountMinor, isNull);
       expect(scheduler.cancelledIds, contains('active'));
       expect(scheduler.scheduledIds, contains('active'));
-      expect(remote.savedScheduled.single.occurrences, isEmpty);
+      expect(
+        remote.savedScheduled.single.occurrences.map((item) => item.status),
+        [ScheduledOccurrenceStatus.pending],
+      );
       expect(remote.savedTransactions.single.scheduledTransactionId, isNull);
 
       final reloaded = await FinanceDataStore.load(
         localRepository: localRepository,
       );
-      expect(reloaded.scheduledTransactions.single.occurrences, isEmpty);
+      expect(
+        reloaded.scheduledTransactions.single.occurrences.map(
+          (item) => item.status,
+        ),
+        [ScheduledOccurrenceStatus.pending],
+      );
       expect(reloaded.transactions, hasLength(2));
 
       remote.remoteDataSet = before;
       await store.attachRemoteSync(remoteRepository: remote, userId: 'user');
-      // The injected remote snapshot contains explicit legacy Paid/Skipped
-      // evidence but no causal reset marker. Preserve that evidence rather
-      // than allowing an empty, unversioned history to erase it.
-      expect(store.scheduledTransactions.single.occurrences, hasLength(2));
+      // A stale epoch-zero replica cannot resurrect erased Paid/Skipped
+      // history, while the explicitly preserved Pending occurrence remains.
+      expect(
+        store.scheduledTransactions.single.occurrences.map(
+          (item) => item.status,
+        ),
+        [ScheduledOccurrenceStatus.pending],
+      );
       expect(
         store.transactions
             .singleWhere((item) => item.id == 'generated')
             .scheduledTransactionId,
         isNull,
       );
+    },
+  );
+
+  test('reset preserves actionable Pending alert and badge state', () async {
+    final scheduler = RecordingNotificationScheduler(idsToReturn: [81]);
+    final today = DateTime(2026, 8, 23);
+    final historicalDate = DateTime(2026, 7, 23);
+    final historical = ScheduledOccurrenceState(
+      scheduledDate: historicalDate,
+      plannedAmountMinor: 25000,
+      status: ScheduledOccurrenceStatus.paid,
+      revision: 1,
+      operationId: 'paid-history',
+      changedAt: DateTime.utc(2026, 7, 23),
+      deviceId: 'phone',
+    );
+    final pending = ScheduledOccurrenceState(
+      scheduledDate: today,
+      plannedAmountMinor: 25000,
+      status: ScheduledOccurrenceStatus.pending,
+      revision: 2,
+      operationId: 'undo-current',
+      changedAt: DateTime.utc(2026, 8, 22),
+      deviceId: 'phone',
+    );
+    final base = _scheduledTransaction(id: 'alert', nextDate: today).copyWith(
+      occurrenceStates: {
+        occurrenceDayKey(historicalDate): historical,
+        occurrenceDayKey(today): pending,
+      },
+      occurrences: legacyOccurrencesFromAuthority([historical, pending]),
+      sync: _scheduledTransaction(id: 'alert', nextDate: today).sync,
+    );
+    final store = FinanceDataStore(
+      dataSet: _dataSet().copyWith(
+        preferences: const UserPreferences(notificationsEnabled: true),
+        scheduledTransactions: [base],
+      ),
+      notificationScheduler: scheduler,
+    );
+
+    final afterAlert = DateTime(2026, 8, 23, 23, 59);
+    await store.resetScheduledHistory(now: afterAlert);
+
+    final reset = store.scheduledTransactions.single;
+    expect(reset.occurrenceStates.keys, [occurrenceDayKey(today)]);
+    expect(
+      reset.occurrenceStates[occurrenceDayKey(today)]?.status,
+      ScheduledOccurrenceStatus.pending,
+    );
+    expect(store.activeScheduledAlerts(now: afterAlert), hasLength(1));
+    expect(scheduler.badgeCounts.last, 1);
+  });
+
+  test(
+    'cloud history-reset failure is surfaced and local data is retained',
+    () async {
+      final occurrenceDate = DateTime(2026, 8, 21);
+      final schedule =
+          _scheduledTransaction(
+            id: 'cloud-failure',
+            nextDate: occurrenceDate,
+          ).copyWith(
+            occurrences: [
+              ScheduledOccurrenceRecord(
+                scheduledDate: occurrenceDate,
+                plannedAmountMinor: 25000,
+                status: ScheduledOccurrenceStatus.paid,
+              ),
+            ],
+            sync: _scheduledTransaction(
+              id: 'cloud-failure',
+              nextDate: occurrenceDate,
+            ).sync,
+          );
+      final before = _dataSet().copyWith(scheduledTransactions: [schedule]);
+      final store = FinanceDataStore(
+        dataSet: before,
+        remoteRepository: FailingHistoryResetRepository(dataSet: before),
+        userId: 'user',
+      );
+
+      await expectLater(
+        store.resetScheduledHistory(now: DateTime(2026, 8, 22)),
+        throwsA(isA<StateError>()),
+      );
+      expect(store.scheduledTransactions.single.occurrences, hasLength(1));
+      expect(store.scheduledTransactions.single.occurrenceHistoryEpoch, isNull);
     },
   );
 
@@ -3126,7 +3242,8 @@ ScheduledTransactionRecord _scheduledTransaction({
   );
 }
 
-class FakeRecordRepository implements FinanceRecordRepository {
+class FakeRecordRepository
+    implements FinanceRecordRepository, ScheduledHistoryResetRepository {
   FakeRecordRepository({FinanceDataSet? dataSet})
     : remoteDataSet = dataSet ?? _dataSet();
 
@@ -3225,6 +3342,23 @@ class FakeRecordRepository implements FinanceRecordRepository {
   }
 
   @override
+  Future<void> saveScheduledHistoryReset({
+    required String userId,
+    required ScheduledTransactionRecord scheduledTransaction,
+  }) async {
+    savedScheduled.add(scheduledTransaction);
+    remoteDataSet = remoteDataSet.copyWith(
+      scheduledTransactions: [
+        for (final existing in remoteDataSet.scheduledTransactions)
+          if (existing.id == scheduledTransaction.id)
+            scheduledTransaction
+          else
+            existing,
+      ],
+    );
+  }
+
+  @override
   Future<void> saveTransaction({
     required String userId,
     required TransactionRecord transaction,
@@ -3258,6 +3392,18 @@ class BulkFakeRecordRepository extends FakeRecordRepository
     bulkSavedDataSet = dataSet;
     bulkSavedBaseline = baseline;
     remoteDataSet = dataSet;
+  }
+}
+
+class FailingHistoryResetRepository extends FakeRecordRepository {
+  FailingHistoryResetRepository({super.dataSet});
+
+  @override
+  Future<void> saveScheduledHistoryReset({
+    required String userId,
+    required ScheduledTransactionRecord scheduledTransaction,
+  }) {
+    throw StateError('cloud unavailable');
   }
 }
 

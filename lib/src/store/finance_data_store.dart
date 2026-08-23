@@ -392,13 +392,13 @@ class FinanceDataStore extends ChangeNotifier {
   int get netWorthLedgerChangeMinor => netWorthMinor - openingNetWorthMinor;
 
   List<GoalRecord> get activeGoals {
-    return goals.where((goal) => goal.isActive).toList(growable: false);
+    return goals
+        .where((goal) => goal.isOnMainGoalsScreen)
+        .toList(growable: false);
   }
 
   List<GoalRecord> get inactiveGoals {
-    return goals
-        .where((goal) => goal.isCompleted || goal.isArchived)
-        .toList(growable: false);
+    return goals.where((goal) => goal.isArchived).toList(growable: false);
   }
 
   List<GoalContributionRecord> activeContributionsForGoal(String goalId) {
@@ -770,38 +770,61 @@ class FinanceDataStore extends ChangeNotifier {
 
   Future<void> resetScheduledHistory({DateTime? now}) async {
     final anchor = now ?? DateTime.now();
-    final updatedSchedules = <ScheduledTransactionRecord>[];
+    final semanticResets = <ScheduledTransactionRecord>[];
+    final preservedPendingKeys = <String, Set<String>>{};
     for (final scheduledTransaction in scheduledTransactions) {
+      final currentStates = occurrenceAuthorityFor(scheduledTransaction);
+      final historyEpoch = nextOccurrenceHistoryEpoch(
+        schedule: scheduledTransaction,
+        deviceId: deviceId,
+      );
+      final pendingStates = <String, ScheduledOccurrenceState>{
+        for (final entry in currentStates.entries)
+          if (entry.value.status == ScheduledOccurrenceStatus.pending)
+            entry.key: rebasePendingOccurrenceState(entry.value, historyEpoch),
+      };
+      preservedPendingKeys[scheduledTransaction.id] = pendingStates.keys
+          .toSet();
       var nextDate = scheduledTransaction.nextDate;
       var lastAction = scheduledTransaction.lastAction;
       if (!scheduledTransaction.isDeleted &&
           scheduledTransaction.frequency != RecurrenceFrequency.once) {
         nextDate =
-            firstUnresolvedScheduledDate(scheduledTransaction, today: anchor) ??
-            nextDate;
+            effectiveNextActionableDate(scheduledTransaction) ?? nextDate;
         lastAction = ScheduledAction.none;
       }
       final resetSync = _touchAfterCurrent(scheduledTransaction.sync);
-      var reset = scheduledTransaction.copyWith(
+      final reset = scheduledTransaction.copyWith(
         nextDate: nextDate,
         lastAction: lastAction,
-        occurrences: const [],
-        occurrenceStates: const {},
+        occurrences: legacyOccurrencesFromAuthority(pendingStates.values),
+        occurrenceStates: pendingStates,
+        occurrenceHistoryEpoch: historyEpoch,
         scheduledNotificationIds: const [],
         sync: resetSync,
         clearLastReminderScheduledAt: true,
       );
-      reset = await _applyScheduledNotificationState(reset);
-      reset = reset.copyWith(sync: resetSync);
-      updatedSchedules.add(reset);
+      semanticResets.add(reset);
     }
 
     final updatedTransactions = <TransactionRecord>[];
     final linkageClearedTransactions = <TransactionRecord>[];
     for (final transaction in transactions) {
-      if (transaction.scheduledTransactionId == null &&
+      final scheduleId = transaction.scheduledTransactionId;
+      if (scheduleId == null &&
           transaction.scheduledOccurrenceDate == null &&
           transaction.scheduledPlannedAmountMinor == null) {
+        updatedTransactions.add(transaction);
+        continue;
+      }
+      final occurrenceDate = transaction.scheduledOccurrenceDate;
+      final preservesPendingLink =
+          scheduleId != null &&
+          occurrenceDate != null &&
+          (preservedPendingKeys[scheduleId] ?? const <String>{}).contains(
+            occurrenceDayKey(occurrenceDate),
+          );
+      if (preservesPendingLink) {
         updatedTransactions.add(transaction);
         continue;
       }
@@ -813,6 +836,30 @@ class FinanceDataStore extends ChangeNotifier {
       linkageClearedTransactions.add(reset);
     }
 
+    final remote = remoteRepository;
+    final currentUserId = userId;
+    if (remote != null && currentUserId != null) {
+      if (remote is! ScheduledHistoryResetRepository) {
+        throw StateError(
+          'Cloud sync must be updated before scheduled history can be reset.',
+        );
+      }
+      for (final scheduledTransaction in semanticResets) {
+        await (remote as ScheduledHistoryResetRepository)
+            .saveScheduledHistoryReset(
+              userId: currentUserId,
+              scheduledTransaction: scheduledTransaction,
+            );
+      }
+    }
+
+    final updatedSchedules = <ScheduledTransactionRecord>[];
+    for (final reset in semanticResets) {
+      final notificationAdjusted = await _applyScheduledNotificationState(
+        reset,
+      );
+      updatedSchedules.add(notificationAdjusted.copyWith(sync: reset.sync));
+    }
     _dataSet = _dataSet.copyWith(
       scheduledTransactions: updatedSchedules,
       transactions: updatedTransactions,
@@ -820,25 +867,11 @@ class FinanceDataStore extends ChangeNotifier {
     notifyListeners();
     await localRepository?.save(_dataSet);
 
-    final remote = remoteRepository;
-    final currentUserId = userId;
     if (remote != null && currentUserId != null) {
-      try {
-        for (final scheduledTransaction in updatedSchedules) {
-          await remote.saveScheduledTransaction(
-            userId: currentUserId,
-            scheduledTransaction: scheduledTransaction,
-          );
-        }
-        for (final transaction in linkageClearedTransactions) {
-          await remote.saveTransaction(
-            userId: currentUserId,
-            transaction: transaction,
-          );
-        }
-      } on Exception catch (error) {
-        debugPrint(
-          'Remote scheduled-history reset failed; local reset retained: $error',
+      for (final transaction in linkageClearedTransactions) {
+        await remote.saveTransaction(
+          userId: currentUserId,
+          transaction: transaction,
         );
       }
     }
@@ -2017,10 +2050,26 @@ class FinanceDataStore extends ChangeNotifier {
         'This reservation changed on another device. Sync and try again.',
       );
     }
+    final goal = containerType == ReservationContainerType.goal
+        ? goalById(containerId)
+        : null;
+    final updatedGoal = goal == null
+        ? null
+        : _goalWithDerivedLifecycleStatus(goal, proposedLedger.reservedMinor);
     final previous = _dataSet;
     try {
-      _dataSet = _dataSet.copyWith(reservationOperations: proposed);
-      await _commit(reservationOperations: [operation]);
+      _dataSet = _dataSet.copyWith(
+        goals: updatedGoal == null || identical(updatedGoal, goal)
+            ? goals
+            : _upsert(goals, updatedGoal, (item) => item.id),
+        reservationOperations: proposed,
+      );
+      await _commit(
+        goal: updatedGoal == null || identical(updatedGoal, goal)
+            ? null
+            : updatedGoal,
+        reservationOperations: [operation],
+      );
     } catch (_) {
       _dataSet = previous;
       notifyListeners();
@@ -2240,7 +2289,7 @@ class FinanceDataStore extends ChangeNotifier {
         !goalTargetDate.isAfter(today)) {
       throw FinanceDataValidationException(
         goalType == GoalType.maintainBalance
-            ? 'Choose a future restore-by date for a reserve below its target.'
+            ? 'Choose a future replenish-by date for a reserve below its target.'
             : 'Choose a future target date for an incomplete Goal.',
       );
     }
@@ -2344,9 +2393,9 @@ class FinanceDataStore extends ChangeNotifier {
     String note = '',
   }) async {
     final goal = goalById(goalId);
-    if (!goal.isActive) {
+    if (!goal.isOnMainGoalsScreen) {
       throw const FinanceDataValidationException(
-        'Only active Goals can receive contributions.',
+        'Archived Goals cannot receive contributions.',
       );
     }
     if (goal.fundingMethod != GoalFundingMethod.trackingOnly) {
@@ -2436,7 +2485,9 @@ class FinanceDataStore extends ChangeNotifier {
         );
       }
       final goal = goals
-          .where((item) => item.id == allocation.goalId && item.isActive)
+          .where(
+            (item) => item.id == allocation.goalId && item.isOnMainGoalsScreen,
+          )
           .firstOrNull;
       if (goal == null ||
           (!goal.isAccountBacked && !goal.usesReservationModel)) {
@@ -3080,27 +3131,9 @@ class FinanceDataStore extends ChangeNotifier {
         );
       }
     }
-    final updatedGoals = <GoalRecord>[
-      for (final goalId in affectedGoalIds)
-        if (goals.where((goal) => goal.id == goalId).firstOrNull
-            case final goal?
-            when goal.goalType == GoalType.reachTarget &&
-                goal.status == GoalStatus.completed &&
-                currentGoalAmountMinor(goalId) -
-                        event.allocations
-                            .where((allocation) => allocation.goalId == goalId)
-                            .fold<int>(
-                              0,
-                              (total, allocation) =>
-                                  total + allocation.amountMinor,
-                            ) <
-                    goal.targetAmountMinor)
-          goal.copyWith(
-            status: GoalStatus.active,
-            clearCompletedAt: true,
-            sync: _touchAfterCurrent(goal.sync),
-          ),
-    ];
+    // Reversing funding changes the reservation, not the historical fact that
+    // a Reach Target Goal achieved its target at least once.
+    const updatedGoals = <GoalRecord>[];
     ScheduledTransactionRecord? restoredSchedule;
     if (event.scheduledTransactionId != null &&
         event.scheduledOccurrenceDate != null) {
@@ -3408,16 +3441,7 @@ class FinanceDataStore extends ChangeNotifier {
     );
     final amountAfterUndo =
         currentGoalAmountMinor(goal.id) - contribution.amountMinor.abs();
-    final updatedGoal =
-        goal.goalType == GoalType.reachTarget &&
-            goal.status == GoalStatus.completed &&
-            amountAfterUndo < goal.targetAmountMinor
-        ? goal.copyWith(
-            status: GoalStatus.active,
-            clearCompletedAt: true,
-            sync: _touchAfterCurrent(goal.sync),
-          )
-        : _goalWithDerivedLifecycleStatus(goal, amountAfterUndo);
+    final updatedGoal = _goalWithDerivedLifecycleStatus(goal, amountAfterUndo);
     final previousDataSet = _dataSet;
     try {
       _dataSet = _dataSet.copyWith(
@@ -3446,7 +3470,6 @@ class FinanceDataStore extends ChangeNotifier {
       goal.copyWith(
         status: GoalStatus.archived,
         archivedAt: DateTime.now(),
-        clearCompletedAt: true,
         sync: _touchAfterCurrent(goal.sync),
       ),
     );
@@ -3454,6 +3477,16 @@ class FinanceDataStore extends ChangeNotifier {
 
   Future<void> markGoalComplete(String goalId) async {
     final goal = goalById(goalId);
+    if (goal.goalType == GoalType.maintainBalance) {
+      throw const FinanceDataValidationException(
+        'Maintain a Balance Goals remain active until archived.',
+      );
+    }
+    if (currentGoalAmountMinor(goalId) < goal.targetAmountMinor) {
+      throw const FinanceDataValidationException(
+        'A Reach a Target Goal is achieved when its target is reached.',
+      );
+    }
     await saveGoal(
       goal.copyWith(
         status: GoalStatus.completed,
@@ -3466,10 +3499,11 @@ class FinanceDataStore extends ChangeNotifier {
 
   Future<void> restoreGoal(String goalId) async {
     final goal = goalById(goalId);
-    if (!goal.isCompleted && !goal.isArchived) return;
+    if (!goal.isArchived) return;
+    final restoresAsAchieved =
+        goal.goalType == GoalType.reachTarget && goal.completedAt != null;
     final restored = goal.copyWith(
-      status: GoalStatus.active,
-      clearCompletedAt: true,
+      status: restoresAsAchieved ? GoalStatus.completed : GoalStatus.active,
       clearArchivedAt: true,
       sync: _touchAfterCurrent(goal.sync),
     );
