@@ -4,13 +4,15 @@ import '../domain/account.dart';
 import '../domain/budget.dart';
 import '../domain/category.dart';
 import '../domain/finance_data_set.dart';
+import '../domain/fund.dart';
 import '../domain/goal.dart';
+import '../domain/reservation.dart';
 import '../domain/scheduled_transaction.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
 
-const currentBackupSchemaVersion = 4;
-const supportedBackupSchemaVersions = {2, currentBackupSchemaVersion};
+const currentBackupSchemaVersion = 5;
+const supportedBackupSchemaVersions = {2, 4, currentBackupSchemaVersion};
 
 class BackupValidationException implements Exception {
   const BackupValidationException(this.message);
@@ -142,6 +144,11 @@ class BackupRestoreValidator {
         _requireRecordList(root, key);
       }
     }
+    if (version >= 5) {
+      for (final key in const ['funds', 'reservationOperations']) {
+        _requireRecordList(root, key);
+      }
+    }
     if (root['preferences'] is! Map) {
       throw const BackupValidationException(
         'The backup is missing Trackmark preferences.',
@@ -178,6 +185,18 @@ class BackupRestoreValidator {
         'goals': const <Object?>[],
         'goalContributions': const <Object?>[],
         'goalFundingEvents': const <Object?>[],
+        'funds': const <Object?>[],
+        'reservationOperations': const <Object?>[],
+      };
+    }
+    if (sourceVersion == 4) {
+      return {
+        ...root,
+        'schemaVersion': currentBackupSchemaVersion,
+        // Legacy Goal records remain intact and parse through their existing
+        // compatibility fields. They are never guessed into reservations.
+        'funds': const <Object?>[],
+        'reservationOperations': const <Object?>[],
       };
     }
     throw BackupValidationException(
@@ -256,6 +275,13 @@ class BackupRestoreValidator {
     );
     _validateEnums(
       root,
+      'transactions',
+      'reservationContainerType',
+      ReservationContainerType.values,
+      optional: true,
+    );
+    _validateEnums(
+      root,
       'scheduledTransactions',
       'type',
       TransactionType.values,
@@ -280,9 +306,30 @@ class BackupRestoreValidator {
       ScheduledAction.values,
       optional: true,
     );
+    _validateEnums(
+      root,
+      'scheduledTransactions',
+      'reservationContainerType',
+      ReservationContainerType.values,
+      optional: true,
+    );
     _validateEnums(root, 'budgets', 'period', BudgetPeriod.values);
     _validateEnums(root, 'goals', 'status', GoalStatus.values);
     _validateEnums(root, 'goals', 'goalType', GoalType.values, optional: true);
+    _validateEnums(root, 'funds', 'status', FundStatus.values);
+    _validateEnums(root, 'funds', 'targetCadence', FundTargetCadence.values);
+    _validateEnums(
+      root,
+      'reservationOperations',
+      'containerType',
+      ReservationContainerType.values,
+    );
+    _validateEnums(
+      root,
+      'reservationOperations',
+      'kind',
+      ReservationOperationKind.values,
+    );
 
     final preferences = _stringMap(root['preferences']);
     _validateEnum(
@@ -405,6 +452,15 @@ class BackupRestoreValidator {
       'Goal funding events',
       dataSet.goalFundingEvents.map((item) => item.id),
     );
+    _requireUniqueIds('funds', dataSet.funds.map((item) => item.id));
+    _requireUniqueIds(
+      'reservation operations',
+      dataSet.reservationOperations.map((item) => item.id),
+    );
+    _requireUniqueIds(
+      'reservation operation identities',
+      dataSet.reservationOperations.map((item) => item.operationId),
+    );
 
     final accounts = {for (final item in dataSet.accounts) item.id: item};
     final categories = {for (final item in dataSet.categories) item.id: item};
@@ -415,6 +471,10 @@ class BackupRestoreValidator {
       for (final item in dataSet.scheduledTransactions) item.id: item,
     };
     final goals = {for (final item in dataSet.goals) item.id: item};
+    final funds = {for (final item in dataSet.funds) item.id: item};
+    final reservationOperations = {
+      for (final item in dataSet.reservationOperations) item.id: item,
+    };
     final fundingEvents = {
       for (final item in dataSet.goalFundingEvents) item.id: item,
     };
@@ -490,6 +550,13 @@ class BackupRestoreValidator {
           'A transaction references a missing Goal funding event.',
         );
       }
+      _validateReservationContainerReference(
+        transaction.reservationContainerType,
+        transaction.reservationContainerId,
+        goals,
+        funds,
+        owner: 'transaction',
+      );
     }
 
     for (final schedule in dataSet.scheduledTransactions) {
@@ -528,6 +595,13 @@ class BackupRestoreValidator {
           );
         }
       }
+      _validateReservationContainerReference(
+        schedule.reservationContainerType,
+        schedule.reservationContainerId,
+        goals,
+        funds,
+        owner: 'scheduled transaction',
+      );
       final occurrenceIds = <String>{};
       for (final occurrence in schedule.occurrences) {
         final occurrenceKey = occurrence.scheduledDate.toIso8601String();
@@ -616,9 +690,121 @@ class BackupRestoreValidator {
         }
       }
     }
+
+    for (final fund in dataSet.funds) {
+      if (fund.isDeleted) continue;
+      _requireAccount(accounts, fund.fundingAccountId, 'Fund');
+      if (fund.linkedAccountId case final linkedAccountId?) {
+        _requireAccount(accounts, linkedAccountId, 'Fund');
+      }
+      if (fund.targetBalanceMinor < 0) {
+        throw const BackupValidationException(
+          'A Fund contains an invalid target balance.',
+        );
+      }
+    }
+
+    for (final operation in dataSet.reservationOperations) {
+      if (operation.amountMinor <= 0 ||
+          operation.revision <= 0 ||
+          operation.baseRevision < 0 ||
+          operation.baseRevision >= operation.revision ||
+          operation.containerId.trim().isEmpty ||
+          operation.fundingAccountId.trim().isEmpty) {
+        throw const BackupValidationException(
+          'A reservation operation contains invalid authority metadata.',
+        );
+      }
+      _requireAccount(
+        accounts,
+        operation.fundingAccountId,
+        'Reservation operation',
+      );
+      switch (operation.containerType) {
+        case ReservationContainerType.goal:
+          final goal = goals[operation.containerId];
+          if (goal == null ||
+              !goal.usesReservationModel ||
+              goal.reservationFundingAccountId != operation.fundingAccountId) {
+            throw const BackupValidationException(
+              'A reservation operation references an invalid Goal.',
+            );
+          }
+        case ReservationContainerType.fund:
+          final fund = funds[operation.containerId];
+          if (fund == null ||
+              fund.fundingAccountId != operation.fundingAccountId) {
+            throw const BackupValidationException(
+              'A reservation operation references an invalid Fund.',
+            );
+          }
+      }
+      if (operation.transactionId case final transactionId?) {
+        if (!transactions.containsKey(transactionId)) {
+          throw const BackupValidationException(
+            'A reservation operation references a missing transaction.',
+          );
+        }
+      }
+      if (operation.kind == ReservationOperationKind.consume &&
+          operation.transactionId == null) {
+        throw const BackupValidationException(
+          'A reservation consumption is missing its transaction linkage.',
+        );
+      }
+      if (operation.scheduledTransactionId case final scheduleId?) {
+        if (!schedules.containsKey(scheduleId)) {
+          throw const BackupValidationException(
+            'A reservation operation references a missing schedule.',
+          );
+        }
+      }
+      if (operation.kind == ReservationOperationKind.reversal) {
+        final targetId = operation.reversesOperationId;
+        final target = targetId == null
+            ? null
+            : reservationOperations[targetId];
+        if (target == null ||
+            target.containerType != operation.containerType ||
+            target.containerId != operation.containerId ||
+            target.kind == ReservationOperationKind.reversal) {
+          throw const BackupValidationException(
+            'A reservation reversal references invalid activity.',
+          );
+        }
+      } else if (operation.reversesOperationId != null) {
+        throw const BackupValidationException(
+          'A reservation operation contains an invalid reversal link.',
+        );
+      }
+    }
   }
 
   bool _validDay(int? value) => value == null || (value >= 1 && value <= 31);
+
+  void _validateReservationContainerReference(
+    ReservationContainerType? type,
+    String? id,
+    Map<String, GoalRecord> goals,
+    Map<String, FundRecord> funds, {
+    required String owner,
+  }) {
+    if (type == null && id == null) return;
+    if (type == null || id == null || id.trim().isEmpty) {
+      throw BackupValidationException(
+        'A $owner contains an incomplete reservation link.',
+      );
+    }
+    final exists = switch (type) {
+      ReservationContainerType.goal => goals[id]?.usesReservationModel == true,
+      ReservationContainerType.fund => funds.containsKey(id),
+    };
+    if (!exists) {
+      throw BackupValidationException(
+        'A $owner references a missing reservation.',
+      );
+    }
+  }
 
   void _validateCategoryReferences(
     String? categoryId,

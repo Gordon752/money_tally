@@ -1,4 +1,5 @@
 import 'json_helpers.dart';
+import 'reservation.dart';
 import 'sync_metadata.dart';
 import 'transaction.dart';
 
@@ -230,6 +231,8 @@ class ScheduledTransactionRecord {
     this.lastAction = ScheduledAction.none,
     this.occurrences = const [],
     this.occurrenceStates = const {},
+    this.reservationContainerType,
+    this.reservationContainerId,
   });
 
   final String id;
@@ -259,6 +262,8 @@ class ScheduledTransactionRecord {
   final ScheduledAction lastAction;
   final List<ScheduledOccurrenceRecord> occurrences;
   final Map<String, ScheduledOccurrenceState> occurrenceStates;
+  final ReservationContainerType? reservationContainerType;
+  final String? reservationContainerId;
   final SyncMetadata sync;
 
   bool get hasAlert => alertPreference != AlertPreference.none;
@@ -336,6 +341,8 @@ class ScheduledTransactionRecord {
     ScheduledAction? lastAction,
     List<ScheduledOccurrenceRecord>? occurrences,
     Map<String, ScheduledOccurrenceState>? occurrenceStates,
+    ReservationContainerType? reservationContainerType,
+    String? reservationContainerId,
     SyncMetadata? sync,
     bool clearTransferAccount = false,
     bool clearCategory = false,
@@ -343,6 +350,7 @@ class ScheduledTransactionRecord {
     bool clearEndDate = false,
     bool clearCustomAlertTime = false,
     bool clearLastReminderScheduledAt = false,
+    bool clearReservationContainer = false,
   }) {
     return ScheduledTransactionRecord(
       id: id,
@@ -376,6 +384,12 @@ class ScheduledTransactionRecord {
       lastAction: lastAction ?? this.lastAction,
       occurrences: occurrences ?? this.occurrences,
       occurrenceStates: occurrenceStates ?? this.occurrenceStates,
+      reservationContainerType: clearReservationContainer
+          ? null
+          : reservationContainerType ?? this.reservationContainerType,
+      reservationContainerId: clearReservationContainer
+          ? null
+          : reservationContainerId ?? this.reservationContainerId,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -410,6 +424,8 @@ class ScheduledTransactionRecord {
           for (final entry in occurrenceStates.entries)
             entry.key: entry.value.toJson(),
         },
+      'reservationContainerType': reservationContainerType?.name,
+      'reservationContainerId': reservationContainerId,
       'sync': sync.toJson(),
     };
   }
@@ -474,6 +490,14 @@ class ScheduledTransactionRecord {
               stringMap(entry.value),
             ),
       },
+      reservationContainerType: json['reservationContainerType'] == null
+          ? null
+          : enumByName(
+              ReservationContainerType.values,
+              json['reservationContainerType'],
+              ReservationContainerType.goal,
+            ),
+      reservationContainerId: json['reservationContainerId'] as String?,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

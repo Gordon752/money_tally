@@ -34,6 +34,14 @@ service cloud.firestore {
       allow read, write: if ownsUserData(userId);
     }
 
+    match /users/{userId}/funds/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/reservationOperations/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
     match /users/{userId}/goalContributions/{documentId} {
       allow read, write: if ownsUserData(userId);
     }
@@ -76,6 +84,14 @@ service cloud.firestore {
     }
 
     match /users/{userId}/restoreGenerations/{generation}/goals/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/funds/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/reservationOperations/{documentId} {
       allow read, write: if ownsUserData(userId);
     }
 

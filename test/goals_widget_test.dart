@@ -70,6 +70,7 @@ void main() {
       find.byKey(const ValueKey('goal-target-amount')),
       '100000',
     );
+    await _selectCheckingFundingAccount(tester);
     await tester.pump();
 
     final enabledSave = tester.widget<FilledButton>(
@@ -82,8 +83,9 @@ void main() {
     expect(store.goals, hasLength(1));
     expect(store.goals.single.name, 'Emergency Fund');
     expect(store.goals.single.fundingMethod, GoalFundingMethod.accountFunded);
-    expect(store.goals.single.defaultFundingAccountId, isNull);
-    expect(store.goals.single.accountId, isNotNull);
+    expect(store.goals.single.defaultFundingAccountId, 'checking');
+    expect(store.goals.single.accountId, isNull);
+    expect(store.reservedForAccount('checking'), 0);
     expect(store.goals.single.goalType, GoalType.reachTarget);
   });
 
@@ -117,6 +119,7 @@ void main() {
       find.byKey(const ValueKey('goal-target-amount')),
       '50000',
     );
+    await _selectCheckingFundingAccount(tester);
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('goal-save')));
     await tester.pumpAndSettle();
@@ -124,7 +127,8 @@ void main() {
     final goal = store.goals.single;
     expect(goal.startingAmountMinor, 0);
     expect(store.currentGoalAmountMinor(goal.id), 0);
-    expect(store.balanceForAccount(goal.accountId!), 0);
+    expect(store.balanceForAccount('checking'), 250000);
+    expect(store.reservedForAccount('checking'), 0);
   });
 
   testWidgets(
@@ -137,6 +141,7 @@ void main() {
         targetAmountMinor: 50000,
         startingAmountMinor: 0,
         targetDate: null,
+        defaultFundingAccountId: 'checking',
       );
       await tester.pumpWidget(_testApp(store, GoalCard(goal: goal)));
 
@@ -166,6 +171,7 @@ void main() {
         targetAmountMinor: 50000,
         startingAmountMinor: 0,
         targetDate: null,
+        defaultFundingAccountId: 'checking',
       );
       await tester.pumpWidget(
         _testApp(
@@ -201,9 +207,9 @@ void main() {
 
       expect(store.scheduledTransactions, hasLength(1));
       final schedule = store.scheduledTransactions.single;
-      expect(schedule.type, TransactionType.transfer);
-      expect(schedule.goalId, goal.id);
-      expect(schedule.transferAccountId, goal.accountId);
+      expect(schedule.type, TransactionType.goalFunding);
+      expect(schedule.goalFundingAllocations.single.goalId, goal.id);
+      expect(schedule.accountId, 'checking');
     },
   );
 
@@ -217,6 +223,7 @@ void main() {
       targetAmountMinor: 50000,
       startingAmountMinor: 0,
       targetDate: null,
+      defaultFundingAccountId: 'checking',
     );
     await store.fundGoals(
       sourceAccountId: 'checking',
@@ -256,6 +263,7 @@ void main() {
       targetAmountMinor: 10000000,
       startingAmountMinor: 0,
       targetDate: null,
+      defaultFundingAccountId: 'checking',
     );
     await tester.pumpWidget(
       _testApp(
@@ -324,6 +332,7 @@ void main() {
       find.byKey(const ValueKey('goal-target-amount')),
       '100000',
     );
+    await _selectCheckingFundingAccount(tester);
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('goal-save')));
     await tester.pumpAndSettle();
@@ -450,6 +459,7 @@ void main() {
         startingAmountMinor: 100000,
         targetAmountMinor: 100000,
         targetDate: DateTime(2027, 6, 20),
+        defaultFundingAccountId: 'checking',
       );
       await tester.pumpWidget(_testApp(store, const GoalsPage()));
 
@@ -618,7 +628,9 @@ void main() {
 
     expect(store.goalFundingEvents, hasLength(1));
     expect(store.currentGoalAmountMinor(goal.id), 50000);
-    expect(store.balanceForAccount('checking'), 200000);
+    expect(store.balanceForAccount('checking'), 250000);
+    expect(store.reservedForAccount('checking'), 50000);
+    expect(store.availableToSpendForAccount('checking'), 200000);
     expect(store.netWorthMinor, 250000);
     final event = store.goalFundingEvents.single;
 
@@ -634,6 +646,8 @@ void main() {
     expect(store.goalFundingEventById(event.id).isDeleted, isTrue);
     expect(store.currentGoalAmountMinor(goal.id), 0);
     expect(store.balanceForAccount('checking'), 250000);
+    expect(store.reservedForAccount('checking'), 0);
+    expect(store.availableToSpendForAccount('checking'), 250000);
     expect(store.netWorthMinor, 250000);
   });
 
@@ -718,6 +732,7 @@ void main() {
         startingAmountMinor: 0,
         targetAmountMinor: 100000,
         targetDate: DateTime(2027, 8, 20),
+        defaultFundingAccountId: 'checking',
       );
       await tester.pumpWidget(_testApp(store, GoalCard(goal: goal)));
 
@@ -1050,6 +1065,16 @@ void main() {
 Future<void> _setPhoneSize(WidgetTester tester) async {
   await tester.binding.setSurfaceSize(const Size(430, 932));
   addTearDown(() => tester.binding.setSurfaceSize(null));
+}
+
+Future<void> _selectCheckingFundingAccount(WidgetTester tester) async {
+  await tester.ensureVisible(
+    find.byKey(const ValueKey('goal-funding-account')),
+  );
+  await tester.tap(find.byKey(const ValueKey('goal-funding-account')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Checking').last);
+  await tester.pumpAndSettle();
 }
 
 Widget _testApp(FinanceDataStore store, Widget child) {

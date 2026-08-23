@@ -581,7 +581,11 @@ class GoalsPlanContent extends StatelessWidget {
               Expanded(
                 child: FilledButton.icon(
                   key: const ValueKey('plan-fund-goals'),
-                  onPressed: active.any((goal) => goal.isAccountBacked)
+                  onPressed:
+                      active.any(
+                        (goal) =>
+                            goal.isAccountBacked || goal.usesReservationModel,
+                      )
                       ? () => showFundGoalsSheet(context)
                       : null,
                   icon: Icon(AppIcon.savings),
@@ -981,7 +985,10 @@ Future<void> showGoalActivitySheet(BuildContext context, String goalId) async {
   final store = FinanceDataStoreScope.read(context);
   final goal = store.goals
       .where(
-        (item) => item.id == goalId && item.isActive && item.isAccountBacked,
+        (item) =>
+            item.id == goalId &&
+            item.isActive &&
+            (item.isAccountBacked || item.usesReservationModel),
       )
       .firstOrNull;
   if (goal == null) return;
@@ -996,25 +1003,35 @@ Future<void> showGoalActivitySheet(BuildContext context, String goalId) async {
         leading: Icon(AppIcon.savings),
       ),
       PolishedChoice(
+        value: 'withdraw',
+        label: goal.usesReservationModel
+            ? 'Return Reserved Money'
+            : 'Withdraw to Account',
+        leading: Icon(AppIcon.transfer),
+      ),
+      if (goal.usesReservationModel)
+        PolishedChoice(
+          value: 'spend',
+          label: 'Spend from Goal',
+          leading: Icon(AppIcon.expense),
+        ),
+      PolishedChoice(
         value: 'scheduleFunding',
         label: 'Schedule Funding',
         leading: Icon(AppIcon.schedule),
       ),
-      PolishedChoice(
-        value: 'spend',
-        label: 'Spend from Goal',
-        leading: Icon(AppIcon.expense),
-      ),
-      PolishedChoice(
-        value: 'between',
-        label: 'Transfer Between Goals',
-        leading: Icon(AppIcon.transfer),
-      ),
-      PolishedChoice(
-        value: 'withdraw',
-        label: 'Withdraw to Account',
-        leading: Icon(AppIcon.transfer),
-      ),
+      if (!goal.usesReservationModel) ...[
+        PolishedChoice(
+          value: 'spend',
+          label: 'Spend from Goal',
+          leading: Icon(AppIcon.expense),
+        ),
+        PolishedChoice(
+          value: 'between',
+          label: 'Transfer Between Goals',
+          leading: Icon(AppIcon.transfer),
+        ),
+      ],
     ],
   );
   if (action == null || !context.mounted) return;
@@ -1027,7 +1044,15 @@ Future<void> showGoalActivitySheet(BuildContext context, String goalId) async {
       await showTransactionDialog(
         context,
         initialIsExpense: true,
-        initialAccountId: goal.accountId,
+        initialAccountId: goal.usesReservationModel
+            ? goal.reservationFundingAccountId
+            : goal.accountId,
+        initialReservationContainerType: goal.usesReservationModel
+            ? ReservationContainerType.goal
+            : null,
+        initialReservationContainerId: goal.usesReservationModel
+            ? goal.id
+            : null,
       );
     case 'between':
       await showTransferDialog(
@@ -1036,7 +1061,17 @@ Future<void> showGoalActivitySheet(BuildContext context, String goalId) async {
         includeGoalAccounts: true,
       );
     case 'withdraw':
-      await showTransferDialog(context, initialFromAccountId: goal.accountId);
+      if (goal.usesReservationModel) {
+        await showReservationAmountDialog(
+          context,
+          containerType: ReservationContainerType.goal,
+          containerId: goal.id,
+          containerName: goal.name,
+          isReturn: true,
+        );
+      } else {
+        await showTransferDialog(context, initialFromAccountId: goal.accountId);
+      }
   }
 }
 
@@ -1052,7 +1087,7 @@ Future<void> showGoalEditor(
   var targetMinor = initialGoal?.targetAmountMinor ?? 0;
   var targetDate = initialGoal?.targetDate;
   var goalType = initialGoal?.goalType ?? GoalType.reachTarget;
-  final accountId = initialGoal?.defaultFundingAccountId;
+  var accountId = initialGoal?.defaultFundingAccountId;
   var isSaving = false;
   String? errorText;
 
@@ -1075,7 +1110,21 @@ Future<void> showGoalEditor(
         final canSave =
             nameController.text.trim().isNotEmpty &&
             targetMinor > 0 &&
-            validDate;
+            validDate &&
+            (isEditing && !initialGoal.usesReservationModel ||
+                accountId != null);
+        final fundingAccounts = store.activeAccountsInDisplayOrder
+            .where(
+              (account) =>
+                  account.type == v2_account.AccountType.checking ||
+                  account.type == v2_account.AccountType.savings ||
+                  account.type == v2_account.AccountType.cash ||
+                  account.type == v2_account.AccountType.otherBanking,
+            )
+            .toList(growable: false);
+        final selectedFundingAccount = fundingAccounts
+            .where((account) => account.id == accountId)
+            .firstOrNull;
 
         return _GoalControllerOwner(
           controllers: [nameController, descriptionController],
@@ -1207,6 +1256,26 @@ Future<void> showGoalEditor(
                       }
                     }
                     setDialogState(() => goalType = selected);
+                  },
+                ),
+                TransactionFormDivider(),
+                TransactionFormLabel('Funding account'),
+                PolishedFormValueRow(
+                  key: const ValueKey('goal-funding-account'),
+                  icon: selectedFundingAccount == null
+                      ? AppIcon.wallet
+                      : v2AccountIcon(selectedFundingAccount.type),
+                  value: selectedFundingAccount?.name ?? 'Choose account',
+                  secondary:
+                      'Goal money remains in this account as reserved cash',
+                  onTap: () async {
+                    final selected = await showTransactionAccountPicker(
+                      dialogContext,
+                      accounts: fundingAccounts,
+                      selectedAccountId: accountId ?? '',
+                    );
+                    if (selected == null || !dialogContext.mounted) return;
+                    setDialogState(() => accountId = selected);
                   },
                 ),
                 TransactionFormDivider(),
@@ -1396,7 +1465,11 @@ Future<void> showFundGoalsSheet(
   final store = FinanceDataStoreScope.read(context);
   final eligibleGoals =
       store.goals
-          .where((goal) => goal.isActive && goal.isAccountBacked)
+          .where(
+            (goal) =>
+                goal.isActive &&
+                (goal.isAccountBacked || goal.usesReservationModel),
+          )
           .toList(growable: false)
         ..sort(compareGoalUrgency);
   if (eligibleGoals.isEmpty) {
@@ -1440,10 +1513,23 @@ Future<void> showFundGoalsSheet(
     useRootNavigator: false,
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setDialogState) {
-        final accounts = store.activeAccountsInDisplayOrder;
+        final accounts = store.activeAccountsInDisplayOrder
+            .where(
+              (account) =>
+                  account.type == v2_account.AccountType.checking ||
+                  account.type == v2_account.AccountType.savings ||
+                  account.type == v2_account.AccountType.cash ||
+                  account.type == v2_account.AccountType.otherBanking,
+            )
+            .toList(growable: false);
         final account = accounts
             .where((item) => item.id == accountId)
             .firstOrNull;
+        final accountAvailableMinor = account == null
+            ? 0
+            : store.availableToSpendForAccount(account.id);
+        final availableAfterFundingMinor =
+            accountAvailableMinor - totalAmountMinor;
         final allocatedTotal = allocations.fold<int>(
           0,
           (total, row) => total + row.amountMinor.abs(),
@@ -1460,8 +1546,7 @@ Future<void> showFundGoalsSheet(
             ) &&
             selectedGoalIds.length == allocations.length;
         final amountFits =
-            account != null &&
-            totalAmountMinor <= store.balanceForAccount(account.id);
+            account != null && totalAmountMinor <= accountAvailableMinor;
         final canSave =
             totalAmountMinor > 0 && remaining == 0 && rowsValid && amountFits;
 
@@ -1522,17 +1607,33 @@ Future<void> showFundGoalsSheet(
                   value: account?.name ?? 'Choose account',
                   secondary: account == null
                       ? null
-                      : 'Balance ${money(store.balanceForAccount(account.id), store.preferences.currency)}',
-                  onTap: () async {
-                    final selected = await showTransactionAccountPicker(
-                      dialogContext,
-                      accounts: accounts,
-                      selectedAccountId: accountId ?? '',
-                    );
-                    if (selected != null) {
-                      setDialogState(() => accountId = selected);
-                    }
-                  },
+                      : 'Available to Spend ${money(accountAvailableMinor, store.preferences.currency)}',
+                  onTap: initialGoal?.usesReservationModel == true
+                      ? null
+                      : () async {
+                          final selected = await showTransactionAccountPicker(
+                            dialogContext,
+                            accounts: accounts,
+                            selectedAccountId: accountId ?? '',
+                          );
+                          if (selected != null) {
+                            setDialogState(() {
+                              accountId = selected;
+                              for (final allocation in allocations) {
+                                final goal = eligibleGoals
+                                    .where(
+                                      (goal) => goal.id == allocation.goalId,
+                                    )
+                                    .firstOrNull;
+                                if (goal?.usesReservationModel == true &&
+                                    goal?.reservationFundingAccountId !=
+                                        selected) {
+                                  allocation.goalId = null;
+                                }
+                              }
+                            });
+                          }
+                        },
                 ),
                 TransactionFormDivider(),
                 TransactionFormLabel('Total Amount'),
@@ -1556,6 +1657,29 @@ Future<void> showFundGoalsSheet(
                     ),
                   ],
                 ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'After allocation · ${money(availableAfterFundingMinor, store.preferences.currency)} available',
+                  key: const ValueKey('fund-goals-live-result'),
+                  style: Theme.of(dialogContext).textTheme.bodyMedium?.copyWith(
+                    color: availableAfterFundingMinor < 0
+                        ? AppColors.warning
+                        : Theme.of(dialogContext).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (availableAfterFundingMinor < 0) ...[
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    'This exceeds the account’s available money.',
+                    key: const ValueKey('fund-goals-overcommit-warning'),
+                    style: Theme.of(dialogContext).textTheme.bodySmall
+                        ?.copyWith(
+                          color: AppColors.warning,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
                 const TransactionFormDivider(),
                 Text(
                   'Goal Allocations',
@@ -1586,11 +1710,14 @@ Future<void> showFundGoalsSheet(
                                     selected: allocations[index].goalId ?? '',
                                     choices: [
                                       for (final goal in eligibleGoals)
-                                        if (!selectedGoalIds.contains(
-                                              goal.id,
-                                            ) ||
-                                            allocations[index].goalId ==
-                                                goal.id)
+                                        if ((!goal.usesReservationModel ||
+                                                goal.reservationFundingAccountId ==
+                                                    accountId) &&
+                                            (!selectedGoalIds.contains(
+                                                  goal.id,
+                                                ) ||
+                                                allocations[index].goalId ==
+                                                    goal.id))
                                           PolishedChoice(
                                             value: goal.id,
                                             label: goal.name,
@@ -1774,7 +1901,11 @@ Future<bool> showScheduledGoalFundingDialog(
   final store = FinanceDataStoreScope.read(context);
   final eligibleGoals =
       store.goals
-          .where((goal) => goal.isActive && goal.isAccountBacked)
+          .where(
+            (goal) =>
+                goal.isActive &&
+                (goal.isAccountBacked || goal.usesReservationModel),
+          )
           .toList(growable: false)
         ..sort(compareGoalUrgency);
   if (eligibleGoals.isEmpty) {
@@ -1787,7 +1918,11 @@ Future<bool> showScheduledGoalFundingDialog(
     );
     return false;
   }
-  final accounts = store.activeAccountsInDisplayOrder;
+  final accounts = store.activeAccountsInDisplayOrder
+      .where(
+        (account) => accountIsAsset(account) && !account.isInternalGoalAccount,
+      )
+      .toList(growable: false);
   if (accounts.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -1805,8 +1940,12 @@ Future<bool> showScheduledGoalFundingDialog(
           .firstOrNull
           ?.id ??
       eligibleGoals
-          .where((goal) => goal.defaultFundingAccountId != null)
-          .map((goal) => goal.defaultFundingAccountId!)
+          .map(
+            (goal) =>
+                goal.reservationFundingAccountId ??
+                goal.defaultFundingAccountId,
+          )
+          .whereType<String>()
           .where((id) => accounts.any((account) => account.id == id))
           .firstOrNull ??
       accounts.first.id;
@@ -1866,6 +2005,17 @@ Future<bool> showScheduledGoalFundingDialog(
             .map((row) => row.goalId)
             .whereType<String>()
             .toSet();
+        final selectedGoal = eligibleGoals
+            .where(
+              (goal) =>
+                  goal.id ==
+                  (allocations.length == 1 ? allocations.single.goalId : null),
+            )
+            .firstOrNull;
+        final fundingAccountMatches =
+            selectedGoal == null ||
+            !selectedGoal.usesReservationModel ||
+            selectedGoal.reservationFundingAccountId == accountId;
         final validRows =
             allocations.length == 1 &&
             allocations.every(
@@ -1876,7 +2026,8 @@ Future<bool> showScheduledGoalFundingDialog(
             account != null &&
             totalAmountMinor > 0 &&
             remaining == 0 &&
-            validRows;
+            validRows &&
+            fundingAccountMatches;
         return _GoalControllerOwner(
           controllers: [note],
           child: TransactionSheetFrame(
@@ -1899,6 +2050,11 @@ Future<bool> showScheduledGoalFundingDialog(
                   final selectedGoal = eligibleGoals
                       .where((goal) => goal.id == allocations.single.goalId)
                       .first;
+                  final usesReservationModel =
+                      selectedGoal.usesReservationModel;
+                  final useGoalFundingRecord =
+                      usesReservationModel ||
+                      existing?.type == TransactionType.goalFunding;
                   final record = v2_scheduled.ScheduledTransactionRecord(
                     id:
                         existing?.id ??
@@ -1906,17 +2062,14 @@ Future<bool> showScheduledGoalFundingDialog(
                     // New schedules are normal scheduled transfers. Legacy
                     // multi-allocation schedules remain readable until the
                     // user intentionally replaces them.
-                    type: existing?.type == TransactionType.goalFunding
+                    type: useGoalFundingRecord
                         ? TransactionType.goalFunding
                         : TransactionType.transfer,
                     accountId: accountId,
-                    transferAccountId:
-                        existing?.type == TransactionType.goalFunding
+                    transferAccountId: useGoalFundingRecord
                         ? null
                         : selectedGoal.accountId,
-                    goalId: existing?.type == TransactionType.goalFunding
-                        ? null
-                        : selectedGoal.id,
+                    goalId: useGoalFundingRecord ? null : selectedGoal.id,
                     payee: 'Fund ${selectedGoal.name}',
                     note: note.text.trim(),
                     amountMinor: totalAmountMinor,
@@ -1930,8 +2083,7 @@ Future<bool> showScheduledGoalFundingDialog(
                     alertPreference: alertPreference,
                     customAlertTimeMinutes: customAlertTimeMinutes,
                     repeatAlertUntilResolved: repeatAlertUntilResolved,
-                    goalFundingAllocations:
-                        existing?.type == TransactionType.goalFunding
+                    goalFundingAllocations: useGoalFundingRecord
                         ? [
                             for (
                               var index = 0;
@@ -2257,7 +2409,7 @@ Future<void> showAddGoalContributionSheet(
   final store = FinanceDataStoreScope.read(context);
   final goal = store.goalById(goalId);
   if (!goal.isActive) return;
-  if (goal.isAccountBacked) {
+  if (goal.isAccountBacked || goal.usesReservationModel) {
     await showGoalActivitySheet(context, goal.id);
     return;
   }

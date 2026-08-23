@@ -1,0 +1,826 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:money_tally/main.dart';
+import 'package:money_tally/src/domain/account.dart' as v2_account;
+import 'package:money_tally/src/domain/budget.dart';
+import 'package:money_tally/src/domain/category.dart';
+import 'package:money_tally/src/domain/finance_data_set.dart';
+import 'package:money_tally/src/domain/fund.dart';
+import 'package:money_tally/src/domain/goal.dart';
+import 'package:money_tally/src/domain/goal_funding.dart';
+import 'package:money_tally/src/domain/reservation.dart';
+import 'package:money_tally/src/domain/scheduled_transaction.dart'
+    as v2_scheduled;
+import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
+import 'package:money_tally/src/domain/transaction.dart' as v2_transaction;
+import 'package:money_tally/src/domain/user_preferences.dart';
+import 'package:money_tally/src/persistence/finance_record_repository.dart';
+import 'package:money_tally/src/store/finance_data_store.dart';
+import 'package:money_tally/src/store/finance_data_store_scope.dart';
+
+void main() {
+  testWidgets('Fund allocation amount receives focus immediately', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Monthly Bills',
+      fundingAccountId: 'checking',
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () =>
+                showFundAmountDialog(context, fundId: fund.id, isReturn: false),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('fund-operation-amount')),
+    );
+    expect(field.focusNode!.hasFocus, isTrue);
+  });
+
+  testWidgets('Goal funding amount receives focus immediately', (tester) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Emergency',
+      targetAmountMinor: 100000,
+      startingAmountMinor: 0,
+      targetDate: null,
+      defaultFundingAccountId: 'checking',
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () =>
+                showFundGoalsSheet(context, initialGoalId: goal.id),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('fund-goals-total')),
+    );
+    expect(field.focusNode!.hasFocus, isTrue);
+    expect(find.text('Available to Spend \$5,000.00'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('fund-goals-total')),
+      '5000',
+    );
+    await tester.pump();
+    expect(
+      find.text('After allocation · \$4,950.00 available'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Allocate shows funding account and live available remainder', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 100000,
+      date: DateTime.now(),
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () =>
+                showFundAmountDialog(context, fundId: fund.id, isReturn: false),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('From CTBI'), findsOneWidget);
+    expect(find.text('Available to Spend \$4,000.00'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('fund-operation-amount')),
+      '50000',
+    );
+    await tester.pump();
+    expect(
+      find.text('After allocation · \$3,500.00 available'),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey('fund-operation-amount')),
+      '450000',
+    );
+    await tester.pump();
+    expect(find.text('After allocation · -\$500.00 available'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('reservation-overcommit-warning')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Allocate'))
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('Fund return shows and updates authoritative reservation', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 300000,
+      date: DateTime.now(),
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () =>
+                showFundAmountDialog(context, fundId: fund.id, isReturn: true),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bills Fund'), findsOneWidget);
+    expect(find.text('Reserved \$3,000.00'), findsOneWidget);
+    expect(find.text('Returns to CTBI'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('fund-operation-amount')),
+      '50000',
+    );
+    await tester.pump();
+    expect(find.text('After return · \$2,500.00 reserved'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('fund-operation-amount')),
+      '350000',
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('reservation-return-exceeds')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Return'))
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('Goal return uses the shared reservation context', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Emergency',
+      targetAmountMinor: 20000,
+      startingAmountMinor: 15000,
+      targetDate: null,
+      defaultFundingAccountId: 'checking',
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showReservationAmountDialog(
+              context,
+              containerType: ReservationContainerType.goal,
+              containerId: goal.id,
+              containerName: goal.name,
+              isReturn: true,
+            ),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Return Goal Reservation'), findsOneWidget);
+    expect(find.text('Emergency Goal'), findsOneWidget);
+    expect(find.text('Reserved \$150.00'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('fund-operation-amount')),
+      '5000',
+    );
+    await tester.pump();
+    expect(find.text('After return · \$100.00 reserved'), findsOneWidget);
+  });
+
+  testWidgets('Mark as Paid can consume a Fund from the payment account', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Monthly Bills',
+      fundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 50000,
+      date: DateTime.now(),
+    );
+    final schedule = v2_scheduled.ScheduledTransactionRecord(
+      id: 'discover-payment',
+      type: v2_transaction.TransactionType.transfer,
+      accountId: 'checking',
+      transferAccountId: 'discover',
+      payee: 'Discover',
+      amountMinor: 3500,
+      nextDate: DateTime.now(),
+      frequency: v2_scheduled.RecurrenceFrequency.monthly,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+    );
+    await store.saveScheduledTransaction(schedule);
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => markScheduledTransactionPaid(context, schedule),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mark-paid-reservation')), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('mark-paid-reservation')),
+    );
+    await tester.tap(find.byKey(const ValueKey('mark-paid-reservation')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Monthly Bills').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.pumpAndSettle();
+
+    final transaction = store.transactions.singleWhere(
+      (item) => item.scheduledTransactionId == schedule.id,
+    );
+    expect(transaction.accountId, 'checking');
+    expect(transaction.transferAccountId, 'discover');
+    expect(transaction.reservationContainerType, ReservationContainerType.fund);
+    expect(transaction.reservationContainerId, fund.id);
+    expect(store.currentFundAmountMinor(fund.id), 46500);
+  });
+
+  testWidgets(
+    'Mark as Paid completes locally when the occurrence cloud write fails',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final remote = _FailingOccurrenceRepository();
+      final store = _store(remoteRepository: remote);
+      final fund = await store.createFund(
+        name: 'Bills',
+        fundingAccountId: 'checking',
+      );
+      await store.allocateReservation(
+        containerType: ReservationContainerType.fund,
+        containerId: fund.id,
+        amountMinor: 50000,
+        date: DateTime(2026, 8, 22),
+      );
+      final schedule = v2_scheduled.ScheduledTransactionRecord(
+        id: 'quota-failed-payment',
+        type: v2_transaction.TransactionType.transfer,
+        accountId: 'checking',
+        transferAccountId: 'discover',
+        payee: 'Discover',
+        amountMinor: 3500,
+        nextDate: DateTime(2026, 8, 22),
+        frequency: v2_scheduled.RecurrenceFrequency.monthly,
+        reservationContainerType: ReservationContainerType.fund,
+        reservationContainerId: fund.id,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+      );
+      await store.saveScheduledTransaction(schedule);
+      await tester.pumpWidget(
+        _app(
+          store,
+          Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => markScheduledTransactionPaid(context, schedule),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Mark as Paid'), findsNothing);
+      expect(remote.occurrenceSaveAttempts, 1);
+      expect(
+        store.transactions
+            .where(
+              (transaction) =>
+                  transaction.scheduledTransactionId == schedule.id,
+            )
+            .length,
+        1,
+      );
+      final updated = store.scheduledTransactions.singleWhere(
+        (item) => item.id == schedule.id,
+      );
+      expect(updated.nextDate, DateTime(2026, 9, 22));
+      expect(
+        updated.occurrenceStates['20260822']?.status,
+        v2_scheduled.ScheduledOccurrenceStatus.paid,
+      );
+      expect(store.currentFundAmountMinor(fund.id), 46500);
+    },
+  );
+
+  testWidgets(
+    'retry completes a partially saved scheduled payment without duplication',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final remote = _FailingOccurrenceRepository();
+      final store = _store(remoteRepository: remote);
+      final fund = await store.createFund(
+        name: 'Bills',
+        fundingAccountId: 'checking',
+      );
+      await store.allocateReservation(
+        containerType: ReservationContainerType.fund,
+        containerId: fund.id,
+        amountMinor: 50000,
+        date: DateTime(2026, 8, 22),
+      );
+      final schedule = v2_scheduled.ScheduledTransactionRecord(
+        id: 'partially-saved-payment',
+        type: v2_transaction.TransactionType.transfer,
+        accountId: 'checking',
+        transferAccountId: 'discover',
+        payee: 'Discover',
+        amountMinor: 3500,
+        nextDate: DateTime(2026, 8, 22),
+        frequency: v2_scheduled.RecurrenceFrequency.monthly,
+        reservationContainerType: ReservationContainerType.fund,
+        reservationContainerId: fund.id,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+      );
+      await store.saveScheduledTransaction(schedule);
+      await store.addTransfer(
+        fromAccountId: 'checking',
+        toAccountId: 'discover',
+        date: DateTime(2026, 8, 22),
+        payee: 'Discover',
+        amountMinor: 3500,
+        scheduledTransactionId: schedule.id,
+        scheduledOccurrenceDate: schedule.nextDate,
+        scheduledPlannedAmountMinor: schedule.amountMinor,
+        reservationContainerType: ReservationContainerType.fund,
+        reservationContainerId: fund.id,
+      );
+      expect(store.currentFundAmountMinor(fund.id), 46500);
+
+      await tester.pumpWidget(
+        _app(
+          store,
+          Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => markScheduledTransactionPaid(context, schedule),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Mark as Paid'), findsNothing);
+      expect(
+        store.transactions
+            .where(
+              (transaction) =>
+                  transaction.scheduledTransactionId == schedule.id,
+            )
+            .length,
+        1,
+      );
+      expect(store.currentFundAmountMinor(fund.id), 46500);
+      expect(
+        store.scheduledTransactions
+            .singleWhere((item) => item.id == schedule.id)
+            .occurrenceStates['20260822']
+            ?.status,
+        v2_scheduled.ScheduledOccurrenceStatus.paid,
+      );
+    },
+  );
+
+  testWidgets('scheduled transfer editor offers Fund reservation linkage', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Monthly Bills',
+      fundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 50000,
+      date: DateTime.now(),
+    );
+    final schedule = v2_scheduled.ScheduledTransactionRecord(
+      id: 'discover-payment-edit',
+      type: v2_transaction.TransactionType.transfer,
+      accountId: 'checking',
+      transferAccountId: 'discover',
+      payee: 'Discover',
+      amountMinor: 3500,
+      nextDate: DateTime.now(),
+      frequency: v2_scheduled.RecurrenceFrequency.monthly,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () =>
+                showScheduledTransactionDialog(context, existing: schedule),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('scheduled-reservation')), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('scheduled-reservation')),
+    );
+    await tester.tap(find.byKey(const ValueKey('scheduled-reservation')));
+    await tester.pumpAndSettle();
+    expect(find.text('Monthly Bills'), findsOneWidget);
+  });
+
+  testWidgets(
+    'linked empty Fund remains visible and can be removed from a schedule',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final store = _store();
+      final fund = await store.createFund(
+        name: 'Bills',
+        fundingAccountId: 'checking',
+      );
+      await store.allocateReservation(
+        containerType: ReservationContainerType.fund,
+        containerId: fund.id,
+        amountMinor: 50000,
+        date: DateTime.now(),
+      );
+      await store.returnReservation(
+        containerType: ReservationContainerType.fund,
+        containerId: fund.id,
+        amountMinor: 50000,
+        date: DateTime.now(),
+      );
+      final schedule = v2_scheduled.ScheduledTransactionRecord(
+        id: 'linked-empty-fund',
+        type: v2_transaction.TransactionType.transfer,
+        accountId: 'checking',
+        transferAccountId: 'discover',
+        payee: 'Discover',
+        amountMinor: 3500,
+        nextDate: DateTime.now(),
+        frequency: v2_scheduled.RecurrenceFrequency.monthly,
+        reservationContainerType: ReservationContainerType.fund,
+        reservationContainerId: fund.id,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+      );
+      await store.saveScheduledTransaction(schedule);
+      await tester.pumpWidget(
+        _app(
+          store,
+          Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => showScheduledTransactionDialog(
+                context,
+                existing: store.scheduledTransactions.single,
+              ),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      final reservationRow = find.byKey(
+        const ValueKey('scheduled-reservation'),
+      );
+      expect(reservationRow, findsOneWidget);
+      await tester.ensureVisible(reservationRow);
+      expect(find.text('Bills'), findsOneWidget);
+      await tester.tap(reservationRow);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('None'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = store.scheduledTransactions.single;
+      expect(saved.reservationContainerType, isNull);
+      expect(saved.reservationContainerId, isNull);
+      expect(store.fundDeleteEligibility(fund.id).canDelete, isTrue);
+    },
+  );
+
+  testWidgets('empty Fund can be permanently deleted without archiving first', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Temporary Fund',
+      fundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 10000,
+      date: DateTime.now(),
+    );
+    await store.returnReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 10000,
+      date: DateTime.now(),
+    );
+    await tester.pumpWidget(_app(store, FundPlanCard(fund: fund)));
+
+    await tester.tap(find.byKey(ValueKey('fund-card-${fund.id}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete this Fund permanently?'), findsOneWidget);
+    await tester.tap(find.text('Delete Permanently'));
+    await tester.pumpAndSettle();
+
+    expect(store.fundById(fund.id).isDeleted, isTrue);
+  });
+
+  testWidgets('long pressing a Fund opens its actions', (tester) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+    );
+    await tester.pumpWidget(_app(store, FundPlanCard(fund: fund)));
+
+    await tester.longPress(find.byKey(ValueKey('fund-card-${fund.id}')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Allocate'), findsOneWidget);
+    expect(find.text('Return Funds'), findsOneWidget);
+    expect(find.text('Delete'), findsOneWidget);
+  });
+
+  testWidgets('Fund deletion identifies its remaining scheduled linkage', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+    );
+    await store.saveScheduledTransaction(
+      v2_scheduled.ScheduledTransactionRecord(
+        id: 'linked-discover-payment',
+        type: v2_transaction.TransactionType.transfer,
+        accountId: 'checking',
+        transferAccountId: 'discover',
+        payee: 'Discover payment',
+        amountMinor: 3500,
+        nextDate: DateTime(2026, 9, 22),
+        frequency: v2_scheduled.RecurrenceFrequency.monthly,
+        reservationContainerType: ReservationContainerType.fund,
+        reservationContainerId: fund.id,
+        sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+      ),
+    );
+    await tester.pumpWidget(_app(store, FundPlanCard(fund: fund)));
+
+    await tester.tap(find.byKey(ValueKey('fund-card-${fund.id}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Fund can’t be deleted yet'), findsOneWidget);
+    expect(
+      find.textContaining('Discover payment still uses this Fund'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Use reserved money to None'), findsOneWidget);
+  });
+}
+
+Future<void> _setPhoneSize(WidgetTester tester) async {
+  tester.view.physicalSize = const Size(900, 1600);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Widget _app(FinanceDataStore store, Widget child) {
+  return MaterialApp(
+    theme: AppTheme.light(),
+    home: FinanceDataStoreScope(
+      store: store,
+      child: Scaffold(body: SafeArea(child: child)),
+    ),
+  );
+}
+
+FinanceDataStore _store({FinanceRecordRepository? remoteRepository}) {
+  final sync = v2_sync.SyncMetadata.fresh(
+    now: DateTime.utc(2026, 8, 22),
+    deviceId: 'test',
+  );
+  return FinanceDataStore(
+    dataSet: FinanceDataSet(
+      accounts: [
+        v2_account.AccountRecord(
+          id: 'checking',
+          name: 'CTBI',
+          type: v2_account.AccountType.checking,
+          openingBalanceMinor: 500000,
+          sync: sync,
+        ),
+        v2_account.AccountRecord(
+          id: 'discover',
+          name: 'Discover',
+          type: v2_account.AccountType.creditCard,
+          openingBalanceMinor: -114486,
+          sync: sync,
+        ),
+      ],
+      categories: const [],
+      transactions: const [],
+      scheduledTransactions: const [],
+      budgets: const [],
+      goals: const <GoalRecord>[],
+      funds: const <FundRecord>[],
+      preferences: const UserPreferences(),
+    ),
+    deviceId: 'test',
+    remoteRepository: remoteRepository,
+    userId: remoteRepository == null ? null : 'test-user',
+  );
+}
+
+class _FailingOccurrenceRepository
+    implements FinanceRecordRepository, ScheduledOccurrenceStateRepository {
+  int occurrenceSaveAttempts = 0;
+
+  @override
+  Future<v2_scheduled.ScheduledOccurrenceState> saveScheduledOccurrenceState({
+    required String userId,
+    required String scheduledTransactionId,
+    required String dayKey,
+    required v2_scheduled.ScheduledOccurrenceState occurrenceState,
+  }) async {
+    occurrenceSaveAttempts += 1;
+    throw Exception('resource-exhausted');
+  }
+
+  @override
+  Future<String?> activeRestoreGeneration(String userId) async => null;
+
+  @override
+  Future<FinanceDataSet> loadDataSet(String userId) async =>
+      const FinanceDataSet(
+        accounts: [],
+        categories: [],
+        transactions: [],
+        scheduledTransactions: [],
+        budgets: [],
+        preferences: UserPreferences(),
+      );
+
+  @override
+  Stream<FinanceDataSet> watchDataSet(String userId) => const Stream.empty();
+
+  @override
+  Future<String> replaceDataSetAuthoritatively({
+    required String userId,
+    required FinanceDataSet dataSet,
+  }) async => 'unused';
+
+  @override
+  Future<void> saveAccount({
+    required String userId,
+    required v2_account.AccountRecord account,
+  }) async {}
+
+  @override
+  Future<void> saveBudget({
+    required String userId,
+    required BudgetRecord budget,
+  }) async {}
+
+  @override
+  Future<void> saveCategory({
+    required String userId,
+    required CategoryRecord category,
+  }) async {}
+
+  @override
+  Future<void> saveGoal({
+    required String userId,
+    required GoalRecord goal,
+  }) async {}
+
+  @override
+  Future<void> saveGoalContribution({
+    required String userId,
+    required GoalContributionRecord contribution,
+  }) async {}
+
+  @override
+  Future<void> saveGoalFundingEvent({
+    required String userId,
+    required GoalFundingEventRecord fundingEvent,
+  }) async {}
+
+  @override
+  Future<void> savePreferences({
+    required String userId,
+    required UserPreferences preferences,
+  }) async {}
+
+  @override
+  Future<void> saveScheduledTransaction({
+    required String userId,
+    required v2_scheduled.ScheduledTransactionRecord scheduledTransaction,
+  }) async {}
+
+  @override
+  Future<void> saveTransaction({
+    required String userId,
+    required v2_transaction.TransactionRecord transaction,
+  }) async {}
+}

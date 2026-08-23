@@ -219,12 +219,12 @@ void main() {
         );
 
         expect(store.currentGoalAmountMinor(goal.id), 50000);
-        expect(store.balanceForAccount('checking'), 200000);
-        // Account-backed Goal balances now participate through the linked
-        // hidden account, not the retired standalone Goal-assets bucket.
+        expect(store.balanceForAccount('checking'), 250000);
+        expect(store.reservedForAccount('checking'), 50000);
+        expect(store.availableToSpendForAccount('checking'), 200000);
         expect(store.fundedGoalAssetsMinor, 0);
         expect(store.netWorthMinor, netWorthBefore);
-        expect(store.transactions, hasLength(1));
+        expect(store.transactions, isEmpty);
       },
     );
 
@@ -258,7 +258,9 @@ void main() {
       );
 
       expect(event.allocations, hasLength(2));
-      expect(store.balanceForAccount('checking'), 208000);
+      expect(store.balanceForAccount('checking'), 250000);
+      expect(store.reservedForAccount('checking'), 42000);
+      expect(store.availableToSpendForAccount('checking'), 208000);
       expect(store.currentGoalAmountMinor(first.id), 15000);
       expect(store.currentGoalAmountMinor(second.id), 27000);
       expect(store.netWorthMinor, 250000);
@@ -291,13 +293,17 @@ void main() {
           store.goalMetrics(goal.id).status,
           GoalProgressStatus.aboveReserveTarget,
         );
-        expect(store.balanceForAccount('checking'), 140000);
+        expect(store.balanceForAccount('checking'), 250000);
+        expect(store.reservedForAccount('checking'), 110000);
+        expect(store.availableToSpendForAccount('checking'), 140000);
         expect(store.netWorthMinor, 250000);
 
         await store.undoGoalFunding(event.id);
         expect(store.goalById(goal.id).isActive, isTrue);
         expect(store.currentGoalAmountMinor(goal.id), 0);
         expect(store.balanceForAccount('checking'), 250000);
+        expect(store.reservedForAccount('checking'), 0);
+        expect(store.availableToSpendForAccount('checking'), 250000);
         expect(store.netWorthMinor, 250000);
       },
     );
@@ -345,6 +351,7 @@ void main() {
           startingAmountMinor: 0,
           targetDate: null,
           fundingMethod: GoalFundingMethod.accountFunded,
+          defaultFundingAccountId: 'checking',
         );
         expect(
           store.addGoalContribution(
@@ -423,6 +430,7 @@ void main() {
           startingAmountMinor: 0,
           targetDate: DateTime(2027, 7, 24),
           fundingMethod: GoalFundingMethod.accountFunded,
+          defaultFundingAccountId: 'checking',
         );
         final funding = await store.fundGoals(
           sourceAccountId: 'checking',
@@ -460,6 +468,7 @@ void main() {
           startingAmountMinor: 0,
           targetDate: null,
           fundingMethod: GoalFundingMethod.accountFunded,
+          defaultFundingAccountId: 'checking',
         );
         expect(store.goalDeleteEligibility(unused.id).canDelete, isTrue);
         await store.deleteGoalPermanently(unused.id);
@@ -471,6 +480,7 @@ void main() {
           startingAmountMinor: 0,
           targetDate: null,
           fundingMethod: GoalFundingMethod.accountFunded,
+          defaultFundingAccountId: 'checking',
         );
         await store.fundGoals(
           sourceAccountId: 'checking',
@@ -496,6 +506,7 @@ void main() {
           startingAmountMinor: 0,
           targetDate: DateTime(2027, 7, 24),
           fundingMethod: GoalFundingMethod.accountFunded,
+          defaultFundingAccountId: 'checking',
         );
         await store.fundGoals(
           sourceAccountId: 'checking',
@@ -537,14 +548,8 @@ void main() {
         ),
         throwsA(isA<FinanceDataValidationException>()),
       );
-      await store.archiveAccount('checking');
       expect(
-        store.fundGoals(
-          sourceAccountId: 'checking',
-          totalAmountMinor: 1000,
-          date: DateTime(2026, 7, 24),
-          allocations: [_allocation(goal.id, 1000)],
-        ),
+        store.archiveAccount('checking'),
         throwsA(isA<FinanceDataValidationException>()),
       );
     });
@@ -697,7 +702,8 @@ void main() {
         targetAmountMinor: 100000,
         startingAmountMinor: 0,
         targetDate: DateTime(2027, 7, 24),
-        fundingMethod: GoalFundingMethod.trackingOnly,
+        fundingMethod: GoalFundingMethod.accountFunded,
+        defaultFundingAccountId: 'checking',
       );
 
       final restored = await FinanceDataStore.load(localRepository: repository);
@@ -740,7 +746,9 @@ void main() {
 
         expect(restored.goalFundingEventById(event.id).isActive, isTrue);
         expect(restored.currentGoalAmountMinor(goal.id), 40000);
-        expect(restored.balanceForAccount('checking'), 210000);
+        expect(restored.balanceForAccount('checking'), 250000);
+        expect(restored.reservedForAccount('checking'), 40000);
+        expect(restored.availableToSpendForAccount('checking'), 210000);
         expect(restored.netWorthMinor, 250000);
       },
     );
@@ -759,6 +767,7 @@ void main() {
           startingAmountMinor: 0,
           targetDate: null,
           fundingMethod: GoalFundingMethod.accountFunded,
+          defaultFundingAccountId: 'checking',
         );
         final funding = await store.fundGoals(
           sourceAccountId: 'checking',
@@ -790,6 +799,7 @@ void main() {
         startingAmountMinor: 0,
         targetDate: null,
         fundingMethod: GoalFundingMethod.accountFunded,
+        defaultFundingAccountId: 'checking',
       );
       final funding = await store.fundGoals(
         sourceAccountId: 'checking',

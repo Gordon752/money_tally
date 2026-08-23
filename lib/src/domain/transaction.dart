@@ -1,4 +1,5 @@
 import 'json_helpers.dart';
+import 'reservation.dart';
 import 'sync_metadata.dart';
 
 /// [goalFunding] is intentionally a scheduled-only kind. It is never offered
@@ -106,6 +107,8 @@ class TransactionRecord {
     this.scheduledOccurrenceDate,
     this.scheduledPlannedAmountMinor,
     this.goalFundingEventId,
+    this.reservationContainerType,
+    this.reservationContainerId,
   });
 
   final String id;
@@ -123,6 +126,8 @@ class TransactionRecord {
   final DateTime? scheduledOccurrenceDate;
   final int? scheduledPlannedAmountMinor;
   final String? goalFundingEventId;
+  final ReservationContainerType? reservationContainerType;
+  final String? reservationContainerId;
   final SyncMetadata sync;
 
   bool get isDeleted => sync.isDeleted;
@@ -195,11 +200,14 @@ class TransactionRecord {
     DateTime? scheduledOccurrenceDate,
     int? scheduledPlannedAmountMinor,
     String? goalFundingEventId,
+    ReservationContainerType? reservationContainerType,
+    String? reservationContainerId,
     SyncMetadata? sync,
     bool clearTransferAccount = false,
     bool clearCategory = false,
     bool clearScheduledTransaction = false,
     bool clearGoalFundingEvent = false,
+    bool clearReservationContainer = false,
   }) {
     return TransactionRecord(
       id: id,
@@ -227,6 +235,12 @@ class TransactionRecord {
       goalFundingEventId: clearGoalFundingEvent
           ? null
           : goalFundingEventId ?? this.goalFundingEventId,
+      reservationContainerType: clearReservationContainer
+          ? null
+          : reservationContainerType ?? this.reservationContainerType,
+      reservationContainerId: clearReservationContainer
+          ? null
+          : reservationContainerId ?? this.reservationContainerId,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -248,6 +262,8 @@ class TransactionRecord {
       'scheduledOccurrenceDate': scheduledOccurrenceDate?.toIso8601String(),
       'scheduledPlannedAmountMinor': scheduledPlannedAmountMinor,
       'goalFundingEventId': goalFundingEventId,
+      'reservationContainerType': reservationContainerType?.name,
+      'reservationContainerId': reservationContainerId,
       'sync': sync.toJson(),
     };
   }
@@ -281,6 +297,14 @@ class TransactionRecord {
           : dateTimeFromJson(json['scheduledOccurrenceDate']),
       scheduledPlannedAmountMinor: json['scheduledPlannedAmountMinor'] as int?,
       goalFundingEventId: json['goalFundingEventId'] as String?,
+      reservationContainerType: json['reservationContainerType'] == null
+          ? null
+          : enumByName(
+              ReservationContainerType.values,
+              json['reservationContainerType'],
+              ReservationContainerType.goal,
+            ),
+      reservationContainerId: json['reservationContainerId'] as String?,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

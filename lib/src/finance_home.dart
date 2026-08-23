@@ -1867,6 +1867,12 @@ class CompactEmptyRow extends StatelessWidget {
   }
 }
 
+bool _showsSpendableAvailability(v2_account.AccountRecord account) =>
+    account.type == v2_account.AccountType.checking ||
+    account.type == v2_account.AccountType.savings ||
+    account.type == v2_account.AccountType.cash ||
+    account.type == v2_account.AccountType.otherBanking;
+
 class AccountsView extends StatelessWidget {
   const AccountsView({this.onOpenLedgerForAccount, super.key});
 
@@ -1928,7 +1934,8 @@ class AccountGroupCard extends StatelessWidget {
         .where((account) => account.includeInGroupBalance)
         .fold(
           0,
-          (total, account) => total + store.balanceForAccount(account.id),
+          (total, account) =>
+              total + store.clearedBalanceForAccount(account.id),
         );
     final progress = accountGroupProgress(context, store, group);
     final showsLiabilitySummary = progress != null;
@@ -2064,9 +2071,25 @@ class AccountGroupCard extends StatelessWidget {
                             child: AccountCard(
                               account: accounts[index],
                               transactions: store.transactions,
-                              balanceMinor: store.balanceForAccount(
+                              balanceMinor: store.clearedBalanceForAccount(
                                 accounts[index].id,
                               ),
+                              pendingEffectMinor:
+                                  _showsSpendableAvailability(accounts[index])
+                                  ? store.pendingEffectForAccount(
+                                      accounts[index].id,
+                                    )
+                                  : null,
+                              reservedMinor:
+                                  _showsSpendableAvailability(accounts[index])
+                                  ? store.reservedForAccount(accounts[index].id)
+                                  : null,
+                              availableToSpendMinor:
+                                  _showsSpendableAvailability(accounts[index])
+                                  ? store.availableToSpendForAccount(
+                                      accounts[index].id,
+                                    )
+                                  : null,
                               currency: store.preferences.currency,
                               subtitle: lastAccountActivitySubtitle(
                                 store,
@@ -2087,6 +2110,15 @@ class AccountGroupCard extends StatelessWidget {
                                   : () => onOpenLedgerForAccount!(
                                       accounts[index].id,
                                     ),
+                              onAvailabilityTap: () {
+                                AppHaptics.selection();
+                                unawaited(
+                                  showAccountDetailsSheet(
+                                    context,
+                                    accounts[index].id,
+                                  ),
+                                );
+                              },
                               onLongPress: () {
                                 AppHaptics.longPressAction();
                                 showAccountOptions(context, accounts[index].id);
@@ -2240,7 +2272,13 @@ class AccountGroupCard extends StatelessWidget {
           nextScheduledPaymentDueDate: store.nextCreditCardPaymentDueDate(
             account.id,
           ),
-          balanceMinor: store.balanceForAccount(account.id),
+          balanceMinor: store.clearedBalanceForAccount(account.id),
+          metricBalanceMinor:
+              store.clearedBalanceForAccount(account.id) +
+              store.pendingEffectForAccount(account.id),
+          creditInsightsBalanceMinor:
+              store.clearedBalanceForAccount(account.id) +
+              store.pendingEffectForAccount(account.id),
           currency: store.preferences.currency,
           subtitle: lastAccountActivitySubtitle(store, account.id),
           balanceFontSize: 17,
@@ -2932,14 +2970,14 @@ class _LedgerViewState extends State<LedgerView> {
                             ?.copyWith(fontWeight: FontWeight.w900),
                       ),
                       Text(
-                        'Current balance',
+                        'Balance',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
                       if (accountBalancePresentation(
                         accountsById[accountFilterId]!.type,
-                        store.balanceForAccount(accountFilterId),
+                        store.clearedBalanceForAccount(accountFilterId),
                       ).needsAttention)
                         Text(
                           'Needs attention',
@@ -2955,7 +2993,9 @@ class _LedgerViewState extends State<LedgerView> {
                 ),
                 AccountBalanceText(
                   accountType: accountsById[accountFilterId]!.type,
-                  signedBalanceMinor: store.balanceForAccount(accountFilterId),
+                  signedBalanceMinor: store.clearedBalanceForAccount(
+                    accountFilterId,
+                  ),
                   currency: store.preferences.currency,
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
@@ -7243,11 +7283,13 @@ class PlanView extends StatefulWidget {
 
 class _PlanViewState extends State<PlanView> {
   final _budgetScrollController = ScrollController();
+  final _fundScrollController = ScrollController();
   final _goalScrollController = ScrollController();
 
   @override
   void dispose() {
     _budgetScrollController.dispose();
+    _fundScrollController.dispose();
     _goalScrollController.dispose();
     super.dispose();
   }
@@ -7255,9 +7297,14 @@ class _PlanViewState extends State<PlanView> {
   @override
   Widget build(BuildContext context) {
     final isGoals = widget.selectedSegment == PlanSegment.goals;
+    final isFunds = widget.selectedSegment == PlanSegment.funds;
     return CustomScrollView(
       key: PageStorageKey('plan-${widget.selectedSegment.name}'),
-      controller: isGoals ? _goalScrollController : _budgetScrollController,
+      controller: isGoals
+          ? _goalScrollController
+          : isFunds
+          ? _fundScrollController
+          : _budgetScrollController,
       slivers: [
         SliverToBoxAdapter(
           child: PageHeader(
@@ -7289,6 +7336,7 @@ class _PlanViewState extends State<PlanView> {
                     value: PlanSegment.budgets,
                     label: Text('Budgets'),
                   ),
+                  ButtonSegment(value: PlanSegment.funds, label: Text('Funds')),
                   ButtonSegment(value: PlanSegment.goals, label: Text('Goals')),
                 ],
                 selected: {widget.selectedSegment},
@@ -7303,7 +7351,11 @@ class _PlanViewState extends State<PlanView> {
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 112),
           sliver: SliverToBoxAdapter(
-            child: isGoals ? const GoalsPlanContent() : const BudgetsView(),
+            child: isGoals
+                ? const GoalsPlanContent()
+                : isFunds
+                ? const FundsPlanContent()
+                : const BudgetsView(),
           ),
         ),
       ],
@@ -12696,9 +12748,9 @@ class AccountBalancePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final currency = store.preferences.currency;
-    final accounts = store.accounts
-        .where((account) => account.isVisible)
-        .take(maxRows ?? store.accounts.length);
+    final accounts = store.activeAccountsInDisplayOrder.take(
+      maxRows ?? store.accounts.length,
+    );
     return AppCard(
       title: title,
       padding: EdgeInsets.all(compact ? AppSpacing.sm : AppSpacing.md),
@@ -12709,7 +12761,10 @@ class AccountBalancePanel extends StatelessWidget {
           for (final account in accounts)
             MetricRow(
               label: account.name,
-              value: money(store.balanceForAccount(account.id), currency),
+              value: money(
+                store.clearedBalanceForAccount(account.id),
+                currency,
+              ),
               icon: accountGroupIcon(account.group.name),
               compact: compact,
             ),
@@ -14694,7 +14749,13 @@ class _AccountDetailsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final balanceMinor = store.balanceForAccount(account.id);
+    final balanceMinor = store.clearedBalanceForAccount(account.id);
+    final pendingEffectMinor = store.pendingEffectForAccount(account.id);
+    final reservedMinor = store.reservedForAccount(account.id);
+    final availableToSpendMinor = store.availableToSpendForAccount(account.id);
+    final reservationBreakdown = store.reservationBreakdownForAccount(
+      account.id,
+    );
     final activity = _latestActivity;
     final icon = AccountAppearanceCatalog.iconFor(
       account.type,
@@ -14750,6 +14811,45 @@ class _AccountDetailsView extends StatelessWidget {
                   currency: store.preferences.currency,
                 ),
                 const SizedBox(height: AppSpacing.md),
+                if (_showsSpendableAvailability(account)) ...[
+                  _AccountDetailsSection(
+                    title: 'Available Money',
+                    children: [
+                      _AccountDetailsRow(
+                        label: 'Balance',
+                        value: money(balanceMinor, store.preferences.currency),
+                      ),
+                      _AccountDetailsRow(
+                        label: 'Pending',
+                        value: money(
+                          pendingEffectMinor,
+                          store.preferences.currency,
+                        ),
+                      ),
+                      _AccountDetailsRow(
+                        label: 'Reserved',
+                        value: money(reservedMinor, store.preferences.currency),
+                      ),
+                      for (final reservation in reservationBreakdown)
+                        _AccountDetailsRow(
+                          label:
+                              '  ${reservation.name} ${reservation.type == ReservationContainerType.fund ? 'Fund' : 'Goal'}',
+                          value: money(
+                            reservation.amountMinor,
+                            store.preferences.currency,
+                          ),
+                        ),
+                      _AccountDetailsRow(
+                        label: 'Available to Spend',
+                        value: money(
+                          availableToSpendMinor,
+                          store.preferences.currency,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
                 _AccountDetailsSection(
                   title: 'Account Information',
                   children: [
@@ -16364,6 +16464,9 @@ Future<void> showFloatingAddMenu(
             'goal',
             'goalFunding',
           ],
+          FinanceSection.plan when planSegment == PlanSegment.funds => const [
+            'fund',
+          ],
           FinanceSection.plan => const ['budget'],
           FinanceSection.accounts => const [
             'account',
@@ -16420,6 +16523,11 @@ Future<void> showFloatingAddMenu(
         label: 'Fund Goals',
         leading: Icon(AppIcon.savings),
         onSelected: () => Navigator.pop(context, 'goalFunding'),
+      ),
+      'fund' => FloatingActionMenuItem(
+        label: 'Create Fund',
+        leading: Icon(AppIcon.savings),
+        onSelected: () => Navigator.pop(context, 'fund'),
       ),
       'category' => FloatingActionMenuItem(
         label: 'Category',
@@ -16500,6 +16608,8 @@ Future<void> showFloatingAddMenu(
       await showBudgetDialog(context);
     case 'goal':
       await showCreateGoalSheet(context);
+    case 'fund':
+      await showFundEditor(context);
     case 'goalFunding':
       if (isScheduled) {
         await showScheduledGoalFundingDialog(
@@ -16970,6 +17080,8 @@ Future<void> showTransferDialog(
   bool includeGoalAccounts = false,
   bool initialScheduleFutureOccurrences = false,
   FutureScheduleDraft? initialFutureSchedule,
+  ReservationContainerType? initialReservationContainerType,
+  String? initialReservationContainerId,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final accounts = dataStore.accounts
@@ -17030,6 +17142,10 @@ Future<void> showTransferDialog(
       linkedSchedule == null && initialScheduleFutureOccurrences;
   var transactionStatus =
       transfer?.status ?? v2_transaction.TransactionStatus.cleared;
+  var reservationContainerType =
+      transfer?.reservationContainerType ?? initialReservationContainerType;
+  var reservationContainerId =
+      transfer?.reservationContainerId ?? initialReservationContainerId;
 
   final result =
       await showDialog<
@@ -17046,6 +17162,8 @@ Future<void> showTransferDialog(
           int scheduledTimeMinutes,
           v2_scheduled.RecurrenceFrequency scheduledFrequency,
           v2_scheduled.AlertPreference scheduledAlertPreference,
+          ReservationContainerType? reservationContainerType,
+          String? reservationContainerId,
         })
       >(
         context: context,
@@ -17058,6 +17176,54 @@ Future<void> showTransferDialog(
             final selectedToAccount = accounts
                 .where((account) => account.id == toAccountId)
                 .firstOrNull;
+            final reservationChoices =
+                <
+                  ({
+                    ReservationContainerType type,
+                    String id,
+                    String name,
+                    int amountMinor,
+                  })
+                >[
+                  if (fromAccountId.isNotEmpty) ...[
+                    for (final fund in dataStore.activeFunds)
+                      if (fund.fundingAccountId == fromAccountId &&
+                          dataStore.currentFundAmountMinor(fund.id) > 0)
+                        (
+                          type: ReservationContainerType.fund,
+                          id: fund.id,
+                          name: fund.name,
+                          amountMinor: dataStore.currentFundAmountMinor(
+                            fund.id,
+                          ),
+                        ),
+                    for (final goal in dataStore.activeGoals)
+                      if (goal.usesReservationModel &&
+                          goal.reservationFundingAccountId == fromAccountId &&
+                          dataStore.currentGoalAmountMinor(goal.id) > 0)
+                        (
+                          type: ReservationContainerType.goal,
+                          id: goal.id,
+                          name: goal.name,
+                          amountMinor: dataStore.currentGoalAmountMinor(
+                            goal.id,
+                          ),
+                        ),
+                  ],
+                ];
+            final selectedReservation = reservationChoices
+                .where(
+                  (choice) =>
+                      choice.type == reservationContainerType &&
+                      choice.id == reservationContainerId,
+                )
+                .firstOrNull;
+            if (selectedReservation == null &&
+                (reservationContainerType != null ||
+                    reservationContainerId != null)) {
+              reservationContainerType = null;
+              reservationContainerId = null;
+            }
             final sourceCurrentBalanceMinor = selectedFromAccount == null
                 ? 0
                 : dataStore.balanceForAccount(selectedFromAccount.id);
@@ -17112,6 +17278,68 @@ Future<void> showTransferDialog(
                       futureSchedule.parsedFirstDate(DateTime.now()),
                       parseDateInput(date.text, DateTime.now()),
                     ));
+
+            Future<void> chooseReservation() async {
+              final selected = await showModalBottomSheet<String?>(
+                context: context,
+                showDragHandle: true,
+                builder: (sheetContext) => SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const ListTile(
+                        title: Text(
+                          'Paid from',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        subtitle: Text(
+                          'Use reserved money without recording a second expense',
+                        ),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.remove_circle_outline),
+                        title: const Text('None'),
+                        trailing: selectedReservation == null
+                            ? const Icon(Icons.check)
+                            : null,
+                        onTap: () => Navigator.pop(sheetContext, ''),
+                      ),
+                      for (final choice in reservationChoices)
+                        ListTile(
+                          leading: Icon(
+                            choice.type == ReservationContainerType.fund
+                                ? Icons.account_balance_wallet_outlined
+                                : Icons.flag_outlined,
+                          ),
+                          title: Text(choice.name),
+                          subtitle: Text(
+                            '${choice.type == ReservationContainerType.fund ? 'Fund' : 'Goal'} · ${money(choice.amountMinor, dataStore.preferences.currency)} reserved',
+                          ),
+                          onTap: () => Navigator.pop(
+                            sheetContext,
+                            '${choice.type.name}:${choice.id}',
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+              if (selected == null || !context.mounted) return;
+              setDialogState(() {
+                if (selected.isEmpty) {
+                  reservationContainerType = null;
+                  reservationContainerId = null;
+                } else {
+                  final separator = selected.indexOf(':');
+                  reservationContainerType = ReservationContainerType.values
+                      .firstWhere(
+                        (value) =>
+                            value.name == selected.substring(0, separator),
+                      );
+                  reservationContainerId = selected.substring(separator + 1);
+                }
+              });
+            }
 
             Widget accountSubtitle(
               v2_account.AccountRecord account, {
@@ -17236,6 +17464,8 @@ Future<void> showTransferDialog(
                 scheduledTimeMinutes: futureSchedule.timeMinutes,
                 scheduledFrequency: futureSchedule.frequency,
                 scheduledAlertPreference: futureSchedule.alertPreference,
+                reservationContainerType: reservationContainerType,
+                reservationContainerId: reservationContainerId,
               ));
             }
 
@@ -17467,6 +17697,43 @@ Future<void> showTransferDialog(
                     onChanged: (value) =>
                         setDialogState(() => transactionStatus = value),
                   ),
+                  if (reservationChoices.isNotEmpty) ...[
+                    const TransactionFormDivider(),
+                    const TransactionFormLabel('Reservation'),
+                    InkWell(
+                      onTap: chooseReservation,
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            TransactionFormIcon(
+                              Icons.account_balance_wallet_outlined,
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    selectedReservation?.name ?? 'None',
+                                    style: fieldValueStyle,
+                                  ),
+                                  Text(
+                                    selectedReservation == null
+                                        ? 'Optionally use money from a Goal or Fund'
+                                        : '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
+                                    style: mutedStyle,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(AppIcon.chevronRight),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                   if (linkedSchedule == null) ...[
                     const TransactionFormDivider(),
                     InkWell(
@@ -17616,6 +17883,8 @@ Future<void> showTransferDialog(
         note: result.note,
         status: result.status,
         scheduledTransactionId: scheduleId,
+        reservationContainerType: result.reservationContainerType,
+        reservationContainerId: result.reservationContainerId,
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
       );
       final schedule = v2_scheduled.ScheduledTransactionRecord(
@@ -17630,6 +17899,8 @@ Future<void> showTransferDialog(
         frequency: result.scheduledFrequency,
         alertPreference: result.scheduledAlertPreference,
         customAlertTimeMinutes: result.scheduledTimeMinutes,
+        reservationContainerType: result.reservationContainerType,
+        reservationContainerId: result.reservationContainerId,
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
       );
       try {
@@ -17663,6 +17934,8 @@ Future<void> showTransferDialog(
         amountMinor: result.amountMinor,
         note: result.note,
         status: result.status,
+        reservationContainerType: result.reservationContainerType,
+        reservationContainerId: result.reservationContainerId,
       );
     }
   } else if (result.scheduleFutureOccurrences) {
@@ -17677,6 +17950,8 @@ Future<void> showTransferDialog(
       note: result.note,
       status: result.status,
       scheduledTransactionId: scheduleId,
+      reservationContainerType: result.reservationContainerType,
+      reservationContainerId: result.reservationContainerId,
       sync: transfer.sync.touched(deviceId: dataStore.deviceId),
       clearCategory: true,
     );
@@ -17692,6 +17967,8 @@ Future<void> showTransferDialog(
       frequency: result.scheduledFrequency,
       alertPreference: result.scheduledAlertPreference,
       customAlertTimeMinutes: result.scheduledTimeMinutes,
+      reservationContainerType: result.reservationContainerType,
+      reservationContainerId: result.reservationContainerId,
       sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
     );
     try {
@@ -17727,6 +18004,8 @@ Future<void> showTransferDialog(
         amountMinor: result.amountMinor,
         note: result.note,
         status: result.status,
+        reservationContainerType: result.reservationContainerType,
+        reservationContainerId: result.reservationContainerId,
         sync: transfer.sync.touched(deviceId: dataStore.deviceId),
         clearCategory: true,
       ),
@@ -17841,6 +18120,12 @@ Future<bool> showScheduledTransactionDialog(
   var alertPreference =
       existing?.alertPreference ?? v2_scheduled.AlertPreference.none;
   var repeatAlertUntilResolved = existing?.repeatAlertUntilResolved ?? false;
+  var reservationContainerType =
+      existing?.reservationContainerType ??
+      sourceTransaction?.reservationContainerType;
+  var reservationContainerId =
+      existing?.reservationContainerId ??
+      sourceTransaction?.reservationContainerId;
 
   final result =
       await showDialog<
@@ -17858,6 +18143,8 @@ Future<bool> showScheduledTransactionDialog(
           v2_scheduled.AlertPreference alertPreference,
           int? customAlertTimeMinutes,
           bool repeatAlertUntilResolved,
+          ReservationContainerType? reservationContainerType,
+          String? reservationContainerId,
         })
       >(
         context: context,
@@ -17914,6 +18201,68 @@ Future<bool> showScheduledTransactionDialog(
             final selectedCategory = categories
                 .where((category) => category.id == categoryId)
                 .firstOrNull;
+            final reservationChoices =
+                <
+                  ({
+                    ReservationContainerType type,
+                    String id,
+                    String name,
+                    int amountMinor,
+                  })
+                >[
+                  if ((type == TransactionType.expense ||
+                          type == TransactionType.transfer) &&
+                      accountId.isNotEmpty) ...[
+                    for (final fund in dataStore.funds)
+                      if (fund.fundingAccountId == accountId &&
+                          !fund.isDeleted &&
+                          ((fund.isActive &&
+                                  dataStore.currentFundAmountMinor(fund.id) >
+                                      0) ||
+                              (reservationContainerType ==
+                                      ReservationContainerType.fund &&
+                                  reservationContainerId == fund.id)))
+                        (
+                          type: ReservationContainerType.fund,
+                          id: fund.id,
+                          name: fund.name,
+                          amountMinor: dataStore.currentFundAmountMinor(
+                            fund.id,
+                          ),
+                        ),
+                    for (final goal in dataStore.goals)
+                      if (goal.usesReservationModel &&
+                          !goal.isDeleted &&
+                          goal.reservationFundingAccountId == accountId &&
+                          ((goal.isActive &&
+                                  dataStore.currentGoalAmountMinor(goal.id) >
+                                      0) ||
+                              (reservationContainerType ==
+                                      ReservationContainerType.goal &&
+                                  reservationContainerId == goal.id)))
+                        (
+                          type: ReservationContainerType.goal,
+                          id: goal.id,
+                          name: goal.name,
+                          amountMinor: dataStore.currentGoalAmountMinor(
+                            goal.id,
+                          ),
+                        ),
+                  ],
+                ];
+            final selectedReservation = reservationChoices
+                .where(
+                  (choice) =>
+                      choice.type == reservationContainerType &&
+                      choice.id == reservationContainerId,
+                )
+                .firstOrNull;
+            if (selectedReservation == null &&
+                (reservationContainerType != null ||
+                    reservationContainerId != null)) {
+              reservationContainerType = null;
+              reservationContainerId = null;
+            }
             final splitTotalMinor = splitDrafts.fold<int>(
               0,
               (total, line) => total + line.amountMinor.abs(),
@@ -18216,7 +18565,68 @@ Future<bool> showScheduledTransactionDialog(
                 repeatAlertUntilResolved:
                     alertPreference != v2_scheduled.AlertPreference.none &&
                     repeatAlertUntilResolved,
+                reservationContainerType: reservationContainerType,
+                reservationContainerId: reservationContainerId,
               ));
+            }
+
+            Future<void> chooseReservation() async {
+              final selected = await showModalBottomSheet<String?>(
+                context: context,
+                showDragHandle: true,
+                builder: (sheetContext) => SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const ListTile(
+                        title: Text(
+                          'Use reserved money',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        subtitle: Text(
+                          'The real payment still comes from the selected account',
+                        ),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.remove_circle_outline),
+                        title: const Text('None'),
+                        onTap: () => Navigator.pop(sheetContext, ''),
+                      ),
+                      for (final choice in reservationChoices)
+                        ListTile(
+                          leading: Icon(
+                            choice.type == ReservationContainerType.fund
+                                ? Icons.account_balance_wallet_outlined
+                                : Icons.flag_outlined,
+                          ),
+                          title: Text(choice.name),
+                          subtitle: Text(
+                            '${money(choice.amountMinor, dataStore.preferences.currency)} reserved',
+                          ),
+                          onTap: () => Navigator.pop(
+                            sheetContext,
+                            '${choice.type.name}:${choice.id}',
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+              if (selected == null || !context.mounted) return;
+              setDialogState(() {
+                if (selected.isEmpty) {
+                  reservationContainerType = null;
+                  reservationContainerId = null;
+                } else {
+                  final separator = selected.indexOf(':');
+                  reservationContainerType = ReservationContainerType.values
+                      .firstWhere(
+                        (value) =>
+                            value.name == selected.substring(0, separator),
+                      );
+                  reservationContainerId = selected.substring(separator + 1);
+                }
+              });
             }
 
             return TransactionSheetFrame(
@@ -18487,6 +18897,19 @@ Future<bool> showScheduledTransactionDialog(
                             : enterScheduledSplitMode,
                       ),
                   ],
+                  if (reservationChoices.isNotEmpty) ...[
+                    const TransactionFormDivider(),
+                    const TransactionFormLabel('Use reserved money'),
+                    choiceRow(
+                      rowKey: const ValueKey('scheduled-reservation'),
+                      icon: Icons.account_balance_wallet_outlined,
+                      value: selectedReservation?.name ?? 'None',
+                      secondary: selectedReservation == null
+                          ? 'Optional'
+                          : '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
+                      onTap: chooseReservation,
+                    ),
+                  ],
                   const TransactionFormDivider(),
                   Padding(
                     padding: const EdgeInsets.only(top: 1, bottom: 8),
@@ -18738,6 +19161,8 @@ Future<bool> showScheduledTransactionDialog(
           alertPreference: result.alertPreference,
           customAlertTimeMinutes: result.customAlertTimeMinutes,
           repeatAlertUntilResolved: result.repeatAlertUntilResolved,
+          reservationContainerType: result.reservationContainerType,
+          reservationContainerId: result.reservationContainerId,
           sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
         )
       : existing.copyWith(
@@ -18754,6 +19179,8 @@ Future<bool> showScheduledTransactionDialog(
           alertPreference: result.alertPreference,
           customAlertTimeMinutes: result.customAlertTimeMinutes,
           repeatAlertUntilResolved: result.repeatAlertUntilResolved,
+          reservationContainerType: result.reservationContainerType,
+          reservationContainerId: result.reservationContainerId,
           scheduledNotificationIds: const [],
           lastAction: v2_scheduled.ScheduledAction.none,
           sync: existing.sync.touched(deviceId: dataStore.deviceId),
@@ -18761,6 +19188,7 @@ Future<bool> showScheduledTransactionDialog(
           clearCategory: result.categoryId == null,
           clearCustomAlertTime: result.customAlertTimeMinutes == null,
           clearLastReminderScheduledAt: true,
+          clearReservationContainer: result.reservationContainerId == null,
         );
   if (sourceTransaction == null) {
     await dataStore.saveScheduledTransaction(scheduledTransaction);
@@ -18768,6 +19196,9 @@ Future<bool> showScheduledTransactionDialog(
     await dataStore.saveTransactionAndSchedule(
       transaction: sourceTransaction.copyWith(
         scheduledTransactionId: scheduledTransaction.id,
+        reservationContainerType: result.reservationContainerType,
+        reservationContainerId: result.reservationContainerId,
+        clearReservationContainer: result.reservationContainerId == null,
       ),
       scheduledTransaction: scheduledTransaction,
     );
@@ -19632,6 +20063,8 @@ Future<void> markScheduledTransactionPaid(
   var isSubmitting = false;
   String? errorMessage;
   var transactionStatus = v2_transaction.TransactionStatus.cleared;
+  var reservationContainerType = item.reservationContainerType;
+  var reservationContainerId = item.reservationContainerId;
 
   v2_account.AccountRecord? accountById(String? id) {
     return dataStore.accounts.where((account) => account.id == id).firstOrNull;
@@ -19646,6 +20079,51 @@ Future<void> markScheduledTransactionPaid(
         final sourceAccount = accountById(item.accountId);
         final destinationAccount = accountById(item.transferAccountId);
         final isTransfer = item.type == TransactionType.transfer;
+        final reservationChoices =
+            <
+              ({
+                ReservationContainerType type,
+                String id,
+                String name,
+                int amountMinor,
+              })
+            >[
+              if ((item.type == TransactionType.expense || isTransfer) &&
+                  sourceAccount != null) ...[
+                for (final fund in dataStore.activeFunds)
+                  if (fund.fundingAccountId == sourceAccount.id &&
+                      dataStore.currentFundAmountMinor(fund.id) > 0)
+                    (
+                      type: ReservationContainerType.fund,
+                      id: fund.id,
+                      name: fund.name,
+                      amountMinor: dataStore.currentFundAmountMinor(fund.id),
+                    ),
+                for (final goal in dataStore.activeGoals)
+                  if (goal.usesReservationModel &&
+                      goal.reservationFundingAccountId == sourceAccount.id &&
+                      dataStore.currentGoalAmountMinor(goal.id) > 0)
+                    (
+                      type: ReservationContainerType.goal,
+                      id: goal.id,
+                      name: goal.name,
+                      amountMinor: dataStore.currentGoalAmountMinor(goal.id),
+                    ),
+              ],
+            ];
+        final selectedReservation = reservationChoices
+            .where(
+              (choice) =>
+                  choice.type == reservationContainerType &&
+                  choice.id == reservationContainerId,
+            )
+            .firstOrNull;
+        if (selectedReservation == null &&
+            (reservationContainerType != null ||
+                reservationContainerId != null)) {
+          reservationContainerType = null;
+          reservationContainerId = null;
+        }
         final categories = scheduledCategoriesForType(dataStore, item.type);
         for (final draft in paymentSplitDrafts) {
           if (!categories.any((category) => category.id == draft.categoryId)) {
@@ -19783,6 +20261,65 @@ Future<void> markScheduledTransactionPaid(
           setDialogState(() => selectedCategoryId = selectedId);
         }
 
+        Future<void> choosePaymentReservation() async {
+          FocusManager.instance.primaryFocus?.unfocus();
+          final selected = await showModalBottomSheet<String?>(
+            context: dialogContext,
+            showDragHandle: true,
+            builder: (sheetContext) => SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const ListTile(
+                    title: Text(
+                      'Use reserved money',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    subtitle: Text(
+                      'The real payment still comes from the account shown above',
+                    ),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.remove_circle_outline),
+                    title: const Text('None'),
+                    onTap: () => Navigator.pop(sheetContext, ''),
+                  ),
+                  for (final choice in reservationChoices)
+                    ListTile(
+                      leading: Icon(
+                        choice.type == ReservationContainerType.fund
+                            ? Icons.account_balance_wallet_outlined
+                            : Icons.flag_outlined,
+                      ),
+                      title: Text(choice.name),
+                      subtitle: Text(
+                        '${money(choice.amountMinor, dataStore.preferences.currency)} reserved',
+                      ),
+                      onTap: () => Navigator.pop(
+                        sheetContext,
+                        '${choice.type.name}:${choice.id}',
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+          if (selected == null || !dialogContext.mounted) return;
+          setDialogState(() {
+            if (selected.isEmpty) {
+              reservationContainerType = null;
+              reservationContainerId = null;
+            } else {
+              final separator = selected.indexOf(':');
+              reservationContainerType = ReservationContainerType.values
+                  .firstWhere(
+                    (value) => value.name == selected.substring(0, separator),
+                  );
+              reservationContainerId = selected.substring(separator + 1);
+            }
+          });
+        }
+
         List<TransactionSplitLine> buildPaymentSplitLines() {
           if (isTransfer || !item.isCategorySplit) return const [];
           return [
@@ -19807,12 +20344,13 @@ Future<void> markScheduledTransactionPaid(
           });
           try {
             final completionTime = DateTime.now();
-            final paymentItem = isTransfer
-                ? item
-                : item.copyWith(
-                    categoryId: selectedCategoryId,
-                    sync: item.sync,
-                  );
+            final paymentItem = item.copyWith(
+              categoryId: isTransfer ? item.categoryId : selectedCategoryId,
+              reservationContainerType: reservationContainerType,
+              reservationContainerId: reservationContainerId,
+              clearReservationContainer: reservationContainerType == null,
+              sync: item.sync,
+            );
             await completeScheduledTransactionPayment(
               dataStore,
               paymentItem,
@@ -19981,6 +20519,23 @@ Future<void> markScheduledTransactionPaid(
                   secondary: destinationAccount == null
                       ? null
                       : 'Balance ${money(dataStore.balanceForAccount(destinationAccount.id), dataStore.preferences.currency)}',
+                ),
+              ],
+              if (reservationChoices.isNotEmpty ||
+                  selectedReservation != null) ...[
+                const TransactionFormDivider(),
+                const TransactionFormLabel('Use reserved money'),
+                readOnlyRow(
+                  rowKey: const ValueKey('mark-paid-reservation'),
+                  icon:
+                      selectedReservation?.type == ReservationContainerType.goal
+                      ? Icons.flag_outlined
+                      : Icons.account_balance_wallet_outlined,
+                  value: selectedReservation?.name ?? 'None',
+                  secondary: selectedReservation == null
+                      ? 'Optional — payment still comes from ${sourceAccount?.name ?? 'the selected account'}'
+                      : '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved in ${sourceAccount?.name ?? 'the selected account'}',
+                  onTap: choosePaymentReservation,
                 ),
               ],
               const TransactionFormDivider(),
@@ -20280,6 +20835,8 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         scheduledOccurrenceDate: scheduledDate,
         scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
         status: status,
+        reservationContainerType: item.reservationContainerType,
+        reservationContainerId: item.reservationContainerId,
       );
     case TransactionType.income:
       if (item.categoryId == null) {
@@ -20314,6 +20871,8 @@ Future<TransactionRecord> _createScheduledOccurrenceTransaction(
         scheduledOccurrenceDate: scheduledDate,
         scheduledPlannedAmountMinor: plannedAmountMinor.abs(),
         status: status,
+        reservationContainerType: item.reservationContainerType,
+        reservationContainerId: item.reservationContainerId,
       );
     case TransactionType.goalFunding:
       throw StateError('Goal Funding does not create a transaction record.');
@@ -20532,6 +21091,8 @@ Future<void> showTransactionDialog(
   bool initialSplitMode = false,
   bool initialScheduleFutureOccurrences = false,
   FutureScheduleDraft? initialFutureSchedule,
+  ReservationContainerType? initialReservationContainerType,
+  String? initialReservationContainerId,
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final activeAccounts = [...dataStore.activeAccountsInDisplayOrder];
@@ -20639,6 +21200,10 @@ Future<void> showTransactionDialog(
 
   var transactionStatus =
       transaction?.status ?? v2_transaction.TransactionStatus.cleared;
+  var reservationContainerType =
+      transaction?.reservationContainerType ?? initialReservationContainerType;
+  var reservationContainerId =
+      transaction?.reservationContainerId ?? initialReservationContainerId;
   final result =
       await showDialog<
         ({
@@ -20656,6 +21221,8 @@ Future<void> showTransactionDialog(
           int scheduledTimeMinutes,
           v2_scheduled.RecurrenceFrequency scheduledFrequency,
           v2_scheduled.AlertPreference scheduledAlertPreference,
+          ReservationContainerType? reservationContainerType,
+          String? reservationContainerId,
         })
       >(
         context: context,
@@ -20728,6 +21295,54 @@ Future<void> showTransactionDialog(
               fontWeight: FontWeight.w400,
             );
             final absoluteAmountMinor = amountMinor.abs();
+            final reservationChoices =
+                <
+                  ({
+                    ReservationContainerType type,
+                    String id,
+                    String name,
+                    int amountMinor,
+                  })
+                >[
+                  if (isExpense && accountId.isNotEmpty) ...[
+                    for (final fund in dataStore.activeFunds)
+                      if (fund.fundingAccountId == accountId &&
+                          dataStore.currentFundAmountMinor(fund.id) > 0)
+                        (
+                          type: ReservationContainerType.fund,
+                          id: fund.id,
+                          name: fund.name,
+                          amountMinor: dataStore.currentFundAmountMinor(
+                            fund.id,
+                          ),
+                        ),
+                    for (final goal in dataStore.activeGoals)
+                      if (goal.usesReservationModel &&
+                          goal.reservationFundingAccountId == accountId &&
+                          dataStore.currentGoalAmountMinor(goal.id) > 0)
+                        (
+                          type: ReservationContainerType.goal,
+                          id: goal.id,
+                          name: goal.name,
+                          amountMinor: dataStore.currentGoalAmountMinor(
+                            goal.id,
+                          ),
+                        ),
+                  ],
+                ];
+            final selectedReservation = reservationChoices
+                .where(
+                  (choice) =>
+                      choice.type == reservationContainerType &&
+                      choice.id == reservationContainerId,
+                )
+                .firstOrNull;
+            if (selectedReservation == null &&
+                (reservationContainerType != null ||
+                    reservationContainerId != null)) {
+              reservationContainerType = null;
+              reservationContainerId = null;
+            }
 
             String newSplitId() =>
                 'split_${DateTime.now().microsecondsSinceEpoch}_${splitDrafts.length}';
@@ -21087,7 +21702,76 @@ Future<void> showTransactionDialog(
                 scheduledTimeMinutes: futureSchedule.timeMinutes,
                 scheduledFrequency: futureSchedule.frequency,
                 scheduledAlertPreference: futureSchedule.alertPreference,
+                reservationContainerType: reservationContainerType,
+                reservationContainerId: reservationContainerId,
               ));
+            }
+
+            Future<void> chooseReservation() async {
+              FocusManager.instance.primaryFocus?.unfocus();
+              final selected = await showModalBottomSheet<String?>(
+                context: context,
+                showDragHandle: true,
+                builder: (sheetContext) => SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const ListTile(
+                        title: Text(
+                          'Paid from',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        subtitle: Text(
+                          'Use reserved money without recording a second expense',
+                        ),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.remove_circle_outline),
+                        title: const Text('None'),
+                        trailing: selectedReservation == null
+                            ? const Icon(Icons.check)
+                            : null,
+                        onTap: () => Navigator.pop(sheetContext, ''),
+                      ),
+                      for (final choice in reservationChoices)
+                        ListTile(
+                          leading: Icon(
+                            choice.type == ReservationContainerType.fund
+                                ? Icons.account_balance_wallet_outlined
+                                : Icons.flag_outlined,
+                          ),
+                          title: Text(choice.name),
+                          subtitle: Text(
+                            '${choice.type == ReservationContainerType.fund ? 'Fund' : 'Goal'} · ${money(choice.amountMinor, dataStore.preferences.currency)} reserved',
+                          ),
+                          trailing:
+                              selectedReservation?.type == choice.type &&
+                                  selectedReservation?.id == choice.id
+                              ? const Icon(Icons.check)
+                              : null,
+                          onTap: () => Navigator.pop(
+                            sheetContext,
+                            '${choice.type.name}:${choice.id}',
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+              if (selected == null || !context.mounted) return;
+              setDialogState(() {
+                if (selected.isEmpty) {
+                  reservationContainerType = null;
+                  reservationContainerId = null;
+                  return;
+                }
+                final separator = selected.indexOf(':');
+                reservationContainerType = ReservationContainerType.values
+                    .firstWhere(
+                      (value) => value.name == selected.substring(0, separator),
+                    );
+                reservationContainerId = selected.substring(separator + 1);
+              });
             }
 
             Widget accountSubtitle() {
@@ -21534,6 +22218,24 @@ Future<void> showTransactionDialog(
                     onChanged: (value) =>
                         setDialogState(() => transactionStatus = value),
                   ),
+                  if (isExpense && reservationChoices.isNotEmpty) ...[
+                    const TransactionFormDivider(),
+                    const TransactionFormLabel('Reservation'),
+                    selectableRow(
+                      icon: Icons.account_balance_wallet_outlined,
+                      title: Text(selectedReservation?.name ?? 'None'),
+                      subtitle: selectedReservation == null
+                          ? Text(
+                              'Optionally use money from a Goal or Fund',
+                              style: mutedStyle,
+                            )
+                          : Text(
+                              '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
+                              style: mutedStyle,
+                            ),
+                      onTap: chooseReservation,
+                    ),
+                  ],
                   if (linkedSchedule == null) ...[
                     const TransactionFormDivider(),
                     InkWell(
@@ -21690,6 +22392,8 @@ Future<void> showTransactionDialog(
         status: result.status,
         splitLines: result.splitLines,
         scheduledTransactionId: scheduleId,
+        reservationContainerType: result.reservationContainerType,
+        reservationContainerId: result.reservationContainerId,
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
       );
       final schedule = v2_scheduled.ScheduledTransactionRecord(
@@ -21705,6 +22409,8 @@ Future<void> showTransactionDialog(
         frequency: result.scheduledFrequency,
         alertPreference: result.scheduledAlertPreference,
         customAlertTimeMinutes: result.scheduledTimeMinutes,
+        reservationContainerType: result.reservationContainerType,
+        reservationContainerId: result.reservationContainerId,
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
       );
       try {
@@ -21739,6 +22445,8 @@ Future<void> showTransactionDialog(
         note: result.note,
         splitLines: result.splitLines,
         status: result.status,
+        reservationContainerType: result.reservationContainerType,
+        reservationContainerId: result.reservationContainerId,
       );
     } else {
       await dataStore.addIncome(
@@ -21765,6 +22473,8 @@ Future<void> showTransactionDialog(
       splitLines: result.splitLines,
       status: result.status,
       scheduledTransactionId: scheduleId,
+      reservationContainerType: result.reservationContainerType,
+      reservationContainerId: result.reservationContainerId,
       sync: transaction.sync.touched(deviceId: dataStore.deviceId),
       clearTransferAccount: true,
     );
@@ -21781,6 +22491,8 @@ Future<void> showTransactionDialog(
       frequency: result.scheduledFrequency,
       alertPreference: result.scheduledAlertPreference,
       customAlertTimeMinutes: result.scheduledTimeMinutes,
+      reservationContainerType: result.reservationContainerType,
+      reservationContainerId: result.reservationContainerId,
       sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
     );
     try {
@@ -21819,6 +22531,8 @@ Future<void> showTransactionDialog(
         amountMinor: result.amountMinor,
         splitLines: result.splitLines,
         status: result.status,
+        reservationContainerType: result.reservationContainerType,
+        reservationContainerId: result.reservationContainerId,
         sync: transaction.sync.touched(deviceId: dataStore.deviceId),
         clearTransferAccount: true,
       ),

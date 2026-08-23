@@ -21,6 +21,7 @@ class AmountEntryField extends StatefulWidget {
     this.textAlign = TextAlign.right,
     this.decoration,
     this.fieldKey,
+    this.focusNode,
     super.key,
   });
 
@@ -37,6 +38,7 @@ class AmountEntryField extends StatefulWidget {
   final TextAlign textAlign;
   final InputDecoration? decoration;
   final Key? fieldKey;
+  final FocusNode? focusNode;
   final ValueChanged<int> onChanged;
 
   @override
@@ -46,6 +48,7 @@ class AmountEntryField extends StatefulWidget {
 class _AmountEntryFieldState extends State<AmountEntryField> {
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
+  late final bool _ownsFocusNode;
   var _isUpdating = false;
   var _hasAppliedInitialSelection = false;
   var _replaceZeroOnNextInput = false;
@@ -55,12 +58,19 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
   @override
   void initState() {
     super.initState();
-    _focusNode = FocusNode()..addListener(_handleFocusChanged);
+    _ownsFocusNode = widget.focusNode == null;
+    _focusNode = (widget.focusNode ?? FocusNode())
+      ..addListener(_handleFocusChanged);
     _controller = TextEditingController(
       text: _formatter.formatMinor(widget.initialMinor),
     );
     _replaceZeroOnNextInput =
         widget.replaceZeroOnFirstInput && widget.initialMinor == 0;
+    if (widget.autofocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
   }
 
   @override
@@ -77,9 +87,8 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
 
   @override
   void dispose() {
-    _focusNode
-      ..removeListener(_handleFocusChanged)
-      ..dispose();
+    _focusNode.removeListener(_handleFocusChanged);
+    if (_ownsFocusNode) _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }

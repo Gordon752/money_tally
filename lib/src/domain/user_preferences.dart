@@ -13,7 +13,7 @@ enum LaunchScreen {
   reports,
 }
 
-enum PlanSegment { budgets, goals }
+enum PlanSegment { budgets, funds, goals }
 
 enum AppearanceMode { system, light, dark }
 

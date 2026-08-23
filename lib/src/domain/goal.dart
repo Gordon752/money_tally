@@ -27,6 +27,7 @@ class GoalRecord {
     this.requiresFundingMigration = false,
     this.accountId,
     this.accountMigrationVersion = 0,
+    this.reservationModelVersion = 0,
   });
 
   final String id;
@@ -53,6 +54,7 @@ class GoalRecord {
   /// account-backed Goal migration runs.
   final String? accountId;
   final int accountMigrationVersion;
+  final int reservationModelVersion;
   final SyncMetadata sync;
 
   DateTime get createdDate => sync.createdAt;
@@ -62,6 +64,8 @@ class GoalRecord {
   bool get isCompleted => !isDeleted && status == GoalStatus.completed;
   bool get isArchived => !isDeleted && status == GoalStatus.archived;
   bool get isAccountBacked => accountId != null && accountId!.isNotEmpty;
+  bool get usesReservationModel => reservationModelVersion >= 1;
+  String? get reservationFundingAccountId => defaultFundingAccountId;
 
   GoalRecord copyWith({
     String? name,
@@ -80,6 +84,7 @@ class GoalRecord {
     bool? requiresFundingMigration,
     String? accountId,
     int? accountMigrationVersion,
+    int? reservationModelVersion,
     SyncMetadata? sync,
     bool clearTargetDate = false,
     bool clearCompletedAt = false,
@@ -109,6 +114,8 @@ class GoalRecord {
       accountId: clearAccountId ? null : accountId ?? this.accountId,
       accountMigrationVersion:
           accountMigrationVersion ?? this.accountMigrationVersion,
+      reservationModelVersion:
+          reservationModelVersion ?? this.reservationModelVersion,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -132,6 +139,7 @@ class GoalRecord {
       'requiresFundingMigration': requiresFundingMigration,
       'accountId': accountId,
       'accountMigrationVersion': accountMigrationVersion,
+      'reservationModelVersion': reservationModelVersion,
       'sync': sync.toJson(),
     };
   }
@@ -167,6 +175,7 @@ class GoalRecord {
           json['fundingMethod'] == 'reserveFromAccount',
       accountId: json['accountId'] as String?,
       accountMigrationVersion: json['accountMigrationVersion'] as int? ?? 0,
+      reservationModelVersion: json['reservationModelVersion'] as int? ?? 0,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

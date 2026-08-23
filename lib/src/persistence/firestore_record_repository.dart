@@ -7,8 +7,10 @@ import '../domain/account.dart';
 import '../domain/budget.dart';
 import '../domain/category.dart';
 import '../domain/finance_data_set.dart';
+import '../domain/fund.dart';
 import '../domain/goal.dart';
 import '../domain/goal_funding.dart';
+import '../domain/reservation.dart';
 import '../domain/scheduled_transaction.dart';
 import '../domain/scheduled_occurrence_authority.dart';
 import '../domain/transaction.dart';
@@ -36,6 +38,7 @@ class FirestoreRecordRepository
     implements
         FinanceRecordRepository,
         BulkFinanceRecordRepository,
+        ReservationRecordRepository,
         ScheduledOccurrenceStateRepository {
   FirestoreRecordRepository({FirebaseFirestore? firestore})
     : firestore = firestore ?? FirebaseFirestore.instance;
@@ -105,6 +108,8 @@ class FirestoreRecordRepository
       _loadCollection(userId, 'goals', generation),
       _loadCollection(userId, 'goalContributions', generation),
       _loadCollection(userId, 'goalFundingEvents', generation),
+      _loadCollection(userId, 'funds', generation),
+      _loadCollection(userId, 'reservationOperations', generation),
       generation == null
           ? _preferencesDoc(userId).get(const GetOptions(source: Source.server))
           : _generationPreferencesDoc(
@@ -125,8 +130,11 @@ class FirestoreRecordRepository
         results[6] as QuerySnapshot<Map<String, dynamic>>;
     final fundingEventsSnapshot =
         results[7] as QuerySnapshot<Map<String, dynamic>>;
+    final fundsSnapshot = results[8] as QuerySnapshot<Map<String, dynamic>>;
+    final reservationOperationsSnapshot =
+        results[9] as QuerySnapshot<Map<String, dynamic>>;
     final preferencesSnapshot =
-        results[8] as DocumentSnapshot<Map<String, dynamic>>;
+        results[10] as DocumentSnapshot<Map<String, dynamic>>;
 
     return FinanceDataSet(
       accounts: accountsSnapshot.docs
@@ -152,6 +160,12 @@ class FirestoreRecordRepository
           .toList(),
       goalFundingEvents: fundingEventsSnapshot.docs
           .map((doc) => GoalFundingEventRecord.fromJson(doc.data()))
+          .toList(),
+      funds: fundsSnapshot.docs
+          .map((doc) => FundRecord.fromJson(doc.data()))
+          .toList(),
+      reservationOperations: reservationOperationsSnapshot.docs
+          .map((doc) => ReservationOperationRecord.fromJson(doc.data()))
           .toList(),
       preferences: preferencesSnapshot.data() == null
           ? const UserPreferences()
@@ -293,6 +307,44 @@ class FirestoreRecordRepository
   }
 
   @override
+  Future<void> saveFund({
+    required String userId,
+    required FundRecord fund,
+  }) async {
+    await _saveRecord(userId, 'funds', fund.id, fund.toJson());
+  }
+
+  @override
+  Future<void> saveReservationOperation({
+    required String userId,
+    required ReservationOperationRecord operation,
+  }) async {
+    final generation = await _activeGeneration(userId);
+    final reference = generation == null
+        ? _collection(userId, 'reservationOperations')
+        : _generationCollection(userId, generation, 'reservationOperations');
+    final documentId = generation == null
+        ? operation.id
+        : _encodedDocumentId(operation.id);
+    final document = reference.doc(documentId);
+    await firestore.runTransaction((transaction) async {
+      final existingSnapshot = await transaction.get(document);
+      if (existingSnapshot.exists) {
+        final existing = ReservationOperationRecord.fromJson(
+          Map<String, Object?>.from(existingSnapshot.data()!),
+        );
+        if (!_sameImmutableReservationOperation(existing, operation)) {
+          throw StateError(
+            'Reservation operation ${operation.id} is immutable and already exists with different content.',
+          );
+        }
+        return;
+      }
+      transaction.set(document, operation.toJson());
+    });
+  }
+
+  @override
   Future<void> savePreferences({
     required String userId,
     required UserPreferences preferences,
@@ -395,6 +447,20 @@ class FirestoreRecordRepository
       'goalFundingEvents',
       dataSet.goalFundingEvents,
       baseline?.goalFundingEvents ?? const <GoalFundingEventRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'funds',
+      dataSet.funds,
+      baseline?.funds ?? const <FundRecord>[],
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'reservationOperations',
+      dataSet.reservationOperations,
+      baseline?.reservationOperations ?? const <ReservationOperationRecord>[],
       (item) => item.id,
       (item) => item.toJson(),
     );
@@ -522,6 +588,18 @@ class FirestoreRecordRepository
       (item) => item.id,
       (item) => item.toJson(),
     );
+    addRecords(
+      'funds',
+      dataSet.funds,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
+    addRecords(
+      'reservationOperations',
+      dataSet.reservationOperations,
+      (item) => item.id,
+      (item) => item.toJson(),
+    );
     writes.add(
       _GenerationWrite(
         reference: _generationPreferencesDoc(userId, generation),
@@ -604,6 +682,30 @@ class FirestoreRecordRepository
         .replaceAll('=', '');
     return encodedId;
   }
+}
+
+bool _sameImmutableReservationOperation(
+  ReservationOperationRecord left,
+  ReservationOperationRecord right,
+) {
+  return left.id == right.id &&
+      left.containerType == right.containerType &&
+      left.containerId == right.containerId &&
+      left.fundingAccountId == right.fundingAccountId &&
+      left.kind == right.kind &&
+      left.amountMinor == right.amountMinor &&
+      left.effectiveDate.toUtc() == right.effectiveDate.toUtc() &&
+      left.revision == right.revision &&
+      left.baseRevision == right.baseRevision &&
+      left.operationId == right.operationId &&
+      left.deviceId == right.deviceId &&
+      left.transactionId == right.transactionId &&
+      left.scheduledTransactionId == right.scheduledTransactionId &&
+      left.scheduledOccurrenceDate?.toUtc() ==
+          right.scheduledOccurrenceDate?.toUtc() &&
+      left.reversesOperationId == right.reversesOperationId &&
+      left.causationId == right.causationId &&
+      left.note == right.note;
 }
 
 class _GenerationWrite {

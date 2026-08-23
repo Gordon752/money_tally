@@ -2,8 +2,10 @@ import '../domain/account.dart';
 import '../domain/budget.dart';
 import '../domain/category.dart';
 import '../domain/finance_data_set.dart';
+import '../domain/fund.dart';
 import '../domain/goal.dart';
 import '../domain/goal_funding.dart';
+import '../domain/reservation.dart';
 import '../domain/scheduled_transaction.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
@@ -93,5 +95,18 @@ abstract interface class ScheduledOccurrenceStateRepository {
     required String scheduledTransactionId,
     required String dayKey,
     required ScheduledOccurrenceState occurrenceState,
+  });
+}
+
+/// Optional capability for repositories that understand the unified
+/// Goal/Fund reservation model. Keeping this separate allows older/local test
+/// repositories to remain valid while reservation-aware cloud repositories
+/// persist the new records explicitly.
+abstract interface class ReservationRecordRepository {
+  Future<void> saveFund({required String userId, required FundRecord fund});
+
+  Future<void> saveReservationOperation({
+    required String userId,
+    required ReservationOperationRecord operation,
   });
 }

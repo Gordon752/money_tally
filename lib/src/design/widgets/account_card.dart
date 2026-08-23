@@ -15,6 +15,11 @@ class AccountCard extends StatelessWidget {
   const AccountCard({
     required this.account,
     required this.balanceMinor,
+    this.metricBalanceMinor,
+    this.creditInsightsBalanceMinor,
+    this.pendingEffectMinor,
+    this.reservedMinor,
+    this.availableToSpendMinor,
     this.transactions = const [],
     this.nextScheduledPaymentDueDate,
     this.currency = const CurrencyFormatSettings(),
@@ -23,6 +28,7 @@ class AccountCard extends StatelessWidget {
     this.balanceFontSize = 17,
     this.leading,
     this.onTap,
+    this.onAvailabilityTap,
     this.onLongPress,
     this.framed = true,
     this.showNavigationChevron = false,
@@ -34,6 +40,11 @@ class AccountCard extends StatelessWidget {
 
   final AccountRecord account;
   final int balanceMinor;
+  final int? metricBalanceMinor;
+  final int? creditInsightsBalanceMinor;
+  final int? pendingEffectMinor;
+  final int? reservedMinor;
+  final int? availableToSpendMinor;
   final Iterable<TransactionRecord> transactions;
   final DateTime? nextScheduledPaymentDueDate;
   final CurrencyFormatSettings currency;
@@ -42,6 +53,7 @@ class AccountCard extends StatelessWidget {
   final double balanceFontSize;
   final Widget? leading;
   final VoidCallback? onTap;
+  final VoidCallback? onAvailabilityTap;
   final VoidCallback? onLongPress;
   final bool framed;
   final bool showNavigationChevron;
@@ -63,7 +75,10 @@ class AccountCard extends StatelessWidget {
             Row(
               children: [
                 if (leading != null) ...[
-                  leading!,
+                  KeyedSubtree(
+                    key: ValueKey('account-leading-${account.id}'),
+                    child: leading!,
+                  ),
                   const SizedBox(width: AppSpacing.sm),
                 ],
                 Expanded(
@@ -72,6 +87,7 @@ class AccountCard extends StatelessWidget {
                     children: [
                       Text(
                         account.name,
+                        key: ValueKey('account-name-${account.id}'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         softWrap: false,
@@ -110,12 +126,15 @@ class AccountCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                AccountBalanceText(
-                  accountType: account.type,
-                  signedBalanceMinor: balanceMinor,
-                  currency: currency,
-                  fontSize: balanceFontSize,
-                  fontWeight: FontWeight.w700,
+                KeyedSubtree(
+                  key: ValueKey('account-balance-${account.id}'),
+                  child: AccountBalanceText(
+                    accountType: account.type,
+                    signedBalanceMinor: balanceMinor,
+                    currency: currency,
+                    fontSize: balanceFontSize,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 if (showNavigationChevron) ...[
                   const SizedBox(width: AppSpacing.xs),
@@ -127,6 +146,13 @@ class AccountCard extends StatelessWidget {
                 ],
               ],
             ),
+            if (_showsAvailabilitySummary) ...[
+              const SizedBox(height: AppSpacing.xxs),
+              Padding(
+                padding: EdgeInsets.only(left: metricLeadingIndent),
+                child: _availabilitySummaryWidget(context),
+              ),
+            ],
             if (metric != null) ...[
               const SizedBox(height: AppSpacing.sm),
               Padding(
@@ -139,7 +165,7 @@ class AccountCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.md),
               _CreditInsightsPreview(
                 account: account,
-                currentBalanceMinor: balanceMinor,
+                currentBalanceMinor: creditInsightsBalanceMinor ?? balanceMinor,
                 transactions: transactions,
                 nextScheduledPaymentDueDate: nextScheduledPaymentDueDate,
                 currency: currency,
@@ -165,11 +191,12 @@ class AccountCard extends StatelessWidget {
 
   _AccountMetric? _accountMetric() {
     final formatter = MoneyFormatter(currency);
+    final metricBalance = metricBalanceMinor ?? balanceMinor;
     switch (account.type) {
       case AccountType.creditCard:
         final limit = account.creditLimitMinor;
         if (limit == null || limit <= 0) return null;
-        final used = balanceMinor.isNegative ? balanceMinor.abs() : 0;
+        final used = metricBalance.isNegative ? metricBalance.abs() : 0;
         final available = limit - used;
         final progress = (used / limit).clamp(0.0, 1.0).toDouble();
         return _AccountMetric(
@@ -183,7 +210,7 @@ class AccountCard extends StatelessWidget {
       case AccountType.loan:
         final original = account.originalLoanAmountMinor;
         if (original == null || original <= 0) return null;
-        final remaining = balanceMinor.abs();
+        final remaining = metricBalance.abs();
         final rawPaidDown = original - remaining;
         final paidDown = rawPaidDown < 0
             ? 0
@@ -202,6 +229,69 @@ class AccountCard extends StatelessWidget {
         return null;
     }
   }
+
+  bool get _showsAvailabilitySummary {
+    if (availableToSpendMinor == null) return false;
+    return (pendingEffectMinor ?? 0) != 0 || (reservedMinor ?? 0) != 0;
+  }
+
+  Widget _availabilitySummaryWidget(BuildContext context) {
+    final text = Text(
+      _availabilitySummary(),
+      key: ValueKey('account-availability-${account.id}'),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+        color: _isOvercommitted
+            ? AppColors.warning
+            : Theme.of(context).colorScheme.onSurfaceVariant,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+    if (onAvailabilityTap == null) {
+      return Align(alignment: Alignment.centerLeft, child: text);
+    }
+    return Semantics(
+      button: true,
+      label: 'Open ${account.name} account details',
+      child: InkWell(
+        key: ValueKey('account-availability-action-${account.id}'),
+        onTap: onAvailabilityTap,
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Align(alignment: Alignment.centerLeft, child: text),
+        ),
+      ),
+    );
+  }
+
+  String _availabilitySummary() {
+    final formatter = MoneyFormatter(currency);
+    if (_isOvercommitted) {
+      final parts = <String>[
+        'Overcommitted by ${formatter.formatMinor(availableToSpendMinor!.abs())}',
+      ];
+      if ((reservedMinor ?? 0) != 0) {
+        parts.add('${formatter.formatMinor(reservedMinor!)} reserved');
+      }
+      return parts.join(' · ');
+    }
+    final parts = <String>[
+      '${formatter.formatMinor(availableToSpendMinor!)} available',
+    ];
+    if ((reservedMinor ?? 0) != 0) {
+      parts.add('${formatter.formatMinor(reservedMinor!)} reserved');
+    } else if ((pendingEffectMinor ?? 0) != 0) {
+      parts.add('${formatter.formatMinor(pendingEffectMinor!)} pending');
+    }
+    return parts.join(' · ');
+  }
+
+  bool get _isOvercommitted =>
+      availableToSpendMinor != null &&
+      availableToSpendMinor! < 0 &&
+      balanceMinor >= 0;
 
   String _groupLabel(String groupName) {
     return switch (groupName) {
