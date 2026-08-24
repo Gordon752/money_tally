@@ -192,6 +192,7 @@ void trackmarkBackgroundCallbackDispatcher() {
                 userId: user.uid,
                 dataStore: dataStore,
                 timeout: const Duration(seconds: 25),
+                trigger: CloudSyncTrigger.background,
               ) &&
               succeeded;
           coordinator.dispose();

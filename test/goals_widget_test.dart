@@ -5,16 +5,116 @@ import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/goal.dart';
 import 'package:money_tally/src/domain/goal_funding.dart';
+import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/reservation.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
 import 'package:money_tally/src/domain/transaction.dart';
 import 'package:money_tally/src/domain/user_preferences.dart';
+import 'package:money_tally/src/goals/goal_calculator.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
 void main() {
   setUp(() {
     TestWidgetsFlutterBinding.ensureInitialized();
+  });
+
+  test('Goal status copy expresses pace, achievement, and replenishment', () {
+    const currency = CurrencyFormatSettings();
+    final dated = _goal(
+      id: 'dated-labels',
+      name: 'Dated Labels',
+      targetDate: DateTime(2027, 8, 23),
+    );
+    GoalProgressMetrics metrics({
+      required GoalProgressStatus status,
+      required int current,
+      required int remaining,
+      required int difference,
+    }) => GoalProgressMetrics(
+      currentAmountMinor: current,
+      remainingAmountMinor: remaining,
+      percentageComplete: current / dated.targetAmountMinor,
+      expectedAmountMinor: current - difference,
+      aheadBehindMinor: difference,
+      requiredWeeklyMinor: 0,
+      requiredMonthlyMinor: 0,
+      status: status,
+    );
+
+    expect(
+      goalCurrentStateLabel(
+        dated,
+        metrics(
+          status: GoalProgressStatus.onTrack,
+          current: 50000,
+          remaining: 50000,
+          difference: 0,
+        ),
+        currency,
+      ),
+      'On track',
+    );
+    expect(
+      goalCurrentStateLabel(
+        dated,
+        metrics(
+          status: GoalProgressStatus.ahead,
+          current: 60000,
+          remaining: 40000,
+          difference: 10000,
+        ),
+        currency,
+      ),
+      r'Ahead by $100.00',
+    );
+    expect(
+      goalCurrentStateLabel(
+        dated,
+        metrics(
+          status: GoalProgressStatus.behind,
+          current: 40000,
+          remaining: 60000,
+          difference: -10000,
+        ),
+        currency,
+      ),
+      r'Behind by $100.00',
+    );
+
+    final achieved = dated.copyWith(status: GoalStatus.completed);
+    expect(
+      goalCurrentStateLabel(
+        achieved,
+        metrics(
+          status: GoalProgressStatus.completed,
+          current: 100000,
+          remaining: 0,
+          difference: 0,
+        ),
+        currency,
+      ),
+      'Achieved',
+    );
+
+    final maintain = _goal(
+      id: 'maintain-labels',
+      name: 'Maintain Labels',
+      goalType: GoalType.maintainBalance,
+    );
+    expect(
+      goalCurrentStateLabel(
+        maintain,
+        metrics(
+          status: GoalProgressStatus.replenishing,
+          current: 0,
+          remaining: 100000,
+          difference: -100000,
+        ),
+        currency,
+      ),
+      r'$1,000.00 needed to replenish',
+    );
   });
 
   testWidgets(
@@ -148,10 +248,15 @@ void main() {
 
       await tester.longPress(find.byKey(ValueKey('goal-card-${goal.id}')));
       await tester.pumpAndSettle();
-      expect(find.text('Goal Actions'), findsWidgets);
+      expect(find.text('View Activity'), findsOneWidget);
       expect(find.text('Archive'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);
 
+      await tester.scrollUntilVisible(
+        find.text('Delete'),
+        120,
+        scrollable: find.byType(Scrollable).last,
+      );
       await tester.tap(find.text('Delete'));
       await tester.pumpAndSettle();
       expect(find.text('Delete this Goal permanently?'), findsOneWidget);
@@ -240,6 +345,11 @@ void main() {
 
     await tester.longPress(find.byKey(ValueKey('goal-card-${goal.id}')));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Delete'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
 
@@ -481,7 +591,74 @@ void main() {
     expect(find.text('Maintain a Balance'), findsOneWidget);
     expect(find.text('Replenish by date'), findsOneWidget);
     expect(find.text('Mark Complete'), findsNothing);
-    expect(find.byKey(const ValueKey('goal-details-archive')), findsOneWidget);
+    expect(find.text('Goal Actions'), findsNothing);
+  });
+
+  testWidgets('Goal card and details share Reach Target status semantics', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final dated = await store.createGoal(
+      name: 'Dated Empty',
+      targetAmountMinor: 100000,
+      startingAmountMinor: 0,
+      targetDate: DateTime(2027, 8, 23),
+      defaultFundingAccountId: 'checking',
+    );
+    await tester.pumpWidget(_testApp(store, GoalCard(goal: dated)));
+
+    expect(find.text('Not started'), findsOneWidget);
+    expect(find.text('On track'), findsNothing);
+
+    await tester.tap(find.byKey(ValueKey('goal-card-${dated.id}')));
+    await tester.pumpAndSettle();
+    expect(find.text('View Activity'), findsOneWidget);
+    expect(find.text('Goal Details'), findsNothing);
+    await tester.tap(find.text('View Activity'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Goal Details'), findsOneWidget);
+    expect(find.text('Not started'), findsWidgets);
+    expect(find.text('On track'), findsNothing);
+  });
+
+  testWidgets('undated funded Goal uses remaining language everywhere', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Undated Funded',
+      targetAmountMinor: 100000,
+      startingAmountMinor: 0,
+      targetDate: null,
+      defaultFundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.goal,
+      containerId: goal.id,
+      amountMinor: 25000,
+      date: DateTime(2026, 8, 23),
+    );
+    await tester.pumpWidget(_testApp(store, GoalCard(goal: goal)));
+
+    expect(find.text(r'$750.00 remaining'), findsOneWidget);
+    expect(find.text('On track'), findsNothing);
+    expect(find.textContaining('Ahead'), findsNothing);
+    expect(find.textContaining('Behind'), findsNothing);
+
+    await tester.tap(find.byKey(ValueKey('goal-card-${goal.id}')));
+    await tester.pumpAndSettle();
+    expect(find.text('View Activity'), findsOneWidget);
+    await tester.tap(find.text('View Activity'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Goal Details'), findsOneWidget);
+    expect(find.text(r'$750.00 remaining'), findsWidgets);
+    expect(find.text('On track'), findsNothing);
+    expect(find.textContaining('Ahead'), findsNothing);
+    expect(find.textContaining('Behind'), findsNothing);
   });
 
   testWidgets(
@@ -507,11 +684,9 @@ void main() {
       expect(find.text('Vacation'), findsOneWidget);
       expect(find.textContaining('Achieved'), findsOneWidget);
 
-      await tester.tap(
-        find.byKey(ValueKey('goal-add-contribution-${goal.id}')),
-      );
+      await tester.tap(find.byKey(ValueKey('goal-card-${goal.id}')));
       await tester.pumpAndSettle();
-      expect(find.text('Goal Actions'), findsWidgets);
+      expect(find.text('Goal Actions'), findsNothing);
       expect(find.text('Spend from Goal'), findsOneWidget);
       expect(find.text('Return Reserved Money'), findsOneWidget);
       expect(find.text('View Activity'), findsOneWidget);
@@ -614,7 +789,7 @@ void main() {
     await tester.tap(find.text('Contribute'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Goal Actions'), findsOneWidget);
+    expect(find.text('View Activity'), findsOneWidget);
     await tester.tap(find.text('Fund Goal'));
     await tester.pumpAndSettle();
 
@@ -762,7 +937,7 @@ void main() {
   });
 
   testWidgets(
-    'Goal Details opens and closes in the nested app navigator without errors',
+    'Goal card opens actions then Activity in the nested app navigator',
     (tester) async {
       await _setPhoneSize(tester);
       final store = _store();
@@ -779,9 +954,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
+      expect(find.text('View Activity'), findsOneWidget);
+      expect(find.text('Goal Details'), findsNothing);
+      await tester.tap(find.text('View Activity'));
+      await tester.pumpAndSettle();
+
       expect(find.text('Goal Details'), findsOneWidget);
       expect(find.text('Emergency Fund'), findsWidgets);
-      expect(find.text('Goal Actions'), findsWidgets);
+      expect(find.text('Goal Actions'), findsNothing);
 
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();

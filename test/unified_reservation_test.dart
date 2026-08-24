@@ -406,6 +406,53 @@ void main() {
     expect(store.reservationOperations, hasLength(2));
   });
 
+  test('Fund covers its reserved portion of a larger real expense', () async {
+    final store = FinanceDataStore(
+      dataSet: _baseDataSet(sync: sync).copyWith(
+        reservationOperations: [
+          _operation(
+            id: 'allocate-partial-bills',
+            kind: ReservationOperationKind.allocate,
+            amountMinor: 200000,
+            revision: 1,
+            sync: sync,
+          ),
+        ],
+      ),
+      deviceId: 'device-a',
+    );
+
+    final transaction = await store.addExpense(
+      accountId: 'checking',
+      categoryId: 'expense',
+      date: today,
+      payee: 'Apple Store',
+      amountMinor: 210000,
+      reservationContainerType: ReservationContainerType.fund,
+      reservationContainerId: 'bills',
+    );
+    final consumption = store.reservationOperations.singleWhere(
+      (operation) =>
+          operation.transactionId == transaction.id &&
+          operation.kind == ReservationOperationKind.consume,
+    );
+
+    expect(consumption.amountMinor, 200000);
+    expect(store.balanceForAccount('checking'), 290000);
+    expect(store.currentFundAmountMinor('bills', asOf: today), 0);
+    expect(store.availableToSpendForAccount('checking', asOf: today), 290000);
+    expect(store.expensesThisMonthMinor(now: today), 210000);
+
+    await store.saveTransaction(
+      transaction.copyWith(
+        sync: transaction.sync.deleted(deviceId: store.deviceId),
+      ),
+    );
+    expect(store.currentFundAmountMinor('bills', asOf: today), 200000);
+    expect(store.balanceForAccount('checking'), 500000);
+    expect(store.availableToSpendForAccount('checking', asOf: today), 300000);
+  });
+
   test('editing and deleting Fund-backed expense reverses causally', () async {
     final store = FinanceDataStore(
       dataSet: _baseDataSet(sync: sync).copyWith(

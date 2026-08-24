@@ -291,6 +291,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
         final lastSuccessfulSyncAt = coordinator?.lastSuccessfulSyncAt;
         return FinanceHome(
           syncLabel: syncLabel,
+          syncErrorLabel: coordinator?.lastErrorDescription,
+          syncDiagnosticLabel: coordinator?.lastDiagnostic?.conciseDescription,
           lastSuccessfulSyncLabel: lastSuccessfulSyncAt == null
               ? null
               : '${shortDate(lastSuccessfulSyncAt.toLocal())} '
@@ -341,6 +343,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
         userId: user.uid,
         dataStore: dataStore,
         retryAfterTransientFailure: true,
+        trigger: CloudSyncTrigger.initial,
       );
       if (succeeded) _syncedUid = user.uid;
     }
@@ -403,7 +406,11 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     ).toIso8601String();
     if (_foregroundCatchUpAttempt == window) return;
     _foregroundCatchUpAttempt = window;
-    await coordinator.synchronize(userId: user.uid, dataStore: dataStore);
+    await coordinator.synchronize(
+      userId: user.uid,
+      dataStore: dataStore,
+      trigger: CloudSyncTrigger.foregroundCatchUp,
+    );
   }
 
   Future<void> _syncNow(MoneyTallyUser user, FinanceDataStore dataStore) async {
@@ -413,8 +420,16 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     final succeeded = await coordinator.synchronize(
       userId: user.uid,
       dataStore: dataStore,
+      trigger: CloudSyncTrigger.manual,
     );
-    if (!mounted || !succeeded) return;
+    if (!mounted) return;
+    if (!succeeded) {
+      final message = coordinator.lastErrorDescription ?? 'Cloud sync failed';
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+      return;
+    }
     _syncedUid = user.uid;
     ScaffoldMessenger.maybeOf(context)
       ?..hideCurrentSnackBar()

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../domain/account.dart';
 import '../domain/budget.dart';
@@ -62,6 +63,8 @@ class FirestoreRecordRepository
     implements
         FinanceRecordRepository,
         BulkFinanceRecordRepository,
+        IncrementalFinanceRecordRepository,
+        CloudSyncMetricsProvider,
         ReservationRecordRepository,
         ScheduledOccurrenceStateRepository,
         ScheduledHistoryResetRepository {
@@ -70,9 +73,85 @@ class FirestoreRecordRepository
 
   final FirebaseFirestore firestore;
   final Map<String, String?> _activeGenerations = {};
+  CloudSyncRepositoryMetrics _syncMetrics = const CloudSyncRepositoryMetrics();
 
   static const _batchWriteLimit = 400;
   static const _normalSyncWriteConcurrency = 8;
+  static const _cloudUpdatedAtField = '_trackmarkCloudUpdatedAt';
+  static const _incrementalCachePrefix =
+      'trackmark_firestore_incremental_sync_cache_';
+  static const _syncCollections = <String>[
+    'accounts',
+    'categories',
+    'transactions',
+    'scheduledTransactions',
+    'budgets',
+    'goals',
+    'goalContributions',
+    'goalFundingEvents',
+    'funds',
+    'reservationOperations',
+  ];
+
+  @override
+  CloudSyncRepositoryMetrics get currentSyncMetrics => _syncMetrics;
+
+  @override
+  void beginSyncMetrics() {
+    _syncMetrics = const CloudSyncRepositoryMetrics();
+  }
+
+  void _updateSyncMetrics({
+    CloudSyncLoadMode? loadMode,
+    String? fullBootstrapReason,
+    int downloadedDelta = 0,
+    int uploadedDelta = 0,
+    int readDelta = 0,
+    int writeDelta = 0,
+    int queryDelta = 0,
+    int? cacheBytes,
+    Map<String, int> uploadedByCollectionDelta = const {},
+    Map<String, Map<String, int>> changedFieldsByCollectionDelta = const {},
+  }) {
+    final current = _syncMetrics;
+    final uploadedByCollection = <String, int>{...current.uploadedByCollection};
+    for (final entry in uploadedByCollectionDelta.entries) {
+      uploadedByCollection.update(
+        entry.key,
+        (value) => value + entry.value,
+        ifAbsent: () => entry.value,
+      );
+    }
+    final changedFieldsByCollection = <String, Map<String, int>>{
+      for (final entry in current.changedFieldsByCollection.entries)
+        entry.key: {...entry.value},
+    };
+    for (final collectionEntry in changedFieldsByCollectionDelta.entries) {
+      final fields = changedFieldsByCollection.putIfAbsent(
+        collectionEntry.key,
+        () => <String, int>{},
+      );
+      for (final fieldEntry in collectionEntry.value.entries) {
+        fields.update(
+          fieldEntry.key,
+          (value) => value + fieldEntry.value,
+          ifAbsent: () => fieldEntry.value,
+        );
+      }
+    }
+    _syncMetrics = CloudSyncRepositoryMetrics(
+      loadMode: loadMode ?? current.loadMode,
+      fullBootstrapReason: fullBootstrapReason ?? current.fullBootstrapReason,
+      documentsDownloaded: current.documentsDownloaded + downloadedDelta,
+      documentsUploaded: current.documentsUploaded + uploadedDelta,
+      estimatedReads: current.estimatedReads + readDelta,
+      estimatedWrites: current.estimatedWrites + writeDelta,
+      queryCount: current.queryCount + queryDelta,
+      cacheBytes: cacheBytes ?? current.cacheBytes,
+      uploadedByCollection: uploadedByCollection,
+      changedFieldsByCollection: changedFieldsByCollection,
+    );
+  }
 
   CollectionReference<Map<String, dynamic>> get _users {
     return firestore.collection('users');
@@ -91,6 +170,10 @@ class FirestoreRecordRepository
 
   DocumentReference<Map<String, dynamic>> _authorityDoc(String userId) {
     return _users.doc(userId).collection('metadata').doc('restoreAuthority');
+  }
+
+  DocumentReference<Map<String, dynamic>> _syncClockDoc(String userId) {
+    return _users.doc(userId).collection('metadata').doc('syncClock');
   }
 
   DocumentReference<Map<String, dynamic>> _generationPreferencesDoc(
@@ -124,6 +207,13 @@ class FirestoreRecordRepository
   Future<FinanceDataSet> loadDataSet(String userId) async {
     await firestore.enableNetwork();
     final generation = await _loadActiveGeneration(userId);
+    return _loadDataSetForGeneration(userId, generation);
+  }
+
+  Future<FinanceDataSet> _loadDataSetForGeneration(
+    String userId,
+    String? generation,
+  ) async {
     final results = await Future.wait([
       _loadCollection(userId, 'accounts', generation),
       _loadCollection(userId, 'categories', generation),
@@ -161,6 +251,8 @@ class FirestoreRecordRepository
     final preferencesSnapshot =
         results[10] as DocumentSnapshot<Map<String, dynamic>>;
 
+    _recordSnapshotReads(results);
+
     return FinanceDataSet(
       accounts: accountsSnapshot.docs
           .map((doc) => AccountRecord.fromJson(doc.data()))
@@ -196,6 +288,212 @@ class FirestoreRecordRepository
           ? const UserPreferences()
           : UserPreferences.fromJson(preferencesSnapshot.data()!),
     );
+  }
+
+  @override
+  Future<IncrementalFinanceSyncLoad> loadDataSetForSync(String userId) async {
+    await firestore.enableNetwork();
+    final generation = await _loadActiveGeneration(userId);
+    final through = await _createServerCheckpoint(userId);
+    final cacheResult = await _loadIncrementalCache(userId);
+    final cached = cacheResult.cache;
+    final fullBootstrapExpired =
+        cached != null &&
+        through.difference(cached.fullBootstrapAt).abs() >=
+            const Duration(days: 7);
+    if (cached == null ||
+        cached.generation != generation ||
+        fullBootstrapExpired) {
+      final reason = cached == null
+          ? cacheResult.missReason ?? 'incremental cache unavailable'
+          : cached.generation != generation
+          ? 'restore generation changed'
+          : 'seven-day safety refresh';
+      _updateSyncMetrics(
+        loadMode: CloudSyncLoadMode.fullBootstrap,
+        fullBootstrapReason: reason,
+      );
+      return IncrementalFinanceSyncLoad(
+        dataSet: await _loadDataSetForGeneration(userId, generation),
+        generation: generation,
+        through: through,
+        wasFullBootstrap: true,
+        fullBootstrapAt: through,
+      );
+    }
+
+    _updateSyncMetrics(loadMode: CloudSyncLoadMode.incremental);
+
+    final snapshots = await Future.wait([
+      for (final collection in _syncCollections)
+        _loadChangedCollection(
+          userId,
+          collection,
+          generation,
+          after: cached.through,
+          through: through,
+        ),
+      generation == null
+          ? _preferencesDoc(userId).get(const GetOptions(source: Source.server))
+          : _generationPreferencesDoc(
+              userId,
+              generation,
+            ).get(const GetOptions(source: Source.server)),
+    ]);
+    _recordSnapshotReads(snapshots);
+    final delta = _dataSetFromSnapshots(snapshots);
+    return IncrementalFinanceSyncLoad(
+      dataSet: applyRemoteDataSetDelta(cached.dataSet, delta),
+      generation: generation,
+      through: through,
+      wasFullBootstrap: false,
+      fullBootstrapAt: cached.fullBootstrapAt,
+    );
+  }
+
+  @override
+  Future<void> acknowledgeIncrementalSync({
+    required String userId,
+    required IncrementalFinanceSyncLoad load,
+    required FinanceDataSet resultingDataSet,
+  }) async {
+    final preferences = await SharedPreferences.getInstance();
+    final encoded = jsonEncode({
+      'generation': load.generation,
+      'through': load.through.toUtc().toIso8601String(),
+      'fullBootstrapAt': (load.fullBootstrapAt ?? load.through)
+          .toUtc()
+          .toIso8601String(),
+      'dataSet': resultingDataSet.toJson(),
+    });
+    final saved = await preferences.setString(
+      '$_incrementalCachePrefix$userId',
+      encoded,
+    );
+    if (!saved) {
+      throw StateError('Cloud sync cache could not be saved locally.');
+    }
+    _updateSyncMetrics(cacheBytes: utf8.encode(encoded).length);
+  }
+
+  void _recordSnapshotReads(List<Object> snapshots) {
+    var documents = 0;
+    var reads = 0;
+    var queries = 0;
+    for (final snapshot in snapshots) {
+      if (snapshot is QuerySnapshot<Map<String, dynamic>>) {
+        final count = snapshot.docs.length;
+        documents += count;
+        reads += count == 0 ? 1 : count;
+        queries += 1;
+      } else if (snapshot is DocumentSnapshot<Map<String, dynamic>>) {
+        documents += snapshot.exists ? 1 : 0;
+        reads += 1;
+      }
+    }
+    _updateSyncMetrics(
+      downloadedDelta: documents,
+      readDelta: reads,
+      queryDelta: queries,
+    );
+  }
+
+  FinanceDataSet _dataSetFromSnapshots(List<Object> results) {
+    final accounts = results[0] as QuerySnapshot<Map<String, dynamic>>;
+    final categories = results[1] as QuerySnapshot<Map<String, dynamic>>;
+    final transactions = results[2] as QuerySnapshot<Map<String, dynamic>>;
+    final scheduled = results[3] as QuerySnapshot<Map<String, dynamic>>;
+    final budgets = results[4] as QuerySnapshot<Map<String, dynamic>>;
+    final goals = results[5] as QuerySnapshot<Map<String, dynamic>>;
+    final contributions = results[6] as QuerySnapshot<Map<String, dynamic>>;
+    final fundingEvents = results[7] as QuerySnapshot<Map<String, dynamic>>;
+    final funds = results[8] as QuerySnapshot<Map<String, dynamic>>;
+    final operations = results[9] as QuerySnapshot<Map<String, dynamic>>;
+    final preference = results[10] as DocumentSnapshot<Map<String, dynamic>>;
+    return FinanceDataSet(
+      accounts: accounts.docs
+          .map((doc) => AccountRecord.fromJson(doc.data()))
+          .toList(),
+      categories: categories.docs
+          .map((doc) => CategoryRecord.fromJson(doc.data()))
+          .toList(),
+      transactions: transactions.docs
+          .map((doc) => TransactionRecord.fromJson(doc.data()))
+          .toList(),
+      scheduledTransactions: scheduled.docs
+          .map((doc) => ScheduledTransactionRecord.fromJson(doc.data()))
+          .toList(),
+      budgets: budgets.docs
+          .map((doc) => BudgetRecord.fromJson(doc.data()))
+          .toList(),
+      goals: goals.docs.map((doc) => GoalRecord.fromJson(doc.data())).toList(),
+      goalContributions: contributions.docs
+          .map((doc) => GoalContributionRecord.fromJson(doc.data()))
+          .toList(),
+      goalFundingEvents: fundingEvents.docs
+          .map((doc) => GoalFundingEventRecord.fromJson(doc.data()))
+          .toList(),
+      funds: funds.docs.map((doc) => FundRecord.fromJson(doc.data())).toList(),
+      reservationOperations: operations.docs
+          .map((doc) => ReservationOperationRecord.fromJson(doc.data()))
+          .toList(),
+      preferences: preference.data() == null
+          ? const UserPreferences()
+          : UserPreferences.fromJson(preference.data()!),
+    );
+  }
+
+  Future<DateTime> _createServerCheckpoint(String userId) async {
+    final reference = _syncClockDoc(userId);
+    _updateSyncMetrics(writeDelta: 1);
+    await reference.set({
+      'checkpointAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    _updateSyncMetrics(readDelta: 1);
+    final snapshot = await reference.get(
+      const GetOptions(source: Source.server),
+    );
+    final value = snapshot.data()?['checkpointAt'];
+    if (value is! Timestamp) {
+      throw StateError('Cloud sync checkpoint is unavailable.');
+    }
+    return value.toDate().toUtc();
+  }
+
+  Future<_IncrementalCacheLoadResult> _loadIncrementalCache(
+    String userId,
+  ) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.reload();
+    final encoded = preferences.getString('$_incrementalCachePrefix$userId');
+    if (encoded == null) {
+      return const _IncrementalCacheLoadResult(
+        missReason: 'no acknowledged incremental cache',
+      );
+    }
+    try {
+      final json = Map<String, Object?>.from(jsonDecode(encoded) as Map);
+      final through = DateTime.parse(json['through']! as String).toUtc();
+      final fullBootstrapAt = DateTime.parse(
+        (json['fullBootstrapAt'] ?? json['through'])! as String,
+      ).toUtc();
+      return _IncrementalCacheLoadResult(
+        cache: _IncrementalSyncCache(
+          generation: json['generation'] as String?,
+          through: through,
+          fullBootstrapAt: fullBootstrapAt,
+          dataSet: FinanceDataSet.fromJson(
+            Map<String, Object?>.from(json['dataSet']! as Map),
+          ),
+        ),
+      );
+    } on Object catch (error) {
+      debugPrint('Discarding unreadable cloud sync cache: $error');
+      await preferences.remove('$_incrementalCachePrefix$userId');
+      return _IncrementalCacheLoadResult(
+        missReason: 'incremental cache was unreadable: ${error.runtimeType}',
+      );
+    }
   }
 
   @override
@@ -263,6 +561,7 @@ class FirestoreRecordRepository
             generation,
             'scheduledTransactions',
           ).doc(_encodedDocumentId(scheduledTransactionId));
+    _updateSyncMetrics(readDelta: 1);
     return firestore.runTransaction((transaction) async {
       final snapshot = await transaction.get(reference);
       if (!snapshot.exists) {
@@ -294,8 +593,10 @@ class FirestoreRecordRepository
           ? occurrenceState
           : authoritativeOccurrenceState(remoteState, occurrenceState);
       if (identical(winner, occurrenceState)) {
+        _updateSyncMetrics(uploadedDelta: 1, writeDelta: 1);
         transaction.update(reference, {
           'occurrenceStates.$dayKey': occurrenceState.toJson(),
+          _cloudUpdatedAtField: FieldValue.serverTimestamp(),
         });
       }
       return winner;
@@ -322,6 +623,7 @@ class FirestoreRecordRepository
             generation,
             'scheduledTransactions',
           ).doc(_encodedDocumentId(scheduledTransaction.id));
+    _updateSyncMetrics(readDelta: 1);
     await firestore.runTransaction((transaction) async {
       final snapshot = await transaction.get(reference);
       if (!snapshot.exists) {
@@ -355,7 +657,9 @@ class FirestoreRecordRepository
         }
         ..['occurrences'] = scheduledTransaction.occurrences
             .map((occurrence) => occurrence.toJson())
-            .toList();
+            .toList()
+        ..[_cloudUpdatedAtField] = FieldValue.serverTimestamp();
+      _updateSyncMetrics(uploadedDelta: 1, writeDelta: 1);
       transaction.update(reference, data);
     });
   }
@@ -436,7 +740,7 @@ class FirestoreRecordRepository
         }
         return;
       }
-      transaction.set(document, operation.toJson());
+      transaction.set(document, _cloudWriteJson(operation.toJson()));
     });
   }
 
@@ -449,7 +753,10 @@ class FirestoreRecordRepository
     final document = generation == null
         ? _preferencesDoc(userId)
         : _generationPreferencesDoc(userId, generation);
-    await document.set(preferences.toJson(), SetOptions(merge: true));
+    await document.set(
+      _cloudWriteJson(preferences.toJson()),
+      SetOptions(merge: true),
+    );
   }
 
   @override
@@ -460,6 +767,25 @@ class FirestoreRecordRepository
   }) async {
     final generation = await _activeGeneration(userId);
     final writes = <_GenerationWrite>[];
+    final changedFieldsByCollection = <String, Map<String, int>>{};
+
+    void recordChangedFields(
+      String collection,
+      Map<String, Object?>? baseline,
+      Map<String, Object?> current,
+    ) {
+      final fields = changedFieldsByCollection.putIfAbsent(
+        collection,
+        () => <String, int>{},
+      );
+      final keys = <String>{...?baseline?.keys, ...current.keys};
+      for (final key in keys) {
+        final before = baseline?[key];
+        final after = current[key];
+        if (jsonEncode(before) == jsonEncode(after)) continue;
+        fields.update(key, (value) => value + 1, ifAbsent: () => 1);
+      }
+    }
 
     void addRecords<T>(
       String collection,
@@ -479,6 +805,7 @@ class FirestoreRecordRepository
             jsonEncode(baselineData) == jsonEncode(data)) {
           continue;
         }
+        recordChangedFields(collection, baselineData, data);
         final reference = generation == null
             ? _collection(userId, collection).doc(id)
             : _generationCollection(
@@ -486,7 +813,13 @@ class FirestoreRecordRepository
                 generation,
                 collection,
               ).doc(_encodedDocumentId(id));
-        writes.add(_GenerationWrite(reference: reference, data: data));
+        writes.add(
+          _GenerationWrite(
+            collection: collection,
+            reference: reference,
+            data: _cloudWriteJson(data),
+          ),
+        );
       }
     }
 
@@ -574,21 +907,29 @@ class FirestoreRecordRepository
       (item) => item.id,
       (item) => item.toJson(),
     );
-    final preferencesJson = dataSet.preferences.toJson();
-    if (baseline == null ||
-        jsonEncode(baseline.preferences.toJson()) !=
-            jsonEncode(preferencesJson)) {
-      writes.add(
-        _GenerationWrite(
-          reference: generation == null
-              ? _preferencesDoc(userId)
-              : _generationPreferencesDoc(userId, generation),
-          data: preferencesJson,
-        ),
-      );
-    }
+    // Preferences are intentionally device-local during normal data-set
+    // merges (see mergeFinanceDataSetsPreferCurrent). Explicit user changes
+    // are published by savePreferences, while authoritative restore writes
+    // use replaceDataSetAuthoritatively. Including a device's retained local
+    // preferences in routine bulk reconciliation makes devices overwrite one
+    // another at every launch.
 
     debugPrint('Cloud sync upload: ${writes.length} documents');
+    final uploadedByCollection = <String, int>{};
+    for (final write in writes) {
+      uploadedByCollection.update(
+        write.collection,
+        (value) => value + 1,
+        ifAbsent: () => 1,
+      );
+    }
+    debugPrint('Cloud sync upload breakdown: $uploadedByCollection');
+    _updateSyncMetrics(
+      uploadedDelta: writes.length,
+      writeDelta: writes.length,
+      uploadedByCollectionDelta: uploadedByCollection,
+      changedFieldsByCollectionDelta: changedFieldsByCollection,
+    );
     for (
       var offset = 0;
       offset < writes.length;
@@ -628,7 +969,16 @@ class FirestoreRecordRepository
       );
     }
     for (final schedule in dataSet.scheduledTransactions) {
+      final baselineSchedule = baselineSchedulesById[schedule.id];
+      // New schedules carry their occurrence state in the atomic create above.
+      if (baselineSchedule == null) continue;
+      final baselineAuthority = occurrenceAuthorityFor(baselineSchedule);
       for (final entry in occurrenceAuthorityFor(schedule).entries) {
+        final previous = baselineAuthority[entry.key];
+        if (previous != null &&
+            jsonEncode(previous.toJson()) == jsonEncode(entry.value.toJson())) {
+          continue;
+        }
         await saveScheduledOccurrenceState(
           userId: userId,
           scheduledTransactionId: schedule.id,
@@ -657,12 +1007,13 @@ class FirestoreRecordRepository
       for (final record in records) {
         writes.add(
           _GenerationWrite(
+            collection: collection,
             reference: _generationCollection(
               userId,
               generation,
               collection,
             ).doc(_encodedDocumentId(idOf(record))),
-            data: jsonOf(record),
+            data: _cloudWriteJson(jsonOf(record)),
           ),
         );
       }
@@ -730,8 +1081,9 @@ class FirestoreRecordRepository
     );
     writes.add(
       _GenerationWrite(
+        collection: 'preferences',
         reference: _generationPreferencesDoc(userId, generation),
-        data: dataSet.preferences.toJson(),
+        data: _cloudWriteJson(dataSet.preferences.toJson()),
       ),
     );
 
@@ -769,8 +1121,28 @@ class FirestoreRecordRepository
           ).get(const GetOptions(source: Source.server));
   }
 
+  Future<QuerySnapshot<Map<String, dynamic>>> _loadChangedCollection(
+    String userId,
+    String collection,
+    String? generation, {
+    required DateTime after,
+    required DateTime through,
+  }) {
+    final reference = generation == null
+        ? _collection(userId, collection)
+        : _generationCollection(userId, generation, collection);
+    return reference
+        .where(_cloudUpdatedAtField, isGreaterThan: Timestamp.fromDate(after))
+        .where(
+          _cloudUpdatedAtField,
+          isLessThanOrEqualTo: Timestamp.fromDate(through),
+        )
+        .get(const GetOptions(source: Source.server));
+  }
+
   Future<String?> _loadActiveGeneration(String userId) async {
     await firestore.enableNetwork();
+    _updateSyncMetrics(readDelta: 1);
     final snapshot = await _authorityDoc(
       userId,
     ).get(const GetOptions(source: Source.server));
@@ -801,7 +1173,14 @@ class FirestoreRecordRepository
         ? _collection(userId, collection)
         : _generationCollection(userId, generation, collection);
     final documentId = generation == null ? id : _encodedDocumentId(id);
-    await reference.doc(documentId).set(json, SetOptions(merge: true));
+    await reference
+        .doc(documentId)
+        .set(_cloudWriteJson(json), SetOptions(merge: true));
+  }
+
+  Map<String, Object?> _cloudWriteJson(Map<String, Object?> json) {
+    return Map<String, Object?>.from(json)
+      ..[_cloudUpdatedAtField] = FieldValue.serverTimestamp();
   }
 
   String _encodedDocumentId(String recordId) {
@@ -836,9 +1215,87 @@ bool _sameImmutableReservationOperation(
       left.note == right.note;
 }
 
-class _GenerationWrite {
-  const _GenerationWrite({required this.reference, required this.data});
+class _IncrementalSyncCache {
+  const _IncrementalSyncCache({
+    required this.generation,
+    required this.through,
+    required this.dataSet,
+    required this.fullBootstrapAt,
+  });
 
+  final String? generation;
+  final DateTime through;
+  final FinanceDataSet dataSet;
+  final DateTime fullBootstrapAt;
+}
+
+class _IncrementalCacheLoadResult {
+  const _IncrementalCacheLoadResult({this.cache, this.missReason});
+
+  final _IncrementalSyncCache? cache;
+  final String? missReason;
+}
+
+@visibleForTesting
+FinanceDataSet applyRemoteDataSetDelta(
+  FinanceDataSet baseline,
+  FinanceDataSet delta,
+) {
+  List<T> merge<T>(
+    List<T> current,
+    List<T> changed,
+    String Function(T item) idOf,
+  ) {
+    final byId = <String, T>{for (final item in current) idOf(item): item};
+    for (final item in changed) {
+      byId[idOf(item)] = item;
+    }
+    return byId.values.toList(growable: false);
+  }
+
+  return FinanceDataSet(
+    accounts: merge(baseline.accounts, delta.accounts, (item) => item.id),
+    categories: merge(baseline.categories, delta.categories, (item) => item.id),
+    transactions: merge(
+      baseline.transactions,
+      delta.transactions,
+      (item) => item.id,
+    ),
+    scheduledTransactions: merge(
+      baseline.scheduledTransactions,
+      delta.scheduledTransactions,
+      (item) => item.id,
+    ),
+    budgets: merge(baseline.budgets, delta.budgets, (item) => item.id),
+    goals: merge(baseline.goals, delta.goals, (item) => item.id),
+    funds: merge(baseline.funds, delta.funds, (item) => item.id),
+    reservationOperations: merge(
+      baseline.reservationOperations,
+      delta.reservationOperations,
+      (item) => item.id,
+    ),
+    goalContributions: merge(
+      baseline.goalContributions,
+      delta.goalContributions,
+      (item) => item.id,
+    ),
+    goalFundingEvents: merge(
+      baseline.goalFundingEvents,
+      delta.goalFundingEvents,
+      (item) => item.id,
+    ),
+    preferences: delta.preferences,
+  );
+}
+
+class _GenerationWrite {
+  const _GenerationWrite({
+    required this.collection,
+    required this.reference,
+    required this.data,
+  });
+
+  final String collection;
   final DocumentReference<Map<String, dynamic>> reference;
   final Map<String, Object?> data;
 }

@@ -2,6 +2,7 @@ import '../domain/goal.dart';
 import '../domain/goal_funding.dart';
 
 enum GoalProgressStatus {
+  notStarted,
   ahead,
   onTrack,
   behind,
@@ -21,6 +22,7 @@ enum GoalProgressStatus {
 extension GoalProgressStatusLabel on GoalProgressStatus {
   String get label {
     return switch (this) {
+      GoalProgressStatus.notStarted => 'Not started',
       GoalProgressStatus.ahead => 'Ahead',
       GoalProgressStatus.onTrack => 'On track',
       GoalProgressStatus.behind => 'Behind',
@@ -147,6 +149,18 @@ class GoalCalculator {
         percentage: percentage,
         remaining: remaining,
         today: today,
+      );
+    }
+    if (current == 0 && target > 0) {
+      return GoalProgressMetrics(
+        currentAmountMinor: current,
+        remainingAmountMinor: remaining,
+        percentageComplete: percentage,
+        expectedAmountMinor: goal.startingAmountMinor,
+        aheadBehindMinor: current - goal.startingAmountMinor,
+        requiredWeeklyMinor: 0,
+        requiredMonthlyMinor: 0,
+        status: GoalProgressStatus.notStarted,
       );
     }
     if (current >= target) {

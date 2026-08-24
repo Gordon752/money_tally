@@ -9789,6 +9789,7 @@ void main() {
             home: FinanceHome(
               syncLabel: 'Synced',
               lastSuccessfulSyncLabel: 'Today at 8:39 AM',
+              syncDiagnosticLabel: 'Incremental · ~13 reads · 1 write · manual',
               onSyncNow: () async => syncCount += 1,
               onSignOut: () => signOutCount += 1,
             ),
@@ -9801,6 +9802,11 @@ void main() {
 
     expect(find.text('Your data is securely synced'), findsOneWidget);
     expect(find.text('Today at 8:39 AM'), findsOneWidget);
+    expect(find.text('Last sync activity'), findsOneWidget);
+    expect(
+      find.text('Incremental · ~13 reads · 1 write · manual'),
+      findsOneWidget,
+    );
     expect(find.text('Automatic Sync'), findsOneWidget);
     expect(find.text('Preferred Daily Sync Time'), findsOneWidget);
     await tester.tap(find.widgetWithText(ListTile, 'Sync now'));
@@ -9819,6 +9825,38 @@ void main() {
     await tester.tap(signOut);
     await tester.pumpAndSettle();
     expect(signOutCount, 1);
+  });
+
+  testWidgets('settings keeps sync diagnostics discoverable before capture', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const V1SnapshotMigrator().migrate(
+        legacyStore.snapshot().toJson(),
+      ),
+    );
+    await tester.pumpWidget(
+      FinanceStoreScope(
+        store: legacyStore,
+        child: FinanceDataStoreScope(
+          store: dataStore,
+          child: MaterialApp(
+            home: FinanceHome(syncLabel: 'Synced', onSyncNow: () async {}),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Last sync activity'), findsOneWidget);
+    expect(find.text('Run Sync now to collect details'), findsOneWidget);
   });
 
   testWidgets('settings disables repeated sync taps and shows real progress', (

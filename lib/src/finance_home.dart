@@ -30,6 +30,8 @@ enum FinanceSection {
 class FinanceHome extends StatefulWidget {
   const FinanceHome({
     this.syncLabel = 'Synced',
+    this.syncErrorLabel,
+    this.syncDiagnosticLabel,
     this.lastSuccessfulSyncLabel,
     this.onSyncNow,
     this.onSignOut,
@@ -37,6 +39,8 @@ class FinanceHome extends StatefulWidget {
   });
 
   final String syncLabel;
+  final String? syncErrorLabel;
+  final String? syncDiagnosticLabel;
   final String? lastSuccessfulSyncLabel;
   final Future<void> Function()? onSyncNow;
   final VoidCallback? onSignOut;
@@ -476,6 +480,8 @@ class _FinanceHomeState extends State<FinanceHome> {
                 FinanceSection.settings => SettingsView(
                   onSelectSection: _openManagementSection,
                   syncLabel: widget.syncLabel,
+                  syncErrorLabel: widget.syncErrorLabel,
+                  syncDiagnosticLabel: widget.syncDiagnosticLabel,
                   lastSuccessfulSyncLabel: widget.lastSuccessfulSyncLabel,
                   onSyncNow: widget.onSyncNow,
                   onSignOut: widget.onSignOut,
@@ -9247,6 +9253,8 @@ class SettingsView extends StatefulWidget {
   const SettingsView({
     this.onSelectSection,
     this.syncLabel = 'Synced',
+    this.syncErrorLabel,
+    this.syncDiagnosticLabel,
     this.lastSuccessfulSyncLabel,
     this.onSyncNow,
     this.onSignOut,
@@ -9261,6 +9269,8 @@ class SettingsView extends StatefulWidget {
 
   final ValueChanged<FinanceSection>? onSelectSection;
   final String syncLabel;
+  final String? syncErrorLabel;
+  final String? syncDiagnosticLabel;
   final String? lastSuccessfulSyncLabel;
   final Future<void> Function()? onSyncNow;
   final VoidCallback? onSignOut;
@@ -9351,7 +9361,8 @@ class _SettingsViewState extends State<SettingsView> {
               subtitle: switch (widget.syncLabel) {
                 'Synced' => 'Your data is securely synced',
                 'Syncing' => 'Your data is syncing',
-                'Sync issue' => 'Cloud sync needs attention',
+                'Sync issue' =>
+                  widget.syncErrorLabel ?? 'Cloud sync needs attention',
                 'Offline' => 'You are currently offline',
                 _ => 'Your data is stored securely',
               },
@@ -9371,6 +9382,16 @@ class _SettingsViewState extends State<SettingsView> {
                       : 'Not available'),
               showDivider: widget.onSyncNow != null || widget.onSignOut != null,
             ),
+            if (widget.onSyncNow != null)
+              SettingsActionRow(
+                icon: AppIcon.reports,
+                title: 'Last sync activity',
+                subtitle:
+                    widget.syncDiagnosticLabel ??
+                    'Run Sync now to collect details',
+                subtitleMaxLines: 6,
+                showDivider: true,
+              ),
             if (widget.onSyncNow != null)
               SettingsActionRow(
                 icon: AppIcon.sync,
@@ -12743,6 +12764,7 @@ class SettingsActionRow extends StatelessWidget {
     required this.icon,
     required this.title,
     this.subtitle,
+    this.subtitleMaxLines = 2,
     this.trailingText,
     this.showProgress = false,
     this.showStatusPill = false,
@@ -12755,6 +12777,7 @@ class SettingsActionRow extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? subtitle;
+  final int subtitleMaxLines;
   final String? trailingText;
   final bool showProgress;
   final bool showStatusPill;
@@ -12793,7 +12816,7 @@ class SettingsActionRow extends StatelessWidget {
             ? null
             : Text(
                 subtitle!,
-                maxLines: 2,
+                maxLines: subtitleMaxLines,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -21296,6 +21319,29 @@ Future<void> showTransactionDialog(
 }) async {
   final dataStore = FinanceDataStoreScope.read(context);
   final activeAccounts = [...dataStore.activeAccountsInDisplayOrder];
+  final reservationSpendContext =
+      transaction == null &&
+      initialReservationContainerType != null &&
+      initialReservationContainerId != null;
+  final reservationContextName = switch (initialReservationContainerType) {
+    ReservationContainerType.fund =>
+      dataStore.funds
+          .where(
+            (fund) =>
+                fund.id == initialReservationContainerId && !fund.isDeleted,
+          )
+          .firstOrNull
+          ?.name,
+    ReservationContainerType.goal =>
+      dataStore.goals
+          .where(
+            (goal) =>
+                goal.id == initialReservationContainerId && !goal.isDeleted,
+          )
+          .firstOrNull
+          ?.name,
+    null => null,
+  };
   // Goal spending is intentionally launched from Goal Details. The internal
   // Goal account stays hidden from ordinary global account pickers, but must
   // remain available to that contextual expense form.
@@ -21543,6 +21589,13 @@ Future<void> showTransactionDialog(
               reservationContainerType = null;
               reservationContainerId = null;
             }
+            final reservationCoveredMinor = selectedReservation == null
+                ? 0
+                : absoluteAmountMinor < selectedReservation.amountMinor
+                ? absoluteAmountMinor
+                : selectedReservation.amountMinor;
+            final unreservedAmountMinor =
+                absoluteAmountMinor - reservationCoveredMinor;
 
             String newSplitId() =>
                 'split_${DateTime.now().microsecondsSinceEpoch}_${splitDrafts.length}';
@@ -22050,52 +22103,125 @@ Future<void> showTransactionDialog(
             Widget selectableRow({
               required IconData icon,
               required Widget title,
-              required VoidCallback onTap,
+              required VoidCallback? onTap,
               Widget? subtitle,
               String? placeholder,
               TextStyle? valueStyle,
             }) {
               final resolvedValueStyle = valueStyle ?? accountRowStyle;
-              return InkWell(
-                borderRadius: BorderRadius.circular(AppRadii.control),
-                onTap: onTap,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Row(
-                    children: [
-                      TransactionFormIcon(icon),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            DefaultTextStyle.merge(
-                              style:
-                                  (placeholder == null
-                                      ? resolvedValueStyle
-                                      : resolvedValueStyle?.copyWith(
-                                          color: theme
-                                              .colorScheme
-                                              .onSurfaceVariant,
-                                          fontWeight: FontWeight.w500,
-                                        )) ??
-                                  const TextStyle(),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              child: title,
-                            ),
-                            if (subtitle != null) ...[
-                              const SizedBox(height: 5),
-                              subtitle,
-                            ],
+              final content = Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: [
+                    TransactionFormIcon(icon),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          DefaultTextStyle.merge(
+                            style:
+                                (placeholder == null
+                                    ? resolvedValueStyle
+                                    : resolvedValueStyle?.copyWith(
+                                        color:
+                                            theme.colorScheme.onSurfaceVariant,
+                                        fontWeight: FontWeight.w500,
+                                      )) ??
+                                const TextStyle(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            child: title,
+                          ),
+                          if (subtitle != null) ...[
+                            const SizedBox(height: 5),
+                            subtitle,
                           ],
-                        ),
+                        ],
                       ),
+                    ),
+                    if (onTap != null) ...[
                       SizedBox(width: AppSpacing.sm),
                       Icon(AppIcon.chevronDown, size: AppIconSize.hero),
                     ],
+                  ],
+                ),
+              );
+              if (onTap == null) return content;
+              return InkWell(
+                borderRadius: BorderRadius.circular(AppRadii.control),
+                onTap: onTap,
+                child: content,
+              );
+            }
+
+            Widget reservationSpendPreview() {
+              final reservation = selectedReservation;
+              if (reservation == null) return const SizedBox.shrink();
+              final kindLabel =
+                  reservation.type == ReservationContainerType.fund
+                  ? 'Fund'
+                  : 'Goal';
+              final normalizedName = reservation.name.trim();
+              final displayName =
+                  normalizedName.toLowerCase().endsWith(kindLabel.toLowerCase())
+                  ? normalizedName
+                  : '$normalizedName $kindLabel';
+              final labelStyle = theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              );
+              final valueStyle = theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              );
+
+              Widget previewRow({
+                required Key key,
+                required String label,
+                required int valueMinor,
+              }) {
+                return Padding(
+                  key: key,
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text(label, style: labelStyle)),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        money(valueMinor, dataStore.preferences.currency),
+                        style: valueStyle,
+                      ),
+                    ],
                   ),
+                );
+              }
+
+              return Padding(
+                key: const ValueKey('reservation-spend-preview'),
+                padding: const EdgeInsets.only(
+                  left: 56,
+                  top: AppSpacing.xs,
+                  bottom: 2,
+                ),
+                child: Column(
+                  children: [
+                    previewRow(
+                      key: const ValueKey('reservation-payment-amount'),
+                      label: 'Payment amount',
+                      valueMinor: absoluteAmountMinor,
+                    ),
+                    previewRow(
+                      key: const ValueKey('reservation-covered-amount'),
+                      label: 'Covered by $displayName',
+                      valueMinor: reservationCoveredMinor,
+                    ),
+                    previewRow(
+                      key: const ValueKey('reservation-unreserved-amount'),
+                      label: 'Unreserved amount',
+                      valueMinor: unreservedAmountMinor,
+                    ),
+                  ],
                 ),
               );
             }
@@ -22154,7 +22280,9 @@ Future<void> showTransactionDialog(
             }
 
             return TransactionSheetFrame(
-              title: transaction == null
+              title: reservationSpendContext
+                  ? 'Spend from ${reservationContextName ?? 'Reserved Money'}'
+                  : transaction == null
                   ? 'Add Transaction'
                   : 'Edit Transaction',
               actions: TransactionFormActions(
@@ -22167,106 +22295,133 @@ Future<void> showTransactionDialog(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 292),
-                      child: SegmentedButton<TransactionType>(
-                        showSelectedIcon: false,
-                        style: SegmentedButton.styleFrom(
-                          selectedBackgroundColor: AppTheme.accent,
-                          selectedForegroundColor: Colors.white,
-                          foregroundColor: theme.colorScheme.onSurface,
-                          textStyle: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 0,
+                  if (!reservationSpendContext) ...[
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 292),
+                        child: SegmentedButton<TransactionType>(
+                          showSelectedIcon: false,
+                          style: SegmentedButton.styleFrom(
+                            selectedBackgroundColor: AppTheme.accent,
+                            selectedForegroundColor: Colors.white,
+                            foregroundColor: theme.colorScheme.onSurface,
+                            textStyle: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 3,
+                            ),
                           ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 3,
-                          ),
-                        ),
-                        segments: const [
-                          ButtonSegment(
-                            value: TransactionType.expense,
-                            label: Text('Expense'),
-                          ),
-                          ButtonSegment(
-                            value: TransactionType.income,
-                            label: Text('Income'),
-                          ),
-                          ButtonSegment(
-                            value: TransactionType.transfer,
-                            label: Text('Transfer'),
-                          ),
-                        ],
-                        selected: {
-                          isExpense
-                              ? TransactionType.expense
-                              : TransactionType.income,
-                        },
-                        onSelectionChanged: (values) {
-                          final selectedType = values.first;
-                          final previousType = isExpense
-                              ? TransactionType.expense
-                              : TransactionType.income;
-                          if (selectedType != previousType) {
-                            AppHaptics.selection();
-                          }
-                          if (selectedType == TransactionType.transfer) {
-                            switchToTransfer = true;
-                            Navigator.pop(context);
-                            return;
-                          }
-                          setDialogState(() {
-                            isExpense = selectedType == TransactionType.expense;
-                            categoryId = '';
-                            for (final draft in splitDrafts) {
-                              draft.note.dispose();
+                          segments: const [
+                            ButtonSegment(
+                              value: TransactionType.expense,
+                              label: Text('Expense'),
+                            ),
+                            ButtonSegment(
+                              value: TransactionType.income,
+                              label: Text('Income'),
+                            ),
+                            ButtonSegment(
+                              value: TransactionType.transfer,
+                              label: Text('Transfer'),
+                            ),
+                          ],
+                          selected: {
+                            isExpense
+                                ? TransactionType.expense
+                                : TransactionType.income,
+                          },
+                          onSelectionChanged: (values) {
+                            final selectedType = values.first;
+                            final previousType = isExpense
+                                ? TransactionType.expense
+                                : TransactionType.income;
+                            if (selectedType != previousType) {
+                              AppHaptics.selection();
                             }
-                            splitDrafts.clear();
-                            splitDrafts.add(
-                              SplitLineDraft(
-                                id: 'split_${DateTime.now().microsecondsSinceEpoch}_0',
-                                categoryId: '',
-                                amountMinor: amountMinor.abs(),
-                              ),
-                            );
-                            firstSplitAutoRemainder = true;
-                            splitMode = false;
-                            autofocusSplitAmountIndex = null;
-                            isCreatingCategory = false;
-                            isSavingCategory = false;
-                            newCategoryError = null;
-                            newCategorySplitIndex = null;
-                            newCategoryName.clear();
-                          });
-                        },
+                            if (selectedType == TransactionType.transfer) {
+                              switchToTransfer = true;
+                              Navigator.pop(context);
+                              return;
+                            }
+                            setDialogState(() {
+                              isExpense =
+                                  selectedType == TransactionType.expense;
+                              categoryId = '';
+                              for (final draft in splitDrafts) {
+                                draft.note.dispose();
+                              }
+                              splitDrafts.clear();
+                              splitDrafts.add(
+                                SplitLineDraft(
+                                  id: 'split_${DateTime.now().microsecondsSinceEpoch}_0',
+                                  categoryId: '',
+                                  amountMinor: amountMinor.abs(),
+                                ),
+                              );
+                              firstSplitAutoRemainder = true;
+                              splitMode = false;
+                              autofocusSplitAmountIndex = null;
+                              isCreatingCategory = false;
+                              isSavingCategory = false;
+                              newCategoryError = null;
+                              newCategorySplitIndex = null;
+                              newCategoryName.clear();
+                            });
+                          },
+                        ),
                       ),
                     ),
+                    SizedBox(height: AppSpacing.md),
+                  ],
+                  TransactionFormLabel(
+                    reservationSpendContext ? 'Paid from' : 'Account',
                   ),
-                  SizedBox(height: AppSpacing.md),
-                  TransactionFormLabel('Account'),
-                  selectableRow(
-                    icon: selectedAccount == null
-                        ? AppIcon.wallet
-                        : v2AccountIcon(selectedAccount.type),
-                    placeholder: selectedAccount == null
-                        ? 'Choose account'
-                        : null,
-                    title: Text(selectedAccount?.name ?? 'Choose account'),
-                    subtitle: accountSubtitle(),
-                    onTap: () async {
-                      FocusManager.instance.primaryFocus?.unfocus();
-                      final selectedAccountId =
-                          await showTransactionAccountPicker(
-                            context,
-                            accounts: activeAccounts,
-                            selectedAccountId: accountId,
-                          );
-                      if (selectedAccountId != null) {
-                        setDialogState(() => accountId = selectedAccountId);
-                      }
-                    },
+                  KeyedSubtree(
+                    key: const ValueKey('transaction-account-row'),
+                    child: selectableRow(
+                      icon: selectedAccount == null
+                          ? AppIcon.wallet
+                          : v2AccountIcon(selectedAccount.type),
+                      placeholder: selectedAccount == null
+                          ? 'Choose account'
+                          : null,
+                      title: Text(selectedAccount?.name ?? 'Choose account'),
+                      subtitle: reservationSpendContext
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                accountSubtitle(),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Reserved money is held in this account',
+                                  key: const ValueKey(
+                                    'reservation-funding-account-help',
+                                  ),
+                                  style: mutedStyle,
+                                ),
+                              ],
+                            )
+                          : accountSubtitle(),
+                      onTap: reservationSpendContext
+                          ? null
+                          : () async {
+                              FocusManager.instance.primaryFocus?.unfocus();
+                              final selectedAccountId =
+                                  await showTransactionAccountPicker(
+                                    context,
+                                    accounts: activeAccounts,
+                                    selectedAccountId: accountId,
+                                  );
+                              if (selectedAccountId != null) {
+                                setDialogState(
+                                  () => accountId = selectedAccountId,
+                                );
+                              }
+                            },
+                    ),
                   ),
                   TransactionFormDivider(),
                   TransactionFormLabel('Amount'),
@@ -22412,15 +22567,8 @@ Future<void> showTransactionDialog(
                     ),
                   ),
                   TransactionFormDivider(),
-                  _TransactionPendingToggle(
-                    key: const ValueKey('transaction-pending-toggle'),
-                    status: transactionStatus,
-                    onChanged: (value) =>
-                        setDialogState(() => transactionStatus = value),
-                  ),
                   if (isExpense && reservationChoices.isNotEmpty) ...[
-                    const TransactionFormDivider(),
-                    const TransactionFormLabel('Reservation'),
+                    const TransactionFormLabel('Using reserved money'),
                     selectableRow(
                       icon: Icons.account_balance_wallet_outlined,
                       title: Text(selectedReservation?.name ?? 'None'),
@@ -22433,9 +22581,17 @@ Future<void> showTransactionDialog(
                               '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
                               style: mutedStyle,
                             ),
-                      onTap: chooseReservation,
+                      onTap: reservationSpendContext ? null : chooseReservation,
                     ),
+                    if (selectedReservation != null) reservationSpendPreview(),
+                    const TransactionFormDivider(),
                   ],
+                  _TransactionPendingToggle(
+                    key: const ValueKey('transaction-pending-toggle'),
+                    status: transactionStatus,
+                    onChanged: (value) =>
+                        setDialogState(() => transactionStatus = value),
+                  ),
                   if (linkedSchedule == null) ...[
                     const TransactionFormDivider(),
                     InkWell(

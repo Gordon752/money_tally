@@ -12,6 +12,50 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   group('Goal calculations', () {
+    test(
+      'unfunded Reach Target Goals are not started with or without date',
+      () {
+        final calculator = const GoalCalculator();
+        final dated = calculator.calculate(
+          _goal(targetAmountMinor: 100000, targetDate: DateTime(2026, 12, 31)),
+          const [],
+          now: DateTime(2026, 8, 23),
+        );
+        final undated = calculator.calculate(
+          _goal(targetAmountMinor: 100000),
+          const [],
+          now: DateTime(2026, 8, 23),
+        );
+
+        expect(dated.status, GoalProgressStatus.notStarted);
+        expect(undated.status, GoalProgressStatus.notStarted);
+        expect(dated.status.label, 'Not started');
+        expect(undated.status.label, 'Not started');
+      },
+    );
+
+    test('funded undated Reach Target Goal remains timeline-neutral', () {
+      final goal = _goal(targetAmountMinor: 100000);
+      final metrics = const GoalCalculator().calculate(goal, [
+        _contribution(goalId: goal.id, amountMinor: 25000),
+      ], now: DateTime(2026, 8, 23));
+
+      expect(metrics.currentAmountMinor, 25000);
+      expect(metrics.remainingAmountMinor, 75000);
+      expect(metrics.status, GoalProgressStatus.noTargetDate);
+      expect(
+        metrics.status,
+        isNot(
+          anyOf(
+            GoalProgressStatus.onTrack,
+            GoalProgressStatus.ahead,
+            GoalProgressStatus.behind,
+            GoalProgressStatus.seriouslyBehind,
+          ),
+        ),
+      );
+    });
+
     test('derives progress, requirements, and on-track status', () {
       final goal = _goal(
         targetAmountMinor: 100000,

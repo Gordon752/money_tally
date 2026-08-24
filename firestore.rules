@@ -60,6 +60,12 @@ service cloud.firestore {
       allow read, write: if ownsUserData(userId);
     }
 
+    // Per-user server timestamp checkpoint used to bound incremental sync
+    // queries. It contains no financial data and remains private to its owner.
+    match /users/{userId}/metadata/syncClock {
+      allow read, write: if ownsUserData(userId);
+    }
+
     // Restored generations remain isolated from legacy record collections so
     // older beta clients cannot read staged records as duplicates. Keep the
     // allowed shape limited to Trackmark's known record collections.

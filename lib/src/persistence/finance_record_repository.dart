@@ -86,6 +86,125 @@ abstract interface class BulkFinanceRecordRepository {
   });
 }
 
+enum CloudSyncLoadMode { unknown, fullBootstrap, incremental }
+
+/// Per-attempt Firestore activity observed by a cloud repository.
+///
+/// Counts are deliberately described as estimates: Firestore may retry a
+/// transaction internally and empty queries have minimum billing behavior.
+/// The values are still precise enough to identify repeated full bootstraps or
+/// unexpectedly busy upload paths on a physical device.
+class CloudSyncRepositoryMetrics {
+  const CloudSyncRepositoryMetrics({
+    this.loadMode = CloudSyncLoadMode.unknown,
+    this.fullBootstrapReason,
+    this.documentsDownloaded = 0,
+    this.documentsUploaded = 0,
+    this.estimatedReads = 0,
+    this.estimatedWrites = 0,
+    this.queryCount = 0,
+    this.cacheBytes,
+    this.uploadedByCollection = const {},
+    this.changedFieldsByCollection = const {},
+  });
+
+  final CloudSyncLoadMode loadMode;
+  final String? fullBootstrapReason;
+  final int documentsDownloaded;
+  final int documentsUploaded;
+  final int estimatedReads;
+  final int estimatedWrites;
+  final int queryCount;
+  final int? cacheBytes;
+  final Map<String, int> uploadedByCollection;
+  final Map<String, Map<String, int>> changedFieldsByCollection;
+
+  Map<String, Object?> toJson() => {
+    'loadMode': loadMode.name,
+    'fullBootstrapReason': fullBootstrapReason,
+    'documentsDownloaded': documentsDownloaded,
+    'documentsUploaded': documentsUploaded,
+    'estimatedReads': estimatedReads,
+    'estimatedWrites': estimatedWrites,
+    'queryCount': queryCount,
+    'cacheBytes': cacheBytes,
+    'uploadedByCollection': uploadedByCollection,
+    'changedFieldsByCollection': changedFieldsByCollection,
+  };
+
+  factory CloudSyncRepositoryMetrics.fromJson(Map<String, Object?> json) {
+    return CloudSyncRepositoryMetrics(
+      loadMode: CloudSyncLoadMode.values.firstWhere(
+        (value) => value.name == json['loadMode'],
+        orElse: () => CloudSyncLoadMode.unknown,
+      ),
+      fullBootstrapReason: json['fullBootstrapReason'] as String?,
+      documentsDownloaded: json['documentsDownloaded'] as int? ?? 0,
+      documentsUploaded: json['documentsUploaded'] as int? ?? 0,
+      estimatedReads: json['estimatedReads'] as int? ?? 0,
+      estimatedWrites: json['estimatedWrites'] as int? ?? 0,
+      queryCount: json['queryCount'] as int? ?? 0,
+      cacheBytes: json['cacheBytes'] as int?,
+      uploadedByCollection: {
+        for (final entry
+            in (json['uploadedByCollection'] as Map? ?? const {}).entries)
+          entry.key.toString(): (entry.value as num).toInt(),
+      },
+      changedFieldsByCollection: {
+        for (final collectionEntry
+            in (json['changedFieldsByCollection'] as Map? ?? const {}).entries)
+          collectionEntry.key.toString(): {
+            for (final fieldEntry
+                in (collectionEntry.value as Map? ?? const {}).entries)
+              fieldEntry.key.toString(): (fieldEntry.value as num).toInt(),
+          },
+      },
+    );
+  }
+}
+
+/// Optional instrumentation exposed by production cloud repositories.
+abstract interface class CloudSyncMetricsProvider {
+  void beginSyncMetrics();
+
+  CloudSyncRepositoryMetrics get currentSyncMetrics;
+}
+
+/// A generation-aware cloud load reconstructed from either a full bootstrap
+/// or changes applied to the last locally acknowledged cloud baseline.
+class IncrementalFinanceSyncLoad {
+  const IncrementalFinanceSyncLoad({
+    required this.dataSet,
+    required this.generation,
+    required this.through,
+    required this.wasFullBootstrap,
+    this.fullBootstrapAt,
+  });
+
+  final FinanceDataSet dataSet;
+  final String? generation;
+  final DateTime through;
+  final bool wasFullBootstrap;
+  final DateTime? fullBootstrapAt;
+}
+
+/// Optional capability for repositories that can avoid downloading every
+/// cloud record on each synchronization.
+///
+/// Implementations must not advance their durable cursor until
+/// [acknowledgeIncrementalSync] is called after the merged data set has been
+/// installed and uploaded successfully. A restore-generation change must
+/// force a full bootstrap before incremental loading resumes.
+abstract interface class IncrementalFinanceRecordRepository {
+  Future<IncrementalFinanceSyncLoad> loadDataSetForSync(String userId);
+
+  Future<void> acknowledgeIncrementalSync({
+    required String userId,
+    required IncrementalFinanceSyncLoad load,
+    required FinanceDataSet resultingDataSet,
+  });
+}
+
 /// Optional capability for causally ordered, field-scoped schedule occurrence
 /// writes. Implementations must compare occurrence authority remotely rather
 /// than replacing an enclosing schedule snapshot.

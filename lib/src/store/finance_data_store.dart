@@ -1104,16 +1104,40 @@ class FinanceDataStore extends ChangeNotifier {
     this.remoteRepository = remoteRepository;
     this.userId = userId;
 
-    debugPrint('Cloud sync stage: loading restore authority');
-    final remoteGeneration = await remoteRepository.activeRestoreGeneration(
-      userId,
-    );
+    IncrementalFinanceSyncLoad? incrementalLoad;
+    String? remoteGeneration;
+    late final FinanceDataSet remoteDataSet;
+    final incrementalRepository =
+        remoteRepository is IncrementalFinanceRecordRepository
+        ? remoteRepository as IncrementalFinanceRecordRepository
+        : null;
+    if (incrementalRepository != null) {
+      debugPrint('Cloud sync stage: loading incremental remote data set');
+      final load = await incrementalRepository.loadDataSetForSync(userId);
+      incrementalLoad = load;
+      remoteGeneration = load.generation;
+      remoteDataSet = load.dataSet;
+    } else {
+      debugPrint('Cloud sync stage: loading restore authority');
+      remoteGeneration = await remoteRepository.activeRestoreGeneration(userId);
+      debugPrint('Cloud sync stage: loading remote data set');
+      remoteDataSet = await remoteRepository.loadDataSet(userId);
+    }
     debugPrint('Cloud sync stage: loading local authority acknowledgement');
     final acknowledgedGeneration = await localRepository
         ?.loadAcknowledgedRestoreGeneration(userId);
-    debugPrint('Cloud sync stage: loading remote data set');
-    final remoteDataSet = await remoteRepository.loadDataSet(userId);
     debugPrint('Cloud sync stage: remote data set loaded');
+
+    Future<void> acknowledgeIncrementalLoad() async {
+      final load = incrementalLoad;
+      if (load == null || incrementalRepository == null) return;
+      await incrementalRepository.acknowledgeIncrementalSync(
+        userId: userId,
+        load: load,
+        resultingDataSet: _dataSet,
+      );
+    }
+
     if (financeDataSetHasRecords(remoteDataSet)) {
       if (remoteGeneration != null &&
           remoteGeneration != acknowledgedGeneration) {
@@ -1128,6 +1152,7 @@ class FinanceDataStore extends ChangeNotifier {
         preferRemoteOnFirstSync = false;
         debugPrint('Cloud sync stage: migrating legacy Goals');
         await migrateLegacyGoalsToAccounts();
+        await acknowledgeIncrementalLoad();
         debugPrint('Cloud sync stage: complete');
         return;
       }
@@ -1146,12 +1171,14 @@ class FinanceDataStore extends ChangeNotifier {
       await migrateLegacyGoalsToAccounts();
       debugPrint('Cloud sync stage: uploading merged data set');
       await pushAllRecordsToRemote(baseline: remoteDataSet);
+      await acknowledgeIncrementalLoad();
       debugPrint('Cloud sync stage: complete');
       return;
     }
 
     debugPrint('Cloud sync stage: seeding empty remote data set');
     await pushAllRecordsToRemote(baseline: remoteDataSet);
+    await acknowledgeIncrementalLoad();
     preferRemoteOnFirstSync = false;
     debugPrint('Cloud sync stage: complete');
   }
@@ -4131,8 +4158,9 @@ class FinanceDataStore extends ChangeNotifier {
         priorConsumptions.single.containerId ==
             transaction.reservationContainerId &&
         priorConsumptions.single.fundingAccountId == transaction.accountId &&
-        priorConsumptions.single.amountMinor == outgoingAmount &&
+        priorConsumptions.single.amountMinor <= outgoingAmount &&
         existing != null &&
+        existing.deltaForAccount(existing.accountId).abs() == outgoingAmount &&
         isSameScheduledDay(existing.date, transaction.date);
     if (desiredMatchesExisting) {
       return (
@@ -4189,18 +4217,24 @@ class FinanceDataStore extends ChangeNotifier {
           containerId: containerId,
         ),
       );
-      if (ledger.reservedMinor < outgoingAmount) {
+      if (ledger.reservedMinor <= 0) {
         throw const FinanceDataValidationException(
           'This Goal or Fund does not contain enough reserved money.',
         );
       }
+      // A Goal or Fund may cover only part of a larger real transaction. The
+      // transaction still changes the account exactly once; the reservation
+      // operation releases only the portion that was actually reserved.
+      final coveredAmount = outgoingAmount < ledger.reservedMinor
+          ? outgoingAmount
+          : ledger.reservedMinor;
       final consumption = _draftReservationOperation(
         operations: workingOperations,
         containerType: containerType,
         containerId: containerId,
         fundingAccountId: fundingAccountId,
         kind: ReservationOperationKind.consume,
-        amountMinor: outgoingAmount,
+        amountMinor: coveredAmount,
         effectiveDate: transaction.date,
         transactionId: transaction.id,
         scheduledTransactionId: transaction.scheduledTransactionId,
@@ -5295,12 +5329,24 @@ T preferCurrentFinanceRecord<T>({
 }) {
   final currentSync = syncOf(current);
   final incomingSync = syncOf(incoming);
-  if (currentSync.isDeleted) return current;
-  if (incomingSync.isDeleted) return incoming;
-  return currentSync.updatedAt.isAfter(incomingSync.updatedAt) ||
-          currentSync.updatedAt.isAtSameMomentAs(incomingSync.updatedAt)
-      ? current
-      : incoming;
+  // A tombstone must beat a live record so an older device cannot resurrect
+  // something that was deleted elsewhere. When both copies are tombstones,
+  // however, they still need the normal authority comparison below. Always
+  // preferring the device-local tombstone in that case lets divergent deleted
+  // payloads (for example, old Scheduled linkage) overwrite one another on
+  // every cross-device sync indefinitely.
+  if (currentSync.isDeleted != incomingSync.isDeleted) {
+    return currentSync.isDeleted ? current : incoming;
+  }
+  if (currentSync.updatedAt.isAfter(incomingSync.updatedAt)) return current;
+  if (incomingSync.updatedAt.isAfter(currentSync.updatedAt)) return incoming;
+  if (currentSync.version > incomingSync.version) return current;
+  if (incomingSync.version > currentSync.version) return incoming;
+
+  // An exact authority tie must converge on the already-published cloud copy.
+  // Preferring each device's local copy here lets divergent payloads with the
+  // same sync metadata alternate forever as devices launch in turn.
+  return incoming;
 }
 
 bool financeDataSetHasRecords(FinanceDataSet dataSet) {

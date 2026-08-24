@@ -8,10 +8,12 @@ import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/goal.dart';
 import 'package:money_tally/src/domain/goal_funding.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart';
+import 'package:money_tally/src/domain/sync_metadata.dart';
 import 'package:money_tally/src/domain/transaction.dart';
 import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/persistence/backup_codec.dart';
 import 'package:money_tally/src/persistence/finance_record_repository.dart';
+import 'package:money_tally/src/persistence/firestore_record_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/sync/automatic_sync_service.dart';
 import 'package:money_tally/src/sync/cloud_sync_coordinator.dart';
@@ -218,8 +220,109 @@ void main() {
       expect(coordinator.status, CloudSyncStatus.issue);
       expect(stateStore.lastSuccess, isNull);
       expect(stateStore.lastSucceeded, isFalse);
+      expect(coordinator.lastErrorDescription, contains('offline'));
+      expect(stateStore.lastError, contains('offline'));
+    });
+
+    test('uses and acknowledges incremental repository capability', () async {
+      final repository = _IncrementalFakeRecordRepository();
+      final coordinator = CloudSyncCoordinator(
+        recordRepository: repository,
+        executionStateStore: _MemorySyncStateStore(),
+      );
+      final store = FinanceDataStore(dataSet: _dataSet());
+
+      expect(
+        await coordinator.synchronize(
+          userId: 'user-1',
+          dataStore: store,
+          trigger: CloudSyncTrigger.manual,
+        ),
+        isTrue,
+      );
+      expect(repository.incrementalLoadCalls, 1);
+      expect(repository.loadCalls, 0);
+      expect(repository.acknowledgeCalls, 1);
+      expect(coordinator.lastDiagnostic, isNotNull);
+      expect(coordinator.lastDiagnostic!.trigger, CloudSyncTrigger.manual);
+      expect(
+        coordinator.lastDiagnostic!.metrics.loadMode,
+        CloudSyncLoadMode.incremental,
+      );
+      expect(coordinator.lastDiagnostic!.metrics.estimatedReads, 13);
+      expect(
+        coordinator.lastDiagnostic!.conciseDescription,
+        contains('~13 reads'),
+      );
+    });
+
+    test('persists failed full-bootstrap reason and retry activity', () async {
+      final repository = _IncrementalFakeRecordRepository(
+        failIncremental: true,
+      );
+      final stateStore = _MemorySyncStateStore();
+      final coordinator = CloudSyncCoordinator(
+        recordRepository: repository,
+        executionStateStore: stateStore,
+      );
+
+      expect(
+        await coordinator.synchronize(
+          userId: 'user-1',
+          dataStore: FinanceDataStore(dataSet: _dataSet()),
+          retryAfterTransientFailure: true,
+          trigger: CloudSyncTrigger.initial,
+        ),
+        isFalse,
+      );
+      expect(repository.beginMetricsCalls, 1);
+      expect(stateStore.lastDiagnostic, isNotNull);
+      expect(stateStore.lastDiagnostic!.succeeded, isFalse);
+      expect(stateStore.lastDiagnostic!.attemptCount, 2);
+      expect(
+        stateStore.lastDiagnostic!.metrics.fullBootstrapReason,
+        'no acknowledged incremental cache',
+      );
     });
   });
+
+  test(
+    'incremental cloud delta replaces changes and preserves untouched data',
+    () {
+      final sync = SyncMetadata.fresh(now: DateTime.utc(2026, 8, 23));
+      final original = AccountRecord(
+        id: 'checking',
+        name: 'Checking',
+        type: AccountType.checking,
+        openingBalanceMinor: 100000,
+        sync: sync,
+      );
+      final untouched = AccountRecord(
+        id: 'savings',
+        name: 'Savings',
+        type: AccountType.savings,
+        openingBalanceMinor: 200000,
+        sync: sync,
+      );
+      final baseline = _dataSet().copyWith(accounts: [original, untouched]);
+      final delta = _dataSet(
+        preferences: const UserPreferences(automaticSyncEnabled: true),
+      ).copyWith(accounts: [original.copyWith(name: 'Primary Checking')]);
+
+      final merged = applyRemoteDataSetDelta(baseline, delta);
+
+      expect(merged.accounts, hasLength(2));
+      expect(
+        merged.accounts.singleWhere((item) => item.id == 'checking').name,
+        'Primary Checking',
+      );
+      expect(
+        merged.accounts.singleWhere((item) => item.id == 'savings').name,
+        'Savings',
+      );
+      expect(merged.preferences.automaticSyncEnabled, isTrue);
+    },
+  );
 }
 
 FinanceDataSet _dataSet({
@@ -254,6 +357,8 @@ class _MemorySyncStateStore implements SyncExecutionStateStore {
   DateTime? lastSuccess;
   bool? lastSucceeded;
   bool leased = false;
+  String? lastError;
+  CloudSyncDiagnostic? lastDiagnostic;
 
   @override
   Future<DateTime?> loadLastSuccessfulSync(String userId) async => lastSuccess;
@@ -262,14 +367,31 @@ class _MemorySyncStateStore implements SyncExecutionStateStore {
   Future<bool?> loadLastSyncSucceeded(String userId) async => lastSucceeded;
 
   @override
+  Future<String?> loadLastSyncError(String userId) async => lastError;
+
+  @override
+  Future<CloudSyncDiagnostic?> loadLastSyncDiagnostic(String userId) async =>
+      lastDiagnostic;
+
+  @override
   Future<void> saveLastSuccessfulSync(String userId, DateTime value) async {
     lastSuccess = value;
     lastSucceeded = true;
+    lastError = null;
   }
 
   @override
-  Future<void> saveLastSyncFailed(String userId) async {
+  Future<void> saveLastSyncFailed(String userId, String description) async {
     lastSucceeded = false;
+    lastError = description;
+  }
+
+  @override
+  Future<void> saveLastSyncDiagnostic(
+    String userId,
+    CloudSyncDiagnostic diagnostic,
+  ) async {
+    lastDiagnostic = diagnostic;
   }
 
   @override
@@ -362,4 +484,60 @@ class _FakeRecordRepository implements FinanceRecordRepository {
     required String userId,
     required TransactionRecord transaction,
   }) async {}
+}
+
+class _IncrementalFakeRecordRepository extends _FakeRecordRepository
+    implements IncrementalFinanceRecordRepository, CloudSyncMetricsProvider {
+  _IncrementalFakeRecordRepository({this.failIncremental = false});
+
+  final bool failIncremental;
+  int incrementalLoadCalls = 0;
+  int acknowledgeCalls = 0;
+  int beginMetricsCalls = 0;
+
+  CloudSyncRepositoryMetrics _metrics = const CloudSyncRepositoryMetrics();
+
+  @override
+  CloudSyncRepositoryMetrics get currentSyncMetrics => _metrics;
+
+  @override
+  void beginSyncMetrics() {
+    beginMetricsCalls += 1;
+    _metrics = const CloudSyncRepositoryMetrics();
+  }
+
+  @override
+  Future<IncrementalFinanceSyncLoad> loadDataSetForSync(String userId) async {
+    incrementalLoadCalls += 1;
+    if (failIncremental) {
+      _metrics = const CloudSyncRepositoryMetrics(
+        loadMode: CloudSyncLoadMode.fullBootstrap,
+        fullBootstrapReason: 'no acknowledged incremental cache',
+        estimatedReads: 2,
+        estimatedWrites: 1,
+      );
+      throw StateError('quota unavailable');
+    }
+    _metrics = const CloudSyncRepositoryMetrics(
+      loadMode: CloudSyncLoadMode.incremental,
+      estimatedReads: 13,
+      estimatedWrites: 1,
+      queryCount: 10,
+    );
+    return IncrementalFinanceSyncLoad(
+      dataSet: _dataSet(),
+      generation: null,
+      through: DateTime.utc(2026, 8, 23),
+      wasFullBootstrap: true,
+    );
+  }
+
+  @override
+  Future<void> acknowledgeIncrementalSync({
+    required String userId,
+    required IncrementalFinanceSyncLoad load,
+    required FinanceDataSet resultingDataSet,
+  }) async {
+    acknowledgeCalls += 1;
+  }
 }

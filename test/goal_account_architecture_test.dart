@@ -90,18 +90,33 @@ void main() {
       expect(store.availableToSpendForAccount('checking'), 70000);
       expect(store.transactions.single.isDeleted, isTrue);
 
-      await expectLater(
-        store.addExpense(
-          accountId: 'checking',
-          categoryId: 'maintenance',
-          date: DateTime(2026, 7, 30),
-          payee: 'Too much',
-          amountMinor: 30001,
-          reservationContainerType: ReservationContainerType.goal,
-          reservationContainerId: goal.id,
-        ),
-        throwsA(isA<FinanceDataValidationException>()),
+      final largerExpense = await store.addExpense(
+        accountId: 'checking',
+        categoryId: 'maintenance',
+        date: DateTime(2026, 7, 30),
+        payee: 'Costs more than reserved',
+        amountMinor: 30001,
+        reservationContainerType: ReservationContainerType.goal,
+        reservationContainerId: goal.id,
       );
+      final consumption = store.reservationOperations.singleWhere(
+        (operation) =>
+            operation.transactionId == largerExpense.id &&
+            operation.kind == ReservationOperationKind.consume,
+      );
+      expect(consumption.amountMinor, 30000);
+      expect(store.currentGoalAmountMinor(goal.id), 0);
+      expect(store.balanceForAccount('checking'), 69999);
+      expect(store.availableToSpendForAccount('checking'), 69999);
+
+      await store.saveTransaction(
+        largerExpense.copyWith(
+          sync: largerExpense.sync.deleted(deviceId: store.deviceId),
+        ),
+      );
+      expect(store.currentGoalAmountMinor(goal.id), 30000);
+      expect(store.balanceForAccount('checking'), 100000);
+      expect(store.availableToSpendForAccount('checking'), 70000);
     },
   );
 

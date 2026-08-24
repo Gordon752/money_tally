@@ -92,6 +92,137 @@ void main() {
     );
   });
 
+  testWidgets('Spend from Fund previews reserved and unreserved portions', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 200000,
+      date: DateTime.now(),
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showTransactionDialog(
+              context,
+              initialIsExpense: true,
+              initialAccountId: 'checking',
+              initialReservationContainerType: ReservationContainerType.fund,
+              initialReservationContainerId: fund.id,
+            ),
+            child: const Text('Spend'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Spend'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Spend from Bills'), findsOneWidget);
+    expect(find.text('Paid from'), findsOneWidget);
+    expect(find.text('CTBI'), findsOneWidget);
+    expect(find.text('Reserved money is held in this account'), findsOneWidget);
+    expect(find.text('Using reserved money'), findsOneWidget);
+    expect(find.text('Mark as Pending'), findsOneWidget);
+    expect(find.text('Schedule future occurrences'), findsOneWidget);
+    final reservationTop = tester
+        .getTopLeft(find.text('Using reserved money'))
+        .dy;
+    final pendingTop = tester.getTopLeft(find.text('Mark as Pending')).dy;
+    final scheduleTop = tester
+        .getTopLeft(find.text('Schedule future occurrences'))
+        .dy;
+    expect(reservationTop, lessThan(pendingTop));
+    expect(pendingTop, lessThan(scheduleTop));
+
+    final accountRow = find.byKey(const ValueKey('transaction-account-row'));
+    expect(
+      find.descendant(of: accountRow, matching: find.byType(InkWell)),
+      findsNothing,
+    );
+    await tester.tap(accountRow);
+    await tester.pumpAndSettle();
+    expect(find.text('Choose account'), findsNothing);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-amount')),
+      '210000',
+    );
+    await tester.pump();
+
+    _expectReservationPreview(
+      payment: r'$2,100.00',
+      coveredLabel: 'Covered by Bills Fund',
+      covered: r'$2,000.00',
+      unreserved: r'$100.00',
+    );
+  });
+
+  testWidgets('Spend from Goal previews reserved and unreserved portions', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'MacBook',
+      targetAmountMinor: 200000,
+      startingAmountMinor: 0,
+      targetDate: null,
+      defaultFundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.goal,
+      containerId: goal.id,
+      amountMinor: 200000,
+      date: DateTime.now(),
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showTransactionDialog(
+              context,
+              initialIsExpense: true,
+              initialAccountId: 'checking',
+              initialReservationContainerType: ReservationContainerType.goal,
+              initialReservationContainerId: goal.id,
+            ),
+            child: const Text('Spend'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Spend'));
+    await tester.pumpAndSettle();
+    expect(find.text('Spend from MacBook'), findsOneWidget);
+    expect(find.text('Paid from'), findsOneWidget);
+    expect(find.text('Using reserved money'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('transaction-amount')),
+      '210000',
+    );
+    await tester.pump();
+
+    _expectReservationPreview(
+      payment: r'$2,100.00',
+      coveredLabel: 'Covered by MacBook Goal',
+      covered: r'$2,000.00',
+      unreserved: r'$100.00',
+    );
+  });
+
   testWidgets('Allocate shows funding account and live available remainder', (
     tester,
   ) async {
@@ -638,6 +769,40 @@ void main() {
     expect(find.text('Delete'), findsOneWidget);
   });
 
+  testWidgets('Fund card opens actions then its read-only Activity', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 20000,
+      date: DateTime(2026, 8, 23),
+    );
+    final operation = store.reservationOperations.single;
+    await tester.pumpWidget(_app(store, FundPlanCard(fund: fund)));
+
+    await tester.tap(find.byKey(ValueKey('fund-card-${fund.id}')));
+    await tester.pumpAndSettle();
+    expect(find.text('View Activity'), findsOneWidget);
+    expect(find.text('Fund Details'), findsNothing);
+
+    await tester.tap(find.text('View Activity'));
+    await tester.pumpAndSettle();
+    expect(find.text('Fund Details'), findsOneWidget);
+    expect(find.text('Activity'), findsOneWidget);
+    expect(find.textContaining('Allocated'), findsOneWidget);
+    expect(
+      find.byKey(ValueKey('fund-reservation-activity-${operation.id}')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('Fund deletion identifies its remaining scheduled linkage', (
     tester,
   ) async {
@@ -676,6 +841,36 @@ void main() {
     );
     expect(find.textContaining('Use reserved money to None'), findsOneWidget);
   });
+}
+
+void _expectReservationPreview({
+  required String payment,
+  required String coveredLabel,
+  required String covered,
+  required String unreserved,
+}) {
+  final paymentRow = find.byKey(const ValueKey('reservation-payment-amount'));
+  final coveredRow = find.byKey(const ValueKey('reservation-covered-amount'));
+  final unreservedRow = find.byKey(
+    const ValueKey('reservation-unreserved-amount'),
+  );
+  expect(paymentRow, findsOneWidget);
+  expect(
+    find.descendant(of: paymentRow, matching: find.text(payment)),
+    findsOneWidget,
+  );
+  expect(
+    find.descendant(of: coveredRow, matching: find.text(coveredLabel)),
+    findsOneWidget,
+  );
+  expect(
+    find.descendant(of: coveredRow, matching: find.text(covered)),
+    findsOneWidget,
+  );
+  expect(
+    find.descendant(of: unreservedRow, matching: find.text(unreserved)),
+    findsOneWidget,
+  );
 }
 
 Future<void> _setPhoneSize(WidgetTester tester) async {

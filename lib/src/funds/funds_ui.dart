@@ -249,65 +249,78 @@ Future<void> showFundActions(BuildContext context, String fundId) async {
     context: context,
     showDragHandle: true,
     builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            title: Text(
-              fund.name,
-              style: const TextStyle(fontWeight: FontWeight.w900),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                fund.name,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: Text(
+                '${money(current, store.preferences.currency)} available',
+              ),
             ),
-            subtitle: Text(
-              '${money(current, store.preferences.currency)} available',
+            ListTile(
+              leading: Icon(AppIcon.history),
+              title: const Text('View Activity'),
+              onTap: () => Navigator.pop(sheetContext, 'viewActivity'),
             ),
-          ),
-          ListTile(
-            leading: Icon(AppIcon.add),
-            title: const Text('Allocate'),
-            subtitle: const Text('Reserve more money from the funding account'),
-            onTap: () => Navigator.pop(sheetContext, 'allocate'),
-          ),
-          ListTile(
-            enabled: current > 0,
-            leading: Icon(AppIcon.expense),
-            title: const Text('Spend from Fund'),
-            subtitle: const Text('Record a real transaction using this money'),
-            onTap: current > 0
-                ? () => Navigator.pop(sheetContext, 'spend')
-                : null,
-          ),
-          ListTile(
-            enabled: current > 0,
-            leading: Icon(AppIcon.transfer),
-            title: const Text('Return Funds'),
-            subtitle: const Text('Release reserved money back to available'),
-            onTap: current > 0
-                ? () => Navigator.pop(sheetContext, 'return')
-                : null,
-          ),
-          ListTile(
-            leading: Icon(AppIcon.edit),
-            title: const Text('Edit'),
-            onTap: () => Navigator.pop(sheetContext, 'edit'),
-          ),
-          ListTile(
-            leading: Icon(AppIcon.archive),
-            title: const Text('Archive'),
-            onTap: () => Navigator.pop(sheetContext, 'archive'),
-          ),
-          ListTile(
-            leading: Icon(AppIcon.delete),
-            title: const Text('Delete'),
-            textColor: Theme.of(sheetContext).colorScheme.error,
-            iconColor: Theme.of(sheetContext).colorScheme.error,
-            onTap: () => Navigator.pop(sheetContext, 'delete'),
-          ),
-        ],
+            ListTile(
+              leading: Icon(AppIcon.add),
+              title: const Text('Allocate'),
+              subtitle: const Text(
+                'Reserve more money from the funding account',
+              ),
+              onTap: () => Navigator.pop(sheetContext, 'allocate'),
+            ),
+            ListTile(
+              enabled: current > 0,
+              leading: Icon(AppIcon.expense),
+              title: const Text('Spend from Fund'),
+              subtitle: const Text(
+                'Record a real transaction using this money',
+              ),
+              onTap: current > 0
+                  ? () => Navigator.pop(sheetContext, 'spend')
+                  : null,
+            ),
+            ListTile(
+              enabled: current > 0,
+              leading: Icon(AppIcon.transfer),
+              title: const Text('Return Funds'),
+              subtitle: const Text('Release reserved money back to available'),
+              onTap: current > 0
+                  ? () => Navigator.pop(sheetContext, 'return')
+                  : null,
+            ),
+            ListTile(
+              leading: Icon(AppIcon.edit),
+              title: const Text('Edit'),
+              onTap: () => Navigator.pop(sheetContext, 'edit'),
+            ),
+            ListTile(
+              leading: Icon(AppIcon.archive),
+              title: const Text('Archive'),
+              onTap: () => Navigator.pop(sheetContext, 'archive'),
+            ),
+            ListTile(
+              leading: Icon(AppIcon.delete),
+              title: const Text('Delete'),
+              textColor: Theme.of(sheetContext).colorScheme.error,
+              iconColor: Theme.of(sheetContext).colorScheme.error,
+              onTap: () => Navigator.pop(sheetContext, 'delete'),
+            ),
+          ],
+        ),
       ),
     ),
   );
   if (!context.mounted || action == null) return;
   switch (action) {
+    case 'viewActivity':
+      await showFundDetails(context, fundId);
     case 'allocate':
       await showFundAmountDialog(context, fundId: fundId, isReturn: false);
     case 'return':
@@ -327,6 +340,126 @@ Future<void> showFundActions(BuildContext context, String fundId) async {
     case 'delete':
       await _confirmAndDeleteFund(context, fundId);
   }
+}
+
+Future<void> showFundDetails(BuildContext context, String fundId) async {
+  final store = FinanceDataStoreScope.read(context);
+  final fund = store.funds
+      .where((item) => item.id == fundId && !item.isDeleted)
+      .firstOrNull;
+  if (fund == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('This Fund is no longer available.')),
+    );
+    return;
+  }
+  final current = store.currentFundAmountMinor(fund.id);
+  final target = fund.targetBalanceMinor;
+  final fundingAccountName = store.accounts
+      .where((account) => account.id == fund.fundingAccountId)
+      .firstOrNull
+      ?.name;
+  final activity = store.reservationActivity(
+    containerType: ReservationContainerType.fund,
+    containerId: fund.id,
+  );
+  final effectiveTargetDate = effectiveFundTargetDate(fund);
+  await showDialog<void>(
+    context: context,
+    useRootNavigator: false,
+    builder: (dialogContext) => TransactionSheetFrame(
+      title: 'Fund Details',
+      actions: TextButton(
+        onPressed: () => Navigator.pop(dialogContext),
+        child: const Text('Close'),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            fund.name,
+            style: Theme.of(
+              dialogContext,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: AppSpacing.xxs),
+          Text(
+            '${money(current, store.preferences.currency)} available',
+            style: Theme.of(dialogContext).textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: Color(fund.accentColorValue),
+              fontFeatures: const [AppTextStyles.tabularFigures],
+            ),
+          ),
+          if (target > 0) ...[
+            const SizedBox(height: AppSpacing.sm),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadii.pill),
+              child: LinearProgressIndicator(
+                minHeight: 8,
+                value: (current / target).clamp(0.0, 1.0),
+                color: Color(fund.accentColorValue),
+                backgroundColor: Theme.of(
+                  dialogContext,
+                ).colorScheme.surfaceContainerHighest,
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          if (fundingAccountName != null)
+            GoalDetailValue(
+              label: 'Funding account',
+              value: fundingAccountName,
+              icon: AppIcon.wallet,
+            ),
+          if (target > 0)
+            GoalDetailValue(
+              label: 'Target balance',
+              value: money(target, store.preferences.currency),
+              icon: AppIcon.goal,
+            ),
+          if (effectiveTargetDate != null)
+            GoalDetailValue(
+              label: 'Next target',
+              value: fullMonthDateLabel(effectiveTargetDate),
+              icon: AppIcon.calendar,
+            ),
+          if (fund.description.trim().isNotEmpty)
+            GoalDetailValue(
+              label: 'Description',
+              value: fund.description,
+              icon: AppIcon.notes,
+            ),
+          const TransactionFormDivider(),
+          Text(
+            'Activity',
+            style: Theme.of(
+              dialogContext,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          if (activity.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+              child: Text('No activity yet'),
+            )
+          else
+            for (final operation in activity.take(20))
+              ReservationActivityRow(
+                operation: operation,
+                currency: store.preferences.currency,
+                fundingAccountName: store.accounts
+                    .where(
+                      (account) => account.id == operation.fundingAccountId,
+                    )
+                    .firstOrNull
+                    ?.name,
+                accentColor: Color(fund.accentColorValue),
+                keyPrefix: 'fund-reservation-activity',
+              ),
+        ],
+      ),
+    ),
+  );
 }
 
 Future<void> showArchivedFundActions(

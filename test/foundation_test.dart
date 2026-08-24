@@ -21,6 +21,127 @@ import 'package:money_tally/src/persistence/scheduled_notification_state_reposit
 import 'package:money_tally/src/store/finance_data_store.dart';
 
 void main() {
+  test(
+    'ordinary sync records converge on cloud authority when timestamps tie',
+    () {
+      final timestamp = DateTime.utc(2026, 8, 23, 19, 54);
+      final remoteSync = SyncMetadata(
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        deviceId: 'phone',
+        version: 2,
+      );
+      final staleLocalSync = SyncMetadata(
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        deviceId: 'tablet',
+        version: 1,
+      );
+      TransactionRecord transaction({
+        required SyncMetadata sync,
+        required bool linked,
+      }) {
+        return TransactionRecord(
+          id: 'paid-occurrence',
+          type: TransactionType.expense,
+          accountId: 'checking',
+          categoryId: 'dining',
+          date: DateTime(2026, 8, 22),
+          payee: 'Test payment',
+          amountMinor: 5000,
+          scheduledTransactionId: linked ? 'schedule' : null,
+          scheduledOccurrenceDate: linked ? DateTime(2026, 8, 22) : null,
+          scheduledPlannedAmountMinor: linked ? 5000 : null,
+          sync: sync,
+        );
+      }
+
+      final authoritativeRemote = transaction(sync: remoteSync, linked: false);
+      final staleLocal = transaction(sync: staleLocalSync, linked: true);
+      final higherRevisionMerge = mergeFinanceDataSetsPreferCurrent(
+        incoming: _emptyDataSet().copyWith(transactions: [authoritativeRemote]),
+        current: _emptyDataSet().copyWith(transactions: [staleLocal]),
+      );
+
+      expect(
+        higherRevisionMerge.transactions.single.scheduledTransactionId,
+        isNull,
+      );
+
+      final divergentExactTie = transaction(sync: remoteSync, linked: true);
+      final exactTieMerge = mergeFinanceDataSetsPreferCurrent(
+        incoming: _emptyDataSet().copyWith(transactions: [authoritativeRemote]),
+        current: _emptyDataSet().copyWith(transactions: [divergentExactTie]),
+      );
+      final repeated = mergeFinanceDataSetsPreferCurrent(
+        incoming: _emptyDataSet().copyWith(transactions: [authoritativeRemote]),
+        current: exactTieMerge,
+      );
+
+      expect(
+        exactTieMerge.transactions.single.toJson(),
+        authoritativeRemote.toJson(),
+      );
+      expect(
+        repeated.transactions.single.toJson(),
+        authoritativeRemote.toJson(),
+      );
+    },
+  );
+
+  test(
+    'deleted transaction payloads converge instead of preferring each device',
+    () {
+      final createdAt = DateTime.utc(2026, 8, 20);
+      final olderDeleted = TransactionRecord(
+        id: 'deleted-scheduled-payment',
+        type: TransactionType.expense,
+        accountId: 'checking',
+        date: DateTime.utc(2026, 8, 22),
+        payee: 'Test payment',
+        amountMinor: 5000,
+        scheduledTransactionId: 'old-schedule',
+        scheduledOccurrenceDate: DateTime.utc(2026, 8, 22),
+        scheduledPlannedAmountMinor: 5000,
+        sync: SyncMetadata(
+          createdAt: createdAt,
+          updatedAt: DateTime.utc(2026, 8, 22, 12),
+          deletedAt: DateTime.utc(2026, 8, 22, 12),
+          deviceId: 'device-b',
+          version: 2,
+        ),
+      );
+      final newerClearedLinkage = olderDeleted.copyWith(
+        clearScheduledTransaction: true,
+        sync: SyncMetadata(
+          createdAt: createdAt,
+          updatedAt: DateTime.utc(2026, 8, 23, 12),
+          deletedAt: DateTime.utc(2026, 8, 22, 12),
+          deviceId: 'device-a',
+          version: 3,
+        ),
+      );
+
+      final merged = mergeFinanceDataSetsPreferCurrent(
+        incoming: _emptyDataSet().copyWith(transactions: [newerClearedLinkage]),
+        current: _emptyDataSet().copyWith(transactions: [olderDeleted]),
+      );
+
+      expect(merged.transactions.single.isDeleted, isTrue);
+      expect(merged.transactions.single.scheduledTransactionId, isNull);
+      expect(merged.transactions.single.sync.version, 3);
+
+      final exactTieLocal = olderDeleted.copyWith(
+        sync: newerClearedLinkage.sync,
+      );
+      final tieMerged = mergeFinanceDataSetsPreferCurrent(
+        incoming: _emptyDataSet().copyWith(transactions: [newerClearedLinkage]),
+        current: _emptyDataSet().copyWith(transactions: [exactTieLocal]),
+      );
+      expect(tieMerged.transactions.single.scheduledTransactionId, isNull);
+    },
+  );
+
   test('scheduled occurrence metadata round trips', () {
     final scheduled = ScheduledTransactionRecord(
       id: 'sched-card',

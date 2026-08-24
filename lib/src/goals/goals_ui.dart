@@ -15,6 +15,7 @@ Color goalStatusColor(GoalProgressStatus status) {
     GoalProgressStatus.needsAttention ||
     GoalProgressStatus.restoreOverdue => AppColors.danger,
     GoalProgressStatus.completed => _goalBlue,
+    GoalProgressStatus.notStarted ||
     GoalProgressStatus.noTargetDate ||
     GoalProgressStatus.noRestoreDate ||
     GoalProgressStatus.archived => AppColors.muted,
@@ -60,7 +61,17 @@ String goalCurrentStateLabel(
         ? 'Achieved'
         : '✓ Achieved ${fullMonthDateLabel(goal.completedAt!)}';
   }
-  return metrics.status.label;
+  if (metrics.currentAmountMinor == 0) return 'Not started';
+  if (goal.targetDate == null) {
+    return '${money(metrics.remainingAmountMinor, currency)} remaining';
+  }
+  return switch (metrics.status) {
+    GoalProgressStatus.ahead =>
+      'Ahead by ${money(metrics.aheadBehindMinor.abs(), currency)}',
+    GoalProgressStatus.behind || GoalProgressStatus.seriouslyBehind =>
+      'Behind by ${money(metrics.aheadBehindMinor.abs(), currency)}',
+    _ => metrics.status.label,
+  };
 }
 
 class GoalsPreviewCard extends StatelessWidget {
@@ -80,6 +91,7 @@ class GoalsPreviewCard extends StatelessWidget {
           GoalProgressStatus.seriouslyBehind: 0,
           GoalProgressStatus.restoreOverdue: 0,
           GoalProgressStatus.needsAttention: 0,
+          GoalProgressStatus.notStarted: 2,
           GoalProgressStatus.behind: 1,
           GoalProgressStatus.replenishing: 1,
           GoalProgressStatus.slightlyBelowTarget: 1,
@@ -167,10 +179,15 @@ class GoalPreviewRow extends StatelessWidget {
     final store = FinanceDataStoreScope.watch(context);
     final metrics = store.goalMetrics(goal.id);
     final statusColor = goalStatusColor(metrics.status);
+    final statusLabel = goalCurrentStateLabel(
+      goal,
+      metrics,
+      store.preferences.currency,
+    );
     return Semantics(
       button: true,
       label:
-          '${goal.name}, ${metrics.status.label}, ${money(metrics.currentAmountMinor, store.preferences.currency)} of ${money(goal.targetAmountMinor, store.preferences.currency)}',
+          '${goal.name}, $statusLabel, ${money(metrics.currentAmountMinor, store.preferences.currency)} of ${money(goal.targetAmountMinor, store.preferences.currency)}',
       child: InkWell(
         key: ValueKey('dashboard-goal-${goal.id}'),
         borderRadius: BorderRadius.circular(AppRadii.control),
@@ -194,7 +211,7 @@ class GoalPreviewRow extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    metrics.status.label,
+                    statusLabel,
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
                       color: statusColor,
                       fontWeight: FontWeight.w800,
@@ -424,124 +441,6 @@ Future<void> showArchivedGoalActions(
     case 'duplicate':
       await store.duplicateGoal(goal.id);
     case 'delete':
-      final confirmed = await showGoalConfirmation(
-        context,
-        title: 'Delete this Goal permanently?',
-        message:
-            'This Goal has no remaining balance or pending scheduled activity. Ledger history, if any, will remain available.',
-        confirmLabel: 'Delete Permanently',
-        destructive: true,
-      );
-      if (confirmed) await store.deleteGoalPermanently(goal.id);
-  }
-}
-
-/// Archiving is optional organization, not a prerequisite for removing an
-/// empty Goal. Active cards use this same long-press action language as
-/// account and Ledger rows.
-Future<void> showActiveGoalActions(BuildContext context, String goalId) async {
-  final store = FinanceDataStoreScope.read(context);
-  final goal = store.goals
-      .where((item) => item.id == goalId && item.isOnMainGoalsScreen)
-      .firstOrNull;
-  if (goal == null) return;
-
-  final action = await showModalBottomSheet<String>(
-    context: context,
-    showDragHandle: true,
-    builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              0,
-              AppSpacing.lg,
-              AppSpacing.xs,
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Goal Actions',
-                style: Theme.of(
-                  sheetContext,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-              ),
-            ),
-          ),
-          ListTile(
-            leading: Icon(AppIcon.savings),
-            title: const Text('Goal Actions'),
-            onTap: () => Navigator.pop(sheetContext, 'actions'),
-          ),
-          ListTile(
-            leading: Icon(AppIcon.edit),
-            title: const Text('Edit'),
-            onTap: () => Navigator.pop(sheetContext, 'edit'),
-          ),
-          ListTile(
-            leading: Icon(AppIcon.archive),
-            title: const Text('Archive'),
-            onTap: () => Navigator.pop(sheetContext, 'archive'),
-          ),
-          ListTile(
-            leading: Icon(AppIcon.delete),
-            title: const Text('Delete'),
-            textColor: Theme.of(sheetContext).colorScheme.error,
-            iconColor: Theme.of(sheetContext).colorScheme.error,
-            onTap: () => Navigator.pop(sheetContext, 'delete'),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          TextButton(
-            onPressed: () => Navigator.pop(sheetContext),
-            child: const Text('Cancel'),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-        ],
-      ),
-    ),
-  );
-  if (action == null || !context.mounted) return;
-
-  switch (action) {
-    case 'actions':
-      await showGoalActionsSheet(context, goal.id);
-    case 'edit':
-      await showGoalEditor(context, initialGoal: goal);
-    case 'archive':
-      final confirmed = await showGoalConfirmation(
-        context,
-        title: 'Archive Goal?',
-        message:
-            'This hides the Goal from active planning. Its balance and activity remain unchanged.',
-        confirmLabel: 'Archive Goal',
-        destructive: true,
-      );
-      if (confirmed) await store.archiveGoal(goal.id);
-    case 'delete':
-      final eligibility = store.goalDeleteEligibility(goal.id);
-      if (!eligibility.canDelete) {
-        await showDialog<void>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Goal can’t be deleted yet'),
-            content: Text(
-              goalDeletionBlockedMessage(
-                eligibility,
-                store.preferences.currency,
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-        );
-        return;
-      }
       final confirmed = await showGoalConfirmation(
         context,
         title: 'Delete this Goal permanently?',
@@ -807,11 +706,11 @@ class GoalCard extends StatelessWidget {
       child: InkWell(
         key: ValueKey('goal-card-${goal.id}'),
         borderRadius: BorderRadius.circular(AppRadii.card),
-        onTap: () => showGoalDetails(context, goal.id),
+        onTap: () => showGoalActionsSheet(context, goal.id),
         onLongPress: goal.isOnMainGoalsScreen
             ? () {
                 AppHaptics.longPressAction();
-                unawaited(showActiveGoalActions(context, goal.id));
+                unawaited(showGoalActionsSheet(context, goal.id));
               }
             : null,
         child: Padding(
@@ -861,35 +760,25 @@ class GoalCard extends StatelessWidget {
               GoalProgressBar(
                 progress: metrics.percentageComplete,
                 color: statusColor,
-                semanticsLabel: metrics.status.label,
+                semanticsLabel: goalCurrentStateLabel(
+                  goal,
+                  metrics,
+                  store.preferences.currency,
+                ),
               ),
               const SizedBox(height: AppSpacing.sm),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      needsAttention
-                          ? 'Goal account unavailable'
-                          : goalCurrentStateLabel(
-                              goal,
-                              metrics,
-                              store.preferences.currency,
-                            ),
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: needsAttention ? AppColors.danger : statusColor,
-                        fontWeight: FontWeight.w900,
+              Text(
+                needsAttention
+                    ? 'Goal account unavailable'
+                    : goalCurrentStateLabel(
+                        goal,
+                        metrics,
+                        store.preferences.currency,
                       ),
-                    ),
-                  ),
-                  if (!compact && goal.isOnMainGoalsScreen)
-                    TextButton(
-                      key: ValueKey('goal-add-contribution-${goal.id}'),
-                      onPressed: needsAttention
-                          ? null
-                          : () => showGoalActionsSheet(context, goal.id),
-                      child: const Text('Goal Actions'),
-                    ),
-                ],
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: needsAttention ? AppColors.danger : statusColor,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
               if (goal.isAchieved && metrics.remainingAmountMinor > 0)
                 Text(
@@ -1011,63 +900,87 @@ Future<void> showGoalActionsSheet(BuildContext context, String goalId) async {
       )
       .firstOrNull;
   if (goal == null) return;
-  final action = await showPolishedChoicePicker<String>(
-    context,
-    title: 'Goal Actions',
-    selected: '',
-    choices: [
-      PolishedChoice(
-        value: 'viewActivity',
-        label: 'View Activity',
-        leading: Icon(AppIcon.history),
-      ),
-      PolishedChoice(
-        value: 'fund',
-        label: 'Fund Goal',
-        leading: Icon(AppIcon.savings),
-      ),
-      PolishedChoice(
-        value: 'withdraw',
-        label: goal.usesReservationModel
-            ? 'Return Reserved Money'
-            : 'Withdraw to Account',
-        leading: Icon(AppIcon.transfer),
-      ),
-      if (goal.usesReservationModel)
-        PolishedChoice(
-          value: 'spend',
-          label: 'Spend from Goal',
-          leading: Icon(AppIcon.expense),
+  final current = store.currentGoalAmountMinor(goal.id);
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                goal.name,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: Text(
+                '${money(current, store.preferences.currency)} reserved',
+              ),
+            ),
+            ListTile(
+              leading: Icon(AppIcon.history),
+              title: const Text('View Activity'),
+              onTap: () => Navigator.pop(sheetContext, 'viewActivity'),
+            ),
+            ListTile(
+              leading: Icon(AppIcon.savings),
+              title: const Text('Fund Goal'),
+              onTap: () => Navigator.pop(sheetContext, 'fund'),
+            ),
+            ListTile(
+              enabled: current > 0,
+              leading: Icon(AppIcon.expense),
+              title: const Text('Spend from Goal'),
+              onTap: current > 0
+                  ? () => Navigator.pop(sheetContext, 'spend')
+                  : null,
+            ),
+            ListTile(
+              enabled: current > 0,
+              leading: Icon(AppIcon.transfer),
+              title: Text(
+                goal.usesReservationModel
+                    ? 'Return Reserved Money'
+                    : 'Withdraw to Account',
+              ),
+              onTap: current > 0
+                  ? () => Navigator.pop(sheetContext, 'withdraw')
+                  : null,
+            ),
+            if (!goal.isAchieved)
+              ListTile(
+                leading: Icon(AppIcon.schedule),
+                title: const Text('Schedule Funding'),
+                onTap: () => Navigator.pop(sheetContext, 'scheduleFunding'),
+              ),
+            ListTile(
+              leading: Icon(AppIcon.edit),
+              title: const Text('Edit'),
+              onTap: () => Navigator.pop(sheetContext, 'edit'),
+            ),
+            if (!goal.usesReservationModel)
+              ListTile(
+                leading: Icon(AppIcon.transfer),
+                title: const Text('Transfer Between Goals'),
+                onTap: () => Navigator.pop(sheetContext, 'between'),
+              ),
+            ListTile(
+              leading: Icon(AppIcon.archive),
+              title: const Text('Archive'),
+              onTap: () => Navigator.pop(sheetContext, 'archive'),
+            ),
+            ListTile(
+              leading: Icon(AppIcon.delete),
+              title: const Text('Delete'),
+              textColor: Theme.of(sheetContext).colorScheme.error,
+              iconColor: Theme.of(sheetContext).colorScheme.error,
+              onTap: () => Navigator.pop(sheetContext, 'delete'),
+            ),
+          ],
         ),
-      if (!goal.isAchieved)
-        PolishedChoice(
-          value: 'scheduleFunding',
-          label: 'Schedule Funding',
-          leading: Icon(AppIcon.schedule),
-        ),
-      PolishedChoice(
-        value: 'edit',
-        label: 'Edit Goal',
-        leading: Icon(AppIcon.edit),
       ),
-      PolishedChoice(
-        value: 'archive',
-        label: 'Archive Goal',
-        leading: Icon(AppIcon.archive),
-      ),
-      if (!goal.usesReservationModel) ...[
-        PolishedChoice(
-          value: 'spend',
-          label: 'Spend from Goal',
-          leading: Icon(AppIcon.expense),
-        ),
-        PolishedChoice(
-          value: 'between',
-          label: 'Transfer Between Goals',
-          leading: Icon(AppIcon.transfer),
-        ),
-      ],
-    ],
+    ),
   );
   if (action == null || !context.mounted) return;
   switch (action) {
@@ -1088,6 +1001,38 @@ Future<void> showGoalActionsSheet(BuildContext context, String goalId) async {
         destructive: true,
       );
       if (confirmed) await store.archiveGoal(goal.id);
+    case 'delete':
+      final eligibility = store.goalDeleteEligibility(goal.id);
+      if (!eligibility.canDelete) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Goal can’t be deleted yet'),
+            content: Text(
+              goalDeletionBlockedMessage(
+                eligibility,
+                store.preferences.currency,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+      final confirmed = await showGoalConfirmation(
+        context,
+        title: 'Delete this Goal permanently?',
+        message:
+            'This Goal has no remaining balance or pending scheduled activity. Ledger history, if any, will remain available.',
+        confirmLabel: 'Delete Permanently',
+        destructive: true,
+      );
+      if (confirmed) await store.deleteGoalPermanently(goal.id);
     case 'fund':
       await showFundGoalsSheet(context, initialGoalId: goal.id);
     case 'scheduleFunding':
@@ -2653,17 +2598,21 @@ class GoalContributionHeader extends StatelessWidget {
   }
 }
 
-class GoalReservationActivityRow extends StatelessWidget {
-  const GoalReservationActivityRow({
+class ReservationActivityRow extends StatelessWidget {
+  const ReservationActivityRow({
     required this.operation,
     required this.currency,
     this.fundingAccountName,
+    this.accentColor = _goalBlue,
+    this.keyPrefix = 'reservation-activity',
     super.key,
   });
 
   final ReservationOperationRecord operation;
   final CurrencyFormatSettings currency;
   final String? fundingAccountName;
+  final Color accentColor;
+  final String keyPrefix;
 
   @override
   Widget build(BuildContext context) {
@@ -2689,9 +2638,9 @@ class GoalReservationActivityRow extends StatelessWidget {
         ? ' to $fundingAccountName'
         : '';
     return ListTile(
-      key: ValueKey('goal-reservation-activity-${operation.id}'),
+      key: ValueKey('$keyPrefix-${operation.id}'),
       contentPadding: EdgeInsets.zero,
-      leading: TransactionFormIcon(icon, color: _goalBlue),
+      leading: TransactionFormIcon(icon, color: accentColor),
       title: Text(
         '$label ${money(operation.amountMinor, currency)}$accountSuffix',
         style: const TextStyle(fontWeight: FontWeight.w800),
@@ -2704,7 +2653,7 @@ class GoalReservationActivityRow extends StatelessWidget {
       trailing: Text(
         '${isDecrease ? '−' : '+'}${money(operation.amountMinor, currency)}',
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: isDecrease ? AppColors.muted : _goalBlue,
+          color: isDecrease ? AppColors.muted : accentColor,
           fontWeight: FontWeight.w800,
           fontFeatures: const [AppTextStyles.tabularFigures],
         ),
@@ -2761,33 +2710,9 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
           : const <ReservationOperationRecord>[];
       return TransactionSheetFrame(
         title: 'Goal Details',
-        actions: Wrap(
-          alignment: WrapAlignment.end,
-          spacing: AppSpacing.xs,
-          children: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Close'),
-            ),
-            if (goal.isOnMainGoalsScreen)
-              OutlinedButton(
-                key: const ValueKey('goal-details-edit'),
-                onPressed: () async {
-                  Navigator.pop(dialogContext);
-                  await showGoalEditor(context, initialGoal: goal);
-                },
-                child: const Text('Edit'),
-              ),
-            if (goal.isOnMainGoalsScreen)
-              FilledButton(
-                key: const ValueKey('goal-details-add-contribution'),
-                onPressed: () async {
-                  Navigator.pop(dialogContext);
-                  await showGoalActionsSheet(context, goal.id);
-                },
-                child: const Text('Goal Actions'),
-              ),
-          ],
+        actions: TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Close'),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2801,7 +2726,11 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
             GoalProgressBar(
               progress: metrics.percentageComplete,
               color: goalStatusColor(metrics.status),
-              semanticsLabel: metrics.status.label,
+              semanticsLabel: goalCurrentStateLabel(
+                goal,
+                metrics,
+                store.preferences.currency,
+              ),
             ),
             SizedBox(height: AppSpacing.md),
             GoalDetailValue(
@@ -2817,7 +2746,11 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                   ? 'Archived'
                   : goal.isAchieved
                   ? 'Achieved'
-                  : metrics.status.label,
+                  : goalCurrentStateLabel(
+                      goal,
+                      metrics,
+                      store.preferences.currency,
+                    ),
               icon: AppIcon.insights,
             ),
             if (goal.goalType == GoalType.reachTarget &&
@@ -2848,19 +2781,21 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                     'Based on the remaining amount and ${goal.goalType == GoalType.maintainBalance ? 'replenish-by' : 'target'} date',
                 icon: AppIcon.trend,
               ),
-            GoalDetailValue(
-              label: goal.goalType == GoalType.maintainBalance
-                  ? 'Reserve balance'
-                  : 'Ahead / behind',
-              value: goal.goalType == GoalType.maintainBalance
-                  ? metrics.aheadBehindMinor >= 0
-                        ? '${money(metrics.aheadBehindMinor, store.preferences.currency)} above reserve target'
-                        : '${money(metrics.aheadBehindMinor.abs(), store.preferences.currency)} below reserve target'
-                  : metrics.aheadBehindMinor >= 0
-                  ? '${money(metrics.aheadBehindMinor, store.preferences.currency)} ahead'
-                  : '${money(metrics.aheadBehindMinor.abs(), store.preferences.currency)} behind',
-              icon: AppIcon.adjustment,
-            ),
+            if (goal.goalType == GoalType.maintainBalance ||
+                goal.targetDate != null)
+              GoalDetailValue(
+                label: goal.goalType == GoalType.maintainBalance
+                    ? 'Reserve balance'
+                    : 'Ahead / behind',
+                value: goal.goalType == GoalType.maintainBalance
+                    ? metrics.aheadBehindMinor >= 0
+                          ? '${money(metrics.aheadBehindMinor, store.preferences.currency)} above reserve target'
+                          : '${money(metrics.aheadBehindMinor.abs(), store.preferences.currency)} below reserve target'
+                    : metrics.aheadBehindMinor >= 0
+                    ? '${money(metrics.aheadBehindMinor, store.preferences.currency)} ahead'
+                    : '${money(metrics.aheadBehindMinor.abs(), store.preferences.currency)} behind',
+                icon: AppIcon.adjustment,
+              ),
             if (goal.description.trim().isNotEmpty)
               GoalDetailValue(
                 label: 'Description',
@@ -2884,9 +2819,10 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               )
             else ...[
               for (final operation in reservationActivity.take(20))
-                GoalReservationActivityRow(
+                ReservationActivityRow(
                   operation: operation,
                   currency: store.preferences.currency,
+                  keyPrefix: 'goal-reservation-activity',
                   fundingAccountName: store.accounts
                       .where(
                         (account) => account.id == operation.fundingAccountId,
@@ -2958,32 +2894,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                       showGoalContributionDetails(context, contribution.id),
                 ),
             ],
-            if (goal.isOnMainGoalsScreen) ...[
-              const TransactionFormDivider(),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  key: const ValueKey('goal-details-archive'),
-                  onPressed: () async {
-                    Navigator.pop(dialogContext);
-                    final confirmed = await showGoalConfirmation(
-                      context,
-                      title: 'Archive Goal?',
-                      message: store.scheduledGoalFundingNeedsAttention(goal.id)
-                          ? 'This Goal has scheduled future funding. Archiving it will block those occurrences until you restore this Goal or update the schedule. Existing history remains unchanged.'
-                          : store.currentGoalAmountMinor(goal.id) > 0
-                          ? 'The reserved money and Goal history remain intact. Restore the Goal later to use it again.'
-                          : 'This preserves the Goal history and removes it from current planning.',
-                      confirmLabel: 'Archive Goal',
-                      destructive: true,
-                    );
-                    if (confirmed) await store.archiveGoal(goal.id);
-                  },
-                  icon: Icon(AppIcon.archive),
-                  label: const Text('Archive Goal'),
-                ),
-              ),
-            ] else ...[
+            if (!goal.isOnMainGoalsScreen) ...[
               const TransactionFormDivider(),
               Wrap(
                 alignment: WrapAlignment.end,

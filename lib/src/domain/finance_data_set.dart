@@ -310,8 +310,8 @@ List<ReservationOperationRecord> effectiveReservationOperationsForContainer({
         transaction.reservationContainerId != containerId ||
         transaction.accountId != operation.fundingAccountId ||
         transaction.deltaForAccount(transaction.accountId) >= 0 ||
-        transaction.deltaForAccount(transaction.accountId).abs() !=
-            operation.amountMinor ||
+        operation.amountMinor >
+            transaction.deltaForAccount(transaction.accountId).abs() ||
         !_sameCalendarDate(transaction.date, operation.effectiveDate)) {
       continue;
     }
