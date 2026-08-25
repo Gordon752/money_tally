@@ -6,6 +6,7 @@ import 'goal.dart';
 import 'goal_funding.dart';
 import 'json_helpers.dart';
 import 'reservation.dart';
+import 'scheduled_occurrence_authority.dart';
 import 'scheduled_transaction.dart';
 import 'transaction.dart';
 import 'user_preferences.dart';
@@ -185,6 +186,7 @@ class FinanceDataSet {
             operations: effectiveReservationOperationsForContainer(
               operations: operations,
               transactions: transactions,
+              scheduledTransactions: scheduledTransactions,
               containerType: operations.first.containerType,
               containerId: operations.first.containerId,
             ),
@@ -273,14 +275,20 @@ class FinanceDataSet {
 List<ReservationOperationRecord> effectiveReservationOperationsForContainer({
   required Iterable<ReservationOperationRecord> operations,
   required Iterable<TransactionRecord> transactions,
+  Iterable<ScheduledTransactionRecord> scheduledTransactions = const [],
   required ReservationContainerType containerType,
   required String containerId,
 }) {
+  final scheduledById = {
+    for (final schedule in scheduledTransactions)
+      if (schedule.isScheduledFundFunding) schedule.id: schedule,
+  };
   final activity = operations
       .where(
         (operation) =>
             operation.containerType == containerType &&
-            operation.containerId == containerId,
+            operation.containerId == containerId &&
+            _isAuthoritativeScheduledFundOperation(operation, scheduledById),
       )
       .toList(growable: false);
   if (!activity.any(
@@ -337,6 +345,33 @@ List<ReservationOperationRecord> effectiveReservationOperationsForContainer({
               selectedConsumptionIds.contains(operation.id)))
         operation,
   ];
+}
+
+/// Scheduled Fund-funding operations are immutable causal history. Their
+/// financial effect is selected by the winning occurrence authority rather
+/// than by whichever operation documents happened to arrive first.
+///
+/// This makes concurrent Paid/Paid and Paid/Skip actions converge safely:
+/// only the allocation linked by the winning Paid state is effective. A
+/// winning Pending (Undo) or Skipped state makes every allocation/reversal
+/// from that occurrence inert without deleting its audit history.
+bool _isAuthoritativeScheduledFundOperation(
+  ReservationOperationRecord operation,
+  Map<String, ScheduledTransactionRecord> scheduledById,
+) {
+  final scheduleId = operation.scheduledTransactionId;
+  if (scheduleId == null) return true;
+  final schedule = scheduledById[scheduleId];
+  if (schedule == null) return true;
+
+  final occurrenceDate = operation.scheduledOccurrenceDate;
+  if (occurrenceDate == null) return false;
+  final authority = occurrenceAuthorityFor(
+    schedule,
+  )[occurrenceDayKey(occurrenceDate)];
+  return authority?.status == ScheduledOccurrenceStatus.paid &&
+      authority!.reservationOperationId == operation.id &&
+      operation.kind == ReservationOperationKind.allocate;
 }
 
 bool _sameCalendarDate(DateTime left, DateTime right) =>

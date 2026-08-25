@@ -151,15 +151,29 @@ class GoalCalculator {
         today: today,
       );
     }
+    final targetDate = goal.targetDate == null
+        ? null
+        : _dateOnly(goal.targetDate!);
     if (current == 0 && target > 0) {
+      final daysRemaining = targetDate?.difference(today).inDays;
+      final weekly = daysRemaining == null
+          ? 0
+          : daysRemaining <= 0
+          ? remaining
+          : (remaining * 7 / daysRemaining).ceil();
+      final monthly = daysRemaining == null
+          ? 0
+          : daysRemaining <= 0
+          ? remaining
+          : (remaining * averageDaysPerMonth / daysRemaining).ceil();
       return GoalProgressMetrics(
         currentAmountMinor: current,
         remainingAmountMinor: remaining,
         percentageComplete: percentage,
         expectedAmountMinor: goal.startingAmountMinor,
         aheadBehindMinor: current - goal.startingAmountMinor,
-        requiredWeeklyMinor: 0,
-        requiredMonthlyMinor: 0,
+        requiredWeeklyMinor: weekly,
+        requiredMonthlyMinor: monthly,
         status: GoalProgressStatus.notStarted,
       );
     }
@@ -175,9 +189,6 @@ class GoalCalculator {
         status: GoalProgressStatus.completed,
       );
     }
-    final targetDate = goal.targetDate == null
-        ? null
-        : _dateOnly(goal.targetDate!);
     if (targetDate == null) {
       return GoalProgressMetrics(
         currentAmountMinor: current,

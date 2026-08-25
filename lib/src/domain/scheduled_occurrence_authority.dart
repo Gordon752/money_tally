@@ -69,6 +69,7 @@ Map<String, ScheduledOccurrenceState> _occurrenceAuthorityForEpoch(
       actualPaymentDate: occurrence.actualPaymentDate,
       transactionId: occurrence.transactionId,
       goalFundingEventId: occurrence.goalFundingEventId,
+      reservationOperationId: occurrence.reservationOperationId,
       revision: resolved ? 1 : 0,
       operationId: 'legacy_${occurrence.status.name}_$key',
       changedAt:
@@ -122,6 +123,7 @@ ScheduledOccurrenceState nextOccurrenceOperation({
   DateTime? actualPaymentDate,
   String? transactionId,
   String? goalFundingEventId,
+  String? reservationOperationId,
 }) {
   final key = occurrenceDayKey(scheduledDate);
   final current = occurrenceAuthorityFor(schedule)[key];
@@ -137,6 +139,7 @@ ScheduledOccurrenceState nextOccurrenceOperation({
     actualPaymentDate: actualPaymentDate,
     transactionId: transactionId,
     goalFundingEventId: goalFundingEventId,
+    reservationOperationId: reservationOperationId,
     revision: (current?.revision ?? 0) + 1,
     operationId: operationId ?? newScheduledOccurrenceOperationId(),
     changedAt: (changedAt ?? DateTime.now()).toUtc(),
@@ -167,6 +170,7 @@ ScheduledOccurrenceState rebasePendingOccurrenceState(
     actualPaymentDate: state.actualPaymentDate,
     transactionId: state.transactionId,
     goalFundingEventId: state.goalFundingEventId,
+    reservationOperationId: state.reservationOperationId,
   );
 }
 

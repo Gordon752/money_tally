@@ -280,7 +280,7 @@ Future<void> showFundActions(BuildContext context, String fundId) async {
               leading: Icon(AppIcon.expense),
               title: const Text('Spend from Fund'),
               subtitle: const Text(
-                'Record a real transaction using this money',
+                'Record a real transaction using this reserved money',
               ),
               onTap: current > 0
                   ? () => Navigator.pop(sheetContext, 'spend')
@@ -289,11 +289,19 @@ Future<void> showFundActions(BuildContext context, String fundId) async {
             ListTile(
               enabled: current > 0,
               leading: Icon(AppIcon.transfer),
-              title: const Text('Return Funds'),
+              title: const Text('Return Reserved Money'),
               subtitle: const Text('Release reserved money back to available'),
               onTap: current > 0
                   ? () => Navigator.pop(sheetContext, 'return')
                   : null,
+            ),
+            ListTile(
+              leading: Icon(AppIcon.schedule),
+              title: const Text('Schedule Funding'),
+              subtitle: const Text(
+                'Allocate money automatically on a schedule',
+              ),
+              onTap: () => Navigator.pop(sheetContext, 'scheduleFunding'),
             ),
             ListTile(
               leading: Icon(AppIcon.edit),
@@ -325,6 +333,8 @@ Future<void> showFundActions(BuildContext context, String fundId) async {
       await showFundAmountDialog(context, fundId: fundId, isReturn: false);
     case 'return':
       await showFundAmountDialog(context, fundId: fundId, isReturn: true);
+    case 'scheduleFunding':
+      await showScheduledFundFundingDialog(context, initialFundId: fundId);
     case 'spend':
       await showTransactionDialog(
         context,
@@ -336,10 +346,777 @@ Future<void> showFundActions(BuildContext context, String fundId) async {
     case 'edit':
       await showFundEditor(context, initialFund: fund);
     case 'archive':
-      await store.archiveFund(fundId);
+      final linkedFunding = store.activeScheduledFundFundingForFund(fundId);
+      if (linkedFunding.isNotEmpty) {
+        await _showFundScheduledFundingBlocker(
+          context,
+          action: 'archived',
+          linkedFunding: linkedFunding,
+        );
+        return;
+      }
+      try {
+        await store.archiveFund(fundId);
+      } on FinanceDataValidationException {
+        final newlyLinkedFunding = store.activeScheduledFundFundingForFund(
+          fundId,
+        );
+        if (newlyLinkedFunding.isEmpty || !context.mounted) rethrow;
+        await _showFundScheduledFundingBlocker(
+          context,
+          action: 'archived',
+          linkedFunding: newlyLinkedFunding,
+        );
+      }
     case 'delete':
       await _confirmAndDeleteFund(context, fundId);
   }
+}
+
+class _FundAllocationDraft {
+  _FundAllocationDraft({required this.id, this.fundId}) : amountMinor = 0;
+
+  final String id;
+  String? fundId;
+  int amountMinor;
+  int revision = 0;
+}
+
+Future<void> showAllocateFundsSheet(BuildContext context) async {
+  final store = FinanceDataStoreScope.read(context);
+  final eligibleFunds = store.activeFunds.toList()
+    ..sort((left, right) => left.name.compareTo(right.name));
+  if (eligibleFunds.isEmpty) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Create a Fund first.')));
+    return;
+  }
+
+  final fundingAccountIds = eligibleFunds
+      .map((fund) => fund.fundingAccountId)
+      .toSet();
+  final eligibleAccounts = store.activeAccountsInDisplayOrder
+      .where(
+        (account) =>
+            fundingAccountIds.contains(account.id) &&
+            accountIsAsset(account) &&
+            !account.isInternalGoalAccount,
+      )
+      .toList(growable: false);
+  if (eligibleAccounts.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('No active Fund funding account is available.'),
+      ),
+    );
+    return;
+  }
+
+  var accountId = eligibleAccounts.first.id;
+  var totalAmountMinor = 0;
+  var date = DateTime.now();
+  var isSaving = false;
+  int? savingAvailableMinor;
+  String? errorText;
+  var draftSequence = 0;
+  final noteController = TextEditingController();
+
+  String? initialFundIdForAccount(String selectedAccountId) {
+    final matches = eligibleFunds
+        .where((fund) => fund.fundingAccountId == selectedAccountId)
+        .toList(growable: false);
+    return matches.length == 1 ? matches.single.id : null;
+  }
+
+  final allocations = <_FundAllocationDraft>[
+    _FundAllocationDraft(
+      id: 'allocate-funds-draft-${draftSequence++}',
+      fundId: initialFundIdForAccount(accountId),
+    ),
+  ];
+
+  void rebalanceFirst() {
+    if (allocations.isEmpty) return;
+    final otherTotal = allocations
+        .skip(1)
+        .fold<int>(0, (total, row) => total + row.amountMinor.abs());
+    allocations.first.amountMinor = (totalAmountMinor - otherTotal)
+        .clamp(0, totalAmountMinor)
+        .toInt();
+    allocations.first.revision += 1;
+  }
+
+  await showDialog<void>(
+    context: context,
+    useRootNavigator: false,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        final account = eligibleAccounts
+            .where((candidate) => candidate.id == accountId)
+            .firstOrNull;
+        final accountFunds = eligibleFunds
+            .where((fund) => fund.fundingAccountId == accountId)
+            .toList(growable: false);
+        final liveAccountAvailableMinor = account == null
+            ? 0
+            : store.availableToSpendForAccount(account.id);
+        final accountAvailableMinor = isSaving && savingAvailableMinor != null
+            ? savingAvailableMinor!
+            : liveAccountAvailableMinor;
+        final availableAfterAllocationMinor =
+            accountAvailableMinor - totalAmountMinor;
+        final allocatedTotal = allocations.fold<int>(
+          0,
+          (total, row) => total + row.amountMinor.abs(),
+        );
+        final remaining = totalAmountMinor - allocatedTotal;
+        final selectedFundIds = allocations
+            .map((row) => row.fundId)
+            .whereType<String>()
+            .toSet();
+        final rowsValid =
+            allocations.isNotEmpty &&
+            allocations.every(
+              (row) =>
+                  row.fundId != null &&
+                  row.amountMinor > 0 &&
+                  accountFunds.any((fund) => fund.id == row.fundId),
+            ) &&
+            selectedFundIds.length == allocations.length;
+        final amountFits =
+            account != null && totalAmountMinor <= accountAvailableMinor;
+        final canSave =
+            totalAmountMinor > 0 && remaining == 0 && rowsValid && amountFits;
+
+        return _GoalControllerOwner(
+          controllers: [noteController],
+          child: TransactionSheetFrame(
+            title: 'Allocate to Funds',
+            actions: TransactionFormActions(
+              onCancel: () => Navigator.pop(dialogContext),
+              canSave: canSave,
+              isSaving: isSaving,
+              saveLabel: 'Allocate',
+              saveKey: const ValueKey('allocate-funds-save'),
+              onSave: () async {
+                if (isSaving || !canSave) return;
+                setDialogState(() {
+                  isSaving = true;
+                  savingAvailableMinor = accountAvailableMinor;
+                  errorText = null;
+                });
+                try {
+                  await store.allocateFunds(
+                    sourceAccountId: accountId,
+                    totalAmountMinor: totalAmountMinor,
+                    date: date,
+                    note: noteController.text,
+                    waitForRemote: false,
+                    allocations: [
+                      for (final allocation in allocations)
+                        FundAllocation(
+                          fundId: allocation.fundId!,
+                          amountMinor: allocation.amountMinor,
+                        ),
+                    ],
+                  );
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                } catch (error) {
+                  if (!dialogContext.mounted) return;
+                  setDialogState(() {
+                    isSaving = false;
+                    savingAvailableMinor = null;
+                    errorText = error.toString();
+                  });
+                }
+              },
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TransactionFormLabel('From Account'),
+                PolishedFormValueRow(
+                  key: const ValueKey('allocate-funds-account'),
+                  icon: AppIcon.bank,
+                  value: account?.name ?? 'Choose account',
+                  secondary: account == null
+                      ? null
+                      : 'Available to Spend ${money(accountAvailableMinor, store.preferences.currency)}',
+                  onTap: eligibleAccounts.length < 2
+                      ? null
+                      : () async {
+                          final selected = await showTransactionAccountPicker(
+                            dialogContext,
+                            accounts: eligibleAccounts,
+                            selectedAccountId: accountId,
+                          );
+                          if (selected == null || selected == accountId) return;
+                          setDialogState(() {
+                            accountId = selected;
+                            for (final allocation in allocations) {
+                              final selectedFund = eligibleFunds
+                                  .where((fund) => fund.id == allocation.fundId)
+                                  .firstOrNull;
+                              if (selectedFund?.fundingAccountId != selected) {
+                                allocation.fundId = null;
+                              }
+                            }
+                            if (allocations.length == 1 &&
+                                allocations.first.fundId == null) {
+                              allocations.first.fundId =
+                                  initialFundIdForAccount(selected);
+                            }
+                            errorText = null;
+                          });
+                        },
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Total Amount'),
+                Row(
+                  children: [
+                    TransactionFormIcon(AppIcon.money),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: AmountEntryField(
+                        fieldKey: const ValueKey('allocate-funds-total'),
+                        initialMinor: totalAmountMinor,
+                        autofocus: true,
+                        replaceZeroOnFirstInput: true,
+                        currency: store.preferences.currency,
+                        labelText: null,
+                        onChanged: (value) => setDialogState(() {
+                          totalAmountMinor = value.abs();
+                          errorText = null;
+                          rebalanceFirst();
+                        }),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'After allocation · ${money(availableAfterAllocationMinor, store.preferences.currency)} available',
+                  key: const ValueKey('allocate-funds-live-result'),
+                  style: Theme.of(dialogContext).textTheme.bodyMedium?.copyWith(
+                    color: availableAfterAllocationMinor < 0
+                        ? AppColors.warning
+                        : Theme.of(dialogContext).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (availableAfterAllocationMinor < 0) ...[
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    'This exceeds the account’s available money.',
+                    key: const ValueKey('allocate-funds-overcommit-warning'),
+                    style: Theme.of(dialogContext).textTheme.bodySmall
+                        ?.copyWith(
+                          color: AppColors.warning,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+                const TransactionFormDivider(),
+                Text(
+                  'Fund Allocations',
+                  style: Theme.of(dialogContext).textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                for (var index = 0; index < allocations.length; index += 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                    child: Row(
+                      key: ValueKey(allocations[index].id),
+                      children: [
+                        Expanded(
+                          flex: 10,
+                          child: InkWell(
+                            key: ValueKey(
+                              'allocate-funds-fund-${allocations[index].id}',
+                            ),
+                            borderRadius: BorderRadius.circular(
+                              AppRadii.control,
+                            ),
+                            onTap: () async {
+                              final selected =
+                                  await showPolishedChoicePicker<String>(
+                                    dialogContext,
+                                    title: 'Choose Fund',
+                                    selected: allocations[index].fundId ?? '',
+                                    choices: [
+                                      for (final fund in accountFunds)
+                                        if (!selectedFundIds.contains(
+                                              fund.id,
+                                            ) ||
+                                            allocations[index].fundId ==
+                                                fund.id)
+                                          PolishedChoice(
+                                            value: fund.id,
+                                            label: fund.name,
+                                            leading: Icon(AppIcon.savings),
+                                          ),
+                                    ],
+                                  );
+                              if (selected != null) {
+                                setDialogState(() {
+                                  allocations[index].fundId = selected;
+                                  errorText = null;
+                                });
+                              }
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                accountFunds
+                                        .where(
+                                          (fund) =>
+                                              fund.id ==
+                                              allocations[index].fundId,
+                                        )
+                                        .firstOrNull
+                                        ?.name ??
+                                    'Choose Fund',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(
+                                  dialogContext,
+                                ).textTheme.bodyLarge,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        Expanded(
+                          flex: 10,
+                          child: AmountEntryField(
+                            key: ValueKey(
+                              '${allocations[index].id}-${allocations[index].revision}',
+                            ),
+                            fieldKey: ValueKey(
+                              'allocate-funds-amount-${allocations[index].id}',
+                            ),
+                            initialMinor: allocations[index].amountMinor,
+                            replaceZeroOnFirstInput: true,
+                            currency: store.preferences.currency,
+                            labelText: null,
+                            decoration: const InputDecoration(
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.never,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: AppSpacing.sm,
+                                vertical: AppSpacing.sm,
+                              ),
+                            ),
+                            onChanged: (value) => setDialogState(() {
+                              allocations[index].amountMinor = value.abs();
+                              errorText = null;
+                              if (index > 0) rebalanceFirst();
+                            }),
+                          ),
+                        ),
+                        if (allocations.length > 1)
+                          SizedBox(
+                            width: 40,
+                            child: IconButton(
+                              key: ValueKey(
+                                'allocate-funds-remove-${allocations[index].id}',
+                              ),
+                              padding: const EdgeInsets.all(AppSpacing.xxs),
+                              constraints: const BoxConstraints(
+                                minWidth: 40,
+                                minHeight: 40,
+                              ),
+                              tooltip: 'Remove Fund allocation',
+                              onPressed: () => setDialogState(() {
+                                allocations.removeAt(index);
+                                errorText = null;
+                                rebalanceFirst();
+                              }),
+                              icon: Icon(AppIcon.expense),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    key: const ValueKey('allocate-funds-add-allocation'),
+                    onPressed: allocations.length >= accountFunds.length
+                        ? null
+                        : () => setDialogState(() {
+                            allocations.add(
+                              _FundAllocationDraft(
+                                id: 'allocate-funds-draft-${draftSequence++}',
+                              ),
+                            );
+                            errorText = null;
+                            rebalanceFirst();
+                          }),
+                    icon: Icon(AppIcon.add),
+                    label: const Text(
+                      'Add Fund',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                KeyedSubtree(
+                  key: const ValueKey('allocate-funds-summary'),
+                  child: GoalAllocationSummary(
+                    totalAmountMinor: totalAmountMinor,
+                    allocatedAmountMinor: allocatedTotal,
+                    currency: store.preferences.currency,
+                  ),
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Date'),
+                PolishedFormValueRow(
+                  key: const ValueKey('allocate-funds-date'),
+                  icon: AppIcon.calendar,
+                  value: fullMonthDateLabel(date),
+                  onTap: () async {
+                    final selected = await pickDateForField(
+                      dialogContext,
+                      date,
+                    );
+                    if (selected != null) {
+                      setDialogState(() {
+                        date = selected;
+                        errorText = null;
+                      });
+                    }
+                  },
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Note'),
+                Row(
+                  children: [
+                    TransactionFormIcon(AppIcon.notes),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('allocate-funds-note'),
+                        controller: noteController,
+                        decoration: const InputDecoration(
+                          hintText: 'Add a note (optional)',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (!amountFits && totalAmountMinor > 0) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Allocation exceeds the selected account’s available money.',
+                    key: const ValueKey('allocate-funds-amount-error'),
+                    style: TextStyle(
+                      color: Theme.of(dialogContext).colorScheme.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+                if (errorText != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    errorText!,
+                    key: const ValueKey('allocate-funds-error'),
+                    style: TextStyle(
+                      color: Theme.of(dialogContext).colorScheme.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
+/// Stores a recurring reservation allocation for one Fund. Completing an
+/// occurrence allocates money through the reservation engine; it does not
+/// create a Ledger transaction or alter the funding account balance.
+Future<bool> showScheduledFundFundingDialog(
+  BuildContext context, {
+  v2_scheduled.ScheduledTransactionRecord? existing,
+  DateTime? initialDate,
+  String? initialFundId,
+}) async {
+  final store = FinanceDataStoreScope.read(context);
+  final funds = store.activeFunds.toList(growable: false);
+  final existingFundId =
+      existing?.reservationFundingContainerType == ReservationContainerType.fund
+      ? existing?.reservationFundingContainerId
+      : null;
+  var fundId =
+      funds
+          .where((item) => item.id == (existingFundId ?? initialFundId))
+          .firstOrNull
+          ?.id ??
+      funds.firstOrNull?.id;
+  if (fundId == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Create an active Fund first.')),
+    );
+    return false;
+  }
+
+  var amountMinor = existing?.amountMinor.abs() ?? 0;
+  var startDate = existing?.nextDate ?? initialDate ?? DateTime.now();
+  var frequency =
+      existing?.frequency ?? v2_scheduled.RecurrenceFrequency.monthly;
+  var alertPreference =
+      existing?.alertPreference ?? v2_scheduled.AlertPreference.none;
+  var customAlertTimeMinutes = existing?.customAlertTimeMinutes ?? 9 * 60;
+  var repeatAlertUntilResolved = existing?.repeatAlertUntilResolved ?? false;
+  var isSaving = false;
+  String? errorText;
+  final note = TextEditingController(text: existing?.note ?? '');
+
+  final saved = await showDialog<bool>(
+    context: context,
+    useRootNavigator: false,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        final fund = funds.where((item) => item.id == fundId).firstOrNull;
+        final account = fund == null
+            ? null
+            : store.activeAccountsInDisplayOrder
+                  .where(
+                    (item) =>
+                        item.id == fund.fundingAccountId &&
+                        accountIsAsset(item) &&
+                        !item.isInternalGoalAccount,
+                  )
+                  .firstOrNull;
+        final canSave = fund != null && account != null && amountMinor > 0;
+        return _GoalControllerOwner(
+          controllers: [note],
+          child: TransactionSheetFrame(
+            title: existing == null
+                ? 'Schedule Funding'
+                : 'Edit Scheduled Funding',
+            actions: TransactionFormActions(
+              onCancel: () => Navigator.pop(dialogContext, false),
+              canSave: canSave,
+              isSaving: isSaving,
+              saveLabel: 'Save',
+              saveKey: const ValueKey('scheduled-fund-funding-save'),
+              onSave: () async {
+                if (isSaving || !canSave) return;
+                setDialogState(() {
+                  isSaving = true;
+                  errorText = null;
+                });
+                try {
+                  final record = v2_scheduled.ScheduledTransactionRecord(
+                    id:
+                        existing?.id ??
+                        'scheduled_fund_${DateTime.now().microsecondsSinceEpoch}',
+                    type: TransactionType.goalFunding,
+                    accountId: account.id,
+                    payee: fund.name,
+                    note: note.text.trim(),
+                    amountMinor: amountMinor,
+                    nextDate: DateTime(
+                      startDate.year,
+                      startDate.month,
+                      startDate.day,
+                    ),
+                    frequency: frequency,
+                    endDate: existing?.endDate,
+                    alertPreference: alertPreference,
+                    customAlertTimeMinutes: customAlertTimeMinutes,
+                    repeatAlertUntilResolved: repeatAlertUntilResolved,
+                    goalFundingAllocations: const [],
+                    reservationFundingContainerType:
+                        ReservationContainerType.fund,
+                    reservationFundingContainerId: fund.id,
+                    occurrences: existing?.occurrences ?? const [],
+                    occurrenceStates: existing?.occurrenceStates ?? const {},
+                    occurrenceHistoryEpoch: existing?.occurrenceHistoryEpoch,
+                    lastAction:
+                        existing?.lastAction ??
+                        v2_scheduled.ScheduledAction.none,
+                    scheduledNotificationIds: const [],
+                    sync: existing == null
+                        ? v2_sync.SyncMetadata.fresh(deviceId: store.deviceId)
+                        : existing.sync.touched(deviceId: store.deviceId),
+                  );
+                  await store.saveScheduledTransaction(record);
+                  if (dialogContext.mounted) {
+                    Navigator.pop(dialogContext, true);
+                  }
+                } catch (error) {
+                  if (!dialogContext.mounted) return;
+                  setDialogState(() {
+                    isSaving = false;
+                    errorText = error.toString();
+                  });
+                }
+              },
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TransactionFormLabel('From Account'),
+                PolishedFormValueRow(
+                  key: const ValueKey('scheduled-fund-funding-account'),
+                  icon: AppIcon.bank,
+                  value: account?.name ?? 'Funding account unavailable',
+                  secondary: account == null
+                      ? null
+                      : 'Available to Spend ${money(store.availableToSpendForAccount(account.id), store.preferences.currency)}',
+                  onTap: null,
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Fund'),
+                PolishedFormValueRow(
+                  key: const ValueKey('scheduled-fund-funding-fund'),
+                  icon: AppIcon.savings,
+                  value: fund?.name ?? 'Choose Fund',
+                  secondary: fund == null
+                      ? null
+                      : '${money(store.currentFundAmountMinor(fund.id), store.preferences.currency)} available',
+                  onTap: existing != null || funds.length < 2
+                      ? null
+                      : () async {
+                          final selected =
+                              await showPolishedChoicePicker<String>(
+                                dialogContext,
+                                title: 'Choose Fund',
+                                selected: fundId!,
+                                choices: [
+                                  for (final candidate in funds)
+                                    PolishedChoice(
+                                      value: candidate.id,
+                                      label: candidate.name,
+                                      leading: Icon(AppIcon.savings),
+                                    ),
+                                ],
+                              );
+                          if (selected != null) {
+                            setDialogState(() => fundId = selected);
+                          }
+                        },
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Amount'),
+                Row(
+                  children: [
+                    TransactionFormIcon(AppIcon.savings),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: AmountEntryField(
+                        fieldKey: const ValueKey(
+                          'scheduled-fund-funding-amount',
+                        ),
+                        initialMinor: amountMinor,
+                        replaceZeroOnFirstInput: true,
+                        currency: store.preferences.currency,
+                        labelText: null,
+                        onChanged: (value) =>
+                            setDialogState(() => amountMinor = value.abs()),
+                      ),
+                    ),
+                  ],
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Start Date'),
+                PolishedFormValueRow(
+                  icon: AppIcon.calendar,
+                  value: fullMonthDateLabel(startDate),
+                  onTap: () async {
+                    final date = await pickDateForField(
+                      dialogContext,
+                      startDate,
+                    );
+                    if (date != null) setDialogState(() => startDate = date);
+                  },
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Frequency'),
+                PolishedFormValueRow(
+                  icon: AppIcon.recurrence,
+                  value: recurrenceFrequencyLabel(frequency),
+                  onTap: () async {
+                    final selected = await showScheduledChoicePicker(
+                      dialogContext,
+                      title: 'Frequency',
+                      values: v2_scheduled.RecurrenceFrequency.values,
+                      selected: frequency,
+                      label: recurrenceFrequencyLabel,
+                    );
+                    if (selected != null) {
+                      setDialogState(() => frequency = selected);
+                    }
+                  },
+                ),
+                const TransactionFormDivider(),
+                TransactionFormLabel('Reminder'),
+                PolishedFormValueRow(
+                  icon: alertPreference == v2_scheduled.AlertPreference.none
+                      ? AppIcon.notificationNone
+                      : AppIcon.notificationActive,
+                  value: alertPreferenceLabel(alertPreference),
+                  onTap: () async {
+                    final selected = await showScheduledChoicePicker(
+                      dialogContext,
+                      title: 'Reminder',
+                      values: v2_scheduled.AlertPreference.values,
+                      selected: alertPreference,
+                      label: alertPreferenceLabel,
+                    );
+                    if (selected != null) {
+                      setDialogState(() => alertPreference = selected);
+                    }
+                  },
+                ),
+                if (alertPreference != v2_scheduled.AlertPreference.none) ...[
+                  const TransactionFormDivider(),
+                  TrackmarkSwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Repeat until allocated or skipped'),
+                    value: repeatAlertUntilResolved,
+                    onChanged: AppHaptics.toggleHandler(
+                      (value) => setDialogState(
+                        () => repeatAlertUntilResolved = value,
+                      ),
+                    ),
+                  ),
+                ],
+                const TransactionFormDivider(),
+                TransactionFormLabel('Note'),
+                TextField(
+                  controller: note,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    hintText: 'Add a note (optional)',
+                  ),
+                ),
+                if (errorText != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    errorText!,
+                    style: TextStyle(
+                      color: Theme.of(dialogContext).colorScheme.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    ),
+  );
+  return saved == true;
 }
 
 Future<void> showFundDetails(BuildContext context, String fundId) async {
@@ -499,6 +1276,15 @@ Future<void> _confirmAndDeleteFund(BuildContext context, String fundId) async {
   final store = FinanceDataStoreScope.read(context);
   final eligibility = store.fundDeleteEligibility(fundId);
   if (!eligibility.canDelete) {
+    final linkedFunding = store.activeScheduledFundFundingForFund(fundId);
+    if (!eligibility.hasNonZeroBalance && linkedFunding.isNotEmpty) {
+      await _showFundScheduledFundingBlocker(
+        context,
+        action: 'deleted',
+        linkedFunding: linkedFunding,
+      );
+      return;
+    }
     final linkedSchedules = store.scheduledTransactions
         .where(
           (scheduled) =>
@@ -539,6 +1325,29 @@ Future<void> _confirmAndDeleteFund(BuildContext context, String fundId) async {
   if (confirmed) await store.deleteFundPermanently(fundId);
 }
 
+Future<void> _showFundScheduledFundingBlocker(
+  BuildContext context, {
+  required String action,
+  required List<v2_scheduled.ScheduledTransactionRecord> linkedFunding,
+}) {
+  final description = linkedFunding.length == 1
+      ? '${linkedFunding.single.payee} still schedules funding for this Fund. Edit or delete that scheduled funding before the Fund can be $action.'
+      : '${linkedFunding.length} scheduled funding items still allocate to this Fund. Edit or delete them before the Fund can be $action.';
+  return showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text('Fund can\u2019t be $action yet'),
+      content: Text(description),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+}
+
 Future<void> showFundAmountDialog(
   BuildContext context, {
   required String fundId,
@@ -572,6 +1381,9 @@ Future<void> showReservationAmountDialog(
   };
   final fundingAccount = store.accountById(fundingAccountId);
   var amountMinor = 0;
+  var isSaving = false;
+  int? savingReservedMinor;
+  int? savingAvailableMinor;
   String? error;
   final amountFocusNode = FocusNode();
   var requestedInitialFocus = false;
@@ -588,13 +1400,23 @@ Future<void> showReservationAmountDialog(
         }
         return StatefulBuilder(
           builder: (dialogContext, setState) {
-            final reservedMinor = store.reservationAmountMinor(
+            final liveReservedMinor = store.reservationAmountMinor(
               containerType: containerType,
               containerId: containerId,
             );
-            final availableMinor = store.availableToSpendForAccount(
+            final liveAvailableMinor = store.availableToSpendForAccount(
               fundingAccountId,
             );
+            // Once Save begins, keep the preview anchored to its pre-submit
+            // baseline. The store notifies listeners immediately after the
+            // successful mutation; using that new value while the draft is
+            // still visible would apply the amount twice for one frame.
+            final reservedMinor = isSaving && savingReservedMinor != null
+                ? savingReservedMinor!
+                : liveReservedMinor;
+            final availableMinor = isSaving && savingAvailableMinor != null
+                ? savingAvailableMinor!
+                : liveAvailableMinor;
             final resultMinor = isReturn
                 ? reservedMinor - amountMinor
                 : availableMinor - amountMinor;
@@ -614,9 +1436,16 @@ Future<void> showReservationAmountDialog(
               actions: TransactionFormActions(
                 onCancel: () => Navigator.pop(dialogContext),
                 canSave: amountMinor > 0 && !exceedsReservation,
-                isSaving: false,
+                isSaving: isSaving,
                 saveLabel: isReturn ? 'Return' : 'Allocate',
                 onSave: () async {
+                  if (isSaving) return;
+                  setState(() {
+                    isSaving = true;
+                    savingReservedMinor = reservedMinor;
+                    savingAvailableMinor = availableMinor;
+                    error = null;
+                  });
                   try {
                     if (isReturn) {
                       await store.returnReservation(
@@ -624,6 +1453,7 @@ Future<void> showReservationAmountDialog(
                         containerId: containerId,
                         amountMinor: amountMinor,
                         date: DateTime.now(),
+                        waitForRemote: false,
                       );
                     } else {
                       await store.allocateReservation(
@@ -631,12 +1461,18 @@ Future<void> showReservationAmountDialog(
                         containerId: containerId,
                         amountMinor: amountMinor,
                         date: DateTime.now(),
+                        waitForRemote: false,
                       );
                     }
                     if (dialogContext.mounted) Navigator.pop(dialogContext);
                   } catch (exception) {
                     if (!dialogContext.mounted) return;
-                    setState(() => error = exception.toString());
+                    setState(() {
+                      isSaving = false;
+                      savingReservedMinor = null;
+                      savingAvailableMinor = null;
+                      error = exception.toString();
+                    });
                   }
                 },
               ),

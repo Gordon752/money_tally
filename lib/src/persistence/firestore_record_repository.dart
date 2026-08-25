@@ -66,6 +66,8 @@ class FirestoreRecordRepository
         IncrementalFinanceRecordRepository,
         CloudSyncMetricsProvider,
         ReservationRecordRepository,
+        ScheduledReservationOperationRepository,
+        ScheduledFundOccurrenceTransitionRepository,
         ScheduledOccurrenceStateRepository,
         ScheduledHistoryResetRepository {
   FirestoreRecordRepository({FirebaseFirestore? firestore})
@@ -745,6 +747,260 @@ class FirestoreRecordRepository
   }
 
   @override
+  Future<ReservationOperationRecord> saveScheduledReservationOperation({
+    required String userId,
+    required ReservationOperationRecord operation,
+  }) async {
+    final generation = await _activeGeneration(userId);
+    final reference = generation == null
+        ? _collection(userId, 'reservationOperations')
+        : _generationCollection(userId, generation, 'reservationOperations');
+    final documentId = generation == null
+        ? operation.id
+        : _encodedDocumentId(operation.id);
+    final document = reference.doc(documentId);
+    return firestore.runTransaction((transaction) async {
+      final existingSnapshot = await transaction.get(document);
+      if (existingSnapshot.exists) {
+        final existing = ReservationOperationRecord.fromJson(
+          Map<String, Object?>.from(existingSnapshot.data()!),
+        );
+        if (!_sameScheduledReservationOperation(existing, operation)) {
+          throw StateError(
+            'Scheduled reservation operation ${operation.id} already exists with different financial content.',
+          );
+        }
+        return existing;
+      }
+      transaction.set(document, _cloudWriteJson(operation.toJson()));
+      return operation;
+    });
+  }
+
+  @override
+  Future<ScheduledFundOccurrenceTransitionResult>
+  saveScheduledFundOccurrenceTransition({
+    required String userId,
+    required String scheduledTransactionId,
+    required String dayKey,
+    required ScheduledOccurrenceState occurrenceState,
+    ReservationOperationRecord? reservationOperation,
+  }) async {
+    _validateScheduledFundOccurrenceTransition(
+      scheduledTransactionId: scheduledTransactionId,
+      dayKey: dayKey,
+      occurrenceState: occurrenceState,
+      reservationOperation: reservationOperation,
+    );
+
+    final generation = await _activeGeneration(userId);
+    final scheduleDocument = generation == null
+        ? _collection(
+            userId,
+            'scheduledTransactions',
+          ).doc(scheduledTransactionId)
+        : _generationCollection(
+            userId,
+            generation,
+            'scheduledTransactions',
+          ).doc(_encodedDocumentId(scheduledTransactionId));
+    final operationCollection = generation == null
+        ? _collection(userId, 'reservationOperations')
+        : _generationCollection(userId, generation, 'reservationOperations');
+
+    DocumentReference<Map<String, dynamic>> operationDocument(String id) =>
+        operationCollection.doc(
+          generation == null ? id : _encodedDocumentId(id),
+        );
+
+    _updateSyncMetrics(readDelta: 1);
+    return firestore.runTransaction((transaction) async {
+      final scheduleSnapshot = await transaction.get(scheduleDocument);
+      if (!scheduleSnapshot.exists) {
+        throw StateError(
+          'The scheduled transaction is unavailable for occurrence update.',
+        );
+      }
+      final scheduleData = scheduleSnapshot.data()!;
+      final remoteSchedule = ScheduledTransactionRecord.fromJson(
+        Map<String, Object?>.from(scheduleData),
+      );
+      if (remoteSchedule.id != scheduledTransactionId ||
+          remoteSchedule.isDeleted ||
+          !remoteSchedule.isScheduledFundFunding) {
+        throw StateError(
+          'The scheduled Fund funding item is no longer available.',
+        );
+      }
+      if (reservationOperation != null &&
+          (reservationOperation.containerId !=
+                  remoteSchedule.reservationFundingContainerId ||
+              reservationOperation.fundingAccountId !=
+                  remoteSchedule.accountId ||
+              reservationOperation.amountMinor !=
+                  remoteSchedule.amountMinor.abs())) {
+        throw StateError(
+          'The Scheduled Fund reservation operation does not match its schedule.',
+        );
+      }
+      final remoteEpoch = scheduleData['occurrenceHistoryEpoch'] is Map
+          ? ScheduledOccurrenceHistoryEpoch.fromJson(
+              Map<String, Object?>.from(
+                scheduleData['occurrenceHistoryEpoch'] as Map,
+              ),
+            )
+          : ScheduledOccurrenceHistoryEpoch.legacy;
+      if (occurrenceState.historyEpochRevision != remoteEpoch.revision ||
+          occurrenceState.historyEpochOperationId != remoteEpoch.operationId) {
+        throw StateError(
+          'Scheduled history changed on another device. Sync and try again.',
+        );
+      }
+
+      final rawStates = scheduleData['occurrenceStates'];
+      ScheduledOccurrenceState? remoteState;
+      if (rawStates is Map && rawStates[dayKey] is Map) {
+        final candidate = ScheduledOccurrenceState.fromJson(
+          Map<String, Object?>.from(rawStates[dayKey] as Map),
+        );
+        if (candidate.historyEpochRevision == remoteEpoch.revision &&
+            candidate.historyEpochOperationId == remoteEpoch.operationId) {
+          remoteState = candidate;
+        }
+      }
+      final winner = remoteState == null
+          ? occurrenceState
+          : authoritativeOccurrenceState(remoteState, occurrenceState);
+      final sameAuthority =
+          remoteState != null &&
+          _sameScheduledOccurrenceAuthority(remoteState, occurrenceState);
+      if (sameAuthority &&
+          !_sameScheduledOccurrenceState(remoteState, occurrenceState)) {
+        throw StateError(
+          'Scheduled occurrence authority already exists with different content.',
+        );
+      }
+      final incomingIsAuthoritative =
+          remoteState == null ||
+          identical(winner, occurrenceState) ||
+          sameAuthority;
+
+      if (!incomingIsAuthoritative) {
+        final linkedId = winner.reservationOperationId;
+        ReservationOperationRecord? linkedOperation;
+        if (linkedId != null && linkedId.isNotEmpty) {
+          _updateSyncMetrics(readDelta: 1);
+          final linkedSnapshot = await transaction.get(
+            operationDocument(linkedId),
+          );
+          if (linkedSnapshot.exists) {
+            linkedOperation = ReservationOperationRecord.fromJson(
+              Map<String, Object?>.from(linkedSnapshot.data()!),
+            );
+            _validateLinkedScheduledFundOperation(
+              scheduledTransactionId: scheduledTransactionId,
+              dayKey: dayKey,
+              occurrenceState: winner,
+              operation: linkedOperation,
+            );
+          }
+        }
+        return ScheduledFundOccurrenceTransitionResult(
+          occurrenceState: winner,
+          reservationOperation: linkedOperation,
+          incomingStateIsAuthoritative: false,
+        );
+      }
+
+      ReservationOperationRecord? linkedOperation;
+      ReservationOperationRecord? reversedAllocation;
+      DocumentSnapshot<Map<String, dynamic>>? operationSnapshot;
+      DocumentSnapshot<Map<String, dynamic>>? reversedAllocationSnapshot;
+      if (reservationOperation != null) {
+        _updateSyncMetrics(readDelta: 1);
+        operationSnapshot = await transaction.get(
+          operationDocument(reservationOperation.id),
+        );
+        final reversesOperationId = reservationOperation.reversesOperationId;
+        if (reservationOperation.kind == ReservationOperationKind.reversal &&
+            reversesOperationId != null) {
+          _updateSyncMetrics(readDelta: 1);
+          reversedAllocationSnapshot = await transaction.get(
+            operationDocument(reversesOperationId),
+          );
+        }
+      }
+
+      if (reservationOperation != null) {
+        if (operationSnapshot!.exists) {
+          linkedOperation = ReservationOperationRecord.fromJson(
+            Map<String, Object?>.from(operationSnapshot.data()!),
+          );
+          if (!_sameScheduledReservationOperation(
+            linkedOperation,
+            reservationOperation,
+          )) {
+            throw StateError(
+              'Scheduled reservation operation ${reservationOperation.id} already exists with different financial content.',
+            );
+          }
+        } else {
+          linkedOperation = reservationOperation;
+        }
+
+        if (reservationOperation.kind == ReservationOperationKind.reversal) {
+          if (reversedAllocationSnapshot == null ||
+              !reversedAllocationSnapshot.exists) {
+            throw StateError(
+              'The Scheduled Fund allocation being reversed is unavailable.',
+            );
+          }
+          reversedAllocation = ReservationOperationRecord.fromJson(
+            Map<String, Object?>.from(reversedAllocationSnapshot.data()!),
+          );
+          _validateScheduledFundReversalTarget(
+            scheduledTransactionId: scheduledTransactionId,
+            dayKey: dayKey,
+            reversal: reservationOperation,
+            allocation: reversedAllocation,
+          );
+          if (remoteState?.status == ScheduledOccurrenceStatus.paid &&
+              remoteState!.reservationOperationId != reversedAllocation.id) {
+            throw StateError(
+              'The Scheduled Fund occurrence changed before it could be undone.',
+            );
+          }
+        }
+      }
+
+      var writeCount = 0;
+      if (remoteState == null ||
+          !_sameScheduledOccurrenceState(remoteState, occurrenceState)) {
+        transaction.update(scheduleDocument, {
+          'occurrenceStates.$dayKey': occurrenceState.toJson(),
+          _cloudUpdatedAtField: FieldValue.serverTimestamp(),
+        });
+        writeCount += 1;
+      }
+      if (reservationOperation != null && !operationSnapshot!.exists) {
+        transaction.set(
+          operationDocument(reservationOperation.id),
+          _cloudWriteJson(reservationOperation.toJson()),
+        );
+        writeCount += 1;
+      }
+      if (writeCount > 0) {
+        _updateSyncMetrics(uploadedDelta: writeCount, writeDelta: writeCount);
+      }
+      return ScheduledFundOccurrenceTransitionResult(
+        occurrenceState: occurrenceState,
+        reservationOperation: linkedOperation,
+        incomingStateIsAuthoritative: true,
+      );
+    });
+  }
+
+  @override
   Future<void> savePreferences({
     required String userId,
     required UserPreferences preferences,
@@ -1191,6 +1447,142 @@ class FirestoreRecordRepository
   }
 }
 
+void _validateScheduledFundOccurrenceTransition({
+  required String scheduledTransactionId,
+  required String dayKey,
+  required ScheduledOccurrenceState occurrenceState,
+  required ReservationOperationRecord? reservationOperation,
+}) {
+  if (occurrenceDayKey(occurrenceState.scheduledDate) != dayKey) {
+    throw ArgumentError(
+      'The occurrence day key does not match its scheduled date.',
+    );
+  }
+  final linkedOperationId = occurrenceState.reservationOperationId;
+  if (linkedOperationId == null || linkedOperationId.isEmpty) {
+    if (reservationOperation != null) {
+      throw ArgumentError(
+        'An unlinked occurrence cannot create a reservation operation.',
+      );
+    }
+    if (occurrenceState.status == ScheduledOccurrenceStatus.paid) {
+      throw ArgumentError(
+        'A Paid Scheduled Fund occurrence requires a linked allocation.',
+      );
+    }
+    return;
+  }
+  if (reservationOperation == null ||
+      reservationOperation.id != linkedOperationId) {
+    throw ArgumentError(
+      'The Scheduled Fund occurrence and reservation operation must share a stable link.',
+    );
+  }
+  _validateLinkedScheduledFundOperation(
+    scheduledTransactionId: scheduledTransactionId,
+    dayKey: dayKey,
+    occurrenceState: occurrenceState,
+    operation: reservationOperation,
+  );
+}
+
+void _validateLinkedScheduledFundOperation({
+  required String scheduledTransactionId,
+  required String dayKey,
+  required ScheduledOccurrenceState occurrenceState,
+  required ReservationOperationRecord operation,
+}) {
+  if (!operation.isActive ||
+      operation.containerType != ReservationContainerType.fund ||
+      operation.amountMinor <= 0 ||
+      operation.scheduledTransactionId != scheduledTransactionId ||
+      operation.scheduledOccurrenceDate == null ||
+      occurrenceDayKey(operation.scheduledOccurrenceDate!) != dayKey ||
+      operation.id != occurrenceState.reservationOperationId) {
+    throw StateError(
+      'The linked Scheduled Fund reservation operation is invalid.',
+    );
+  }
+  switch (occurrenceState.status) {
+    case ScheduledOccurrenceStatus.paid:
+      final expectedAmount =
+          occurrenceState.actualAmountMinor ??
+          occurrenceState.plannedAmountMinor;
+      if (operation.kind != ReservationOperationKind.allocate ||
+          operation.reversesOperationId != null ||
+          operation.amountMinor != expectedAmount.abs() ||
+          (occurrenceState.actualPaymentDate != null &&
+              occurrenceDayKey(operation.effectiveDate) !=
+                  occurrenceDayKey(occurrenceState.actualPaymentDate!))) {
+        throw StateError(
+          'A Paid Scheduled Fund occurrence must link to its exact allocation.',
+        );
+      }
+      break;
+    case ScheduledOccurrenceStatus.pending:
+      if (operation.kind != ReservationOperationKind.reversal ||
+          operation.reversesOperationId == null ||
+          operation.reversesOperationId!.isEmpty) {
+        throw StateError(
+          'An undone Scheduled Fund occurrence must link to its exact reversal.',
+        );
+      }
+      break;
+    case ScheduledOccurrenceStatus.skipped:
+      throw StateError(
+        'A Skipped Scheduled Fund occurrence cannot link to a reservation operation.',
+      );
+  }
+}
+
+void _validateScheduledFundReversalTarget({
+  required String scheduledTransactionId,
+  required String dayKey,
+  required ReservationOperationRecord reversal,
+  required ReservationOperationRecord allocation,
+}) {
+  if (!allocation.isActive ||
+      allocation.id != reversal.reversesOperationId ||
+      allocation.kind != ReservationOperationKind.allocate ||
+      allocation.containerType != ReservationContainerType.fund ||
+      allocation.containerType != reversal.containerType ||
+      allocation.containerId != reversal.containerId ||
+      allocation.fundingAccountId != reversal.fundingAccountId ||
+      allocation.amountMinor != reversal.amountMinor ||
+      allocation.scheduledTransactionId != scheduledTransactionId ||
+      allocation.scheduledOccurrenceDate == null ||
+      occurrenceDayKey(allocation.scheduledOccurrenceDate!) != dayKey) {
+    throw StateError(
+      'The Scheduled Fund reversal does not match its allocation.',
+    );
+  }
+}
+
+bool _sameScheduledOccurrenceAuthority(
+  ScheduledOccurrenceState left,
+  ScheduledOccurrenceState right,
+) =>
+    left.revision == right.revision &&
+    left.operationId == right.operationId &&
+    left.historyEpochRevision == right.historyEpochRevision &&
+    left.historyEpochOperationId == right.historyEpochOperationId;
+
+bool _sameScheduledOccurrenceState(
+  ScheduledOccurrenceState left,
+  ScheduledOccurrenceState right,
+) =>
+    _sameScheduledOccurrenceAuthority(left, right) &&
+    left.scheduledDate.toUtc() == right.scheduledDate.toUtc() &&
+    left.plannedAmountMinor == right.plannedAmountMinor &&
+    left.status == right.status &&
+    left.actualAmountMinor == right.actualAmountMinor &&
+    left.actualPaymentDate?.toUtc() == right.actualPaymentDate?.toUtc() &&
+    left.transactionId == right.transactionId &&
+    left.goalFundingEventId == right.goalFundingEventId &&
+    left.reservationOperationId == right.reservationOperationId &&
+    left.changedAt.toUtc() == right.changedAt.toUtc() &&
+    left.deviceId == right.deviceId;
+
 bool _sameImmutableReservationOperation(
   ReservationOperationRecord left,
   ReservationOperationRecord right,
@@ -1213,6 +1605,25 @@ bool _sameImmutableReservationOperation(
       left.reversesOperationId == right.reversesOperationId &&
       left.causationId == right.causationId &&
       left.note == right.note;
+}
+
+bool _sameScheduledReservationOperation(
+  ReservationOperationRecord left,
+  ReservationOperationRecord right,
+) {
+  return left.id == right.id &&
+      left.containerType == right.containerType &&
+      left.containerId == right.containerId &&
+      left.fundingAccountId == right.fundingAccountId &&
+      left.kind == right.kind &&
+      left.amountMinor == right.amountMinor &&
+      left.effectiveDate.toUtc() == right.effectiveDate.toUtc() &&
+      left.transactionId == right.transactionId &&
+      left.scheduledTransactionId == right.scheduledTransactionId &&
+      left.scheduledOccurrenceDate?.toUtc() ==
+          right.scheduledOccurrenceDate?.toUtc() &&
+      left.reversesOperationId == right.reversesOperationId &&
+      left.causationId == right.causationId;
 }
 
 class _IncrementalSyncCache {

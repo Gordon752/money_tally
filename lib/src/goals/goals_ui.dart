@@ -924,14 +924,20 @@ Future<void> showGoalActionsSheet(BuildContext context, String goalId) async {
               onTap: () => Navigator.pop(sheetContext, 'viewActivity'),
             ),
             ListTile(
-              leading: Icon(AppIcon.savings),
-              title: const Text('Fund Goal'),
+              leading: Icon(AppIcon.add),
+              title: const Text('Allocate'),
+              subtitle: const Text(
+                'Reserve more money from the funding account',
+              ),
               onTap: () => Navigator.pop(sheetContext, 'fund'),
             ),
             ListTile(
               enabled: current > 0,
               leading: Icon(AppIcon.expense),
               title: const Text('Spend from Goal'),
+              subtitle: const Text(
+                'Record a real transaction using this reserved money',
+              ),
               onTap: current > 0
                   ? () => Navigator.pop(sheetContext, 'spend')
                   : null,
@@ -944,16 +950,21 @@ Future<void> showGoalActionsSheet(BuildContext context, String goalId) async {
                     ? 'Return Reserved Money'
                     : 'Withdraw to Account',
               ),
+              subtitle: goal.usesReservationModel
+                  ? const Text('Release reserved money back to available')
+                  : null,
               onTap: current > 0
                   ? () => Navigator.pop(sheetContext, 'withdraw')
                   : null,
             ),
-            if (!goal.isAchieved)
-              ListTile(
-                leading: Icon(AppIcon.schedule),
-                title: const Text('Schedule Funding'),
-                onTap: () => Navigator.pop(sheetContext, 'scheduleFunding'),
+            ListTile(
+              leading: Icon(AppIcon.schedule),
+              title: const Text('Schedule Funding'),
+              subtitle: const Text(
+                'Allocate money automatically on a schedule',
               ),
+              onTap: () => Navigator.pop(sheetContext, 'scheduleFunding'),
+            ),
             ListTile(
               leading: Icon(AppIcon.edit),
               title: const Text('Edit'),
@@ -1484,6 +1495,7 @@ Future<void> showFundGoalsSheet(
   var totalAmountMinor = 0;
   var date = DateTime.now();
   var isSaving = false;
+  int? savingAvailableMinor;
   String? errorText;
   var draftSequence = 0;
   final noteController = TextEditingController();
@@ -1522,9 +1534,12 @@ Future<void> showFundGoalsSheet(
         final account = accounts
             .where((item) => item.id == accountId)
             .firstOrNull;
-        final accountAvailableMinor = account == null
+        final liveAccountAvailableMinor = account == null
             ? 0
             : store.availableToSpendForAccount(account.id);
+        final accountAvailableMinor = isSaving && savingAvailableMinor != null
+            ? savingAvailableMinor!
+            : liveAccountAvailableMinor;
         final availableAfterFundingMinor =
             accountAvailableMinor - totalAmountMinor;
         final allocatedTotal = allocations.fold<int>(
@@ -1561,6 +1576,7 @@ Future<void> showFundGoalsSheet(
                 if (isSaving || !canSave) return;
                 setDialogState(() {
                   isSaving = true;
+                  savingAvailableMinor = accountAvailableMinor;
                   errorText = null;
                 });
                 try {
@@ -1569,6 +1585,7 @@ Future<void> showFundGoalsSheet(
                     totalAmountMinor: totalAmountMinor,
                     date: date,
                     note: noteController.text,
+                    waitForRemote: false,
                     allocations: [
                       for (
                         var index = 0;
@@ -1589,6 +1606,7 @@ Future<void> showFundGoalsSheet(
                   if (!dialogContext.mounted) return;
                   setDialogState(() {
                     isSaving = false;
+                    savingAvailableMinor = null;
                     errorText = error.toString();
                   });
                 }
@@ -1900,7 +1918,7 @@ Future<bool> showScheduledGoalFundingDialog(
       store.goals
           .where(
             (goal) =>
-                goal.isActive &&
+                goal.isOnMainGoalsScreen &&
                 (goal.isAccountBacked || goal.usesReservationModel),
           )
           .toList(growable: false)
@@ -3579,7 +3597,7 @@ Future<bool> confirmDeleteGoalFundingAccount(
   );
 }
 
-enum CalendarActivityType { income, expense, transfer, goal }
+enum CalendarActivityType { income, expense, transfer, fund, goal }
 
 class GoalCalendarActivity {
   const GoalCalendarActivity.progress({

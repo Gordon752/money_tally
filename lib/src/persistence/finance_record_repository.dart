@@ -240,3 +240,56 @@ abstract interface class ReservationRecordRepository {
     required ReservationOperationRecord operation,
   });
 }
+
+/// Optional capability for an idempotent reservation operation whose stable
+/// identity is owned by a Scheduled occurrence.
+///
+/// Unlike an ordinary user-created reservation operation, two devices may
+/// independently recover the same Paid occurrence after one device saved the
+/// occurrence authority but did not finish installing the linked allocation
+/// locally. Implementations return the existing immutable operation when its
+/// financial/linkage identity matches [operation].
+abstract interface class ScheduledReservationOperationRepository {
+  Future<ReservationOperationRecord> saveScheduledReservationOperation({
+    required String userId,
+    required ReservationOperationRecord operation,
+  });
+}
+
+/// Result of atomically resolving one Scheduled Fund occurrence together with
+/// the immutable reservation operation linked by that occurrence.
+///
+/// [incomingStateIsAuthoritative] is also true for an idempotent retry of an
+/// already-installed occurrence operation. In that case a repository may have
+/// repaired a missing linked reservation operation without rewriting the
+/// occurrence state.
+class ScheduledFundOccurrenceTransitionResult {
+  const ScheduledFundOccurrenceTransitionResult({
+    required this.occurrenceState,
+    required this.incomingStateIsAuthoritative,
+    this.reservationOperation,
+  });
+
+  final ScheduledOccurrenceState occurrenceState;
+  final ReservationOperationRecord? reservationOperation;
+  final bool incomingStateIsAuthoritative;
+}
+
+/// Optional capability for an atomic Scheduled Fund occurrence transition.
+///
+/// Implementations must remotely resolve occurrence authority before writing.
+/// When [occurrenceState] wins (or is an idempotent retry of the installed
+/// winner), its linked allocation/reversal [reservationOperation] must be
+/// created or validated in the same atomic transaction. When a different
+/// remote occurrence wins, no incoming operation is written and the remote
+/// winner plus its linked operation, when available, are returned.
+abstract interface class ScheduledFundOccurrenceTransitionRepository {
+  Future<ScheduledFundOccurrenceTransitionResult>
+  saveScheduledFundOccurrenceTransition({
+    required String userId,
+    required String scheduledTransactionId,
+    required String dayKey,
+    required ScheduledOccurrenceState occurrenceState,
+    ReservationOperationRecord? reservationOperation,
+  });
+}

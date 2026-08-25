@@ -84,7 +84,10 @@ Future<void> _pumpSettings(
       store: store,
       child: Scaffold(
         body: SingleChildScrollView(
-          child: SettingsView(iCloudBackupStorage: iCloud),
+          child: SettingsView(
+            dataManagementOnly: true,
+            iCloudBackupStorage: iCloud,
+          ),
         ),
       ),
     ),

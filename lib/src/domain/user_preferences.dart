@@ -126,10 +126,14 @@ class UserPreferences {
     TransactionType? lastUsedTransactionType,
     AccountDefaultMode? defaultTransactionAccountMode,
     String? defaultTransactionAccountId,
+    bool clearDefaultTransactionAccountId = false,
     AccountDefaultMode? defaultTransferSourceMode,
     String? defaultTransferSourceAccountId,
+    bool clearDefaultTransferSourceAccountId = false,
     String? lastUsedTransactionAccountId,
+    bool clearLastUsedTransactionAccountId = false,
     String? lastUsedTransferSourceAccountId,
+    bool clearLastUsedTransferSourceAccountId = false,
     bool? newAccountIncludeInGroupBalance,
     bool? newAccountIncludeInNetWorth,
     bool? warnBeforeNegativeAssetBalance,
@@ -165,17 +169,22 @@ class UserPreferences {
           lastUsedTransactionType ?? this.lastUsedTransactionType,
       defaultTransactionAccountMode:
           defaultTransactionAccountMode ?? this.defaultTransactionAccountMode,
-      defaultTransactionAccountId:
-          defaultTransactionAccountId ?? this.defaultTransactionAccountId,
+      defaultTransactionAccountId: clearDefaultTransactionAccountId
+          ? null
+          : defaultTransactionAccountId ?? this.defaultTransactionAccountId,
       defaultTransferSourceMode:
           defaultTransferSourceMode ?? this.defaultTransferSourceMode,
-      defaultTransferSourceAccountId:
-          defaultTransferSourceAccountId ?? this.defaultTransferSourceAccountId,
-      lastUsedTransactionAccountId:
-          lastUsedTransactionAccountId ?? this.lastUsedTransactionAccountId,
-      lastUsedTransferSourceAccountId:
-          lastUsedTransferSourceAccountId ??
-          this.lastUsedTransferSourceAccountId,
+      defaultTransferSourceAccountId: clearDefaultTransferSourceAccountId
+          ? null
+          : defaultTransferSourceAccountId ??
+                this.defaultTransferSourceAccountId,
+      lastUsedTransactionAccountId: clearLastUsedTransactionAccountId
+          ? null
+          : lastUsedTransactionAccountId ?? this.lastUsedTransactionAccountId,
+      lastUsedTransferSourceAccountId: clearLastUsedTransferSourceAccountId
+          ? null
+          : lastUsedTransferSourceAccountId ??
+                this.lastUsedTransferSourceAccountId,
       newAccountIncludeInGroupBalance:
           newAccountIncludeInGroupBalance ??
           this.newAccountIncludeInGroupBalance,

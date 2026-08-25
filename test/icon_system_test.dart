@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:money_tally/src/design/app_icons.dart';
 import 'package:money_tally/src/design/category_icon_catalog.dart';
 import 'package:money_tally/src/design/credit_card_appearance.dart';
@@ -9,6 +10,7 @@ import 'package:money_tally/src/design/widgets/category_icon_badge.dart';
 import 'package:money_tally/src/design/widgets/category_icon_picker.dart';
 import 'package:money_tally/src/domain/account.dart';
 import 'package:money_tally/src/domain/category.dart';
+import 'package:money_tally/src/domain/sync_metadata.dart';
 
 const _phaseOneCategoryGlyphs = <String, IconData>{
   'finance.wallet': Icons.wallet_outlined,
@@ -179,6 +181,109 @@ void main() {
       expect(option.icon, entry.value);
     }
   });
+
+  test('banking appearance IDs resolve to the approved Hugeicons set', () {
+    final expectations = <String, List<List<dynamic>>>{
+      'bank': HugeIcons.strokeRoundedBank,
+      'checking': HugeIcons.strokeRoundedWallet01,
+      'savings': HugeIcons.strokeRoundedSafeBox,
+      'portfolio': HugeIcons.strokeRoundedChartUp,
+      'cashWallet': HugeIcons.strokeRoundedWallet04,
+      'savingsPiggy': HugeIcons.strokeRoundedPiggyBank,
+      'cash': HugeIcons.strokeRoundedMoney02,
+    };
+
+    expect(
+      AccountAppearanceCatalog.iconsFor(
+        AccountType.checking,
+      ).map((option) => option.id),
+      expectations.keys,
+    );
+    for (final entry in expectations.entries) {
+      final option = AccountAppearanceCatalog.iconFor(
+        AccountType.checking,
+        entry.key,
+      );
+      expect(option.id, entry.key, reason: 'Persisted icon ID must be stable.');
+      expect(option.hugeIcon, same(entry.value));
+    }
+    expect(
+      AccountAppearanceCatalog.creditCardIcons.every(
+        (option) => option.hugeIcon == null,
+      ),
+      isTrue,
+      reason: 'Credit-card choices remain type-specific and unchanged.',
+    );
+  });
+
+  test('new banking appearance IDs round-trip without stored-data changes', () {
+    final account = AccountRecord(
+      id: 'savings',
+      name: 'Emergency Savings',
+      type: AccountType.savings,
+      openingBalanceMinor: 250000,
+      creditCardIconId: 'savingsPiggy',
+      creditCardAccentId: 'gold',
+      sync: SyncMetadata.fresh(now: DateTime(2026, 8, 24)),
+    );
+
+    final restored = AccountRecord.fromJson(account.toJson());
+
+    expect(restored.appearanceIconId, 'savingsPiggy');
+    expect(restored.appearanceAccentId, 'gold');
+    expect(
+      AccountAppearanceCatalog.iconFor(
+        restored.type,
+        restored.appearanceIconId,
+      ).hugeIcon,
+      same(HugeIcons.strokeRoundedPiggyBank),
+    );
+  });
+
+  testWidgets(
+    'account appearance renderer supports Hugeicons and IconData together',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Row(
+              children: [
+                AccountAppearanceBadge(
+                  accountType: AccountType.checking,
+                  iconId: 'bank',
+                  accentId: 'teal',
+                  size: 36,
+                ),
+                AccountAppearanceBadge(
+                  accountType: AccountType.checking,
+                  iconId: 'savings',
+                  accentId: 'teal',
+                  size: 46,
+                ),
+                AccountAppearanceBadge(
+                  accountType: AccountType.checking,
+                  iconId: 'portfolio',
+                  accentId: 'teal',
+                  size: 54,
+                ),
+                AccountAppearanceBadge(
+                  accountType: AccountType.creditCard,
+                  iconId: 'creditcard',
+                  accentId: 'teal',
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      final vectorIcons = tester.widgetList<HugeIcon>(find.byType(HugeIcon));
+      expect(vectorIcons.map((icon) => icon.size), [18, 23, 27]);
+      expect(vectorIcons.every((icon) => icon.strokeWidth == 1.8), isTrue);
+      expect(find.byIcon(CupertinoIcons.creditcard), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   test(
     'weak semantic mappings remain storage compatible but render clearly',

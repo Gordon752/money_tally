@@ -165,6 +165,7 @@ class FinanceDataStore extends ChangeNotifier {
   final ValueNotifier<BudgetLowAlert?> budgetLowAlertNotifier =
       ValueNotifier<BudgetLowAlert?>(null);
   final List<BudgetLowAlert> _pendingBudgetLowAlerts = [];
+  Future<void> _remoteCommitTail = Future<void>.value();
 
   FinanceDataSet get dataSet => _dataSet;
   List<AccountRecord> get accounts => _dataSet.accounts;
@@ -1073,10 +1074,33 @@ class FinanceDataStore extends ChangeNotifier {
 
   /// Replaces the financial data set with a clean, empty authority boundary.
   ///
-  /// App preferences and sign-in remain intact. In cloud mode the empty data
-  /// set is activated remotely before local data changes, using the same
+  /// App preferences and sign-in remain intact unless [resetAppSettings] is
+  /// requested. Payees are user financial data, so their saved, archived, and
+  /// deleted-name state is cleared in either mode. In cloud mode the empty
+  /// data set is activated remotely before local data changes, using the same
   /// generation-safe path as an authoritative backup restore.
-  Future<void> resetTrackmarkData() {
+  Future<void> resetTrackmarkData({bool resetAppSettings = false}) {
+    final resetPreferences = resetAppSettings
+        ? const UserPreferences()
+        : preferences.copyWith(
+            defaultTransactionAccountMode:
+                preferences.defaultTransactionAccountMode ==
+                    AccountDefaultMode.specific
+                ? AccountDefaultMode.lastUsed
+                : preferences.defaultTransactionAccountMode,
+            clearDefaultTransactionAccountId: true,
+            defaultTransferSourceMode:
+                preferences.defaultTransferSourceMode ==
+                    AccountDefaultMode.specific
+                ? AccountDefaultMode.lastUsed
+                : preferences.defaultTransferSourceMode,
+            clearDefaultTransferSourceAccountId: true,
+            clearLastUsedTransactionAccountId: true,
+            clearLastUsedTransferSourceAccountId: true,
+            savedPayeeNames: const [],
+            archivedPayeeNames: const {},
+            deletedPayeeNames: const {},
+          );
     return restoreBackupDataSet(
       FinanceDataSet(
         accounts: const [],
@@ -1089,7 +1113,7 @@ class FinanceDataStore extends ChangeNotifier {
         reservationOperations: const [],
         goalContributions: const [],
         goalFundingEvents: const [],
-        preferences: preferences,
+        preferences: resetPreferences,
       ),
     );
   }
@@ -1138,24 +1162,27 @@ class FinanceDataStore extends ChangeNotifier {
       );
     }
 
+    if (remoteGeneration != null &&
+        remoteGeneration != acknowledgedGeneration) {
+      // A confirmed restore or reset is an authority boundary. A device that
+      // has not seen this generation must discard its stale local-only records
+      // once, even when the authoritative generation is completely empty.
+      // Otherwise an empty reset can be mistaken for an uninitialized cloud
+      // and the stale device can republish the records that were just erased.
+      await replaceDataSet(remoteDataSet);
+      await localRepository?.saveAcknowledgedRestoreGeneration(
+        userId,
+        remoteGeneration,
+      );
+      preferRemoteOnFirstSync = false;
+      debugPrint('Cloud sync stage: migrating legacy Goals');
+      await migrateLegacyGoalsToAccounts();
+      await acknowledgeIncrementalLoad();
+      debugPrint('Cloud sync stage: complete');
+      return;
+    }
+
     if (financeDataSetHasRecords(remoteDataSet)) {
-      if (remoteGeneration != null &&
-          remoteGeneration != acknowledgedGeneration) {
-        // A confirmed restore is an authority boundary. A device that has not
-        // seen this generation must discard its stale local-only records once,
-        // otherwise those records would be pushed into the restored data set.
-        await replaceDataSet(remoteDataSet);
-        await localRepository?.saveAcknowledgedRestoreGeneration(
-          userId,
-          remoteGeneration,
-        );
-        preferRemoteOnFirstSync = false;
-        debugPrint('Cloud sync stage: migrating legacy Goals');
-        await migrateLegacyGoalsToAccounts();
-        await acknowledgeIncrementalLoad();
-        debugPrint('Cloud sync stage: complete');
-        return;
-      }
       final merged = preferRemoteOnFirstSync
           ? mergeFinanceDataSetsPreferIncoming(
               incoming: remoteDataSet,
@@ -1730,6 +1757,7 @@ class FinanceDataStore extends ChangeNotifier {
       operations: effectiveReservationOperationsForContainer(
         operations: reservationOperations,
         transactions: transactions,
+        scheduledTransactions: scheduledTransactions,
         containerType: containerType,
         containerId: containerId,
       ),
@@ -1824,6 +1852,11 @@ class FinanceDataStore extends ChangeNotifier {
 
   Future<void> archiveFund(String fundId) async {
     final fund = fundById(fundId);
+    if (activeScheduledFundFundingForFund(fundId).isNotEmpty) {
+      throw const FinanceDataValidationException(
+        'Remove this Fund from scheduled funding before archiving it.',
+      );
+    }
     await saveFund(
       fund.copyWith(
         status: FundStatus.archived,
@@ -1831,6 +1864,17 @@ class FinanceDataStore extends ChangeNotifier {
       ),
     );
   }
+
+  List<ScheduledTransactionRecord> activeScheduledFundFundingForFund(
+    String fundId,
+  ) => scheduledTransactions
+      .where(
+        (scheduled) =>
+            !scheduled.isDeleted &&
+            scheduled.isScheduledFundFunding &&
+            scheduled.reservationFundingContainerId == fundId,
+      )
+      .toList(growable: false);
 
   Future<void> restoreFund(String fundId) async {
     final fund = fundById(fundId);
@@ -1847,8 +1891,12 @@ class FinanceDataStore extends ChangeNotifier {
     final hasScheduledReference = scheduledTransactions.any(
       (scheduled) =>
           !scheduled.isDeleted &&
-          scheduled.reservationContainerType == ReservationContainerType.fund &&
-          scheduled.reservationContainerId == fundId,
+          ((scheduled.reservationContainerType ==
+                      ReservationContainerType.fund &&
+                  scheduled.reservationContainerId == fundId) ||
+              (scheduled.reservationFundingContainerType ==
+                      ReservationContainerType.fund &&
+                  scheduled.reservationFundingContainerId == fundId)),
     );
     return FundDeleteEligibility(
       hasScheduledReference: hasScheduledReference,
@@ -1881,6 +1929,7 @@ class FinanceDataStore extends ChangeNotifier {
     required DateTime date,
     String note = '',
     String? causationId,
+    bool waitForRemote = true,
   }) {
     return _recordReservationOperation(
       containerType: containerType,
@@ -1890,7 +1939,139 @@ class FinanceDataStore extends ChangeNotifier {
       date: date,
       note: note,
       causationId: causationId,
+      waitForRemote: waitForRemote,
     );
+  }
+
+  /// Allocates one exact total from a single asset account across active
+  /// Funds backed by that account.
+  ///
+  /// Each Fund receives its own immutable, independently revisioned
+  /// reservation operation. The operations share a causation prefix so the
+  /// UI can present the allocation as one deliberate batch without making a
+  /// cached aggregate authoritative.
+  Future<List<ReservationOperationRecord>> allocateFunds({
+    required String sourceAccountId,
+    required int totalAmountMinor,
+    required DateTime date,
+    required List<FundAllocation> allocations,
+    String note = '',
+    bool waitForRemote = true,
+  }) async {
+    final sourceAccount = accounts
+        .where(
+          (account) =>
+              account.id == sourceAccountId &&
+              account.isVisible &&
+              _isReservationFundingAccount(account),
+        )
+        .firstOrNull;
+    if (sourceAccount == null) {
+      throw const FinanceDataValidationException(
+        'Choose an active Banking or Cash account.',
+      );
+    }
+    if (totalAmountMinor <= 0 || allocations.isEmpty) {
+      throw const FinanceDataValidationException(
+        'Fund allocation amount must be greater than zero.',
+      );
+    }
+
+    final fundIds = <String>{};
+    var allocatedTotalMinor = 0;
+    for (final allocation in allocations) {
+      if (allocation.amountMinor <= 0) {
+        throw const FinanceDataValidationException(
+          'Each Fund allocation must be greater than zero.',
+        );
+      }
+      if (!fundIds.add(allocation.fundId)) {
+        throw const FinanceDataValidationException(
+          'Each Fund may only appear once in an allocation.',
+        );
+      }
+      final fund = funds
+          .where((item) => item.id == allocation.fundId && item.isActive)
+          .firstOrNull;
+      if (fund == null) {
+        throw const FinanceDataValidationException('Choose an active Fund.');
+      }
+      if (fund.fundingAccountId != sourceAccountId) {
+        throw const FinanceDataValidationException(
+          'All selected Funds must use the chosen funding account.',
+        );
+      }
+      allocatedTotalMinor += allocation.amountMinor;
+    }
+    if (allocatedTotalMinor != totalAmountMinor) {
+      throw const FinanceDataValidationException(
+        'Fund allocations must exactly match the total amount.',
+      );
+    }
+
+    final eventDate = DateTime(date.year, date.month, date.day);
+    final available = availableToSpendForAccount(
+      sourceAccountId,
+      asOf: eventDate,
+    );
+    if (totalAmountMinor > available) {
+      throw FinanceDataValidationException(
+        '${sourceAccount.name} does not have enough available money to reserve.',
+      );
+    }
+
+    final batchId = newReservationOperationId();
+    final batchCausationPrefix = 'fund-allocation:$batchId';
+    final normalizedNote = note.trim();
+    final operations = <ReservationOperationRecord>[];
+    for (final allocation in allocations) {
+      final activity = effectiveReservationOperationsForContainer(
+        operations: reservationOperations,
+        transactions: transactions,
+        scheduledTransactions: scheduledTransactions,
+        containerType: ReservationContainerType.fund,
+        containerId: allocation.fundId,
+      );
+      final ledger = calculateReservationLedger(
+        operations: activity,
+        asOf: eventDate,
+      );
+      final uniqueId = newReservationOperationId();
+      operations.add(
+        ReservationOperationRecord(
+          id: 'reservation_$uniqueId',
+          containerType: ReservationContainerType.fund,
+          containerId: allocation.fundId,
+          fundingAccountId: sourceAccountId,
+          kind: ReservationOperationKind.allocate,
+          amountMinor: allocation.amountMinor,
+          effectiveDate: eventDate,
+          revision: ledger.latestRevision + 1,
+          baseRevision: ledger.latestRevision,
+          operationId: uniqueId,
+          deviceId: deviceId,
+          causationId: '$batchCausationPrefix:${allocation.fundId}',
+          note: normalizedNote,
+          sync: SyncMetadata.fresh(deviceId: deviceId),
+        ),
+      );
+    }
+
+    final previous = _dataSet;
+    try {
+      _dataSet = _dataSet.copyWith(
+        reservationOperations: [...reservationOperations, ...operations],
+      );
+      await _commit(
+        reservationOperations: operations,
+        waitForRemote: waitForRemote,
+      );
+    } catch (_) {
+      _dataSet = previous;
+      notifyListeners();
+      rethrow;
+    }
+    return operations;
   }
 
   Future<ReservationOperationRecord> returnReservation({
@@ -1899,6 +2080,7 @@ class FinanceDataStore extends ChangeNotifier {
     required int amountMinor,
     required DateTime date,
     String note = '',
+    bool waitForRemote = true,
   }) {
     return _recordReservationOperation(
       containerType: containerType,
@@ -1907,6 +2089,7 @@ class FinanceDataStore extends ChangeNotifier {
       amountMinor: amountMinor,
       date: date,
       note: note,
+      waitForRemote: waitForRemote,
     );
   }
 
@@ -1971,6 +2154,7 @@ class FinanceDataStore extends ChangeNotifier {
     String? reversesOperationId,
     String? causationId,
     String note = '',
+    bool waitForRemote = true,
   }) async {
     final amount = amountMinor.abs();
     if (amount <= 0) {
@@ -2021,6 +2205,7 @@ class FinanceDataStore extends ChangeNotifier {
     final activity = effectiveReservationOperationsForContainer(
       operations: reservationOperations,
       transactions: transactions,
+      scheduledTransactions: scheduledTransactions,
       containerType: containerType,
       containerId: containerId,
     );
@@ -2067,6 +2252,7 @@ class FinanceDataStore extends ChangeNotifier {
       operations: effectiveReservationOperationsForContainer(
         operations: proposed,
         transactions: transactions,
+        scheduledTransactions: scheduledTransactions,
         containerType: containerType,
         containerId: containerId,
       ),
@@ -2096,6 +2282,7 @@ class FinanceDataStore extends ChangeNotifier {
             ? null
             : updatedGoal,
         reservationOperations: [operation],
+        waitForRemote: waitForRemote,
       );
     } catch (_) {
       _dataSet = previous;
@@ -2142,8 +2329,21 @@ class FinanceDataStore extends ChangeNotifier {
     final linkedFund = funds
         .where((fund) => !fund.isDeleted && fund.fundingAccountId == accountId)
         .firstOrNull;
-    if (linkedGoal == null && linkedFund == null) return;
-    final containerName = linkedGoal?.name ?? linkedFund!.name;
+    final linkedScheduledFund = scheduledTransactions
+        .where(
+          (schedule) =>
+              !schedule.isDeleted &&
+              schedule.isScheduledFundFunding &&
+              schedule.accountId == accountId,
+        )
+        .firstOrNull;
+    if (linkedGoal == null &&
+        linkedFund == null &&
+        linkedScheduledFund == null) {
+      return;
+    }
+    final containerName =
+        linkedGoal?.name ?? linkedFund?.name ?? linkedScheduledFund!.payee;
     throw FinanceDataValidationException(
       'Reassign or remove $containerName before archiving this account.',
     );
@@ -2473,6 +2673,7 @@ class FinanceDataStore extends ChangeNotifier {
     required DateTime date,
     required List<GoalFundingAllocation> allocations,
     String note = '',
+    bool waitForRemote = true,
   }) async {
     final account = accounts
         .where((item) => item.id == sourceAccountId && item.isVisible)
@@ -2549,6 +2750,7 @@ class FinanceDataStore extends ChangeNotifier {
         date: date,
         allocations: allocations,
         note: note,
+        waitForRemote: waitForRemote,
       );
     }
     if (selectedGoals.any((goal) => goal.usesReservationModel)) {
@@ -2655,6 +2857,7 @@ class FinanceDataStore extends ChangeNotifier {
     required DateTime date,
     required List<GoalFundingAllocation> allocations,
     required String note,
+    bool waitForRemote = true,
   }) async {
     final available = availableToSpendForAccount(sourceAccountId, asOf: date);
     if (totalAmountMinor > available) {
@@ -2749,6 +2952,7 @@ class FinanceDataStore extends ChangeNotifier {
         goalRecords: updatedGoals,
         goalFundingEvents: [event],
         reservationOperations: operations,
+        waitForRemote: waitForRemote,
       );
     } catch (_) {
       _dataSet = previous;
@@ -2756,6 +2960,557 @@ class FinanceDataStore extends ChangeNotifier {
       rethrow;
     }
     return event;
+  }
+
+  /// Completes one planned Fund-funding occurrence without creating a Ledger
+  /// transaction. Cloud-backed stores install the occurrence authority and
+  /// its immutable allocation in one remote transaction so a competing
+  /// Paid/Skip action cannot leave an orphan reservation operation.
+  Future<ReservationOperationRecord> completeScheduledFundFunding({
+    required String scheduledTransactionId,
+    required DateTime occurrenceDate,
+    DateTime? fundingDate,
+    String? note,
+  }) async {
+    final schedule = scheduledTransactions
+        .where((item) => item.id == scheduledTransactionId)
+        .firstOrNull;
+    if (schedule == null || !schedule.isScheduledFundFunding) {
+      throw const FinanceDataValidationException(
+        'This scheduled Fund funding item is no longer available.',
+      );
+    }
+    final day = _scheduledCalendarDay(occurrenceDate);
+    final targetId = schedule.reservationFundingContainerId!;
+    final fund = funds
+        .where(
+          (item) =>
+              item.id == targetId &&
+              !item.isDeleted &&
+              item.status == FundStatus.active,
+        )
+        .firstOrNull;
+    if (fund == null || fund.fundingAccountId != schedule.accountId) {
+      throw const FinanceDataValidationException(
+        'The Fund or its funding account is no longer available.',
+      );
+    }
+    final account = accounts
+        .where(
+          (item) =>
+              item.id == fund.fundingAccountId &&
+              item.isVisible &&
+              _isReservationFundingAccount(item),
+        )
+        .firstOrNull;
+    if (account == null) {
+      throw const FinanceDataValidationException(
+        'The Fund funding account is no longer available.',
+      );
+    }
+    final amount = schedule.amountMinor.abs();
+    if (amount <= 0) {
+      throw const FinanceDataValidationException(
+        'Scheduled Fund funding must be greater than zero.',
+      );
+    }
+
+    var currentAuthority = occurrenceAuthorityFor(
+      schedule,
+    )[occurrenceDayKey(day)];
+    if (currentAuthority?.status == ScheduledOccurrenceStatus.skipped) {
+      throw const FinanceDataValidationException(
+        'This scheduled Fund funding occurrence was skipped.',
+      );
+    }
+    if (currentAuthority?.status == ScheduledOccurrenceStatus.pending &&
+        currentAuthority!.revision > 0) {
+      final linkedReversal = _scheduledReservationOperationForState(
+        schedule: schedule,
+        state: currentAuthority,
+      );
+      if (linkedReversal != null &&
+          linkedReversal.kind == ReservationOperationKind.reversal) {
+        currentAuthority = null;
+      }
+    }
+    final isRepairingCommittedPaidOccurrence =
+        currentAuthority?.status == ScheduledOccurrenceStatus.paid;
+    final proposedPaymentDay = _scheduledCalendarDay(
+      fundingDate ?? DateTime.now(),
+    );
+    if (!isRepairingCommittedPaidOccurrence) {
+      final available = availableToSpendForAccount(
+        account.id,
+        asOf: proposedPaymentDay,
+      );
+      if (amount > available) {
+        throw FinanceDataValidationException(
+          '${account.name} does not have enough available money to reserve.',
+        );
+      }
+    }
+    ScheduledOccurrenceState proposedAuthority;
+    if (currentAuthority?.status == ScheduledOccurrenceStatus.paid) {
+      proposedAuthority = currentAuthority!;
+    } else {
+      if (schedule.isDeleted) {
+        throw const FinanceDataValidationException(
+          'This scheduled Fund funding item is no longer available.',
+        );
+      }
+      final operationId = newScheduledOccurrenceOperationId();
+      final reservationId = _scheduledFundReservationOperationId(
+        scheduleId: schedule.id,
+        day: day,
+        occurrenceOperationId: operationId,
+        action: 'allocate',
+      );
+      proposedAuthority = nextOccurrenceOperation(
+        schedule: schedule,
+        scheduledDate: day,
+        plannedAmountMinor: schedule.amountMinor.abs(),
+        status: ScheduledOccurrenceStatus.paid,
+        actualAmountMinor: schedule.amountMinor.abs(),
+        actualPaymentDate: proposedPaymentDay,
+        reservationOperationId: reservationId,
+        operationId: operationId,
+        deviceId: deviceId,
+      );
+    }
+
+    if (proposedAuthority.status != ScheduledOccurrenceStatus.paid ||
+        proposedAuthority.reservationOperationId == null) {
+      throw const FinanceDataValidationException(
+        'The linked Fund reservation activity is invalid.',
+      );
+    }
+
+    ReservationOperationRecord allocationFor(
+      ScheduledOccurrenceState authority,
+    ) {
+      final reservationId = authority.reservationOperationId;
+      if (reservationId == null || reservationId.isEmpty) {
+        throw const FinanceDataValidationException(
+          'The linked Fund reservation activity is invalid.',
+        );
+      }
+      final existing = reservationOperations
+          .where(
+            (item) =>
+                item.id == reservationId &&
+                item.isActive &&
+                item.kind == ReservationOperationKind.allocate,
+          )
+          .firstOrNull;
+      if (existing != null) return existing;
+      final activity = effectiveReservationOperationsForContainer(
+        operations: reservationOperations,
+        transactions: transactions,
+        scheduledTransactions: scheduledTransactions,
+        containerType: ReservationContainerType.fund,
+        containerId: fund.id,
+      );
+      final operationDay = _scheduledCalendarDay(
+        authority.actualPaymentDate ?? fundingDate ?? day,
+      );
+      final ledger = calculateReservationLedger(
+        operations: activity,
+        asOf: operationDay,
+      );
+      return ReservationOperationRecord(
+        id: reservationId,
+        containerType: ReservationContainerType.fund,
+        containerId: fund.id,
+        fundingAccountId: account.id,
+        kind: ReservationOperationKind.allocate,
+        amountMinor: amount,
+        effectiveDate: operationDay,
+        revision: ledger.latestRevision + 1,
+        baseRevision: ledger.latestRevision,
+        operationId: reservationId,
+        deviceId: deviceId,
+        scheduledTransactionId: schedule.id,
+        scheduledOccurrenceDate: day,
+        causationId:
+            'scheduled-fund-funding:${schedule.id}:${occurrenceDayKey(day)}:${authority.operationId}',
+        note: (note ?? schedule.note).trim(),
+        sync: SyncMetadata.fresh(now: authority.changedAt, deviceId: deviceId),
+      );
+    }
+
+    var transition = await _saveScheduledFundOccurrenceTransition(
+      schedule: schedule,
+      state: proposedAuthority,
+      operation: allocationFor(proposedAuthority),
+    );
+    var paidAuthority = transition.occurrenceState;
+    var operation = transition.reservationOperation;
+    if (paidAuthority.status == ScheduledOccurrenceStatus.paid &&
+        operation == null) {
+      // Repairs a partial state written by a pre-atomic development build.
+      // The stable operation ID comes from the winning occurrence authority;
+      // no merchant/date/amount matching is involved.
+      transition = await _saveScheduledFundOccurrenceTransition(
+        schedule: schedule,
+        state: paidAuthority,
+        operation: allocationFor(paidAuthority),
+      );
+      paidAuthority = transition.occurrenceState;
+      operation = transition.reservationOperation;
+    }
+    if (paidAuthority.status != ScheduledOccurrenceStatus.paid ||
+        operation == null) {
+      throw const FinanceDataValidationException(
+        'This occurrence changed on another device. Sync and try again.',
+      );
+    }
+    if (operation.containerType != ReservationContainerType.fund ||
+        operation.containerId != fund.id ||
+        operation.fundingAccountId != account.id ||
+        operation.kind != ReservationOperationKind.allocate ||
+        operation.amountMinor != amount ||
+        operation.scheduledTransactionId != schedule.id ||
+        operation.scheduledOccurrenceDate == null ||
+        !isSameScheduledDay(operation.scheduledOccurrenceDate!, day)) {
+      throw const FinanceDataValidationException(
+        'The linked Fund reservation activity is invalid.',
+      );
+    }
+
+    final updatedSchedule = _scheduledFundScheduleAfterPaid(
+      schedule: withOccurrenceAuthority(schedule, paidAuthority),
+      day: day,
+    );
+    final previous = _dataSet;
+    ScheduledTransactionRecord? notificationAdjusted;
+    try {
+      notificationAdjusted = await _applyScheduledNotificationState(
+        updatedSchedule,
+      );
+      _dataSet = _dataSet.copyWith(
+        scheduledTransactions: _upsert(
+          scheduledTransactions,
+          notificationAdjusted,
+          (item) => item.id,
+        ),
+        reservationOperations: _upsert(
+          reservationOperations,
+          operation,
+          (item) => item.id,
+        ),
+      );
+      await _commit(scheduledTransaction: notificationAdjusted);
+      await refreshScheduledNotificationBadge();
+    } catch (_) {
+      _dataSet = previous;
+      notifyListeners();
+      rethrow;
+    }
+    return operation;
+  }
+
+  /// Reopens a Paid scheduled Fund-funding occurrence and reverses its linked
+  /// allocation exactly once. The newer Pending occurrence is causal Undo
+  /// authority; the allocation record itself remains immutable history.
+  Future<ReservationOperationRecord> undoScheduledFundFunding({
+    required String scheduledTransactionId,
+    required DateTime occurrenceDate,
+  }) async {
+    final schedule = scheduledTransactions
+        .where((item) => item.id == scheduledTransactionId)
+        .firstOrNull;
+    if (schedule == null || !schedule.isScheduledFundFunding) {
+      throw const FinanceDataValidationException(
+        'The linked scheduled Fund funding record is unavailable.',
+      );
+    }
+    final day = _scheduledCalendarDay(occurrenceDate);
+    var authority = occurrenceAuthorityFor(schedule)[occurrenceDayKey(day)];
+    if (authority == null) {
+      throw const FinanceDataValidationException(
+        'This scheduled Fund funding occurrence has not been completed.',
+      );
+    }
+
+    ReservationOperationRecord? allocation;
+    ReservationOperationRecord? existingReversal;
+    if (authority.status == ScheduledOccurrenceStatus.paid) {
+      allocation = _scheduledReservationOperationForState(
+        schedule: schedule,
+        state: authority,
+      );
+    } else if (authority.status == ScheduledOccurrenceStatus.pending &&
+        authority.revision > 0) {
+      existingReversal = _scheduledReservationOperationForState(
+        schedule: schedule,
+        state: authority,
+      );
+      final reversedOperationId = existingReversal?.reversesOperationId;
+      if (reversedOperationId != null) {
+        allocation = reservationOperations
+            .where(
+              (operation) =>
+                  operation.id == reversedOperationId && operation.isActive,
+            )
+            .firstOrNull;
+      }
+    }
+    if (allocation == null ||
+        allocation.kind != ReservationOperationKind.allocate ||
+        allocation.containerType != ReservationContainerType.fund ||
+        allocation.containerId != schedule.reservationFundingContainerId) {
+      throw const FinanceDataValidationException(
+        'The linked Fund reservation activity is unavailable.',
+      );
+    }
+
+    ScheduledOccurrenceState proposedAuthority;
+    if (authority.status == ScheduledOccurrenceStatus.paid) {
+      final operationId = newScheduledOccurrenceOperationId();
+      final reversalId = _scheduledFundReservationOperationId(
+        scheduleId: schedule.id,
+        day: day,
+        occurrenceOperationId: operationId,
+        action: 'undo',
+      );
+      proposedAuthority = nextOccurrenceOperation(
+        schedule: schedule,
+        scheduledDate: day,
+        plannedAmountMinor: authority.plannedAmountMinor,
+        status: ScheduledOccurrenceStatus.pending,
+        reservationOperationId: reversalId,
+        operationId: operationId,
+        deviceId: deviceId,
+      );
+    } else {
+      proposedAuthority = authority;
+    }
+    if (proposedAuthority.status != ScheduledOccurrenceStatus.pending ||
+        proposedAuthority.reservationOperationId == null) {
+      throw const FinanceDataValidationException(
+        'This occurrence changed on another device. Sync and try again.',
+      );
+    }
+
+    final reversalId = proposedAuthority.reservationOperationId!;
+    var reversal =
+        existingReversal ??
+        reservationOperations
+            .where(
+              (item) =>
+                  item.id == reversalId &&
+                  item.isActive &&
+                  item.kind == ReservationOperationKind.reversal,
+            )
+            .firstOrNull;
+    if (reversal == null) {
+      final activity = effectiveReservationOperationsForContainer(
+        operations: reservationOperations,
+        transactions: transactions,
+        scheduledTransactions: scheduledTransactions,
+        containerType: allocation.containerType,
+        containerId: allocation.containerId,
+      );
+      final ledger = calculateReservationLedger(operations: activity);
+      if (!ledger.acceptedOperationIds.contains(allocation.id) ||
+          ledger.reversedOperationIds.contains(allocation.id)) {
+        throw const FinanceDataValidationException(
+          'This scheduled Fund allocation has already been reversed.',
+        );
+      }
+      final candidate = ReservationOperationRecord(
+        id: reversalId,
+        containerType: allocation.containerType,
+        containerId: allocation.containerId,
+        fundingAccountId: allocation.fundingAccountId,
+        kind: ReservationOperationKind.reversal,
+        amountMinor: allocation.amountMinor,
+        effectiveDate: day,
+        revision: ledger.latestRevision + 1,
+        baseRevision: ledger.latestRevision,
+        operationId: reversalId,
+        deviceId: deviceId,
+        scheduledTransactionId: schedule.id,
+        scheduledOccurrenceDate: day,
+        reversesOperationId: allocation.id,
+        causationId:
+            'undo-scheduled-fund-funding:${schedule.id}:${occurrenceDayKey(day)}:${proposedAuthority.operationId}',
+        note: 'Undo scheduled Fund funding',
+        sync: SyncMetadata.fresh(
+          now: proposedAuthority.changedAt,
+          deviceId: deviceId,
+        ),
+      );
+      final proposed = calculateReservationLedger(
+        operations: [...activity, candidate],
+      );
+      if (proposed.conflictedOperationIds.contains(candidate.id)) {
+        throw const FinanceDataValidationException(
+          'This Fund changed on another device. Sync and try again.',
+        );
+      }
+      reversal = candidate;
+    }
+
+    final transition = await _saveScheduledFundOccurrenceTransition(
+      schedule: schedule,
+      state: proposedAuthority,
+      operation: reversal,
+    );
+    final pendingAuthority = transition.occurrenceState;
+    reversal = transition.reservationOperation;
+    if (pendingAuthority.status != ScheduledOccurrenceStatus.pending ||
+        reversal == null ||
+        reversal.kind != ReservationOperationKind.reversal ||
+        reversal.reversesOperationId == null) {
+      throw const FinanceDataValidationException(
+        'This occurrence changed on another device. Sync and try again.',
+      );
+    }
+
+    final today = _scheduledCalendarDay(DateTime.now());
+    final automaticallyClosed =
+        schedule.isDeleted && schedule.lastAction == ScheduledAction.paid;
+    final shouldRestoreAsNext =
+        automaticallyClosed ||
+        (!day.isBefore(today) && day.isBefore(schedule.nextDate));
+    final scheduleSync = schedule.isDeleted
+        ? schedule.sync.restored(deviceId: deviceId)
+        : schedule.sync.touched(deviceId: deviceId);
+    final restoredSchedule = withOccurrenceAuthority(
+      schedule.copyWith(
+        nextDate: shouldRestoreAsNext ? day : schedule.nextDate,
+        lastAction: ScheduledAction.none,
+        scheduledNotificationIds: const [],
+        sync: scheduleSync,
+        clearLastReminderScheduledAt: true,
+      ),
+      pendingAuthority,
+    );
+    final previous = _dataSet;
+    try {
+      final notificationAdjusted = await _applyScheduledNotificationState(
+        restoredSchedule,
+      );
+      _dataSet = _dataSet.copyWith(
+        scheduledTransactions: _upsert(
+          scheduledTransactions,
+          notificationAdjusted.copyWith(sync: scheduleSync),
+          (item) => item.id,
+        ),
+        reservationOperations: _upsert(
+          reservationOperations,
+          reversal,
+          (item) => item.id,
+        ),
+      );
+      await _commit(
+        scheduledTransaction: notificationAdjusted.copyWith(sync: scheduleSync),
+      );
+      await refreshScheduledNotificationBadge();
+    } catch (_) {
+      _dataSet = previous;
+      notifyListeners();
+      rethrow;
+    }
+    return reversal;
+  }
+
+  DateTime _scheduledCalendarDay(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  String _scheduledFundReservationOperationId({
+    required String scheduleId,
+    required DateTime day,
+    required String occurrenceOperationId,
+    required String action,
+  }) =>
+      'reservation_scheduled_fund_${action}_${scheduleId}_${occurrenceDayKey(day)}_$occurrenceOperationId';
+
+  ReservationOperationRecord? _scheduledReservationOperationForState({
+    required ScheduledTransactionRecord schedule,
+    required ScheduledOccurrenceState state,
+  }) {
+    final linkedId = state.reservationOperationId;
+    if (linkedId != null) {
+      return reservationOperations
+          .where((operation) => operation.id == linkedId && operation.isActive)
+          .firstOrNull;
+    }
+    return _scheduledFundAllocationForDay(schedule, state.scheduledDate);
+  }
+
+  ReservationOperationRecord? _scheduledFundAllocationForDay(
+    ScheduledTransactionRecord schedule,
+    DateTime day,
+  ) => reservationOperations
+      .where(
+        (operation) =>
+            operation.isActive &&
+            operation.kind == ReservationOperationKind.allocate &&
+            operation.containerType == ReservationContainerType.fund &&
+            operation.containerId == schedule.reservationFundingContainerId &&
+            operation.scheduledTransactionId == schedule.id &&
+            operation.scheduledOccurrenceDate != null &&
+            isSameScheduledDay(operation.scheduledOccurrenceDate!, day),
+      )
+      .firstOrNull;
+
+  Future<ScheduledFundOccurrenceTransitionResult>
+  _saveScheduledFundOccurrenceTransition({
+    required ScheduledTransactionRecord schedule,
+    required ScheduledOccurrenceState state,
+    required ReservationOperationRecord operation,
+  }) async {
+    final remote = remoteRepository;
+    final currentUserId = userId;
+    if (remote == null || currentUserId == null) {
+      return ScheduledFundOccurrenceTransitionResult(
+        occurrenceState: state,
+        reservationOperation: operation,
+        incomingStateIsAuthoritative: true,
+      );
+    }
+    if (remote
+        case final ScheduledFundOccurrenceTransitionRepository
+            transitionRepository) {
+      return transitionRepository.saveScheduledFundOccurrenceTransition(
+        userId: currentUserId,
+        scheduledTransactionId: schedule.id,
+        dayKey: occurrenceDayKey(state.scheduledDate),
+        occurrenceState: state,
+        reservationOperation: operation,
+      );
+    }
+    throw StateError(
+      'The configured cloud repository cannot atomically save Scheduled Fund funding.',
+    );
+  }
+
+  ScheduledTransactionRecord _scheduledFundScheduleAfterPaid({
+    required ScheduledTransactionRecord schedule,
+    required DateTime day,
+  }) {
+    if (schedule.nextDate.isAfter(day)) return schedule;
+    final nextDate = nextScheduledRecurrenceDate(day, schedule.frequency);
+    final beyondEnd =
+        nextDate != null &&
+        schedule.endDate != null &&
+        nextDate.isAfter(schedule.endDate!);
+    if (nextDate == null || beyondEnd) {
+      return schedule.copyWith(
+        lastAction: ScheduledAction.paid,
+        sync: schedule.sync.deleted(deviceId: deviceId),
+      );
+    }
+    return schedule.copyWith(
+      nextDate: nextDate,
+      lastAction: ScheduledAction.none,
+      scheduledNotificationIds: const [],
+      sync: schedule.sync.touched(deviceId: deviceId),
+      clearLastReminderScheduledAt: true,
+    );
   }
 
   /// Completes exactly one planned Goal Funding occurrence. Unlike an ordinary
@@ -3718,6 +4473,7 @@ class FinanceDataStore extends ChangeNotifier {
       actualPaymentDate: occurrence.actualPaymentDate,
       transactionId: occurrence.transactionId,
       goalFundingEventId: occurrence.goalFundingEventId,
+      reservationOperationId: occurrence.reservationOperationId,
       deviceId: deviceId,
     );
     final remote = remoteRepository;
@@ -4213,6 +4969,7 @@ class FinanceDataStore extends ChangeNotifier {
         operations: effectiveReservationOperationsForContainer(
           operations: workingOperations,
           transactions: transactions,
+          scheduledTransactions: scheduledTransactions,
           containerType: containerType,
           containerId: containerId,
         ),
@@ -4269,6 +5026,7 @@ class FinanceDataStore extends ChangeNotifier {
       final activity = effectiveReservationOperationsForContainer(
         operations: reservationOperations,
         transactions: transactions,
+        scheduledTransactions: scheduledTransactions,
         containerType: type,
         containerId: id,
       );
@@ -4695,6 +5453,13 @@ class FinanceDataStore extends ChangeNotifier {
   void _validateScheduledTransaction(
     ScheduledTransactionRecord scheduledTransaction,
   ) {
+    if (scheduledTransaction.type != TransactionType.goalFunding &&
+        (scheduledTransaction.reservationFundingContainerType != null ||
+            scheduledTransaction.reservationFundingContainerId != null)) {
+      throw const FinanceDataValidationException(
+        'Only scheduled reservation funding may select a funding target.',
+      );
+    }
     if (scheduledTransaction.type == TransactionType.transfer) {
       if (scheduledTransaction.splitLines.isNotEmpty) {
         throw const FinanceDataValidationException(
@@ -4704,21 +5469,62 @@ class FinanceDataStore extends ChangeNotifier {
       return;
     }
     if (scheduledTransaction.type == TransactionType.goalFunding) {
+      final account = accounts
+          .where(
+            (account) =>
+                account.id == scheduledTransaction.accountId &&
+                account.isVisible,
+          )
+          .firstOrNull;
+      if (account == null) {
+        throw const FinanceDataValidationException(
+          'Scheduled funding requires an active source account.',
+        );
+      }
+      if (scheduledTransaction.amountMinor.abs() <= 0) {
+        throw const FinanceDataValidationException(
+          'Scheduled funding must be greater than zero.',
+        );
+      }
       if (scheduledTransaction.transferAccountId != null ||
           scheduledTransaction.categoryId != null ||
           scheduledTransaction.splitLines.isNotEmpty ||
+          scheduledTransaction.reservationContainerType != null ||
+          scheduledTransaction.reservationContainerId != null) {
+        throw const FinanceDataValidationException(
+          'Scheduled funding cannot contain transaction or consumption fields.',
+        );
+      }
+
+      if (scheduledTransaction.isScheduledFundFunding) {
+        if (scheduledTransaction.goalFundingAllocations.isNotEmpty ||
+            !_isReservationFundingAccount(account)) {
+          throw const FinanceDataValidationException(
+            'Scheduled Fund Funding requires one eligible asset account and no Goal allocations.',
+          );
+        }
+        final targetId = scheduledTransaction.reservationFundingContainerId!;
+        final fund = funds
+            .where(
+              (fund) =>
+                  fund.id == targetId &&
+                  !fund.isDeleted &&
+                  fund.status == FundStatus.active,
+            )
+            .firstOrNull;
+        if (fund == null || fund.fundingAccountId != account.id) {
+          throw const FinanceDataValidationException(
+            'Scheduled Fund Funding requires an active Fund backed by its source account.',
+          );
+        }
+        return;
+      }
+
+      if (scheduledTransaction.reservationFundingContainerType != null ||
+          scheduledTransaction.reservationFundingContainerId != null ||
           !scheduledTransaction.hasValidGoalFundingAllocations) {
         throw const FinanceDataValidationException(
           'Scheduled Goal Funding requires balanced Goal allocations only.',
-        );
-      }
-      final accountExists = accounts.any(
-        (account) =>
-            account.id == scheduledTransaction.accountId && account.isVisible,
-      );
-      if (!accountExists) {
-        throw const FinanceDataValidationException(
-          'Scheduled Goal Funding requires an active source account.',
         );
       }
       return;
@@ -4808,94 +5614,117 @@ class FinanceDataStore extends ChangeNotifier {
     List<FundRecord> funds = const [],
     List<ReservationOperationRecord> reservationOperations = const [],
     UserPreferences? preferences,
+    bool waitForRemote = true,
   }) async {
     notifyListeners();
     await localRepository?.save(_dataSet);
-    final remote = remoteRepository;
-    final currentUserId = userId;
-    if (remote != null && currentUserId != null) {
-      try {
-        for (final account in accounts) {
-          await remote.saveAccount(userId: currentUserId, account: account);
-        }
-        if (category != null) {
-          await remote.saveCategory(userId: currentUserId, category: category);
-        }
-        if (transaction != null) {
-          await remote.saveTransaction(
-            userId: currentUserId,
-            transaction: transaction,
-          );
-        }
-        for (final transactionRecord in transactions) {
-          await remote.saveTransaction(
-            userId: currentUserId,
-            transaction: transactionRecord,
-          );
-        }
-        if (scheduledTransaction != null) {
-          await remote.saveScheduledTransaction(
-            userId: currentUserId,
-            scheduledTransaction: scheduledTransaction,
-          );
-        }
-        for (final scheduledTransactionRecord in scheduledTransactions) {
-          await remote.saveScheduledTransaction(
-            userId: currentUserId,
-            scheduledTransaction: scheduledTransactionRecord,
-          );
-        }
-        if (budget != null) {
-          await remote.saveBudget(userId: currentUserId, budget: budget);
-        }
-        if (goal != null) {
-          await remote.saveGoal(userId: currentUserId, goal: goal);
-        }
-        for (final goalRecord in goalRecords) {
-          await remote.saveGoal(userId: currentUserId, goal: goalRecord);
-        }
-        if (goalContribution != null) {
-          await remote.saveGoalContribution(
-            userId: currentUserId,
-            contribution: goalContribution,
-          );
-        }
-        for (final contribution in goalContributions) {
-          await remote.saveGoalContribution(
-            userId: currentUserId,
-            contribution: contribution,
-          );
-        }
-        for (final fundingEvent in goalFundingEvents) {
-          await remote.saveGoalFundingEvent(
-            userId: currentUserId,
-            fundingEvent: fundingEvent,
-          );
-        }
-        if (remote
-            case final ReservationRecordRepository reservationRepository) {
-          for (final fund in funds) {
-            await reservationRepository.saveFund(
+    Future<void> saveRemote() async {
+      final remote = remoteRepository;
+      final currentUserId = userId;
+      if (remote != null && currentUserId != null) {
+        try {
+          for (final account in accounts) {
+            await remote.saveAccount(userId: currentUserId, account: account);
+          }
+          if (category != null) {
+            await remote.saveCategory(
               userId: currentUserId,
-              fund: fund,
+              category: category,
             );
           }
-          for (final operation in reservationOperations) {
-            await reservationRepository.saveReservationOperation(
+          if (transaction != null) {
+            await remote.saveTransaction(
               userId: currentUserId,
-              operation: operation,
+              transaction: transaction,
             );
           }
-        }
-        if (preferences != null) {
-          await remote.savePreferences(
-            userId: currentUserId,
-            preferences: preferences,
+          for (final transactionRecord in transactions) {
+            await remote.saveTransaction(
+              userId: currentUserId,
+              transaction: transactionRecord,
+            );
+          }
+          if (scheduledTransaction != null) {
+            await remote.saveScheduledTransaction(
+              userId: currentUserId,
+              scheduledTransaction: scheduledTransaction,
+            );
+          }
+          for (final scheduledTransactionRecord in scheduledTransactions) {
+            await remote.saveScheduledTransaction(
+              userId: currentUserId,
+              scheduledTransaction: scheduledTransactionRecord,
+            );
+          }
+          if (budget != null) {
+            await remote.saveBudget(userId: currentUserId, budget: budget);
+          }
+          if (goal != null) {
+            await remote.saveGoal(userId: currentUserId, goal: goal);
+          }
+          for (final goalRecord in goalRecords) {
+            await remote.saveGoal(userId: currentUserId, goal: goalRecord);
+          }
+          if (goalContribution != null) {
+            await remote.saveGoalContribution(
+              userId: currentUserId,
+              contribution: goalContribution,
+            );
+          }
+          for (final contribution in goalContributions) {
+            await remote.saveGoalContribution(
+              userId: currentUserId,
+              contribution: contribution,
+            );
+          }
+          for (final fundingEvent in goalFundingEvents) {
+            await remote.saveGoalFundingEvent(
+              userId: currentUserId,
+              fundingEvent: fundingEvent,
+            );
+          }
+          if (remote
+              case final ReservationRecordRepository reservationRepository) {
+            for (final fund in funds) {
+              await reservationRepository.saveFund(
+                userId: currentUserId,
+                fund: fund,
+              );
+            }
+            for (final operation in reservationOperations) {
+              await reservationRepository.saveReservationOperation(
+                userId: currentUserId,
+                operation: operation,
+              );
+            }
+          }
+          if (preferences != null) {
+            await remote.savePreferences(
+              userId: currentUserId,
+              preferences: preferences,
+            );
+          }
+        } on Exception catch (error) {
+          debugPrint(
+            'Remote finance save failed; local change retained: $error',
           );
         }
-      } on Exception catch (error) {
-        debugPrint('Remote finance save failed; local change retained: $error');
       }
+    }
+
+    // Keep cloud writes in local commit order even when a UI flow only waits
+    // for durable local persistence. Without this queue, two quick reservation
+    // actions could finish remotely out of order and leave an older merged
+    // Goal/Fund snapshot as the last cloud write.
+    final queuedRemoteSave = _remoteCommitTail.then((_) => saveRemote());
+    _remoteCommitTail = queuedRemoteSave.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    if (waitForRemote) {
+      await queuedRemoteSave;
+    } else {
+      unawaited(queuedRemoteSave);
     }
   }
 

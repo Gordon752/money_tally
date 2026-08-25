@@ -218,6 +218,10 @@ int notificationIdFor(String scheduledTransactionId) {
 }
 
 String notificationTitleFor(ScheduledTransactionRecord scheduledTransaction) {
+  if (scheduledTransaction.isScheduledFundFunding) {
+    final name = scheduledTransaction.payee.trim();
+    return name.isEmpty ? 'Fund funding due' : '$name funding due';
+  }
   return switch (scheduledTransaction.type) {
     TransactionType.income => 'Income due',
     TransactionType.transfer => 'Transfer due',
@@ -228,6 +232,11 @@ String notificationTitleFor(ScheduledTransactionRecord scheduledTransaction) {
 }
 
 String notificationBodyFor(ScheduledTransactionRecord scheduledTransaction) {
+  if (scheduledTransaction.isScheduledFundFunding) {
+    final amount = (scheduledTransaction.amountMinor.abs() / 100)
+        .toStringAsFixed(2);
+    return 'Allocate \$$amount to your Fund.';
+  }
   if (scheduledTransaction.type == TransactionType.goalFunding) {
     final count = scheduledTransaction.goalFundingAllocations.length;
     final amount = (scheduledTransaction.amountMinor.abs() / 100)

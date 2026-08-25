@@ -26,13 +26,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   group('authoritative backup restore', () {
     test(
-      'reset replaces local and cloud financial data while preserving preferences',
+      'reset replaces financial data and payees while preserving app settings',
       () async {
         SharedPreferences.setMockInitialValues({});
         final original = _richDataSet();
         final remote = _AuthoritativeFakeRepository(original);
+        const local = LocalFinanceDataSetRepository(
+          storageKey: 'reset-preserves-settings',
+        );
         final store = FinanceDataStore(
           dataSet: original,
+          localRepository: local,
           remoteRepository: remote,
           userId: 'user-1',
         );
@@ -53,13 +57,51 @@ void main() {
           expect(
             dataSet.preferences.toJson(),
             original.preferences
-                .copyWith(legacyV1MigrationCompleted: true)
+                .copyWith(
+                  defaultTransactionAccountMode: AccountDefaultMode.lastUsed,
+                  clearDefaultTransactionAccountId: true,
+                  defaultTransferSourceMode: AccountDefaultMode.lastUsed,
+                  clearDefaultTransferSourceAccountId: true,
+                  clearLastUsedTransactionAccountId: true,
+                  clearLastUsedTransferSourceAccountId: true,
+                  savedPayeeNames: const [],
+                  archivedPayeeNames: const {},
+                  deletedPayeeNames: const {},
+                  legacyV1MigrationCompleted: true,
+                )
                 .toJson(),
           );
         }
+        final reloaded = await local.load();
+        expect(reloaded, isNotNull);
+        expect(reloaded!.preferences.savedPayeeNames, isEmpty);
+        expect(reloaded.preferences.archivedPayeeNames, isEmpty);
+        expect(reloaded.preferences.deletedPayeeNames, isEmpty);
+        expect(
+          reloaded.preferences.currency.toJson(),
+          original.preferences.currency.toJson(),
+        );
         expect(remote.authoritativeWrites, 1);
       },
     );
+
+    test('reset can return app settings to defaults', () async {
+      SharedPreferences.setMockInitialValues({});
+      final original = _richDataSet();
+      final remote = _AuthoritativeFakeRepository(original);
+      final store = FinanceDataStore(
+        dataSet: original,
+        remoteRepository: remote,
+        userId: 'user-1',
+      );
+
+      await store.resetTrackmarkData(resetAppSettings: true);
+
+      const expected = UserPreferences(legacyV1MigrationCompleted: true);
+      expect(store.preferences.toJson(), expected.toJson());
+      expect(remote.remoteDataSet.preferences.toJson(), expected.toJson());
+      expect(remote.authoritativeWrites, 1);
+    });
 
     test('failed cloud reset retains the complete local data set', () async {
       SharedPreferences.setMockInitialValues({});
@@ -71,7 +113,10 @@ void main() {
         userId: 'user-1',
       );
 
-      await expectLater(store.resetTrackmarkData(), throwsStateError);
+      await expectLater(
+        store.resetTrackmarkData(resetAppSettings: true),
+        throwsStateError,
+      );
 
       expect(store.dataSet.toJson(), original.toJson());
       expect(remote.remoteDataSet.toJson(), original.toJson());
@@ -686,6 +731,71 @@ void main() {
           remote.remoteDataSet.transactions.map((item) => item.id),
           contains('post-restore-transaction'),
         );
+      },
+    );
+
+    test(
+      'stale second device accepts an empty reset generation without resurrecting records',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final beforeReset = _richDataSet();
+        final remote = _AuthoritativeFakeRepository(beforeReset);
+        const resettingLocal = LocalFinanceDataSetRepository(
+          storageKey: 'empty-reset-authority-device',
+        );
+        final resettingDevice = FinanceDataStore(
+          dataSet: beforeReset,
+          localRepository: resettingLocal,
+          remoteRepository: remote,
+          userId: 'user-1',
+        );
+        await resettingDevice.resetTrackmarkData();
+
+        const staleLocal = LocalFinanceDataSetRepository(
+          storageKey: 'empty-reset-stale-device',
+        );
+        await staleLocal.save(beforeReset);
+        final staleDevice = FinanceDataStore(
+          dataSet: beforeReset,
+          localRepository: staleLocal,
+        );
+
+        await staleDevice.attachRemoteSync(
+          remoteRepository: remote,
+          userId: 'user-1',
+        );
+
+        expect(financeDataSetHasRecords(staleDevice.dataSet), isFalse);
+        expect(financeDataSetHasRecords(remote.remoteDataSet), isFalse);
+        expect(staleDevice.preferences.savedPayeeNames, isEmpty);
+        expect(staleDevice.preferences.archivedPayeeNames, isEmpty);
+        expect(staleDevice.preferences.deletedPayeeNames, isEmpty);
+        expect(
+          await staleLocal.loadAcknowledgedRestoreGeneration('user-1'),
+          remote.activeGeneration,
+        );
+
+        final relaunched = await FinanceDataStore.load(
+          localRepository: staleLocal,
+          deviceId: 'stale-device-relaunch',
+        );
+        await relaunched.attachRemoteSync(
+          remoteRepository: remote,
+          userId: 'user-1',
+        );
+
+        expect(financeDataSetHasRecords(relaunched.dataSet), isFalse);
+        expect(financeDataSetHasRecords(remote.remoteDataSet), isFalse);
+        expect(relaunched.preferences.savedPayeeNames, isEmpty);
+        expect(relaunched.preferences.archivedPayeeNames, isEmpty);
+        expect(relaunched.preferences.deletedPayeeNames, isEmpty);
+
+        await relaunched.attachRemoteSync(
+          remoteRepository: remote,
+          userId: 'user-1',
+        );
+        expect(financeDataSetHasRecords(relaunched.dataSet), isFalse);
+        expect(financeDataSetHasRecords(remote.remoteDataSet), isFalse);
       },
     );
 

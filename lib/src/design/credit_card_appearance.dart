@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 
 import 'accent_color_catalog.dart';
 import '../domain/account.dart';
@@ -9,11 +10,17 @@ class AccountIconOption {
     required this.id,
     required this.label,
     required this.icon,
+    this.hugeIcon,
   });
 
   final String id;
   final String label;
+
+  /// The existing Flutter glyph remains available as a compatibility fallback
+  /// for callers that consume [icon] directly. Account appearance surfaces use
+  /// [hugeIcon] when present.
   final IconData icon;
+  final List<List<dynamic>>? hugeIcon;
 }
 
 /// Stable, app-owned appearance identifiers for credit-card accounts.
@@ -52,21 +59,43 @@ abstract final class AccountAppearanceCatalog {
       id: 'bank',
       label: 'Bank',
       icon: CupertinoIcons.building_2_fill,
+      hugeIcon: HugeIcons.strokeRoundedBank,
     ),
     AccountIconOption(
       id: 'checking',
       label: 'Checking',
       icon: Icons.account_balance_wallet_outlined,
+      hugeIcon: HugeIcons.strokeRoundedWallet01,
     ),
     AccountIconOption(
       id: 'savings',
       label: 'Savings',
       icon: Icons.savings_outlined,
+      hugeIcon: HugeIcons.strokeRoundedSafeBox,
     ),
     AccountIconOption(
       id: 'portfolio',
       label: 'Portfolio',
       icon: Icons.trending_up_outlined,
+      hugeIcon: HugeIcons.strokeRoundedChartUp,
+    ),
+    AccountIconOption(
+      id: 'cashWallet',
+      label: 'Wallet',
+      icon: Icons.wallet_outlined,
+      hugeIcon: HugeIcons.strokeRoundedWallet04,
+    ),
+    AccountIconOption(
+      id: 'savingsPiggy',
+      label: 'Piggy Bank',
+      icon: Icons.savings_outlined,
+      hugeIcon: HugeIcons.strokeRoundedPiggyBank,
+    ),
+    AccountIconOption(
+      id: 'cash',
+      label: 'Cash',
+      icon: CupertinoIcons.money_dollar,
+      hugeIcon: HugeIcons.strokeRoundedMoney02,
     ),
   ];
 
@@ -75,6 +104,7 @@ abstract final class AccountAppearanceCatalog {
       id: 'cash',
       label: 'Cash',
       icon: CupertinoIcons.money_dollar,
+      hugeIcon: HugeIcons.strokeRoundedMoney02,
     ),
     AccountIconOption(
       id: 'cashCircle',
@@ -90,6 +120,7 @@ abstract final class AccountAppearanceCatalog {
       id: 'cashWallet',
       label: 'Wallet',
       icon: Icons.wallet_outlined,
+      hugeIcon: HugeIcons.strokeRoundedWallet04,
     ),
   ];
 
@@ -214,7 +245,6 @@ class AccountAppearanceBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final option = AccountAppearanceCatalog.iconFor(accountType, iconId);
-    final icon = option.icon;
     final accent = AccountAppearanceCatalog.accentFor(accentId)?.color;
     final foreground = accent ?? theme.colorScheme.onSurfaceVariant;
     final background = accent == null
@@ -239,8 +269,41 @@ class AccountAppearanceBadge extends StatelessWidget {
           borderRadius: BorderRadius.circular(size * 0.26),
           border: Border.all(color: border),
         ),
-        child: Icon(icon, color: foreground, size: size * 0.50),
+        child: AccountAppearanceGlyph(
+          option: option,
+          color: foreground,
+          size: size * 0.50,
+        ),
       ),
     );
+  }
+}
+
+/// Renders one account-appearance option without changing the catalog's
+/// stable Flutter [IconData] compatibility surface.
+class AccountAppearanceGlyph extends StatelessWidget {
+  const AccountAppearanceGlyph({
+    required this.option,
+    required this.color,
+    required this.size,
+    super.key,
+  });
+
+  final AccountIconOption option;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final hugeIcon = option.hugeIcon;
+    if (hugeIcon != null) {
+      return HugeIcon(
+        icon: hugeIcon,
+        color: color,
+        size: size,
+        strokeWidth: 1.8,
+      );
+    }
+    return Icon(option.icon, color: color, size: size);
   }
 }

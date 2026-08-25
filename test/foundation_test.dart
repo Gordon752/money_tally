@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:money_tally/src/credit/credit_insights_calculator.dart';
@@ -5,9 +7,11 @@ import 'package:money_tally/src/domain/account.dart';
 import 'package:money_tally/src/domain/budget.dart';
 import 'package:money_tally/src/domain/category.dart';
 import 'package:money_tally/src/domain/finance_data_set.dart';
+import 'package:money_tally/src/domain/fund.dart';
 import 'package:money_tally/src/domain/goal.dart';
 import 'package:money_tally/src/domain/goal_funding.dart';
 import 'package:money_tally/src/domain/money.dart';
+import 'package:money_tally/src/domain/reservation.dart';
 import 'package:money_tally/src/domain/scheduled_occurrence_authority.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart';
@@ -21,6 +25,101 @@ import 'package:money_tally/src/persistence/scheduled_notification_state_reposit
 import 'package:money_tally/src/store/finance_data_store.dart';
 
 void main() {
+  test(
+    'nonblocking reservation commits wait locally and preserve remote order',
+    () async {
+      final local = _FirstSaveBlockingLocalRepository();
+      final remote = _OrderedBlockingReservationRepository();
+      final sync = SyncMetadata.fresh(
+        now: DateTime(2026, 8, 24),
+        deviceId: 'device-a',
+      );
+      final store = FinanceDataStore(
+        deviceId: 'device-a',
+        userId: 'user-a',
+        localRepository: local,
+        remoteRepository: remote,
+        dataSet: _emptyDataSet().copyWith(
+          accounts: [
+            AccountRecord(
+              id: 'checking',
+              name: 'Checking',
+              type: AccountType.checking,
+              openingBalanceMinor: 500000,
+              sync: sync,
+            ),
+          ],
+          funds: [
+            FundRecord(
+              id: 'bills',
+              name: 'Bills',
+              fundingAccountId: 'checking',
+              status: FundStatus.active,
+              sync: sync,
+            ),
+          ],
+        ),
+      );
+
+      var firstReturned = false;
+      final firstCommit = store
+          .allocateReservation(
+            containerType: ReservationContainerType.fund,
+            containerId: 'bills',
+            amountMinor: 10000,
+            date: DateTime(2026, 8, 24),
+            waitForRemote: false,
+          )
+          .then((operation) {
+            firstReturned = true;
+            return operation;
+          });
+
+      await local.firstSaveStarted.future;
+      await Future<void>.delayed(Duration.zero);
+      expect(firstReturned, isFalse);
+      expect(remote.events, isEmpty);
+
+      local.releaseFirstSave();
+      final firstOperation = await firstCommit.timeout(
+        const Duration(seconds: 1),
+      );
+      expect(firstReturned, isTrue);
+      expect(local.saveCount, 1);
+      await remote.firstSaveStarted.future.timeout(const Duration(seconds: 1));
+      expect(remote.events, ['start:10000']);
+
+      final secondOperation = await store
+          .allocateReservation(
+            containerType: ReservationContainerType.fund,
+            containerId: 'bills',
+            amountMinor: 20000,
+            date: DateTime(2026, 8, 24),
+            waitForRemote: false,
+          )
+          .timeout(const Duration(seconds: 1));
+
+      expect(local.saveCount, 2);
+      expect((firstOperation.revision, secondOperation.revision), (1, 2));
+      expect(
+        remote.events,
+        ['start:10000'],
+        reason: 'the second cloud write must queue behind the blocked first',
+      );
+
+      remote.releaseFirstSave();
+      await remote.secondSaveFinished.future.timeout(
+        const Duration(seconds: 1),
+      );
+      expect(remote.events, [
+        'start:10000',
+        'finish:10000',
+        'start:20000',
+        'finish:20000',
+      ]);
+    },
+  );
+
   test(
     'ordinary sync records converge on cloud authority when timestamps tie',
     () {
@@ -1851,6 +1950,12 @@ void main() {
       appearanceMode: AppearanceMode.dark,
       currency: CurrencyFormatSettings(currencyCode: 'USD', symbol: r'$'),
       defaultTransactionType: DefaultTransactionType.lastUsed,
+      defaultTransactionAccountMode: AccountDefaultMode.specific,
+      defaultTransactionAccountId: 'checking',
+      defaultTransferSourceMode: AccountDefaultMode.specific,
+      defaultTransferSourceAccountId: 'checking',
+      lastUsedTransactionAccountId: 'checking',
+      lastUsedTransferSourceAccountId: 'savings',
       collapsedAccountGroupNames: {'cash'},
       accountGroupOrderNames: ['cash', 'banking', 'creditCards', 'loans'],
       accountGroupLabelOverrides: {'banking': 'Everyday Money'},
@@ -1871,6 +1976,8 @@ void main() {
     expect(updated.appearanceMode, AppearanceMode.dark);
     expect(updated.currency.currencyCode, 'CAD');
     expect(updated.defaultTransactionType, DefaultTransactionType.lastUsed);
+    expect(updated.defaultTransactionAccountId, 'checking');
+    expect(updated.defaultTransferSourceAccountId, 'checking');
     expect(updated.collapsedAccountGroupNames, {'cash'});
     expect(updated.accountGroupOrderNames.take(2), ['cash', 'banking']);
     expect(updated.accountGroupLabelOverrides, {'banking': 'Everyday Money'});
@@ -1884,6 +1991,17 @@ void main() {
     expect(roundTripped.savedPayeeNames, ['Cafe', 'Old Store']);
     expect(roundTripped.archivedPayeeNames, {'cafe'});
     expect(roundTripped.deletedPayeeNames, {'old store'});
+
+    final clearedAccountReferences = roundTripped.copyWith(
+      clearDefaultTransactionAccountId: true,
+      clearDefaultTransferSourceAccountId: true,
+      clearLastUsedTransactionAccountId: true,
+      clearLastUsedTransferSourceAccountId: true,
+    );
+    expect(clearedAccountReferences.defaultTransactionAccountId, isNull);
+    expect(clearedAccountReferences.defaultTransferSourceAccountId, isNull);
+    expect(clearedAccountReferences.lastUsedTransactionAccountId, isNull);
+    expect(clearedAccountReferences.lastUsedTransferSourceAccountId, isNull);
   });
 
   test('notification planner converts alert preferences into requests', () {
@@ -3534,5 +3652,57 @@ class AlwaysFailingLocalRepository extends LocalFinanceDataSetRepository {
   @override
   Future<void> save(FinanceDataSet dataSet) {
     throw StateError('Local paired save failed');
+  }
+}
+
+class _FirstSaveBlockingLocalRepository extends LocalFinanceDataSetRepository {
+  final firstSaveStarted = Completer<void>();
+  final _releaseFirstSave = Completer<void>();
+  int saveCount = 0;
+
+  void releaseFirstSave() {
+    if (!_releaseFirstSave.isCompleted) _releaseFirstSave.complete();
+  }
+
+  @override
+  Future<void> save(FinanceDataSet dataSet) async {
+    saveCount += 1;
+    if (saveCount != 1) return;
+    firstSaveStarted.complete();
+    await _releaseFirstSave.future;
+  }
+}
+
+class _OrderedBlockingReservationRepository extends FakeRecordRepository
+    implements ReservationRecordRepository {
+  final firstSaveStarted = Completer<void>();
+  final secondSaveFinished = Completer<void>();
+  final _releaseFirstSave = Completer<void>();
+  final events = <String>[];
+  int _saveCount = 0;
+
+  void releaseFirstSave() {
+    if (!_releaseFirstSave.isCompleted) _releaseFirstSave.complete();
+  }
+
+  @override
+  Future<void> saveFund({
+    required String userId,
+    required FundRecord fund,
+  }) async {}
+
+  @override
+  Future<void> saveReservationOperation({
+    required String userId,
+    required ReservationOperationRecord operation,
+  }) async {
+    _saveCount += 1;
+    events.add('start:${operation.amountMinor}');
+    if (_saveCount == 1) {
+      firstSaveStarted.complete();
+      await _releaseFirstSave.future;
+    }
+    events.add('finish:${operation.amountMinor}');
+    if (_saveCount == 2) secondSaveFinished.complete();
   }
 }

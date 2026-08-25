@@ -31,6 +31,31 @@ void main() {
         expect(undated.status, GoalProgressStatus.notStarted);
         expect(dated.status.label, 'Not started');
         expect(undated.status.label, 'Not started');
+        expect(dated.requiredWeeklyMinor, 5385);
+        expect(dated.requiredMonthlyMinor, 23414);
+        expect(undated.requiredWeeklyMinor, 0);
+        expect(undated.requiredMonthlyMinor, 0);
+      },
+    );
+
+    test(
+      'new zero-funded dated Goal calculates the funding pace immediately',
+      () {
+        final metrics = const GoalCalculator().calculate(
+          _goal(
+            targetAmountMinor: 100000,
+            targetDate: DateTime(2026, 9, 30),
+            createdAt: DateTime(2026, 8, 24),
+          ),
+          const [],
+          now: DateTime(2026, 8, 24),
+        );
+
+        expect(metrics.status, GoalProgressStatus.notStarted);
+        expect(metrics.currentAmountMinor, 0);
+        expect(metrics.remainingAmountMinor, 100000);
+        expect(metrics.requiredWeeklyMinor, 18919);
+        expect(metrics.requiredMonthlyMinor, 82264);
       },
     );
 

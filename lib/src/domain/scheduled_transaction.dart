@@ -128,6 +128,7 @@ class ScheduledOccurrenceState {
     this.actualPaymentDate,
     this.transactionId,
     this.goalFundingEventId,
+    this.reservationOperationId,
   });
 
   final DateTime scheduledDate;
@@ -137,6 +138,7 @@ class ScheduledOccurrenceState {
   final DateTime? actualPaymentDate;
   final String? transactionId;
   final String? goalFundingEventId;
+  final String? reservationOperationId;
   final int revision;
   final String operationId;
   final DateTime changedAt;
@@ -156,6 +158,7 @@ class ScheduledOccurrenceState {
     'actualPaymentDate': actualPaymentDate?.toIso8601String(),
     'transactionId': transactionId,
     'goalFundingEventId': goalFundingEventId,
+    'reservationOperationId': reservationOperationId,
     'revision': revision,
     'operationId': operationId,
     'changedAt': changedAt.toUtc().toIso8601String(),
@@ -181,6 +184,7 @@ class ScheduledOccurrenceState {
           : dateTimeFromJson(json['actualPaymentDate']),
       transactionId: json['transactionId'] as String?,
       goalFundingEventId: json['goalFundingEventId'] as String?,
+      reservationOperationId: json['reservationOperationId'] as String?,
       revision: revision,
       // Old/hand-authored additive payloads remain deterministic even if they
       // omitted the operation id. New writes always supply a random id.
@@ -205,6 +209,7 @@ class ScheduledOccurrenceState {
     actualPaymentDate: actualPaymentDate,
     transactionId: transactionId,
     goalFundingEventId: goalFundingEventId,
+    reservationOperationId: reservationOperationId,
   );
 }
 
@@ -232,6 +237,7 @@ class ScheduledOccurrenceRecord {
     this.actualPaymentDate,
     this.transactionId,
     this.goalFundingEventId,
+    this.reservationOperationId,
   });
 
   final DateTime scheduledDate;
@@ -244,6 +250,10 @@ class ScheduledOccurrenceRecord {
   /// Present only when this occurrence was explicitly funded as a Goal event.
   final String? goalFundingEventId;
 
+  /// Present when this occurrence allocated money through the shared
+  /// reservation engine rather than creating a Ledger transaction.
+  final String? reservationOperationId;
+
   Map<String, Object?> toJson() {
     return {
       'scheduledDate': scheduledDate.toIso8601String(),
@@ -253,6 +263,7 @@ class ScheduledOccurrenceRecord {
       'actualPaymentDate': actualPaymentDate?.toIso8601String(),
       'transactionId': transactionId,
       'goalFundingEventId': goalFundingEventId,
+      'reservationOperationId': reservationOperationId,
     };
   }
 
@@ -271,6 +282,7 @@ class ScheduledOccurrenceRecord {
           : dateTimeFromJson(json['actualPaymentDate']),
       transactionId: json['transactionId'] as String?,
       goalFundingEventId: json['goalFundingEventId'] as String?,
+      reservationOperationId: json['reservationOperationId'] as String?,
     );
   }
 }
@@ -303,6 +315,8 @@ class ScheduledTransactionRecord {
     this.occurrenceHistoryEpoch,
     this.reservationContainerType,
     this.reservationContainerId,
+    this.reservationFundingContainerType,
+    this.reservationFundingContainerId,
   });
 
   final String id;
@@ -335,13 +349,27 @@ class ScheduledTransactionRecord {
   final ScheduledOccurrenceHistoryEpoch? occurrenceHistoryEpoch;
   final ReservationContainerType? reservationContainerType;
   final String? reservationContainerId;
+
+  /// Optional target for a scheduled reservation allocation. This is
+  /// deliberately separate from [reservationContainerType] and
+  /// [reservationContainerId], which mean that a real scheduled transaction
+  /// consumes already-reserved money when it is marked Paid.
+  final ReservationContainerType? reservationFundingContainerType;
+  final String? reservationFundingContainerId;
   final SyncMetadata sync;
 
   bool get hasAlert => alertPreference != AlertPreference.none;
   bool get isDeleted => sync.isDeleted;
+  bool get isScheduledFundFunding =>
+      type == TransactionType.goalFunding &&
+      reservationFundingContainerType == ReservationContainerType.fund &&
+      (reservationFundingContainerId?.trim().isNotEmpty ?? false);
+  bool get isScheduledGoalFunding =>
+      type == TransactionType.goalFunding && !isScheduledFundFunding;
+  bool get isReservationFunding =>
+      isScheduledGoalFunding || isScheduledFundFunding;
   bool get isGoalFunding =>
-      type == TransactionType.goalFunding ||
-      (goalId != null && goalId!.isNotEmpty);
+      isScheduledGoalFunding || (goalId != null && goalId!.isNotEmpty);
   List<TransactionSplitLine> get effectiveCategoryAllocations {
     return resolveEffectiveCategoryAllocations(
       type: type,
@@ -378,7 +406,7 @@ class ScheduledTransactionRecord {
   );
 
   bool get hasValidGoalFundingAllocations {
-    if (type != TransactionType.goalFunding) return true;
+    if (!isScheduledGoalFunding) return true;
     final ids = <String>{};
     return goalFundingAllocations.isNotEmpty &&
         goalFundingAllocations.every(
@@ -415,6 +443,8 @@ class ScheduledTransactionRecord {
     ScheduledOccurrenceHistoryEpoch? occurrenceHistoryEpoch,
     ReservationContainerType? reservationContainerType,
     String? reservationContainerId,
+    ReservationContainerType? reservationFundingContainerType,
+    String? reservationFundingContainerId,
     SyncMetadata? sync,
     bool clearTransferAccount = false,
     bool clearCategory = false,
@@ -423,6 +453,7 @@ class ScheduledTransactionRecord {
     bool clearCustomAlertTime = false,
     bool clearLastReminderScheduledAt = false,
     bool clearReservationContainer = false,
+    bool clearReservationFundingContainer = false,
   }) {
     return ScheduledTransactionRecord(
       id: id,
@@ -464,6 +495,13 @@ class ScheduledTransactionRecord {
       reservationContainerId: clearReservationContainer
           ? null
           : reservationContainerId ?? this.reservationContainerId,
+      reservationFundingContainerType: clearReservationFundingContainer
+          ? null
+          : reservationFundingContainerType ??
+                this.reservationFundingContainerType,
+      reservationFundingContainerId: clearReservationFundingContainer
+          ? null
+          : reservationFundingContainerId ?? this.reservationFundingContainerId,
       sync: sync ?? this.sync.touched(),
     );
   }
@@ -502,6 +540,8 @@ class ScheduledTransactionRecord {
         'occurrenceHistoryEpoch': occurrenceHistoryEpoch!.toJson(),
       'reservationContainerType': reservationContainerType?.name,
       'reservationContainerId': reservationContainerId,
+      'reservationFundingContainerType': reservationFundingContainerType?.name,
+      'reservationFundingContainerId': reservationFundingContainerId,
       'sync': sync.toJson(),
     };
   }
@@ -579,6 +619,16 @@ class ScheduledTransactionRecord {
               ReservationContainerType.goal,
             ),
       reservationContainerId: json['reservationContainerId'] as String?,
+      reservationFundingContainerType:
+          json['reservationFundingContainerType'] == null
+          ? null
+          : enumByName(
+              ReservationContainerType.values,
+              json['reservationFundingContainerType'],
+              ReservationContainerType.fund,
+            ),
+      reservationFundingContainerId:
+          json['reservationFundingContainerId'] as String?,
       sync: SyncMetadata.fromJson(stringMap(json['sync'])),
     );
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
@@ -11,6 +13,7 @@ import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
 import 'package:money_tally/src/domain/transaction.dart';
 import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/goals/goal_calculator.dart';
+import 'package:money_tally/src/persistence/local_finance_data_set_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
@@ -762,7 +765,7 @@ void main() {
     expect(store.goalContributionById(contribution.id).isDeleted, isTrue);
   });
 
-  testWidgets('Goal Actions opens the dedicated Fund Goals sheet', (
+  testWidgets('Goal Actions Allocate opens the dedicated funding sheet', (
     tester,
   ) async {
     await _setPhoneSize(tester);
@@ -790,7 +793,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('View Activity'), findsOneWidget);
-    await tester.tap(find.text('Fund Goal'));
+    await tester.tap(find.text('Allocate'));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
@@ -864,6 +867,63 @@ void main() {
     expect(store.availableToSpendForAccount('checking'), 250000);
     expect(store.netWorthMinor, 250000);
   });
+
+  testWidgets(
+    'exact-available Goal allocation stays valid while persistence is pending',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final repository = _BlockingLocalFinanceRepository();
+      final store = _store(localRepository: repository);
+      final goal = await store.createGoal(
+        name: 'Emergency Fund',
+        startingAmountMinor: 0,
+        defaultFundingAccountId: 'checking',
+        targetAmountMinor: 250000,
+        targetDate: null,
+      );
+      await tester.pumpWidget(
+        _testApp(
+          store,
+          Builder(
+            builder: (context) => FilledButton(
+              onPressed: () =>
+                  showFundGoalsSheet(context, initialGoalId: goal.id),
+              child: const Text('Open Funding'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Funding'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('fund-goals-total')),
+        '250000',
+      );
+      await tester.pump();
+      expect(find.text('After allocation · \$0.00 available'), findsOneWidget);
+      expect(
+        find.text('Funding exceeds the selected account balance.'),
+        findsNothing,
+      );
+
+      repository.blockNextSave();
+      await tester.tap(find.byKey(const ValueKey('fund-goals-save')));
+      await tester.pump();
+
+      expect(find.text('Fund Goals'), findsWidgets);
+      expect(find.text('After allocation · \$0.00 available'), findsOneWidget);
+      expect(
+        find.text('Funding exceeds the selected account balance.'),
+        findsNothing,
+      );
+
+      repository.releaseSave();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('fund-goals-total')), findsNothing);
+      expect(store.currentGoalAmountMinor(goal.id), 250000);
+    },
+  );
 
   testWidgets('tracking-only Add Contribution omits the account section', (
     tester,
@@ -1313,6 +1373,7 @@ FinanceDataStore _store({
   List<GoalRecord> goals = const [],
   List<GoalContributionRecord> contributions = const [],
   List<GoalFundingEventRecord> fundingEvents = const [],
+  LocalFinanceDataSetRepository? localRepository,
 }) {
   return FinanceDataStore(
     dataSet: FinanceDataSet(
@@ -1334,7 +1395,30 @@ FinanceDataStore _store({
       goalFundingEvents: fundingEvents,
       preferences: const UserPreferences(),
     ),
+    localRepository: localRepository,
   );
+}
+
+class _BlockingLocalFinanceRepository extends LocalFinanceDataSetRepository {
+  Completer<void>? _pendingSave;
+
+  void blockNextSave() {
+    expect(_pendingSave, isNull);
+    _pendingSave = Completer<void>();
+  }
+
+  void releaseSave() {
+    final pending = _pendingSave;
+    expect(pending, isNotNull);
+    _pendingSave = null;
+    pending!.complete();
+  }
+
+  @override
+  Future<void> save(FinanceDataSet dataSet) async {
+    final pending = _pendingSave;
+    if (pending != null) await pending.future;
+  }
 }
 
 GoalRecord _goal({

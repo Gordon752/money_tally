@@ -393,6 +393,15 @@ class _FinanceHomeState extends State<FinanceHome> {
     setState(() => selected = FinanceSection.settings);
   }
 
+  Future<void> _openReports() async {
+    if (MediaQuery.sizeOf(context).width >= 880) {
+      AppHaptics.navigation();
+      setState(() => selected = FinanceSection.reports);
+      return;
+    }
+    await _openManagementSection(FinanceSection.reports);
+  }
+
   Widget _sectionBody() {
     if (selected == FinanceSection.plan) {
       return PlanView(
@@ -445,6 +454,7 @@ class _FinanceHomeState extends State<FinanceHome> {
                       _openPlan(PlanSegment.goals, createGoal: true),
                   onViewScheduled: () =>
                       setState(() => selected = FinanceSection.scheduled),
+                  onViewReports: () => unawaited(_openReports()),
                 ),
                 FinanceSection.accounts => AccountsView(
                   onOpenLedgerForAccount: _openAccountLedger,
@@ -1428,6 +1438,7 @@ class DashboardView extends StatelessWidget {
     required this.onViewGoals,
     required this.onCreateGoal,
     required this.onViewScheduled,
+    required this.onViewReports,
     super.key,
   });
 
@@ -1436,13 +1447,12 @@ class DashboardView extends StatelessWidget {
   final VoidCallback onViewGoals;
   final VoidCallback onCreateGoal;
   final VoidCallback onViewScheduled;
+  final VoidCallback onViewReports;
 
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
     final scheduled = store.actionableScheduledTransactions();
-    final incomeThisMonth = store.incomeThisMonthMinor();
-    final expensesThisMonth = store.expensesThisMonthMinor();
     final currency = store.preferences.currency;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1460,11 +1470,7 @@ class DashboardView extends StatelessWidget {
               availableCashMinor: store.availableCashMinor,
               currency: currency,
             ),
-            ThisMonthSummaryCard(
-              incomeMinor: incomeThisMonth,
-              expensesMinor: expensesThisMonth,
-              currency: currency,
-            ),
+            DashboardReportsPreviewCard(onViewFull: onViewReports),
             GoalsPreviewCard(onViewAll: onViewGoals, onCreate: onCreateGoal),
             NextScheduledCard(
               scheduled: scheduled,
@@ -1639,47 +1645,243 @@ class CashSummaryCard extends StatelessWidget {
   }
 }
 
-class ThisMonthSummaryCard extends StatelessWidget {
-  const ThisMonthSummaryCard({
-    required this.incomeMinor,
-    required this.expensesMinor,
+class DashboardReportsPreviewCard extends StatefulWidget {
+  const DashboardReportsPreviewCard({
+    required this.onViewFull,
+    this.now,
+    super.key,
+  });
+
+  final VoidCallback onViewFull;
+  final DateTime Function()? now;
+
+  @override
+  State<DashboardReportsPreviewCard> createState() =>
+      _DashboardReportsPreviewCardState();
+}
+
+class _DashboardReportsPreviewCardState
+    extends State<DashboardReportsPreviewCard> {
+  List<TransactionRecord>? _cachedTransactions;
+  List<v2_category.CategoryRecord>? _cachedCategories;
+  List<v2_account.AccountRecord>? _cachedAccounts;
+  DateTime? _cachedDay;
+  ReportSnapshot? _cachedSnapshot;
+
+  DateTime get _now => widget.now?.call() ?? DateTime.now();
+
+  ReportSnapshot _reportFor(FinanceDataStore store) {
+    final now = _now;
+    final day = DateTime(now.year, now.month, now.day);
+    if (identical(_cachedTransactions, store.transactions) &&
+        identical(_cachedCategories, store.categories) &&
+        identical(_cachedAccounts, store.accounts) &&
+        _cachedDay == day &&
+        _cachedSnapshot != null) {
+      return _cachedSnapshot!;
+    }
+
+    final snapshot = const MoneyReportCalculator().calculate(
+      transactions: store.transactions,
+      categories: store.categories,
+      accounts: store.accounts,
+      range: ReportDateRange.thisMonth,
+      now: now,
+    );
+    _cachedTransactions = store.transactions;
+    _cachedCategories = store.categories;
+    _cachedAccounts = store.accounts;
+    _cachedDay = day;
+    _cachedSnapshot = snapshot;
+    return snapshot;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = FinanceDataStoreScope.watch(context);
+    final report = _reportFor(store);
+    final currency = store.preferences.currency;
+    final net = report.netCashFlowMinor;
+    return AppCard(
+      key: const ValueKey('dashboard-reports-preview'),
+      title: 'This Month',
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.sm,
+        AppSpacing.sm,
+        AppSpacing.sm,
+        AppSpacing.xs,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: ReportSummaryValue(
+                  key: const ValueKey('dashboard-report-income'),
+                  label: 'Income',
+                  value: money(report.incomeMinor, currency),
+                  color: AppTheme.accent,
+                ),
+              ),
+              const ReportVerticalDivider(),
+              Expanded(
+                child: ReportSummaryValue(
+                  key: const ValueKey('dashboard-report-expenses'),
+                  label: 'Expenses',
+                  value: money(report.expensesMinor, currency),
+                  color: AppTheme.rose,
+                ),
+              ),
+              const ReportVerticalDivider(),
+              Expanded(
+                child: ReportSummaryValue(
+                  key: const ValueKey('dashboard-report-net'),
+                  label: 'Net',
+                  value: money(net, currency),
+                  color: net < 0 ? AppTheme.rose : AppTheme.accent,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (report.hasTrendData)
+            DashboardMonthlyTrendChart(
+              totals: report.monthlyTotals,
+              currency: currency,
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: Text(
+                'No income or expense activity yet',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              key: const ValueKey('dashboard-view-full-report'),
+              onPressed: widget.onViewFull,
+              label: const Text('View Full Report'),
+              iconAlignment: IconAlignment.end,
+              icon: Icon(AppIcon.arrowForward, size: AppIconSize.inline),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DashboardMonthlyTrendChart extends StatelessWidget {
+  const DashboardMonthlyTrendChart({
+    required this.totals,
     required this.currency,
     super.key,
   });
 
-  final int incomeMinor;
-  final int expensesMinor;
+  final List<MonthlyReportTotal> totals;
   final CurrencyFormatSettings currency;
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
-      title: 'This Month',
-      padding: EdgeInsets.all(AppSpacing.sm),
-      child: Column(
-        children: [
-          CompactMetricRow(
-            label: 'Income',
-            amountMinor: incomeMinor,
-            currency: currency,
-            icon: AppIcon.income,
-            showPositiveSign: true,
+    final maxAmount = totals.fold<int>(
+      0,
+      (maximum, month) =>
+          max(maximum, max(month.incomeMinor, month.expensesMinor)),
+    );
+    final maxY = max(1, maxAmount).toDouble() / 100 * 1.12;
+    return Column(
+      children: [
+        const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ReportLegendDot(color: AppTheme.accent, label: 'Income'),
+            SizedBox(width: AppSpacing.md),
+            ReportLegendDot(color: AppTheme.rose, label: 'Expenses'),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Semantics(
+          label: monthlyTrendSemantics(totals, currency),
+          child: ExcludeSemantics(
+            child: SizedBox(
+              key: const ValueKey('dashboard-monthly-trend-chart'),
+              height: 112,
+              child: BarChart(
+                BarChartData(
+                  minY: 0,
+                  maxY: maxY,
+                  alignment: BarChartAlignment.spaceAround,
+                  borderData: FlBorderData(show: false),
+                  gridData: const FlGridData(show: false),
+                  barTouchData: BarTouchData(enabled: false),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    leftTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 24,
+                        getTitlesWidget: (value, _) {
+                          final index = value.toInt();
+                          if (index < 0 || index >= totals.length) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 5),
+                            child: Text(
+                              reportMonthAbbreviation(totals[index].month),
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  barGroups: [
+                    for (var index = 0; index < totals.length; index += 1)
+                      BarChartGroupData(
+                        x: index,
+                        barsSpace: 2,
+                        barRods: [
+                          BarChartRodData(
+                            toY: totals[index].incomeMinor / 100,
+                            width: 6,
+                            color: AppTheme.accent,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(2),
+                            ),
+                          ),
+                          BarChartRodData(
+                            toY: totals[index].expensesMinor / 100,
+                            width: 6,
+                            color: AppTheme.rose,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(2),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
           ),
-          CompactMetricRow(
-            label: 'Expenses',
-            amountMinor: -expensesMinor.abs(),
-            currency: currency,
-            icon: AppIcon.expense,
-          ),
-          CompactMetricRow(
-            label: 'Remaining',
-            amountMinor: incomeMinor - expensesMinor,
-            currency: currency,
-            icon: AppIcon.savings,
-            showPositiveSign: incomeMinor - expensesMinor > 0,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1748,12 +1950,12 @@ class _NextScheduledRow extends StatelessWidget {
     return Row(
       children: [
         Icon(
-          scheduled.type == TransactionType.goalFunding
+          scheduled.isScheduledFundFunding
+              ? AppIcon.savings
+              : scheduled.isScheduledGoalFunding
               ? AppIcon.goal
               : AppIcon.recurrence,
-          color: scheduled.type == TransactionType.goalFunding
-              ? _goalBlue
-              : AppTheme.accent,
+          color: scheduled.isScheduledGoalFunding ? _goalBlue : AppTheme.accent,
         ),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
@@ -1761,7 +1963,9 @@ class _NextScheduledRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                scheduled.type == TransactionType.goalFunding
+                scheduled.isScheduledFundFunding
+                    ? scheduled.payee
+                    : scheduled.isScheduledGoalFunding
                     ? (scheduled.goalFundingAllocations.length == 1
                           ? 'Goal Funding'
                           : 'Goal Funding · ${scheduled.goalFundingAllocations.length} Goals')
@@ -1793,8 +1997,10 @@ class _NextScheduledRow extends StatelessWidget {
           fontWeight: FontWeight.w900,
           color: scheduled.type.name == 'expense'
               ? AppTheme.rose
-              : scheduled.type == TransactionType.goalFunding
+              : scheduled.isScheduledGoalFunding
               ? _goalBlue
+              : scheduled.isScheduledFundFunding
+              ? AppTheme.accent
               : AppTheme.ink,
           showPositiveSign: scheduled.type.name == 'income',
         ),
@@ -2694,6 +2900,9 @@ class LedgerDrillDownFilter {
   }
 }
 
+const _ledgerGoalsTypeFilter = 'goals';
+const _ledgerFundsTypeFilter = 'funds';
+
 class LedgerView extends StatefulWidget {
   const LedgerView({
     this.initialAccountFilterId,
@@ -2776,6 +2985,8 @@ class _LedgerViewState extends State<LedgerView> {
     final categoriesById = {
       for (final category in store.categories) category.id: category,
     };
+    final goalsById = {for (final goal in store.goals) goal.id: goal};
+    final fundsById = {for (final fund in store.funds) fund.id: fund};
     final singleAccountId = accountFilterId.isNotEmpty
         ? accountFilterId
         : drillDownFilter?.accountId;
@@ -2801,6 +3012,16 @@ class _LedgerViewState extends State<LedgerView> {
             now: now,
           ).transactionIdsFor(managementFilter!);
     final normalizedQuery = query.trim().toLowerCase();
+    String? reservationContainerNameFor(TransactionRecord transaction) {
+      final containerId = transaction.reservationContainerId;
+      if (containerId == null || containerId.isEmpty) return null;
+      return switch (transaction.reservationContainerType) {
+        ReservationContainerType.goal => goalsById[containerId]?.name,
+        ReservationContainerType.fund => fundsById[containerId]?.name,
+        null => null,
+      };
+    }
+
     final requestedCategoryId = categoryFilterId.isNotEmpty
         ? categoryFilterId
         : drillDownFilter?.categoryId?.isNotEmpty == true
@@ -2844,6 +3065,9 @@ class _LedgerViewState extends State<LedgerView> {
                 categoryName: transaction.categoryId == null
                     ? null
                     : categoriesById[transaction.categoryId]?.name,
+                reservationContainerName: reservationContainerNameFor(
+                  transaction,
+                ),
               ),
             )
             .where(
@@ -2866,15 +3090,67 @@ class _LedgerViewState extends State<LedgerView> {
       categoryScope: categoryScope,
     );
     final pendingSummary = summarizePendingLedgerTransactions(transactions);
+    final reservationActivities =
+        projectLedgerReservationActivities(
+              goals: store.goals,
+              funds: store.funds,
+              operations: store.reservationOperations,
+              transactions: store.transactions,
+              scheduledTransactions: store.scheduledTransactions,
+            )
+            .where((activity) {
+              if (widget.initialPendingTransactionIds != null ||
+                  managementFilter != null ||
+                  drillDownFilter != null ||
+                  categoryFilterId.isNotEmpty) {
+                return false;
+              }
+              final expectedType =
+                  activity.containerType == ReservationContainerType.goal
+                  ? _ledgerGoalsTypeFilter
+                  : _ledgerFundsTypeFilter;
+              if (typeFilterName.isNotEmpty && typeFilterName != expectedType) {
+                return false;
+              }
+              if (accountFilterId.isNotEmpty &&
+                  activity.fundingAccountId != accountFilterId) {
+                return false;
+              }
+              if (!dateMatchesLedgerFilter(
+                activity.effectiveDate,
+                dateFilter: dateFilter,
+                customDateRange: customDateRange,
+                now: now,
+              )) {
+                return false;
+              }
+              if (normalizedQuery.isEmpty) return true;
+              final accountName =
+                  accountsById[activity.fundingAccountId]?.name ?? '';
+              final action = activity.isAllocation
+                  ? 'allocated reserve'
+                  : 'returned';
+              final containerKind =
+                  activity.containerType == ReservationContainerType.goal
+                  ? 'goal'
+                  : 'fund';
+              return '$action ${activity.containerName} $containerKind '
+                      '$accountName ${activity.note}'
+                  .toLowerCase()
+                  .contains(normalizedQuery);
+            })
+            .toList(growable: false);
     final goalFundingEvents =
         store.goalFundingEvents
             .where((event) => event.isActive)
+            .where((event) => !event.isMigrationEvent)
             .where(
               (event) =>
                   widget.initialPendingTransactionIds == null &&
                   managementFilter == null &&
                   drillDownFilter == null &&
-                  typeFilterName.isEmpty &&
+                  (typeFilterName.isEmpty ||
+                      typeFilterName == _ledgerGoalsTypeFilter) &&
                   categoryFilterId.isEmpty &&
                   (accountFilterId.isEmpty ||
                       event.sourceAccountId == accountFilterId) &&
@@ -2911,14 +3187,7 @@ class _LedgerViewState extends State<LedgerView> {
         dateFilter != LedgerDateFilter.all ||
         managementFilter != null ||
         drillDownFilter != null;
-    final selectedTypeLabel = typeFilterName.isEmpty
-        ? 'All Types'
-        : transactionTypeLabel(
-            TransactionType.values.firstWhere(
-              (type) => type.name == typeFilterName,
-              orElse: () => TransactionType.expense,
-            ),
-          );
+    final selectedTypeLabel = ledgerTypeFilterLabel(typeFilterName);
     final selectedAccountLabel = accountFilterId.isEmpty
         ? 'All Accounts'
         : accountsById[accountFilterId]?.name ?? 'Account';
@@ -2949,9 +3218,19 @@ class _LedgerViewState extends State<LedgerView> {
       final month = DateTime(event.date.year, event.date.month);
       fundingByMonth.putIfAbsent(month, () => []).add(event);
     }
+    final reservationsByMonth =
+        <DateTime, List<LedgerReservationActivityProjection>>{};
+    for (final activity in reservationActivities) {
+      final month = DateTime(
+        activity.effectiveDate.year,
+        activity.effectiveDate.month,
+      );
+      reservationsByMonth.putIfAbsent(month, () => []).add(activity);
+    }
     final visibleMonths = {
       ...transactionsByMonth.keys,
       ...fundingByMonth.keys,
+      ...reservationsByMonth.keys,
     }.toList(growable: false)..sort((a, b) => b.compareTo(a));
     for (final month in visibleMonths) {
       _monthAnchors.putIfAbsent(ledgerMonthKey(month), () => GlobalKey());
@@ -3277,11 +3556,13 @@ class _LedgerViewState extends State<LedgerView> {
           ),
         ],
         const SizedBox(height: 12),
-        if (transactions.isEmpty && goalFundingEvents.isEmpty)
+        if (transactions.isEmpty &&
+            goalFundingEvents.isEmpty &&
+            reservationActivities.isEmpty)
           AppCard(
             child: Center(
               child: Text(
-                'No transactions match',
+                'No activities match',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -3295,6 +3576,7 @@ class _LedgerViewState extends State<LedgerView> {
               month: month,
               transactions: transactionsByMonth[month] ?? const [],
               goalFundingEvents: fundingByMonth[month] ?? const [],
+              reservationActivities: reservationsByMonth[month] ?? const [],
               store: store,
               accountsById: accountsById,
               categoriesById: categoriesById,
@@ -3414,13 +3696,27 @@ class _LedgerViewState extends State<LedgerView> {
                             icon: AppIcon.filter,
                             detail: null,
                           ),
-                          for (final type in TransactionType.values)
+                          for (final type in TransactionType.values.where(
+                            (type) => type != TransactionType.goalFunding,
+                          ))
                             (
                               value: type.name,
                               label: transactionTypeLabel(type),
                               icon: transactionTypeIcon(type),
                               detail: null,
                             ),
+                          (
+                            value: _ledgerGoalsTypeFilter,
+                            label: 'Goals',
+                            icon: AppIcon.goal,
+                            detail: null,
+                          ),
+                          (
+                            value: _ledgerFundsTypeFilter,
+                            label: 'Funds',
+                            icon: AppIcon.savings,
+                            detail: null,
+                          ),
                         ],
                       );
                       if (value != null && mounted) {
@@ -4017,11 +4313,29 @@ String? ledgerTransactionTimeLabel(BuildContext context, DateTime date) {
   ).formatTimeOfDay(TimeOfDay.fromDateTime(local));
 }
 
+typedef _LedgerActivity = ({
+  DateTime date,
+  LedgerTransactionProjection? projection,
+  GoalFundingEventRecord? fundingEvent,
+  LedgerReservationActivityProjection? reservationActivity,
+});
+
+DateTime _ledgerActivityCreatedAt(_LedgerActivity activity) =>
+    activity.projection?.transaction.sync.createdAt ??
+    activity.fundingEvent?.sync.createdAt ??
+    activity.reservationActivity!.createdAt;
+
+String _ledgerActivityId(_LedgerActivity activity) =>
+    activity.projection?.transaction.id ??
+    activity.fundingEvent?.id ??
+    activity.reservationActivity!.reservationOperationId;
+
 class LedgerMonthSection extends StatelessWidget {
   const LedgerMonthSection({
     required this.month,
     required this.transactions,
     required this.goalFundingEvents,
+    required this.reservationActivities,
     required this.store,
     required this.accountsById,
     required this.categoriesById,
@@ -4037,6 +4351,7 @@ class LedgerMonthSection extends StatelessWidget {
   final DateTime month;
   final List<LedgerTransactionProjection> transactions;
   final List<GoalFundingEventRecord> goalFundingEvents;
+  final List<LedgerReservationActivityProjection> reservationActivities;
   final FinanceDataStore store;
   final Map<String, v2_account.AccountRecord> accountsById;
   final Map<String, v2_category.CategoryRecord> categoriesById;
@@ -4060,54 +4375,40 @@ class LedgerMonthSection extends StatelessWidget {
         .fold(0, (total, item) => total + item.displayedAmountMinor);
     final net = income - expenses + adjustments;
     final activities =
-        <
-            ({
-              DateTime date,
-              LedgerTransactionProjection? projection,
-              GoalFundingEventRecord? fundingEvent,
-            })
-          >[
-            for (final projection in transactions)
-              (
-                date: projection.transaction.date,
-                projection: projection,
-                fundingEvent: null,
-              ),
-            for (final fundingEvent in goalFundingEvents)
-              (
-                date: fundingEvent.date,
-                projection: null,
-                fundingEvent: fundingEvent,
-              ),
-          ]
-          ..sort((left, right) {
-            final dateOrder = right.date.compareTo(left.date);
-            if (dateOrder != 0) return dateOrder;
-            final leftCreated =
-                left.projection?.transaction.sync.createdAt ??
-                left.fundingEvent!.sync.createdAt;
-            final rightCreated =
-                right.projection?.transaction.sync.createdAt ??
-                right.fundingEvent!.sync.createdAt;
-            final createdOrder = rightCreated.compareTo(leftCreated);
-            if (createdOrder != 0) return createdOrder;
-            final leftId =
-                left.projection?.transaction.id ?? left.fundingEvent!.id;
-            final rightId =
-                right.projection?.transaction.id ?? right.fundingEvent!.id;
-            return rightId.compareTo(leftId);
-          });
-    final activitiesByDay =
-        <
-          DateTime,
-          List<
-            ({
-              DateTime date,
-              LedgerTransactionProjection? projection,
-              GoalFundingEventRecord? fundingEvent,
-            })
-          >
-        >{};
+        <_LedgerActivity>[
+          for (final projection in transactions)
+            (
+              date: projection.transaction.date,
+              projection: projection,
+              fundingEvent: null,
+              reservationActivity: null,
+            ),
+          for (final fundingEvent in goalFundingEvents)
+            (
+              date: fundingEvent.date,
+              projection: null,
+              fundingEvent: fundingEvent,
+              reservationActivity: null,
+            ),
+          for (final reservationActivity in reservationActivities)
+            (
+              date: reservationActivity.effectiveDate,
+              projection: null,
+              fundingEvent: null,
+              reservationActivity: reservationActivity,
+            ),
+        ]..sort((left, right) {
+          final dateOrder = right.date.compareTo(left.date);
+          if (dateOrder != 0) return dateOrder;
+          final leftCreated = _ledgerActivityCreatedAt(left);
+          final rightCreated = _ledgerActivityCreatedAt(right);
+          final createdOrder = rightCreated.compareTo(leftCreated);
+          if (createdOrder != 0) return createdOrder;
+          final leftId = _ledgerActivityId(left);
+          final rightId = _ledgerActivityId(right);
+          return rightId.compareTo(leftId);
+        });
+    final activitiesByDay = <DateTime, List<_LedgerActivity>>{};
     for (final activity in activities) {
       activitiesByDay
           .putIfAbsent(ledgerCalendarDay(activity.date), () => [])
@@ -4234,14 +4535,7 @@ class _LedgerDayCard extends StatelessWidget {
   });
 
   final DateTime date;
-  final List<
-    ({
-      DateTime date,
-      LedgerTransactionProjection? projection,
-      GoalFundingEventRecord? fundingEvent,
-    })
-  >
-  activities;
+  final List<_LedgerActivity> activities;
   final FinanceDataStore store;
   final Map<String, v2_account.AccountRecord> accountsById;
   final Map<String, v2_category.CategoryRecord> categoriesById;
@@ -4308,6 +4602,11 @@ class _LedgerDayCard extends StatelessWidget {
                           projection.transaction,
                           categoriesById,
                         ),
+                    reservationLabel: _transactionReservationMetadataLabel(
+                      projection.transaction,
+                      goals: store.goals,
+                      funds: store.funds,
+                    ),
                   ),
                   isAccountScoped: scopedAccountId != null,
                   reservePendingIndicatorSpace: reservePendingIndicatorSpace,
@@ -4340,6 +4639,23 @@ class _LedgerDayCard extends StatelessWidget {
                     );
                     if (context.mounted) onDismissFocus();
                   },
+                )
+              else if (activities[index].reservationActivity
+                  case final reservationActivity?)
+                ReservationLedgerRow(
+                  activity: reservationActivity,
+                  showDateContext: false,
+                  account: accountsById[reservationActivity.fundingAccountId],
+                  isAccountScoped: scopedAccountId != null,
+                  currency: store.preferences.currency,
+                  showIcon: store.preferences.showLedgerIcons,
+                  showTimestamp: store.preferences.showLedgerTimestamps,
+                  onTap: () => showReservationActivityDetails(
+                    context,
+                    reservationActivity,
+                    account: accountsById[reservationActivity.fundingAccountId],
+                    currency: store.preferences.currency,
+                  ),
                 )
               else
                 GoalFundingLedgerRow(
@@ -4916,11 +5232,13 @@ String _ledgerMetadataDetails(
   required String? scopedAccountId,
   required Map<String, v2_account.AccountRecord> accountsById,
   required String? categoryName,
+  String? reservationLabel,
 }) {
   if (scopedAccountId == null) {
     return [
       accountsById[transaction.accountId]?.name,
       categoryName,
+      reservationLabel,
       if (transaction.type == TransactionType.adjustment)
         'Manual balance adjustment',
       if (transaction.isTransfer) 'Transfer',
@@ -4935,16 +5253,39 @@ String _ledgerMetadataDetails(
       'Transfer',
       if (otherAccountName != null && otherAccountName.isNotEmpty)
         otherAccountName,
-    ].join(' • ');
+      reservationLabel,
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' • ');
   }
   if (transaction.type == TransactionType.adjustment) {
-    return categoryName?.isNotEmpty == true
-        ? categoryName!
-        : 'Manual balance adjustment';
+    return [
+      categoryName?.isNotEmpty == true
+          ? categoryName!
+          : 'Manual balance adjustment',
+      reservationLabel,
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' • ');
   }
-  return categoryName?.isNotEmpty == true
-      ? categoryName!
-      : transactionTypeLabel(transaction.type);
+  return [
+    categoryName?.isNotEmpty == true
+        ? categoryName!
+        : transactionTypeLabel(transaction.type),
+    reservationLabel,
+  ].whereType<String>().where((value) => value.isNotEmpty).join(' • ');
+}
+
+String? _transactionReservationMetadataLabel(
+  TransactionRecord transaction, {
+  required Iterable<GoalRecord> goals,
+  required Iterable<FundRecord> funds,
+}) {
+  final containerId = transaction.reservationContainerId;
+  if (containerId == null || containerId.isEmpty) return null;
+  return switch (transaction.reservationContainerType) {
+    ReservationContainerType.goal =>
+      '${goals.where((goal) => goal.id == containerId).firstOrNull?.name ?? 'Deleted'} Goal',
+    ReservationContainerType.fund =>
+      '${funds.where((fund) => fund.id == containerId).firstOrNull?.name ?? 'Deleted'} Fund',
+    null => null,
+  };
 }
 
 class _LedgerMetadataLine extends StatelessWidget {
@@ -5161,6 +5502,248 @@ class _LedgerIconBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+class ReservationLedgerRow extends StatelessWidget {
+  const ReservationLedgerRow({
+    required this.activity,
+    required this.currency,
+    required this.onTap,
+    this.account,
+    this.showDateContext = true,
+    this.showIcon = true,
+    this.showTimestamp = true,
+    this.isAccountScoped = false,
+    super.key,
+  });
+
+  final LedgerReservationActivityProjection activity;
+  final CurrencyFormatSettings currency;
+  final v2_account.AccountRecord? account;
+  final bool showDateContext;
+  final bool showIcon;
+  final bool showTimestamp;
+  final bool isAccountScoped;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isGoal = activity.containerType == ReservationContainerType.goal;
+    final containerKind = isGoal ? 'Goal' : 'Fund';
+    final identityColor = isGoal
+        ? Colors.blue.shade700
+        : theme.colorScheme.primary;
+    final actionLabel = activity.isAllocation
+        ? 'Allocated to'
+        : 'Returned from';
+    final amountLabel = activity.isAllocation ? 'reserved' : 'returned';
+    final metadataDetails = [
+      if (!isAccountScoped && account != null) account!.name,
+      '${activity.containerName} $containerKind',
+    ].join(' • ');
+    final timeLabel = ledgerTransactionTimeLabel(
+      context,
+      activity.effectiveDate,
+    );
+    final secondaryStyle =
+        theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ) ??
+        const TextStyle(fontSize: 12);
+
+    return Semantics(
+      button: true,
+      label:
+          '$actionLabel ${activity.containerName} $containerKind, '
+          '${money(activity.amountMinor.abs(), currency)} $amountLabel',
+      child: InkWell(
+        key: ValueKey(
+          'ledger-reservation-row-${activity.reservationOperationId}',
+        ),
+        onTap: () {
+          AppHaptics.navigation();
+          onTap();
+        },
+        child: SizedBox(
+          height: 72,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (showDateContext) ...[
+                  SizedBox(
+                    width: 38,
+                    child: Text(
+                      '${activity.effectiveDate.day}\n'
+                      '${ledgerDayContext(activity.effectiveDate)}',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w800,
+                        height: 1.1,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
+                if (showIcon) ...[
+                  _LedgerIconBadge(
+                    icon: isGoal ? AppIcon.goal : AppIcon.savings,
+                    semanticLabel: '$containerKind reservation',
+                    color: identityColor,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '$actionLabel ${activity.containerName}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.15,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          SizedBox(
+                            width: 104,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: MoneyText(
+                                amountMinor: activity.amountMinor.abs(),
+                                currency: currency,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: identityColor,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _LedgerMetadataLine(
+                              rowId:
+                                  'reservation-${activity.reservationOperationId}',
+                              details: metadataDetails,
+                              timeLabel: showTimestamp ? timeLabel : null,
+                              reserveTimestampSpace: showTimestamp,
+                              // Reservation activity can never carry a Split or
+                              // Pending indicator. Keep that space available for
+                              // the stable Goal/Fund identity instead.
+                              reserveSplitSpace: false,
+                              reservePendingSpace: false,
+                              style: secondaryStyle,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          SizedBox(
+                            width: 104,
+                            height: 18,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                amountLabel,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> showReservationActivityDetails(
+  BuildContext context,
+  LedgerReservationActivityProjection activity, {
+  required v2_account.AccountRecord? account,
+  required CurrencyFormatSettings currency,
+}) async {
+  final isGoal = activity.containerType == ReservationContainerType.goal;
+  final containerKind = isGoal ? 'Goal' : 'Fund';
+  final action = activity.isAllocation ? 'Allocated' : 'Returned';
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => TransactionSheetFrame(
+      title: 'Reservation Activity',
+      actions: SizedBox(
+        width: double.infinity,
+        height: 48,
+        child: FilledButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Close'),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ScheduledTransactionDetailRow(
+            icon: isGoal ? AppIcon.goal : AppIcon.savings,
+            label: containerKind,
+            value: activity.containerName,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: activity.isAllocation ? AppIcon.add : AppIcon.undo,
+            label: 'Action',
+            value: action,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: AppIcon.money,
+            label: 'Amount',
+            value: money(activity.amountMinor.abs(), currency),
+            tabularFigures: true,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: AppIcon.bank,
+            label: 'Funding account',
+            value: account?.name ?? 'Deleted account',
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: AppIcon.calendar,
+            label: 'Date',
+            value: fullMonthDateLabel(activity.effectiveDate),
+          ),
+          if (activity.note.trim().isNotEmpty) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.notes,
+              label: 'Note',
+              value: activity.note.trim(),
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
 }
 
 class GoalFundingLedgerRow extends StatelessWidget {
@@ -5810,6 +6393,7 @@ bool transactionMatchesSearch(
   String query, {
   String? accountName,
   String? categoryName,
+  String? reservationContainerName,
 }) {
   if (query.isEmpty) return true;
   return [
@@ -5817,8 +6401,20 @@ bool transactionMatchesSearch(
     transaction.note,
     accountName,
     categoryName,
+    reservationContainerName,
+    transaction.reservationContainerType?.name,
     transaction.type.name,
   ].whereType<String>().any((value) => value.toLowerCase().contains(query));
+}
+
+String ledgerTypeFilterLabel(String value) {
+  if (value.isEmpty) return 'All Types';
+  if (value == _ledgerGoalsTypeFilter) return 'Goals';
+  if (value == _ledgerFundsTypeFilter) return 'Funds';
+  final type = TransactionType.values
+      .where((candidate) => candidate.name == value)
+      .firstOrNull;
+  return type == null ? 'All Types' : transactionTypeLabel(type);
 }
 
 enum LedgerDateFilter { all, today, thisMonth, last30Days, custom }
@@ -5832,7 +6428,16 @@ bool transactionMatchesLedgerFilters(
   DateTimeRange? customDateRange,
   required DateTime now,
 }) {
-  if (typeFilterName.isNotEmpty && transaction.type.name != typeFilterName) {
+  if (typeFilterName == _ledgerGoalsTypeFilter) {
+    if (transaction.reservationContainerType != ReservationContainerType.goal) {
+      return false;
+    }
+  } else if (typeFilterName == _ledgerFundsTypeFilter) {
+    if (transaction.reservationContainerType != ReservationContainerType.fund) {
+      return false;
+    }
+  } else if (typeFilterName.isNotEmpty &&
+      transaction.type.name != typeFilterName) {
     return false;
   }
   if (accountFilterId.isNotEmpty &&
@@ -7383,7 +7988,7 @@ class ScheduledView extends StatefulWidget {
   State<ScheduledView> createState() => _ScheduledViewState();
 }
 
-enum CalendarActivityFilter { all, income, expenses, transfers, goals }
+enum CalendarActivityFilter { all, income, expenses, transfers, funds, goals }
 
 extension CalendarActivityFilterPresentation on CalendarActivityFilter {
   String get label => switch (this) {
@@ -7391,6 +7996,7 @@ extension CalendarActivityFilterPresentation on CalendarActivityFilter {
     CalendarActivityFilter.income => 'Income',
     CalendarActivityFilter.expenses => 'Expenses',
     CalendarActivityFilter.transfers => 'Transfers',
+    CalendarActivityFilter.funds => 'Funds',
     CalendarActivityFilter.goals => 'Goals',
   };
 
@@ -7403,6 +8009,7 @@ extension CalendarActivityFilterPresentation on CalendarActivityFilter {
     CalendarActivityFilter.income => AppIcon.income,
     CalendarActivityFilter.expenses => AppIcon.expense,
     CalendarActivityFilter.transfers => AppIcon.transfer,
+    CalendarActivityFilter.funds => AppIcon.savings,
     CalendarActivityFilter.goals => AppIcon.goal,
   };
 
@@ -7411,22 +8018,27 @@ extension CalendarActivityFilterPresentation on CalendarActivityFilter {
     CalendarActivityFilter.income => type == CalendarActivityType.income,
     CalendarActivityFilter.expenses => type == CalendarActivityType.expense,
     CalendarActivityFilter.transfers => type == CalendarActivityType.transfer,
+    CalendarActivityFilter.funds => type == CalendarActivityType.fund,
     CalendarActivityFilter.goals => type == CalendarActivityType.goal,
   };
 
-  bool matchesScheduled(TransactionType type) => switch (this) {
-    CalendarActivityFilter.all => type != TransactionType.adjustment,
-    CalendarActivityFilter.income => type == TransactionType.income,
-    CalendarActivityFilter.expenses => type == TransactionType.expense,
-    CalendarActivityFilter.transfers => type == TransactionType.transfer,
-    CalendarActivityFilter.goals => type == TransactionType.goalFunding,
-  };
+  bool matchesScheduled(v2_scheduled.ScheduledTransactionRecord item) =>
+      switch (this) {
+        CalendarActivityFilter.all => item.type != TransactionType.adjustment,
+        CalendarActivityFilter.income => item.type == TransactionType.income,
+        CalendarActivityFilter.expenses => item.type == TransactionType.expense,
+        CalendarActivityFilter.transfers =>
+          item.type == TransactionType.transfer,
+        CalendarActivityFilter.funds => item.isScheduledFundFunding,
+        CalendarActivityFilter.goals => item.isScheduledGoalFunding,
+      };
 
   String get scheduledCompletedLabel => switch (this) {
     CalendarActivityFilter.all => 'Completed',
     CalendarActivityFilter.income => 'Received',
     CalendarActivityFilter.expenses => 'Paid',
     CalendarActivityFilter.transfers => 'Completed',
+    CalendarActivityFilter.funds => 'Allocated',
     CalendarActivityFilter.goals => 'Funded',
   };
 
@@ -7437,6 +8049,7 @@ extension CalendarActivityFilterPresentation on CalendarActivityFilter {
     CalendarActivityFilter.transfers => Theme.of(
       context,
     ).colorScheme.onSurfaceVariant,
+    CalendarActivityFilter.funds => AppTheme.accent,
     CalendarActivityFilter.goals => _goalBlue,
   };
 }
@@ -7445,6 +8058,7 @@ String calendarActivityTypeLabel(CalendarActivityType type) => switch (type) {
   CalendarActivityType.income => 'Income',
   CalendarActivityType.expense => 'Expense',
   CalendarActivityType.transfer => 'Transfer',
+  CalendarActivityType.fund => 'Fund',
   CalendarActivityType.goal => 'Goal',
 };
 
@@ -7475,6 +8089,9 @@ class CalendarDayActivity {
     if (item == null) {
       final scheduled = scheduledOccurrence;
       if (scheduled == null) return CalendarActivityType.goal;
+      if (scheduled.transaction.isScheduledFundFunding) {
+        return CalendarActivityType.fund;
+      }
       return switch (scheduled.transaction.type) {
         TransactionType.income => CalendarActivityType.income,
         TransactionType.expense => CalendarActivityType.expense,
@@ -7528,6 +8145,7 @@ class CalendarDayActivity {
     CalendarActivityType.income => AppIcon.income,
     CalendarActivityType.expense => AppIcon.expense,
     CalendarActivityType.transfer => AppIcon.transfer,
+    CalendarActivityType.fund => AppIcon.savings,
     CalendarActivityType.goal => AppIcon.goal,
   };
 
@@ -7537,6 +8155,7 @@ class CalendarDayActivity {
     CalendarActivityType.transfer => Theme.of(
       context,
     ).colorScheme.onSurfaceVariant,
+    CalendarActivityType.fund => AppTheme.accent,
     CalendarActivityType.goal => _goalBlue,
   };
 }
@@ -7791,16 +8410,24 @@ class _ScheduledViewState extends State<ScheduledView> {
             ? 'Transfer'
             : 'To ${destinationAccount.name}',
       ],
-      TransactionType.goalFunding => [sourceAccount?.name, 'Goal Funding'],
+      TransactionType.goalFunding => [
+        sourceAccount?.name,
+        item.isScheduledFundFunding ? 'Fund allocation' : 'Goal Funding',
+      ],
       _ => [sourceAccount?.name, category?.name],
     }.whereType<String>().where((value) => value.isNotEmpty).join(' • ');
-    final needsAttention =
-        item.type == TransactionType.goalFunding &&
-        item.goalFundingAllocations.any(
-          (allocation) => !store.goals.any(
-            (goal) => goal.id == allocation.goalId && goal.isActive,
-          ),
-        );
+    final needsAttention = item.isScheduledFundFunding
+        ? !store.activeFunds.any(
+            (fund) =>
+                fund.id == item.reservationFundingContainerId &&
+                fund.fundingAccountId == item.accountId,
+          )
+        : item.isScheduledGoalFunding &&
+              item.goalFundingAllocations.any(
+                (allocation) => !store.goals.any(
+                  (goal) => goal.id == allocation.goalId && goal.isActive,
+                ),
+              );
     final row = ScheduledTransactionRow(
       key: ValueKey('scheduled-row-${item.id}-$dateKey'),
       scheduledTransaction: displayItem,
@@ -8105,7 +8732,7 @@ class _ScheduledViewState extends State<ScheduledView> {
     final filteredMonthOccurrences = visibleMonthOccurrences
         .where(
           (occurrence) =>
-              _activityFilter.matchesScheduled(occurrence.transaction.type),
+              _activityFilter.matchesScheduled(occurrence.transaction),
         )
         .toList(growable: false);
     final groupedOccurrences = scheduledOccurrencesByDate(
@@ -8345,13 +8972,15 @@ class _ScheduledNeedsAttentionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final schedule = alert.scheduledTransaction;
     final theme = Theme.of(context);
-    final dueDescription = switch (schedule.type) {
-      TransactionType.income => 'Income due',
-      TransactionType.transfer => 'Transfer due',
-      TransactionType.goalFunding => 'Goal funding due',
-      TransactionType.expense => 'Payment due',
-      TransactionType.adjustment => 'Adjustment due',
-    };
+    final dueDescription = schedule.isScheduledFundFunding
+        ? 'Funding due'
+        : switch (schedule.type) {
+            TransactionType.income => 'Income due',
+            TransactionType.transfer => 'Transfer due',
+            TransactionType.goalFunding => 'Goal funding due',
+            TransactionType.expense => 'Payment due',
+            TransactionType.adjustment => 'Adjustment due',
+          };
     final occurrenceDate = alert.occurrenceDate;
     final dueDate =
         '${shortMonthName(occurrenceDate.month)} ${occurrenceDate.day}';
@@ -8366,7 +8995,9 @@ class _ScheduledNeedsAttentionRow extends StatelessWidget {
         'Reminder: 1 week before due date',
       v2_scheduled.AlertPreference.custom => 'Reminder: custom',
     };
-    final title = schedule.type == TransactionType.goalFunding
+    final title = schedule.isScheduledFundFunding
+        ? schedule.payee
+        : schedule.isScheduledGoalFunding
         ? 'Goal Funding'
         : schedule.payee.trim().isEmpty
         ? dueDescription
@@ -8785,6 +9416,7 @@ class CalendarActivityDots extends StatelessWidget {
       CalendarActivityType.income,
       CalendarActivityType.expense,
       CalendarActivityType.transfer,
+      CalendarActivityType.fund,
       CalendarActivityType.goal,
     ];
     Color colorFor(CalendarActivityType type) => switch (type) {
@@ -8793,6 +9425,7 @@ class CalendarActivityDots extends StatelessWidget {
       CalendarActivityType.transfer => Theme.of(
         context,
       ).colorScheme.onSurfaceVariant,
+      CalendarActivityType.fund => AppTheme.accent,
       CalendarActivityType.goal => _goalBlue,
     };
 
@@ -9251,6 +9884,7 @@ class _CategoriesViewState extends State<CategoriesView> {
 
 class SettingsView extends StatefulWidget {
   const SettingsView({
+    this.dataManagementOnly = false,
     this.onSelectSection,
     this.syncLabel = 'Synced',
     this.syncErrorLabel,
@@ -9267,6 +9901,7 @@ class SettingsView extends StatefulWidget {
     super.key,
   });
 
+  final bool dataManagementOnly;
   final ValueChanged<FinanceSection>? onSelectSection;
   final String syncLabel;
   final String? syncErrorLabel;
@@ -9346,6 +9981,10 @@ class _SettingsViewState extends State<SettingsView> {
     final store = FinanceDataStoreScope.watch(context);
     final preferences = store.preferences;
     final isSyncing = widget.syncLabel == 'Syncing';
+
+    if (widget.dataManagementOnly) {
+      return _buildDataManagementContent(store, preferences);
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -9660,20 +10299,38 @@ class _SettingsViewState extends State<SettingsView> {
               icon: AppIcon.insights,
               title: 'Reports',
               subtitle: 'Review spending and category trends',
-              showDivider: false,
+              showDivider: true,
               onTap: () => widget.onSelectSection?.call(FinanceSection.reports),
+            ),
+            SettingsActionRow(
+              key: const ValueKey('data-management-row'),
+              icon: AppIcon.backup,
+              title: 'Data Management',
+              subtitle: 'Backups, exports, imports, and reset options',
+              showDivider: false,
+              onTap: _openDataManagement,
             ),
           ],
         ),
-        SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _buildDataManagementContent(
+    FinanceDataStore store,
+    UserPreferences preferences,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
         SettingsSectionCard(
           title: 'Data Management',
           children: [
             SettingsActionRow(
               icon: AppIcon.history,
-              title: 'Reset Scheduled History',
-              subtitle: 'Clear paid and skipped occurrence history',
-              destructive: true,
+              title: 'Reset Scheduled Calendar History',
+              subtitle:
+                  'Clear paid and skipped calendar history. Transactions and schedules stay unchanged.',
               onTap: () => showResetScheduledHistorySheet(context, store),
             ),
             Builder(
@@ -9796,6 +10453,37 @@ class _SettingsViewState extends State<SettingsView> {
           ),
         ),
       ],
+    );
+  }
+
+  void _openDataManagement() {
+    AppHaptics.navigation();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          appBar: AppBar(
+            title: const Text('Data Management'),
+            scrolledUnderElevation: 0,
+          ),
+          body: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+              child: SettingsView(
+                dataManagementOnly: true,
+                syncLabel: widget.syncLabel,
+                onSyncNow: widget.onSyncNow,
+                exportFileService: widget.exportFileService,
+                backupImportFileService: widget.backupImportFileService,
+                backupSafetyFileService: widget.backupSafetyFileService,
+                iCloudBackupStorage: widget.iCloudBackupStorage,
+                backupRestoreValidator: widget.backupRestoreValidator,
+                now: widget.now,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -9939,8 +10627,8 @@ class _SettingsViewState extends State<SettingsView> {
       return;
     }
 
-    final confirmed = await _showResetTrackmarkDataConfirmation(context);
-    if (!mounted || confirmed != true) return;
+    final resetChoice = await _showResetTrackmarkDataConfirmation(context);
+    if (!mounted || resetChoice == null) return;
 
     setState(() => _isResettingData = true);
     final createdAt = widget.now?.call() ?? DateTime.now();
@@ -9967,7 +10655,9 @@ class _SettingsViewState extends State<SettingsView> {
       }
 
       try {
-        await store.resetTrackmarkData();
+        await store.resetTrackmarkData(
+          resetAppSettings: resetChoice.resetAppSettings,
+        );
       } on AuthoritativeRestoreLocalInstallException {
         if (!mounted) return;
         await _showBackupError(
@@ -10003,7 +10693,11 @@ class _SettingsViewState extends State<SettingsView> {
                     'Trackmark devices.'
               else
                 'This device now has an empty financial data set.',
-              'Your app preferences and sign-in were preserved.',
+              if (resetChoice.resetAppSettings)
+                'Your app settings were returned to their defaults. Your '
+                    'sign-in and existing backup files were preserved.'
+              else
+                'Your app preferences and sign-in were preserved.',
               'A verified pre-reset safety backup was saved as '
                   '${safetyBackup!.fileName}.',
             ].join('\n\n'),
@@ -10493,9 +11187,18 @@ Rect exportSharePositionOrigin(BuildContext context) {
   );
 }
 
-Future<bool?> _showResetTrackmarkDataConfirmation(BuildContext context) async {
+class _ResetTrackmarkDataChoice {
+  const _ResetTrackmarkDataChoice({required this.resetAppSettings});
+
+  final bool resetAppSettings;
+}
+
+Future<_ResetTrackmarkDataChoice?> _showResetTrackmarkDataConfirmation(
+  BuildContext context,
+) async {
   var confirmation = '';
-  return showDialog<bool>(
+  var resetAppSettings = false;
+  return showDialog<_ResetTrackmarkDataChoice>(
     context: context,
     barrierDismissible: false,
     builder: (dialogContext) => StatefulBuilder(
@@ -10509,16 +11212,34 @@ Future<bool?> _showResetTrackmarkDataConfirmation(BuildContext context) async {
               const Text(
                 'Trackmark will first create and verify a safety backup. It '
                 'will then permanently replace accounts, transactions, '
-                'schedules, categories, budgets, Funds, Goals, and '
+                'schedules, payees, categories, budgets, Funds, Goals, and '
                 'reservation history with an empty data set.',
               ),
               const SizedBox(height: AppSpacing.md),
               const Text(
                 'If cloud sync is enabled, the empty data set becomes '
-                'authoritative and will sync to your other devices. App '
-                'preferences, backup settings, and sign-in are preserved.',
+                'authoritative and will sync to your other devices. Sign-in '
+                'and existing backup files are preserved.',
               ),
               const SizedBox(height: AppSpacing.md),
+              CheckboxListTile(
+                key: const ValueKey('reset-app-settings-too'),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: resetAppSettings,
+                title: const Text(
+                  'Reset app settings too',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text(
+                  'Return appearance, defaults, sync, backup, and display '
+                  'settings to their factory defaults.',
+                ),
+                onChanged: (value) => setDialogState(() {
+                  resetAppSettings = value ?? false;
+                }),
+              ),
+              const SizedBox(height: AppSpacing.sm),
               const Text('Type RESET to continue.'),
               const SizedBox(height: AppSpacing.sm),
               TextField(
@@ -10526,7 +11247,15 @@ Future<bool?> _showResetTrackmarkDataConfirmation(BuildContext context) async {
                 autocorrect: false,
                 enableSuggestions: false,
                 textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(labelText: 'RESET'),
+                decoration: InputDecoration(
+                  hintText: 'RESET',
+                  hintStyle: TextStyle(
+                    color: Theme.of(
+                      dialogContext,
+                    ).colorScheme.onSurfaceVariant.withValues(alpha: 0.42),
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
                 onChanged: (value) => setDialogState(() {
                   confirmation = value.trim();
                 }),
@@ -10536,7 +11265,7 @@ Future<bool?> _showResetTrackmarkDataConfirmation(BuildContext context) async {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Cancel'),
           ),
           FilledButton(
@@ -10546,7 +11275,11 @@ Future<bool?> _showResetTrackmarkDataConfirmation(BuildContext context) async {
               foregroundColor: Colors.white,
             ),
             onPressed: confirmation == 'RESET'
-                ? () => Navigator.of(dialogContext).pop(true)
+                ? () => Navigator.of(dialogContext).pop(
+                    _ResetTrackmarkDataChoice(
+                      resetAppSettings: resetAppSettings,
+                    ),
+                  )
                 : null,
             child: const Text('Reset Data'),
           ),
@@ -10578,14 +11311,14 @@ Future<void> showResetScheduledHistorySheet(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Reset Scheduled History?',
+              'Reset Scheduled Calendar History?',
               style: Theme.of(
                 sheetContext,
               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'This removes paid and skipped scheduled-occurrence history '
+              'This removes paid and skipped scheduled occurrence history '
               'and resets Scheduled calendar summaries. Active recurring '
               'schedules and ledger transactions will remain.',
               style: Theme.of(sheetContext).textTheme.bodyLarge?.copyWith(
@@ -10612,10 +11345,6 @@ Future<void> showResetScheduledHistorySheet(
                     height: 48,
                     child: FilledButton(
                       key: const ValueKey('confirm-scheduled-history-reset'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.danger,
-                        foregroundColor: Colors.white,
-                      ),
                       onPressed: () => Navigator.pop(sheetContext, true),
                       child: const Text('Reset History'),
                     ),
@@ -10633,9 +11362,9 @@ Future<void> showResetScheduledHistorySheet(
   try {
     await dataStore.resetScheduledHistory();
     if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Scheduled history reset')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Scheduled calendar history reset')),
+    );
   } on Exception catch (error) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -16074,75 +16803,83 @@ Future<String?> _showAccountIconPicker(
     context: context,
     showDragHandle: true,
     useSafeArea: true,
-    builder: (sheetContext) => Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        0,
-        AppSpacing.md,
-        AppSpacing.lg,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Choose Account Icon',
-            style: Theme.of(
-              sheetContext,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: AppSpacing.sm,
-            crossAxisSpacing: AppSpacing.sm,
-            childAspectRatio: 2.15,
-            children: [
-              for (final option in icons)
-                InkWell(
-                  key: ValueKey('$keyPrefix-icon-${option.id}'),
-                  borderRadius: BorderRadius.circular(AppRadii.control),
-                  onTap: () => Navigator.pop(sheetContext, option.id),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(AppRadii.control),
-                      border: Border.all(
-                        color: option.id == resolvedSelectedId
-                            ? AppTheme.accent
-                            : Theme.of(sheetContext).colorScheme.outlineVariant,
-                        width: option.id == resolvedSelectedId ? 1.5 : 1,
+    builder: (sheetContext) => SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          0,
+          AppSpacing.md,
+          AppSpacing.lg,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Choose Account Icon',
+              style: Theme.of(
+                sheetContext,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: AppSpacing.sm,
+              crossAxisSpacing: AppSpacing.sm,
+              childAspectRatio: 2.15,
+              children: [
+                for (final option in icons)
+                  InkWell(
+                    key: ValueKey('$keyPrefix-icon-${option.id}'),
+                    borderRadius: BorderRadius.circular(AppRadii.control),
+                    onTap: () => Navigator.pop(sheetContext, option.id),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(AppRadii.control),
+                        border: Border.all(
+                          color: option.id == resolvedSelectedId
+                              ? AppTheme.accent
+                              : Theme.of(
+                                  sheetContext,
+                                ).colorScheme.outlineVariant,
+                          width: option.id == resolvedSelectedId ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          AccountAppearanceBadge(
+                            accountType: accountType,
+                            iconId: option.id,
+                            accentId: accentId,
+                            size: 36,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(
+                            child: Text(
+                              option.label,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (option.id == resolvedSelectedId)
+                            Icon(
+                              AppIcon.check,
+                              size: 18,
+                              color: AppTheme.accent,
+                            ),
+                        ],
                       ),
                     ),
-                    child: Row(
-                      children: [
-                        AccountAppearanceBadge(
-                          accountType: accountType,
-                          iconId: option.id,
-                          accentId: accentId,
-                          size: 36,
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(
-                          child: Text(
-                            option.label,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (option.id == resolvedSelectedId)
-                          Icon(AppIcon.check, size: 18, color: AppTheme.accent),
-                      ],
-                    ),
                   ),
-                ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     ),
   );
@@ -16689,6 +17426,7 @@ Future<void> showFloatingAddMenu(
           ],
           FinanceSection.plan when planSegment == PlanSegment.funds => const [
             'fund',
+            'fundAllocation',
           ],
           FinanceSection.plan => const ['budget'],
           FinanceSection.accounts => const [
@@ -16751,6 +17489,11 @@ Future<void> showFloatingAddMenu(
         label: 'Create Fund',
         leading: Icon(AppIcon.savings),
         onSelected: () => Navigator.pop(context, 'fund'),
+      ),
+      'fundAllocation' => FloatingActionMenuItem(
+        label: 'Allocate to Funds',
+        leading: Icon(AppIcon.money),
+        onSelected: () => Navigator.pop(context, 'fundAllocation'),
       ),
       'category' => FloatingActionMenuItem(
         label: 'Category',
@@ -16833,6 +17576,8 @@ Future<void> showFloatingAddMenu(
       await showCreateGoalSheet(context);
     case 'fund':
       await showFundEditor(context);
+    case 'fundAllocation':
+      await showAllocateFundsSheet(context);
     case 'goalFunding':
       if (isScheduled) {
         await showScheduledGoalFundingDialog(
@@ -18249,8 +18994,15 @@ Future<bool> showScheduledTransactionDialog(
   TransactionRecord? sourceTransaction,
   DateTime? initialDate,
 }) async {
-  if (existing?.type == TransactionType.goalFunding ||
-      initialType == TransactionType.goalFunding) {
+  if (existing?.isScheduledFundFunding == true) {
+    return showScheduledFundFundingDialog(
+      context,
+      existing: existing,
+      initialDate: initialDate,
+    );
+  }
+  if (existing?.isScheduledGoalFunding == true ||
+      (existing == null && initialType == TransactionType.goalFunding)) {
     return showScheduledGoalFundingDialog(
       context,
       existing: existing,
@@ -19501,6 +20253,8 @@ Future<void> showScheduledTransactionDetails(
   final dataStore = FinanceDataStoreScope.read(context);
   final occurrenceDate = scheduledDate ?? item.nextDate;
   final occurrenceAmount = plannedAmountMinor ?? item.amountMinor;
+  final isFundFunding = item.isScheduledFundFunding;
+  final isGoalFunding = item.isScheduledGoalFunding;
   String accountName(String? id) {
     for (final account in dataStore.accounts) {
       if (account.id == id) return account.name;
@@ -19522,10 +20276,19 @@ Future<void> showScheduledTransactionDetails(
     return 'Unavailable Goal';
   }
 
+  String fundName(String? id) {
+    for (final fund in dataStore.funds) {
+      if (fund.id == id && !fund.isDeleted) return fund.name;
+    }
+    return item.payee.trim().isEmpty ? 'Unavailable Fund' : item.payee;
+  }
+
   final action = await showDialog<String>(
     context: context,
     builder: (dialogContext) => TransactionSheetFrame(
-      title: item.type == TransactionType.goalFunding
+      title: isFundFunding
+          ? 'Scheduled Fund Allocation'
+          : isGoalFunding
           ? 'Scheduled Goal Funding'
           : 'Scheduled Transaction',
       actions: ScheduledTransactionDetailActions(
@@ -19539,7 +20302,9 @@ Future<void> showScheduledTransactionDetails(
             ? () => Navigator.pop(dialogContext, 'occurrenceActions')
             : null,
         primaryLabel: occurrenceRecord == null
-            ? (item.type == TransactionType.goalFunding
+            ? (isFundFunding
+                  ? 'Allocate Now'
+                  : isGoalFunding
                   ? 'Fund Now'
                   : 'Mark as Paid')
             : 'Actions',
@@ -19548,7 +20313,7 @@ Future<void> showScheduledTransactionDetails(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (item.type != TransactionType.goalFunding)
+          if (!item.isReservationFunding)
             ScheduledTransactionDetailRow(
               rowKey: ValueKey('scheduled-detail-payee'),
               icon: item.type == TransactionType.transfer
@@ -19559,12 +20324,15 @@ Future<void> showScheduledTransactionDetails(
                   : 'Payee',
               value: item.payee,
             ),
-          if (item.type != TransactionType.goalFunding)
-            const TransactionFormDivider(),
+          if (!item.isReservationFunding) const TransactionFormDivider(),
           ScheduledTransactionDetailRow(
-            icon: transactionTypeIcon(item.type),
+            icon: isFundFunding
+                ? AppIcon.savings
+                : transactionTypeIcon(item.type),
             label: 'Type',
-            value: transactionTypeLabel(item.type),
+            value: isFundFunding
+                ? 'Fund Allocation'
+                : transactionTypeLabel(item.type),
           ),
           TransactionFormDivider(),
           ScheduledTransactionDetailRow(
@@ -19591,7 +20359,9 @@ Future<void> showScheduledTransactionDetails(
               value:
                   occurrenceRecord.status ==
                       v2_scheduled.ScheduledOccurrenceStatus.paid
-                  ? (item.type == TransactionType.goalFunding
+                  ? (isFundFunding
+                        ? 'Allocated'
+                        : isGoalFunding
                         ? 'Funded'
                         : 'Paid')
                   : 'Skipped',
@@ -19614,12 +20384,20 @@ Future<void> showScheduledTransactionDetails(
             ),
             label:
                 item.type == TransactionType.transfer ||
-                    item.type == TransactionType.goalFunding
+                    item.isReservationFunding
                 ? 'From Account'
                 : 'Account',
             value: accountName(item.accountId),
           ),
-          if (item.type == TransactionType.goalFunding) ...[
+          if (isFundFunding) ...[
+            TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.savings,
+              label: 'Fund',
+              value: fundName(item.reservationFundingContainerId),
+              valueColor: AppTheme.accent,
+            ),
+          ] else if (isGoalFunding) ...[
             TransactionFormDivider(),
             ScheduledTransactionDetailRow(
               icon: AppIcon.goal,
@@ -19688,7 +20466,13 @@ Future<void> showScheduledTransactionDetails(
       plannedAmountMinor: editAmount,
     );
   } else if (action == 'paid' && context.mounted) {
-    if (item.type == TransactionType.goalFunding) {
+    if (isFundFunding) {
+      await fundScheduledFundFunding(
+        context,
+        item,
+        scheduledDate: occurrenceDate,
+      );
+    } else if (isGoalFunding) {
       await fundScheduledGoalFunding(
         context,
         item,
@@ -19894,7 +20678,11 @@ Future<void> showCompletedScheduledOccurrenceActions(
   v2_scheduled.ScheduledOccurrenceRecord occurrence,
 ) async {
   final dataStore = FinanceDataStoreScope.read(context);
-  if (item.type == TransactionType.goalFunding) {
+  if (item.isScheduledFundFunding) {
+    await showCompletedScheduledFundFundingActions(context, item, occurrence);
+    return;
+  }
+  if (item.isScheduledGoalFunding) {
     final event = dataStore.goalFundingEvents
         .where(
           (event) =>
@@ -20008,6 +20796,183 @@ Future<void> showCompletedScheduledOccurrenceActions(
   }
 }
 
+Future<void> showCompletedScheduledFundFundingActions(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+  v2_scheduled.ScheduledOccurrenceRecord occurrence,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final fundId = item.reservationFundingContainerId;
+  final fundIsAvailable =
+      fundId != null &&
+      dataStore.funds.any((fund) => fund.id == fundId && !fund.isDeleted);
+  final hasAllocation =
+      occurrence.reservationOperationId != null &&
+      dataStore.reservationOperations.any(
+        (operation) =>
+            operation.id == occurrence.reservationOperationId &&
+            operation.isActive,
+      );
+  final canRestore =
+      item.isDeleted &&
+      nextScheduledDate(item.copyWith(nextDate: occurrence.scheduledDate)) !=
+          null;
+  final action = await showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (fundIsAvailable)
+            ListTile(
+              leading: Icon(AppIcon.history),
+              title: const Text('View Activity'),
+              onTap: () => Navigator.pop(sheetContext, 'activity'),
+            ),
+          if (!item.isDeleted)
+            ListTile(
+              leading: Icon(AppIcon.recurrence),
+              title: const Text('Edit future schedule'),
+              onTap: () => Navigator.pop(sheetContext, 'editFuture'),
+            ),
+          if (canRestore)
+            ListTile(
+              leading: Icon(AppIcon.restore),
+              title: const Text('Restore future schedule'),
+              onTap: () => Navigator.pop(sheetContext, 'restoreFuture'),
+            ),
+          if (occurrence.status ==
+                  v2_scheduled.ScheduledOccurrenceStatus.paid &&
+              hasAllocation)
+            ListTile(
+              key: const ValueKey('scheduled-fund-occurrence-undo-action'),
+              leading: Icon(AppIcon.undo),
+              title: const Text('Undo Allocation'),
+              subtitle: const Text(
+                'Return this occurrence to its original date',
+              ),
+              textColor: AppTheme.rose,
+              iconColor: AppTheme.rose,
+              onTap: () => Navigator.pop(sheetContext, 'undoAllocation'),
+            ),
+        ],
+      ),
+    ),
+  );
+  if (!context.mounted || action == null) return;
+  switch (action) {
+    case 'activity':
+      if (fundId != null) await showFundDetails(context, fundId);
+    case 'editFuture':
+      await editScheduledTransactionFromOccurrence(
+        context,
+        item,
+        scheduledDate: item.nextDate,
+        plannedAmountMinor: item.amountMinor,
+      );
+    case 'restoreFuture':
+      await restoreScheduledTransactionAfterOccurrence(
+        context,
+        item,
+        occurrence,
+      );
+    case 'undoAllocation':
+      await showUndoScheduledFundFundingConfirmation(context, item, occurrence);
+  }
+}
+
+Future<void> showUndoScheduledFundFundingConfirmation(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item,
+  v2_scheduled.ScheduledOccurrenceRecord occurrence,
+) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  var isProcessing = false;
+  String? errorMessage;
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        Future<void> undoAllocation() async {
+          if (isProcessing) return;
+          setDialogState(() {
+            isProcessing = true;
+            errorMessage = null;
+          });
+          try {
+            await dataStore.undoScheduledFundFunding(
+              scheduledTransactionId: item.id,
+              occurrenceDate: occurrence.scheduledDate,
+            );
+            if (dialogContext.mounted) Navigator.pop(dialogContext);
+          } on FinanceDataValidationException catch (error) {
+            if (!dialogContext.mounted) return;
+            setDialogState(() {
+              isProcessing = false;
+              errorMessage = error.message;
+            });
+          }
+        }
+
+        return TransactionSheetFrame(
+          title: 'Undo this scheduled Fund allocation?',
+          actions: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: isProcessing
+                        ? null
+                        : () => Navigator.pop(dialogContext),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: FilledButton(
+                    key: const ValueKey('confirm-undo-scheduled-fund-funding'),
+                    onPressed: isProcessing ? null : undoAllocation,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.rose,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: Text(isProcessing ? 'Undoing…' : 'Undo Allocation'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'This releases the reserved money back to the funding account and restores the scheduled occurrence for its original date.',
+              ),
+              if (errorMessage != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  errorMessage!,
+                  key: const ValueKey('undo-scheduled-fund-funding-error'),
+                  style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(dialogContext).colorScheme.error,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
 Future<void> restoreScheduledTransactionAfterOccurrence(
   BuildContext context,
   v2_scheduled.ScheduledTransactionRecord item,
@@ -20029,6 +20994,8 @@ Future<void> restoreScheduledTransactionAfterOccurrence(
       categoryId: item.categoryId,
       splitLines: item.splitLines,
       goalFundingAllocations: item.goalFundingAllocations,
+      reservationFundingContainerType: item.reservationFundingContainerType,
+      reservationFundingContainerId: item.reservationFundingContainerId,
       payee: item.payee,
       note: item.note,
       amountMinor: item.amountMinor,
@@ -20115,7 +21082,9 @@ Future<void> showScheduledTransactionActions(
             ListTile(
               leading: Icon(AppIcon.success),
               title: Text(
-                item.type == TransactionType.goalFunding
+                item.isScheduledFundFunding
+                    ? 'Allocate Now'
+                    : item.isScheduledGoalFunding
                     ? 'Fund Now'
                     : 'Mark as Paid',
               ),
@@ -20155,7 +21124,13 @@ Future<void> showScheduledTransactionActions(
   if (!context.mounted || action == null) return;
   switch (action) {
     case 'paid':
-      if (item.type == TransactionType.goalFunding) {
+      if (item.isScheduledFundFunding) {
+        await fundScheduledFundFunding(
+          context,
+          item,
+          scheduledDate: occurrenceDate,
+        );
+      } else if (item.isScheduledGoalFunding) {
         await fundScheduledGoalFunding(
           context,
           item,
@@ -20220,6 +21195,8 @@ Future<void> editScheduledTransactionFromOccurrence(
     categoryId: item.categoryId,
     splitLines: item.splitLines,
     goalFundingAllocations: item.goalFundingAllocations,
+    reservationFundingContainerType: item.reservationFundingContainerType,
+    reservationFundingContainerId: item.reservationFundingContainerId,
     payee: item.payee,
     note: item.note,
     amountMinor: plannedAmountMinor,
@@ -20898,6 +21875,74 @@ Future<void> markScheduledTransactionPaid(
   }
 }
 
+Future<void> fundScheduledFundFunding(
+  BuildContext context,
+  v2_scheduled.ScheduledTransactionRecord item, {
+  DateTime? scheduledDate,
+}) async {
+  final dataStore = FinanceDataStoreScope.read(context);
+  final occurrenceDate = scheduledDate ?? item.nextDate;
+  final account = dataStore.accounts
+      .where((account) => account.id == item.accountId)
+      .firstOrNull;
+  final fund = dataStore.funds
+      .where(
+        (fund) =>
+            fund.id == item.reservationFundingContainerId && !fund.isDeleted,
+      )
+      .firstOrNull;
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => TransactionSheetFrame(
+      title: 'Allocate to Fund Now?',
+      actions: TransactionFormActions(
+        onCancel: () => Navigator.pop(dialogContext, false),
+        canSave:
+            account != null &&
+            fund != null &&
+            fund.fundingAccountId == item.accountId,
+        saveLabel: 'Allocate Now',
+        onSave: () => Navigator.pop(dialogContext, true),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'This reserves ${money(item.amountMinor, dataStore.preferences.currency)} from ${account?.name ?? 'the selected account'} for ${fund?.name ?? item.payee}.',
+            style: Theme.of(dialogContext).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          ScheduledTransactionDetailRow(
+            icon: AppIcon.savings,
+            label: 'Fund',
+            value: fund?.name ?? item.payee,
+            valueColor: AppTheme.accent,
+          ),
+          const TransactionFormDivider(),
+          ScheduledTransactionDetailRow(
+            icon: AppIcon.money,
+            label: 'Allocation',
+            value: money(item.amountMinor, dataStore.preferences.currency),
+            tabularFigures: true,
+          ),
+        ],
+      ),
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+  try {
+    await dataStore.completeScheduledFundFunding(
+      scheduledTransactionId: item.id,
+      occurrenceDate: occurrenceDate,
+    );
+  } on FinanceDataValidationException catch (error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(error.message)));
+  }
+}
+
 Future<void> fundScheduledGoalFunding(
   BuildContext context,
   v2_scheduled.ScheduledTransactionRecord item, {
@@ -21139,7 +22184,9 @@ Future<void> duplicateScheduledTransaction(
       categoryId: item.categoryId,
       splitLines: item.splitLines,
       goalFundingAllocations: item.goalFundingAllocations,
-      payee: '${item.payee} copy',
+      reservationFundingContainerType: item.reservationFundingContainerType,
+      reservationFundingContainerId: item.reservationFundingContainerId,
+      payee: item.isScheduledFundFunding ? item.payee : '${item.payee} copy',
       note: item.note,
       amountMinor: item.amountMinor,
       nextDate: item.nextDate,
@@ -25924,7 +26971,7 @@ ScheduledMonthSummary scheduledMonthSummary(
   var paid = 0;
   var remaining = 0;
   for (final occurrence in occurrences) {
-    if (!filter.matchesScheduled(occurrence.transaction.type)) continue;
+    if (!filter.matchesScheduled(occurrence.transaction)) continue;
     final plannedAmount = occurrence.plannedAmountMinor.abs();
     planned += plannedAmount;
     if (occurrence.isPaid) {

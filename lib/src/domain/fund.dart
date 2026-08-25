@@ -5,6 +5,18 @@ enum FundStatus { active, archived }
 
 enum FundTargetCadence { none, monthly }
 
+/// One non-persisted line in a batch Fund allocation request.
+///
+/// The resulting reservation operations remain the authoritative persisted
+/// records; this value only carries input from the allocation workflow into
+/// the store.
+class FundAllocation {
+  const FundAllocation({required this.fundId, required this.amountMinor});
+
+  final String fundId;
+  final int amountMinor;
+}
+
 class FundRecord {
   const FundRecord({
     required this.id,

@@ -313,6 +313,13 @@ class BackupRestoreValidator {
       ReservationContainerType.values,
       optional: true,
     );
+    _validateEnums(
+      root,
+      'scheduledTransactions',
+      'reservationFundingContainerType',
+      ReservationContainerType.values,
+      optional: true,
+    );
     _validateEnums(root, 'budgets', 'period', BudgetPeriod.values);
     _validateEnums(root, 'goals', 'status', GoalStatus.values);
     _validateEnums(root, 'goals', 'goalType', GoalType.values, optional: true);
@@ -384,6 +391,26 @@ class BackupRestoreValidator {
     for (final rawSchedule in _recordMaps(root, 'scheduledTransactions')) {
       for (final occurrence in _mapList(rawSchedule['occurrences'])) {
         _validateEnum(occurrence, 'status', ScheduledOccurrenceStatus.values);
+      }
+      final rawOccurrenceStates = rawSchedule['occurrenceStates'];
+      if (rawOccurrenceStates != null) {
+        if (rawOccurrenceStates is! Map) {
+          throw const BackupValidationException(
+            'A scheduled transaction contains invalid occurrence authority.',
+          );
+        }
+        for (final rawState in rawOccurrenceStates.values) {
+          if (rawState is! Map) {
+            throw const BackupValidationException(
+              'A scheduled transaction contains invalid occurrence authority.',
+            );
+          }
+          _validateEnum(
+            _stringMap(rawState),
+            'status',
+            ScheduledOccurrenceStatus.values,
+          );
+        }
       }
     }
     for (final rawBudget in _recordMaps(root, 'budgets')) {
@@ -602,6 +629,46 @@ class BackupRestoreValidator {
         funds,
         owner: 'scheduled transaction',
       );
+      _validateReservationContainerReference(
+        schedule.reservationFundingContainerType,
+        schedule.reservationFundingContainerId,
+        goals,
+        funds,
+        owner: 'scheduled funding transaction',
+      );
+      if (schedule.reservationFundingContainerType != null &&
+          !schedule.isScheduledFundFunding) {
+        throw const BackupValidationException(
+          'A scheduled funding transaction contains an invalid Fund link.',
+        );
+      }
+      if (schedule.isScheduledFundFunding) {
+        final fund = funds[schedule.reservationFundingContainerId];
+        if (fund == null || fund.fundingAccountId != schedule.accountId) {
+          throw const BackupValidationException(
+            'Scheduled Fund funding does not use the Fund funding account.',
+          );
+        }
+        if (!schedule.isDeleted) {
+          final account = accounts[schedule.accountId];
+          if (schedule.amountMinor.abs() <= 0 ||
+              account == null ||
+              !account.isVisible ||
+              !_isReservationFundingAccount(account) ||
+              fund.isDeleted ||
+              fund.status != FundStatus.active ||
+              schedule.transferAccountId != null ||
+              schedule.categoryId != null ||
+              schedule.splitLines.isNotEmpty ||
+              schedule.goalFundingAllocations.isNotEmpty ||
+              schedule.reservationContainerType != null ||
+              schedule.reservationContainerId != null) {
+            throw const BackupValidationException(
+              'An active scheduled Fund funding plan contains invalid fields.',
+            );
+          }
+        }
+      }
       final occurrenceIds = <String>{};
       for (final occurrence in schedule.occurrences) {
         final occurrenceKey = occurrence.scheduledDate.toIso8601String();
@@ -623,6 +690,58 @@ class BackupRestoreValidator {
               'A scheduled occurrence references a missing Goal funding event.',
             );
           }
+        }
+        _validateScheduledReservationOperationReference(
+          schedule: schedule,
+          scheduledDate: occurrence.scheduledDate,
+          reservationOperationId: occurrence.reservationOperationId,
+          reservationOperations: reservationOperations,
+        );
+        if (schedule.isScheduledFundFunding) {
+          _validateScheduledFundOccurrenceLink(
+            schedule: schedule,
+            scheduledDate: occurrence.scheduledDate,
+            plannedAmountMinor: occurrence.plannedAmountMinor,
+            status: occurrence.status,
+            actualAmountMinor: occurrence.actualAmountMinor,
+            actualPaymentDate: occurrence.actualPaymentDate,
+            transactionId: occurrence.transactionId,
+            goalFundingEventId: occurrence.goalFundingEventId,
+            reservationOperationId: occurrence.reservationOperationId,
+            explicitPendingRevision: false,
+            reservationOperations: reservationOperations,
+          );
+        }
+      }
+      for (final entry in schedule.occurrenceStates.entries) {
+        final state = entry.value;
+        if (entry.key != occurrenceDayKey(state.scheduledDate)) {
+          throw const BackupValidationException(
+            'A scheduled occurrence state contains an invalid date key.',
+          );
+        }
+        _validateScheduledReservationOperationReference(
+          schedule: schedule,
+          scheduledDate: state.scheduledDate,
+          reservationOperationId: state.reservationOperationId,
+          reservationOperations: reservationOperations,
+        );
+        if (schedule.isScheduledFundFunding) {
+          _validateScheduledFundOccurrenceLink(
+            schedule: schedule,
+            scheduledDate: state.scheduledDate,
+            plannedAmountMinor: state.plannedAmountMinor,
+            status: state.status,
+            actualAmountMinor: state.actualAmountMinor,
+            actualPaymentDate: state.actualPaymentDate,
+            transactionId: state.transactionId,
+            goalFundingEventId: state.goalFundingEventId,
+            reservationOperationId: state.reservationOperationId,
+            explicitPendingRevision:
+                state.status == ScheduledOccurrenceStatus.pending &&
+                state.revision > 0,
+            reservationOperations: reservationOperations,
+          );
         }
       }
     }
@@ -753,11 +872,32 @@ class BackupRestoreValidator {
         );
       }
       if (operation.scheduledTransactionId case final scheduleId?) {
-        if (!schedules.containsKey(scheduleId)) {
+        final schedule = schedules[scheduleId];
+        if (schedule == null) {
           throw const BackupValidationException(
             'A reservation operation references a missing schedule.',
           );
         }
+        if (operation.scheduledOccurrenceDate == null) {
+          throw const BackupValidationException(
+            'Scheduled reservation activity is missing its occurrence date.',
+          );
+        }
+        if (schedule.isScheduledFundFunding &&
+            (operation.kind == ReservationOperationKind.allocate ||
+                operation.kind == ReservationOperationKind.reversal)) {
+          _validateScheduledFundReservationOperation(
+            schedule: schedule,
+            scheduledDate: operation.scheduledOccurrenceDate!,
+            operation: operation,
+            expectedKind: operation.kind,
+            reservationOperations: reservationOperations,
+          );
+        }
+      } else if (operation.scheduledOccurrenceDate != null) {
+        throw const BackupValidationException(
+          'Reservation activity contains an occurrence date without a schedule.',
+        );
       }
       if (operation.kind == ReservationOperationKind.reversal) {
         final targetId = operation.reversesOperationId;
@@ -781,6 +921,175 @@ class BackupRestoreValidator {
   }
 
   bool _validDay(int? value) => value == null || (value >= 1 && value <= 31);
+
+  bool _isReservationFundingAccount(AccountRecord account) =>
+      account.type == AccountType.checking ||
+      account.type == AccountType.savings ||
+      account.type == AccountType.cash ||
+      account.type == AccountType.otherBanking;
+
+  void _validateScheduledFundOccurrenceLink({
+    required ScheduledTransactionRecord schedule,
+    required DateTime scheduledDate,
+    required int plannedAmountMinor,
+    required ScheduledOccurrenceStatus status,
+    required int? actualAmountMinor,
+    required DateTime? actualPaymentDate,
+    required String? transactionId,
+    required String? goalFundingEventId,
+    required String? reservationOperationId,
+    required bool explicitPendingRevision,
+    required Map<String, ReservationOperationRecord> reservationOperations,
+  }) {
+    final expectedAmount = schedule.amountMinor.abs();
+    if (plannedAmountMinor != expectedAmount ||
+        transactionId != null ||
+        goalFundingEventId != null) {
+      throw const BackupValidationException(
+        'A scheduled Fund occurrence contains invalid financial linkage.',
+      );
+    }
+
+    switch (status) {
+      case ScheduledOccurrenceStatus.paid:
+        final operation = reservationOperationId == null
+            ? null
+            : reservationOperations[reservationOperationId];
+        if (operation == null ||
+            actualAmountMinor != expectedAmount ||
+            actualPaymentDate == null) {
+          throw const BackupValidationException(
+            'A Paid scheduled Fund occurrence is missing its allocation.',
+          );
+        }
+        _validateScheduledFundReservationOperation(
+          schedule: schedule,
+          scheduledDate: scheduledDate,
+          operation: operation,
+          expectedKind: ReservationOperationKind.allocate,
+          reservationOperations: reservationOperations,
+        );
+        if (!_isSameCalendarDay(operation.effectiveDate, actualPaymentDate)) {
+          throw const BackupValidationException(
+            'A Paid scheduled Fund allocation has an invalid effective date.',
+          );
+        }
+        return;
+      case ScheduledOccurrenceStatus.pending:
+        if (!explicitPendingRevision && reservationOperationId == null) return;
+        final operation = reservationOperationId == null
+            ? null
+            : reservationOperations[reservationOperationId];
+        if (operation == null ||
+            actualAmountMinor != null ||
+            actualPaymentDate != null) {
+          throw const BackupValidationException(
+            'A reopened scheduled Fund occurrence is missing its Undo activity.',
+          );
+        }
+        _validateScheduledFundReservationOperation(
+          schedule: schedule,
+          scheduledDate: scheduledDate,
+          operation: operation,
+          expectedKind: ReservationOperationKind.reversal,
+          reservationOperations: reservationOperations,
+        );
+        if (!_isSameCalendarDay(operation.effectiveDate, scheduledDate)) {
+          throw const BackupValidationException(
+            'A scheduled Fund Undo has an invalid effective date.',
+          );
+        }
+        return;
+      case ScheduledOccurrenceStatus.skipped:
+        if (reservationOperationId != null ||
+            actualAmountMinor != null ||
+            actualPaymentDate != null) {
+          throw const BackupValidationException(
+            'A Skipped scheduled Fund occurrence contains reservation activity.',
+          );
+        }
+        return;
+    }
+  }
+
+  void _validateScheduledFundReservationOperation({
+    required ScheduledTransactionRecord schedule,
+    required DateTime scheduledDate,
+    required ReservationOperationRecord operation,
+    required ReservationOperationKind expectedKind,
+    required Map<String, ReservationOperationRecord> reservationOperations,
+  }) {
+    final expectedAmount = schedule.amountMinor.abs();
+    if (!operation.isActive ||
+        operation.kind != expectedKind ||
+        operation.containerType != ReservationContainerType.fund ||
+        operation.containerId != schedule.reservationFundingContainerId ||
+        operation.fundingAccountId != schedule.accountId ||
+        operation.amountMinor != expectedAmount ||
+        operation.transactionId != null ||
+        operation.scheduledTransactionId != schedule.id ||
+        operation.scheduledOccurrenceDate == null ||
+        !_isSameCalendarDay(
+          operation.scheduledOccurrenceDate!,
+          scheduledDate,
+        )) {
+      throw const BackupValidationException(
+        'Scheduled Fund reservation activity has invalid causal linkage.',
+      );
+    }
+
+    if (expectedKind == ReservationOperationKind.allocate) {
+      if (operation.reversesOperationId != null) {
+        throw const BackupValidationException(
+          'Scheduled Fund allocation contains an invalid reversal link.',
+        );
+      }
+      return;
+    }
+
+    final targetId = operation.reversesOperationId;
+    final target = targetId == null ? null : reservationOperations[targetId];
+    if (target == null ||
+        target.id == operation.id ||
+        target.kind != ReservationOperationKind.allocate) {
+      throw const BackupValidationException(
+        'Scheduled Fund Undo references an invalid allocation.',
+      );
+    }
+    _validateScheduledFundReservationOperation(
+      schedule: schedule,
+      scheduledDate: scheduledDate,
+      operation: target,
+      expectedKind: ReservationOperationKind.allocate,
+      reservationOperations: reservationOperations,
+    );
+  }
+
+  void _validateScheduledReservationOperationReference({
+    required ScheduledTransactionRecord schedule,
+    required DateTime scheduledDate,
+    required String? reservationOperationId,
+    required Map<String, ReservationOperationRecord> reservationOperations,
+  }) {
+    if (reservationOperationId == null) return;
+    final operation = reservationOperations[reservationOperationId];
+    if (operation == null ||
+        operation.scheduledTransactionId != schedule.id ||
+        operation.scheduledOccurrenceDate == null ||
+        !_isSameCalendarDay(
+          operation.scheduledOccurrenceDate!,
+          scheduledDate,
+        )) {
+      throw const BackupValidationException(
+        'A scheduled occurrence references invalid reservation activity.',
+      );
+    }
+  }
+
+  bool _isSameCalendarDay(DateTime left, DateTime right) =>
+      left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
 
   void _validateReservationContainerReference(
     ReservationContainerType? type,

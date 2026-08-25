@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
@@ -15,6 +17,7 @@ import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
 import 'package:money_tally/src/domain/transaction.dart' as v2_transaction;
 import 'package:money_tally/src/domain/user_preferences.dart';
 import 'package:money_tally/src/persistence/finance_record_repository.dart';
+import 'package:money_tally/src/persistence/local_finance_data_set_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
@@ -283,6 +286,63 @@ void main() {
     );
   });
 
+  testWidgets(
+    'exact-available Fund allocation stays valid while persistence is pending',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final repository = _BlockingLocalFinanceRepository();
+      final store = _store(localRepository: repository);
+      final fund = await store.createFund(
+        name: 'Bills',
+        fundingAccountId: 'checking',
+      );
+      await tester.pumpWidget(
+        _app(
+          store,
+          Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => showFundAmountDialog(
+                context,
+                fundId: fund.id,
+                isReturn: false,
+              ),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('fund-operation-amount')),
+        '500000',
+      );
+      await tester.pump();
+      expect(find.text('After allocation · \$0.00 available'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('reservation-overcommit-warning')),
+        findsNothing,
+      );
+
+      repository.blockNextSave();
+      await tester.tap(find.widgetWithText(FilledButton, 'Allocate'));
+      await tester.pump();
+
+      expect(find.text('Allocate to Bills'), findsOneWidget);
+      expect(find.text('After allocation · \$0.00 available'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('reservation-overcommit-warning')),
+        findsNothing,
+      );
+
+      repository.releaseSave();
+      await tester.pumpAndSettle();
+      expect(find.text('Allocate to Bills'), findsNothing);
+      expect(store.currentFundAmountMinor(fund.id), 500000);
+    },
+  );
+
   testWidgets('Fund return shows and updates authoritative reservation', (
     tester,
   ) async {
@@ -337,6 +397,195 @@ void main() {
           .widget<FilledButton>(find.widgetWithText(FilledButton, 'Return'))
           .onPressed,
       isNull,
+    );
+  });
+
+  testWidgets('Return All does not flash a negative reservation while saving', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final repository = _BlockingLocalFinanceRepository();
+    final store = _store(localRepository: repository);
+    final fund = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 300000,
+      date: DateTime.now(),
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () =>
+                showFundAmountDialog(context, fundId: fund.id, isReturn: true),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('fund-operation-amount')),
+      '300000',
+    );
+    await tester.pump();
+    expect(find.text('After return · \$0.00 reserved'), findsOneWidget);
+
+    repository.blockNextSave();
+    await tester.tap(find.widgetWithText(FilledButton, 'Return'));
+    await tester.pump();
+
+    expect(find.text('Return Funds'), findsOneWidget);
+    expect(find.text('After return · \$0.00 reserved'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('reservation-return-exceeds')),
+      findsNothing,
+    );
+
+    repository.releaseSave();
+    await tester.pumpAndSettle();
+    expect(find.text('Return Funds'), findsNothing);
+    expect(store.currentFundAmountMinor(fund.id), 0);
+  });
+
+  testWidgets('Funds floating add menu offers creation and allocation', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showFloatingAddMenu(
+              context,
+              section: FinanceSection.plan,
+              planSegment: PlanSegment.funds,
+            ),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create Fund'), findsOneWidget);
+    expect(find.text('Allocate to Funds'), findsOneWidget);
+    expect(find.text('Fund Goals'), findsNothing);
+  });
+
+  testWidgets('Allocate to Funds saves one exact total as a two-Fund batch', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final bills = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+    );
+    final repairs = await store.createFund(
+      name: 'Repairs',
+      fundingAccountId: 'checking',
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showAllocateFundsSheet(context),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Allocate to Funds'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('allocate-funds-total')),
+      '100000',
+    );
+    await tester.pump();
+
+    await tester.tap(
+      find.byKey(const ValueKey('allocate-funds-fund-allocate-funds-draft-0')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bills'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('allocate-funds-add-allocation')),
+    );
+    await tester.pump();
+    await tester.tap(
+      find.byKey(const ValueKey('allocate-funds-fund-allocate-funds-draft-1')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Repairs'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(
+        const ValueKey('allocate-funds-amount-allocate-funds-draft-1'),
+      ),
+      '40000',
+    );
+    await tester.pump();
+
+    final summary = find.byKey(const ValueKey('allocate-funds-summary'));
+    expect(
+      find.descendant(of: summary, matching: find.text('Total\n\$1,000.00')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: summary, matching: find.text('Remaining\nBalanced')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('allocate-funds-save')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('allocate-funds-save')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Allocate to Funds'), findsNothing);
+    expect(store.currentFundAmountMinor(bills.id), 60000);
+    expect(store.currentFundAmountMinor(repairs.id), 40000);
+    expect(store.reservedForAccount('checking'), 100000);
+    expect(store.availableToSpendForAccount('checking'), 400000);
+    final operations = store.reservationOperations
+        .where(
+          (operation) =>
+              operation.containerType == ReservationContainerType.fund &&
+              {bills.id, repairs.id}.contains(operation.containerId),
+        )
+        .toList(growable: false);
+    expect(operations, hasLength(2));
+    expect(
+      operations
+          .map(
+            (operation) => operation.causationId!.split(':').take(2).join(':'),
+          )
+          .toSet(),
+      hasLength(1),
     );
   });
 
@@ -765,8 +1014,140 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Allocate'), findsOneWidget);
-    expect(find.text('Return Funds'), findsOneWidget);
+    expect(find.text('Return Reserved Money'), findsOneWidget);
     expect(find.text('Delete'), findsOneWidget);
+  });
+
+  testWidgets(
+    'Fund actions schedule funding with its fixed account and Fund selected',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final store = _store();
+      final fund = await store.createFund(
+        name: 'Bills',
+        fundingAccountId: 'checking',
+      );
+      await tester.pumpWidget(_app(store, FundPlanCard(fund: fund)));
+
+      await tester.tap(find.byKey(ValueKey('fund-card-${fund.id}')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('View Activity'), findsOneWidget);
+      expect(find.text('Allocate'), findsOneWidget);
+      expect(find.text('Return Reserved Money'), findsOneWidget);
+      expect(find.text('Schedule Funding'), findsOneWidget);
+
+      await tester.tap(find.text('Schedule Funding'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Schedule Funding'), findsOneWidget);
+      final accountRow = find.byKey(
+        const ValueKey('scheduled-fund-funding-account'),
+      );
+      final fundRow = find.byKey(const ValueKey('scheduled-fund-funding-fund'));
+      expect(
+        find.descendant(of: accountRow, matching: find.text('CTBI')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: fundRow, matching: find.text('Bills')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('scheduled-fund-funding-amount')),
+        '20000',
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('scheduled-fund-funding-save')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(store.scheduledTransactions, hasLength(1));
+      final schedule = store.scheduledTransactions.single;
+      expect(schedule.type, v2_transaction.TransactionType.goalFunding);
+      expect(schedule.accountId, 'checking');
+      expect(
+        schedule.reservationFundingContainerType,
+        ReservationContainerType.fund,
+      );
+      expect(schedule.reservationFundingContainerId, fund.id);
+      expect(schedule.goalFundingAllocations, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'Fund with scheduled funding explains why it cannot be archived',
+    (tester) async {
+      await _setPhoneSize(tester);
+      final store = _store();
+      final fund = await store.createFund(
+        name: 'Bills',
+        fundingAccountId: 'checking',
+      );
+      await store.saveScheduledTransaction(
+        v2_scheduled.ScheduledTransactionRecord(
+          id: 'scheduled-bills-funding',
+          type: v2_transaction.TransactionType.goalFunding,
+          accountId: 'checking',
+          payee: 'Bills',
+          amountMinor: 20000,
+          nextDate: DateTime(2026, 9, 1),
+          frequency: v2_scheduled.RecurrenceFrequency.monthly,
+          reservationFundingContainerType: ReservationContainerType.fund,
+          reservationFundingContainerId: fund.id,
+          sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+        ),
+      );
+
+      await expectLater(
+        store.archiveFund(fund.id),
+        throwsA(
+          isA<FinanceDataValidationException>().having(
+            (error) => error.message,
+            'message',
+            contains('Remove this Fund from scheduled funding'),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(_app(store, FundPlanCard(fund: fund)));
+      await tester.tap(find.byKey(ValueKey('fund-card-${fund.id}')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Archive'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Fund can\u2019t be archived yet'), findsOneWidget);
+      expect(
+        find.textContaining('Bills still schedules funding for this Fund'),
+        findsOneWidget,
+      );
+      expect(store.fundById(fund.id).status, FundStatus.active);
+    },
+  );
+
+  testWidgets('Goal actions use the same reservation wording as Funds', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Emergency',
+      targetAmountMinor: 100000,
+      startingAmountMinor: 0,
+      targetDate: DateTime(2026, 9, 30),
+      defaultFundingAccountId: 'checking',
+    );
+    await tester.pumpWidget(_app(store, GoalCard(goal: goal)));
+
+    await tester.tap(find.byKey(ValueKey('goal-card-${goal.id}')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('View Activity'), findsOneWidget);
+    expect(find.text('Allocate'), findsOneWidget);
+    expect(find.text('Return Reserved Money'), findsOneWidget);
+    expect(find.text('Schedule Funding'), findsOneWidget);
   });
 
   testWidgets('Fund card opens actions then its read-only Activity', (
@@ -890,7 +1271,10 @@ Widget _app(FinanceDataStore store, Widget child) {
   );
 }
 
-FinanceDataStore _store({FinanceRecordRepository? remoteRepository}) {
+FinanceDataStore _store({
+  FinanceRecordRepository? remoteRepository,
+  LocalFinanceDataSetRepository? localRepository,
+}) {
   final sync = v2_sync.SyncMetadata.fresh(
     now: DateTime.utc(2026, 8, 22),
     deviceId: 'test',
@@ -922,9 +1306,32 @@ FinanceDataStore _store({FinanceRecordRepository? remoteRepository}) {
       preferences: const UserPreferences(),
     ),
     deviceId: 'test',
+    localRepository: localRepository,
     remoteRepository: remoteRepository,
     userId: remoteRepository == null ? null : 'test-user',
   );
+}
+
+class _BlockingLocalFinanceRepository extends LocalFinanceDataSetRepository {
+  Completer<void>? _pendingSave;
+
+  void blockNextSave() {
+    expect(_pendingSave, isNull);
+    _pendingSave = Completer<void>();
+  }
+
+  void releaseSave() {
+    final pending = _pendingSave;
+    expect(pending, isNotNull);
+    _pendingSave = null;
+    pending!.complete();
+  }
+
+  @override
+  Future<void> save(FinanceDataSet dataSet) async {
+    final pending = _pendingSave;
+    if (pending != null) await pending.future;
+  }
 }
 
 class _FailingOccurrenceRepository

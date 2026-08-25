@@ -49,6 +49,7 @@ dependencies:
   timezone: ^0.11.1
   workmanager: ^0.10.0
   package_info_plus: ^10.2.1
+  hugeicons: ^1.1.7
 
 dev_dependencies:
   flutter_test:
@@ -60,6 +61,8 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  material_symbols_icons: ^4.2960.0
+  tabler_icons_plus: ^3.44.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

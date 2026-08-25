@@ -57,6 +57,7 @@ import 'src/migration/finance_data_bootstrapper.dart';
 import 'src/management/management_ledger_index.dart';
 import 'src/ledger/ledger_projection.dart';
 import 'src/ledger/pending_ledger_summary.dart';
+import 'src/ledger/reservation_ledger_activity.dart';
 import 'src/ledger/running_balance_calculator.dart';
 import 'src/notifications/local_notification_scheduler.dart';
 import 'src/notifications/notification_scheduler.dart';

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/design/accent_color_catalog.dart';
 import 'package:money_tally/src/design/app_icons.dart';
@@ -1972,7 +1973,7 @@ void main() {
     expect(ledgerRowWithText('Diner'), findsNothing);
     expect(ledgerRowWithText('Walmart'), findsNothing);
     expect(ledgerRowWithText('Settlement'), findsNothing);
-    expect(find.text('No transactions match'), findsOneWidget);
+    expect(find.text('No activities match'), findsOneWidget);
   });
 
   testWidgets(
@@ -5615,7 +5616,7 @@ void main() {
     );
     expect(
       AccountAppearanceCatalog.iconsFor(v2_account.AccountType.checking),
-      hasLength(4),
+      hasLength(7),
     );
     expect(
       AccountAppearanceCatalog.iconsFor(v2_account.AccountType.cash),
@@ -5694,14 +5695,17 @@ void main() {
       originalAccount.includeInGroupBalance,
     );
     expect(account.includeInNetWorth, originalAccount.includeInNetWorth);
+    final portfolioIcon = AccountAppearanceCatalog.iconFor(
+      v2_account.AccountType.checking,
+      'portfolio',
+    ).hugeIcon;
+    expect(portfolioIcon, isNotNull);
     expect(
       find.descendant(
         of: checkingCard,
-        matching: find.byIcon(
-          AccountAppearanceCatalog.iconFor(
-            v2_account.AccountType.checking,
-            'portfolio',
-          ).icon,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is HugeIcon && identical(widget.icon, portfolioIcon),
         ),
       ),
       findsOneWidget,
@@ -7335,12 +7339,20 @@ void main() {
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      final resetRow = find.text('Reset Scheduled History');
+      final dataManagementRow = find.byKey(
+        const ValueKey('data-management-row'),
+      );
+      await tester.ensureVisible(dataManagementRow);
+      await tester.pumpAndSettle();
+      await tester.tap(dataManagementRow);
+      await tester.pumpAndSettle();
+      final resetRow = find.text('Reset Scheduled Calendar History');
       await tester.ensureVisible(resetRow);
       await tester.pumpAndSettle();
       await tester.tap(resetRow.hitTestable());
       await tester.pumpAndSettle();
-      expect(find.text('Reset Scheduled History?'), findsOneWidget);
+      expect(find.text('Reset Scheduled Calendar History?'), findsOneWidget);
+      expect(find.text('Reset History'), findsOneWidget);
       expect(dataStore.scheduledTransactions.single.occurrences, hasLength(1));
 
       await tester.tap(
@@ -7370,7 +7382,7 @@ void main() {
       expect(julySummary.plannedAmountMinor, 0);
       expect(julySummary.paidAmountMinor, 0);
       expect(julySummary.remainingAmountMinor, 0);
-      expect(find.text('Scheduled history reset'), findsOneWidget);
+      expect(find.text('Scheduled calendar history reset'), findsOneWidget);
     },
   );
 
@@ -9613,8 +9625,18 @@ void main() {
     expect(find.text('Manage budgets'), findsOneWidget);
     expect(find.text('More'), findsOneWidget);
     expect(find.widgetWithText(ListTile, 'Reports'), findsOneWidget);
-    expect(find.text('Data Management'), findsOneWidget);
+    final dataManagementRow = find.byKey(const ValueKey('data-management-row'));
+    expect(dataManagementRow, findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'Export CSV'), findsNothing);
+
+    await tester.ensureVisible(dataManagementRow);
+    await tester.pumpAndSettle();
+    await tester.tap(dataManagementRow);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Data Management'), findsWidgets);
     expect(find.widgetWithText(ListTile, 'Export CSV'), findsOneWidget);
+    expect(find.byKey(const ValueKey('data-management-row')), findsNothing);
   });
 
   testWidgets('settings preference rows update and persist stored values', (
@@ -10074,6 +10096,11 @@ void main() {
 
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
+    final dataManagementRow = find.byKey(const ValueKey('data-management-row'));
+    await tester.ensureVisible(dataManagementRow);
+    await tester.pumpAndSettle();
+    await tester.tap(dataManagementRow);
+    await tester.pumpAndSettle();
     final exportCsv = find.widgetWithText(ListTile, 'Export CSV');
     await tester.ensureVisible(exportCsv);
     await tester.pumpAndSettle();
@@ -10126,6 +10153,7 @@ void main() {
           child: Scaffold(
             body: SingleChildScrollView(
               child: SettingsView(
+                dataManagementOnly: true,
                 exportFileService: exportFileService,
                 now: () => DateTime(2026, 7, 23, 22, 45),
               ),
@@ -10201,7 +10229,14 @@ void main() {
       final original = const V1SnapshotMigrator().migrate(
         legacyStore.snapshot().toJson(),
       );
-      final dataStore = FinanceDataStore(dataSet: original);
+      final resetSource = original.copyWith(
+        preferences: original.preferences.copyWith(
+          savedPayeeNames: const ['Walmart', 'Cafe'],
+          archivedPayeeNames: const {'cafe'},
+          deletedPayeeNames: const {'old store'},
+        ),
+      );
+      final dataStore = FinanceDataStore(dataSet: resetSource);
       final safetyService = RecordingBackupSafetyFileService();
 
       await tester.pumpWidget(
@@ -10211,6 +10246,7 @@ void main() {
             child: Scaffold(
               body: SingleChildScrollView(
                 child: SettingsView(
+                  dataManagementOnly: true,
                   syncLabel: 'Local only',
                   backupSafetyFileService: safetyService,
                   now: () => DateTime(2026, 8, 23, 10, 11, 12),
@@ -10227,6 +10263,29 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Reset Trackmark Data?'), findsOneWidget);
+      final confirmationField = tester.widget<TextField>(
+        find.byKey(const ValueKey('reset-trackmark-data-confirmation')),
+      );
+      expect(confirmationField.decoration?.labelText, isNull);
+      expect(confirmationField.decoration?.hintText, 'RESET');
+      expect(
+        confirmationField.decoration?.hintStyle?.fontWeight,
+        FontWeight.w400,
+      );
+      expect(
+        tester
+            .widget<EditableText>(
+              find.descendant(
+                of: find.byKey(
+                  const ValueKey('reset-trackmark-data-confirmation'),
+                ),
+                matching: find.byType(EditableText),
+              ),
+            )
+            .controller
+            .text,
+        isEmpty,
+      );
       final resetButton = tester.widget<FilledButton>(
         find.byKey(const ValueKey('confirm-trackmark-data-reset')),
       );
@@ -10252,6 +10311,9 @@ void main() {
       expect(dataStore.goals, isEmpty);
       expect(dataStore.funds, isEmpty);
       expect(dataStore.reservationOperations, isEmpty);
+      expect(dataStore.preferences.savedPayeeNames, isEmpty);
+      expect(dataStore.preferences.archivedPayeeNames, isEmpty);
+      expect(dataStore.preferences.deletedPayeeNames, isEmpty);
       expect(
         dataStore.preferences.currency.toJson(),
         original.preferences.currency.toJson(),
@@ -10261,8 +10323,93 @@ void main() {
         safetyService.savedContent!,
       );
       expect(restoredSafety.dataSet.accounts.length, original.accounts.length);
+      expect(restoredSafety.dataSet.preferences.savedPayeeNames, [
+        'Walmart',
+        'Cafe',
+      ]);
     },
   );
+
+  testWidgets('settings reset can also restore app preferences to defaults', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final original = const V1SnapshotMigrator().migrate(
+      FinanceStore.seeded().snapshot().toJson(),
+    );
+    final customized = original.copyWith(
+      preferences: const UserPreferences(
+        launchScreen: LaunchScreen.ledger,
+        preferredPlanSegment: PlanSegment.goals,
+        appearanceMode: AppearanceMode.dark,
+        floatingAddButtonPosition: FloatingAddButtonPosition.left,
+        automaticSyncEnabled: true,
+        automaticBackupsEnabled: true,
+        automaticBackupLocation: AutomaticBackupLocation.iCloud,
+        showLedgerIcons: false,
+        savedPayeeNames: ['Walmart'],
+        archivedPayeeNames: {'old store'},
+        deletedPayeeNames: {'deleted store'},
+        legacyV1MigrationCompleted: true,
+      ),
+    );
+    final dataStore = FinanceDataStore(dataSet: customized);
+    final safetyService = RecordingBackupSafetyFileService();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FinanceDataStoreScope(
+          store: dataStore,
+          child: Scaffold(
+            body: SingleChildScrollView(
+              child: SettingsView(
+                dataManagementOnly: true,
+                syncLabel: 'Local only',
+                backupSafetyFileService: safetyService,
+                now: () => DateTime(2026, 8, 24, 9, 30),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final resetRow = find.byKey(const ValueKey('reset-trackmark-data-row'));
+    await tester.ensureVisible(resetRow);
+    await tester.tap(resetRow);
+    await tester.pumpAndSettle();
+    final resetSettingsCheckbox = find.descendant(
+      of: find.byKey(const ValueKey('reset-app-settings-too')),
+      matching: find.byType(Checkbox),
+    );
+    await tester.tap(resetSettingsCheckbox);
+    await tester.pump();
+    expect(tester.widget<Checkbox>(resetSettingsCheckbox).value, isTrue);
+    await tester.enterText(
+      find.byKey(const ValueKey('reset-trackmark-data-confirmation')),
+      'RESET',
+    );
+    await tester.pump();
+    expect(tester.widget<Checkbox>(resetSettingsCheckbox).value, isTrue);
+    await tester.tap(
+      find.byKey(const ValueKey('confirm-trackmark-data-reset')),
+    );
+    await tester.pumpAndSettle();
+
+    const expected = UserPreferences(legacyV1MigrationCompleted: true);
+    expect(dataStore.preferences.toJson(), expected.toJson());
+    final restoredSafety = const BackupRestoreValidator().validate(
+      safetyService.savedContent!,
+    );
+    expect(
+      restoredSafety.dataSet.preferences.toJson(),
+      customized.preferences.toJson(),
+    );
+  });
 
   testWidgets('settings reports temporary export creation failures', (
     tester,
@@ -10288,7 +10435,10 @@ void main() {
           store: dataStore,
           child: Scaffold(
             body: SingleChildScrollView(
-              child: SettingsView(exportFileService: exportFileService),
+              child: SettingsView(
+                dataManagementOnly: true,
+                exportFileService: exportFileService,
+              ),
             ),
           ),
         ),
@@ -10417,7 +10567,15 @@ Future<void> selectScheduledCalendarFilter(
   );
   await tester.pumpAndSettle();
   final option = find.byKey(ValueKey('calendar-filter-$filter'));
-  await tester.ensureVisible(option);
+  if (option.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(
+      option,
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+  } else {
+    await tester.ensureVisible(option);
+  }
   await tester.pumpAndSettle();
   await tester.tap(option);
   await tester.pumpAndSettle();

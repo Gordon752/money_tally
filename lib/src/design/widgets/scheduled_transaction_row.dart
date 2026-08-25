@@ -42,7 +42,9 @@ class ScheduledTransactionRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    scheduledTransaction.type == TransactionType.goalFunding
+                    scheduledTransaction.isScheduledFundFunding
+                        ? scheduledTransaction.payee
+                        : scheduledTransaction.isScheduledGoalFunding
                         ? 'Goal Funding'
                         : scheduledTransaction.payee,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
