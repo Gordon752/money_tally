@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 
 /// A deliberately curated category-icon choice.
 ///
@@ -15,6 +16,7 @@ class AppCategoryIcon {
     required this.group,
     required this.materialIcon,
     required this.cupertinoIcon,
+    this.hugeIcon,
     this.aliases = const [],
   });
 
@@ -23,6 +25,7 @@ class AppCategoryIcon {
   final String group;
   final IconData materialIcon;
   final IconData cupertinoIcon;
+  final List<List<dynamic>>? hugeIcon;
   final List<String> aliases;
 
   IconData get icon => defaultTargetPlatform == TargetPlatform.iOS
@@ -78,6 +81,7 @@ abstract final class CategoryIconCatalog {
       group: 'Finance',
       materialIcon: Icons.account_balance_wallet_outlined,
       cupertinoIcon: Icons.wallet_outlined,
+      hugeIcon: HugeIcons.strokeRoundedWallet01,
       aliases: ['wallet', 'billfold', 'purse'],
     ),
     AppCategoryIcon(
@@ -108,6 +112,7 @@ abstract final class CategoryIconCatalog {
       group: 'Finance',
       materialIcon: Icons.trending_up_outlined,
       cupertinoIcon: Icons.trending_up_outlined,
+      hugeIcon: HugeIcons.strokeRoundedChartUp,
       aliases: [
         'invest',
         'investing',
@@ -179,6 +184,7 @@ abstract final class CategoryIconCatalog {
       group: 'Food',
       materialIcon: Icons.fastfood_outlined,
       cupertinoIcon: Icons.fastfood_outlined,
+      hugeIcon: HugeIcons.strokeRoundedFrenchFries01,
       aliases: ['burger', 'fries', 'drive thru', 'takeout'],
     ),
     AppCategoryIcon(
@@ -194,6 +200,7 @@ abstract final class CategoryIconCatalog {
       group: 'Food',
       materialIcon: Icons.local_drink_outlined,
       cupertinoIcon: Icons.local_drink_outlined,
+      hugeIcon: HugeIcons.strokeRoundedSoftDrink01,
       aliases: ['drink', 'beverage', 'soda', 'fountain drink'],
     ),
     AppCategoryIcon(
@@ -304,6 +311,7 @@ abstract final class CategoryIconCatalog {
       group: 'Fuel',
       materialIcon: Icons.local_gas_station_outlined,
       cupertinoIcon: Icons.local_gas_station_outlined,
+      hugeIcon: HugeIcons.strokeRoundedFuelStation,
       aliases: ['fuel', 'gas', 'gasoline', 'petrol', 'pump'],
     ),
     AppCategoryIcon(
@@ -375,6 +383,7 @@ abstract final class CategoryIconCatalog {
       group: 'Shopping',
       materialIcon: Icons.checkroom_outlined,
       cupertinoIcon: Icons.checkroom_outlined,
+      hugeIcon: HugeIcons.strokeRoundedTShirt,
       aliases: ['clothes', 'clothing', 'apparel', 'shirt', 'fashion'],
     ),
     AppCategoryIcon(
@@ -390,6 +399,7 @@ abstract final class CategoryIconCatalog {
       group: 'Shopping',
       materialIcon: Icons.storefront_outlined,
       cupertinoIcon: Icons.storefront_outlined,
+      hugeIcon: HugeIcons.strokeRoundedStore01,
       aliases: ['store', 'storefront', 'merchant', 'shop'],
     ),
     AppCategoryIcon(
@@ -438,6 +448,7 @@ abstract final class CategoryIconCatalog {
       group: 'Medical',
       materialIcon: Icons.medication_outlined,
       cupertinoIcon: Icons.medication_outlined,
+      hugeIcon: HugeIcons.strokeRoundedPill,
       aliases: [
         'medication',
         'medicine',
@@ -462,6 +473,7 @@ abstract final class CategoryIconCatalog {
       group: 'Medical',
       materialIcon: Icons.face_outlined,
       cupertinoIcon: CupertinoIcons.smiley,
+      hugeIcon: HugeIcons.strokeRoundedDentalTooth,
       aliases: ['dental', 'dentist', 'dentistry', 'tooth', 'teeth', 'oral'],
     ),
     AppCategoryIcon(
@@ -560,6 +572,7 @@ abstract final class CategoryIconCatalog {
       group: 'Housing',
       materialIcon: Icons.key_outlined,
       cupertinoIcon: Icons.key_outlined,
+      hugeIcon: HugeIcons.strokeRoundedKey01,
       aliases: ['rent', 'lease', 'landlord', 'tenant'],
     ),
     AppCategoryIcon(
@@ -568,6 +581,7 @@ abstract final class CategoryIconCatalog {
       group: 'Housing',
       materialIcon: Icons.real_estate_agent_outlined,
       cupertinoIcon: Icons.real_estate_agent_outlined,
+      hugeIcon: HugeIcons.strokeRoundedRealEstate02,
       aliases: ['mortgage', 'home loan'],
     ),
     AppCategoryIcon(
@@ -584,6 +598,7 @@ abstract final class CategoryIconCatalog {
       group: 'Housing',
       materialIcon: Icons.chair_outlined,
       cupertinoIcon: Icons.chair_outlined,
+      hugeIcon: HugeIcons.strokeRoundedSofa01,
       aliases: ['furniture', 'chair', 'sofa', 'couch'],
     ),
     AppCategoryIcon(
@@ -592,6 +607,7 @@ abstract final class CategoryIconCatalog {
       group: 'Housing',
       materialIcon: Icons.yard_outlined,
       cupertinoIcon: Icons.yard_outlined,
+      hugeIcon: HugeIcons.strokeRoundedPlant01,
       aliases: ['lawn', 'garden', 'yard', 'landscaping', 'plants'],
     ),
     AppCategoryIcon(
@@ -600,6 +616,7 @@ abstract final class CategoryIconCatalog {
       group: 'Housing',
       materialIcon: Icons.cleaning_services_outlined,
       cupertinoIcon: Icons.cleaning_services_outlined,
+      hugeIcon: HugeIcons.strokeRoundedCleaningBucket,
       aliases: ['cleaning', 'cleaner', 'housekeeping'],
     ),
     AppCategoryIcon(
@@ -632,6 +649,7 @@ abstract final class CategoryIconCatalog {
       group: 'Business',
       materialIcon: Icons.payments_outlined,
       cupertinoIcon: Icons.payments_outlined,
+      hugeIcon: HugeIcons.strokeRoundedPayment01,
       aliases: ['payroll', 'paycheck', 'wages', 'salary'],
     ),
     AppCategoryIcon(
@@ -748,6 +766,7 @@ abstract final class CategoryIconCatalog {
       group: 'Technology',
       materialIcon: Icons.phonelink_setup_outlined,
       cupertinoIcon: Icons.phonelink_setup_outlined,
+      hugeIcon: HugeIcons.strokeRoundedMobileProgramming01,
       aliases: [
         'device repair',
         'phone repair',
@@ -817,6 +836,7 @@ abstract final class CategoryIconCatalog {
       group: 'Travel',
       materialIcon: Icons.luggage_outlined,
       cupertinoIcon: Icons.luggage_outlined,
+      hugeIcon: HugeIcons.strokeRoundedLuggage01,
       aliases: ['travel', 'trip', 'luggage', 'suitcase'],
     ),
     AppCategoryIcon(
@@ -860,6 +880,7 @@ abstract final class CategoryIconCatalog {
       group: 'Travel',
       materialIcon: Icons.festival_outlined,
       cupertinoIcon: Icons.festival_outlined,
+      hugeIcon: HugeIcons.strokeRoundedTent,
       aliases: ['camping', 'camp', 'tent', 'campground'],
     ),
     AppCategoryIcon(
@@ -898,6 +919,7 @@ abstract final class CategoryIconCatalog {
       group: 'Entertainment',
       materialIcon: Icons.sports_basketball_outlined,
       cupertinoIcon: Icons.sports_basketball_outlined,
+      hugeIcon: HugeIcons.strokeRoundedBasketball01,
       aliases: ['sport', 'sports', 'athletics', 'ball'],
     ),
     AppCategoryIcon(
@@ -957,6 +979,7 @@ abstract final class CategoryIconCatalog {
       group: 'Education',
       materialIcon: Icons.cast_for_education_outlined,
       cupertinoIcon: Icons.cast_for_education_outlined,
+      hugeIcon: HugeIcons.strokeRoundedCourse,
       aliases: ['course', 'class', 'lesson', 'training'],
     ),
     AppCategoryIcon(
@@ -980,6 +1003,7 @@ abstract final class CategoryIconCatalog {
       group: 'Education',
       materialIcon: Icons.local_library_outlined,
       cupertinoIcon: Icons.local_library_outlined,
+      hugeIcon: HugeIcons.strokeRoundedLibrary,
       aliases: ['library', 'books', 'reading'],
     ),
     AppCategoryIcon(
@@ -988,6 +1012,7 @@ abstract final class CategoryIconCatalog {
       group: 'Education',
       materialIcon: Icons.school_outlined,
       cupertinoIcon: Icons.school_outlined,
+      hugeIcon: HugeIcons.strokeRoundedSchool,
       aliases: ['graduation', 'graduate', 'degree', 'diploma', 'commencement'],
     ),
 
@@ -1095,6 +1120,7 @@ abstract final class CategoryIconCatalog {
       group: 'Insurance',
       materialIcon: Icons.fact_check_outlined,
       cupertinoIcon: Icons.fact_check_outlined,
+      hugeIcon: HugeIcons.strokeRoundedDocumentValidation,
       aliases: ['insurance claim', 'claim', 'claim review', 'claim form'],
     ),
 

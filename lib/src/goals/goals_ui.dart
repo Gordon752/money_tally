@@ -472,39 +472,11 @@ class GoalsPlanContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AppCard(
-          padding: const EdgeInsets.all(AppSpacing.sm),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  key: ValueKey('plan-create-goal'),
-                  onPressed: () => showCreateGoalSheet(context),
-                  icon: Icon(AppIcon.goal),
-                  label: const Text('Create Goal'),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: FilledButton.icon(
-                  key: const ValueKey('plan-fund-goals'),
-                  onPressed:
-                      active.any(
-                        (goal) =>
-                            goal.isAccountBacked || goal.usesReservationModel,
-                      )
-                      ? () => showFundGoalsSheet(context)
-                      : null,
-                  icon: Icon(AppIcon.savings),
-                  label: const Text('Fund Goals'),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: AppSpacing.sm),
         if (active.isEmpty)
-          ActiveGoalsEmptyState(hasArchivedGoals: archivedCount > 0)
+          ActiveGoalsEmptyState(
+            hasArchivedGoals: archivedCount > 0,
+            showCreateButton: true,
+          )
         else ...[
           for (final goal in active) ...[
             GoalCard(goal: goal),
@@ -1204,6 +1176,8 @@ Future<void> showGoalEditor(
                         key: const ValueKey('goal-name'),
                         controller: nameController,
                         autofocus: true,
+                        onTapOutside: (_) =>
+                            FocusManager.instance.primaryFocus?.unfocus(),
                         decoration: const InputDecoration(
                           hintText: 'Emergency Fund',
                         ),

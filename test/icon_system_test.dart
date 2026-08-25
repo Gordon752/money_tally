@@ -69,6 +69,32 @@ const _phaseTwoCategoryGlyphs = <String, IconData>{
   'insurance.claim': Icons.fact_check_outlined,
 };
 
+const _hugeCategoryGlyphs = <String, List<List<dynamic>>>{
+  'finance.wallet': HugeIcons.strokeRoundedWallet01,
+  'finance.investment': HugeIcons.strokeRoundedChartUp,
+  'food.fast': HugeIcons.strokeRoundedFrenchFries01,
+  'food.drink': HugeIcons.strokeRoundedSoftDrink01,
+  'fuelpump': HugeIcons.strokeRoundedFuelStation,
+  'shopping.clothes': HugeIcons.strokeRoundedTShirt,
+  'shopping.store': HugeIcons.strokeRoundedStore01,
+  'medical.medicine': HugeIcons.strokeRoundedPill,
+  'medical.dental': HugeIcons.strokeRoundedDentalTooth,
+  'housing.rent': HugeIcons.strokeRoundedKey01,
+  'housing.mortgage': HugeIcons.strokeRoundedRealEstate02,
+  'housing.furniture': HugeIcons.strokeRoundedSofa01,
+  'housing.garden': HugeIcons.strokeRoundedPlant01,
+  'housing.cleaning': HugeIcons.strokeRoundedCleaningBucket,
+  'business.payroll': HugeIcons.strokeRoundedPayment01,
+  'technology.repair': HugeIcons.strokeRoundedMobileProgramming01,
+  'travel.luggage': HugeIcons.strokeRoundedLuggage01,
+  'travel.camping': HugeIcons.strokeRoundedTent,
+  'entertainment.sports': HugeIcons.strokeRoundedBasketball01,
+  'education.course': HugeIcons.strokeRoundedCourse,
+  'education.library': HugeIcons.strokeRoundedLibrary,
+  'education.graduation': HugeIcons.strokeRoundedSchool,
+  'insurance.claim': HugeIcons.strokeRoundedDocumentValidation,
+};
+
 void main() {
   tearDown(() {
     debugDefaultTargetPlatformOverride = null;
@@ -161,8 +187,41 @@ void main() {
     expect(
       CategoryIconCatalog.find('medical.dental')?.icon,
       CupertinoIcons.smiley,
-      reason: 'Dental stays unchanged until a genuine dental glyph exists.',
+      reason: 'The persisted Dental fallback remains storage compatible.',
     );
+  });
+
+  test('selected category keys resolve to production Hugeicons', () {
+    for (final entry in _hugeCategoryGlyphs.entries) {
+      final option = CategoryIconCatalog.find(entry.key);
+      expect(option, isNotNull);
+      expect(
+        option?.hugeIcon,
+        same(entry.value),
+        reason: '${entry.key} must retain its key and use its approved vector.',
+      );
+      expect(
+        option?.icon,
+        isA<IconData>(),
+        reason: '${entry.key} must preserve its Flutter fallback.',
+      );
+    }
+
+    for (final deferredKey in [
+      'fuel.carwash',
+      'transport.toll',
+      'business.scaleTicket',
+      'pets.vet',
+      'pets.food',
+      'pets.boarding',
+      'taxes.sales',
+    ]) {
+      expect(
+        CategoryIconCatalog.find(deferredKey)?.hugeIcon,
+        isNull,
+        reason: '$deferredKey remains on its clearer existing glyph.',
+      );
+    }
   });
 
   test('Phase 1 account appearance IDs resolve to approved glyphs', () {
@@ -484,6 +543,49 @@ void main() {
     }
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'category badge renders approved Hugeicons at Ledger and picker sizes',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Material(
+            child: Row(
+              children: [
+                CategoryIconBadge(
+                  iconName: 'medical.dental',
+                  kind: CategoryKind.expense,
+                  size: CategoryIconBadgeSize.compact,
+                ),
+                CategoryIconBadge(
+                  iconName: 'finance.wallet',
+                  kind: CategoryKind.expense,
+                  size: CategoryIconBadgeSize.row,
+                ),
+                CategoryIconBadge(
+                  iconName: 'travel.camping',
+                  kind: CategoryKind.expense,
+                  size: CategoryIconBadgeSize.form,
+                ),
+                CategoryIconBadge(
+                  iconName: 'food.tip',
+                  kind: CategoryKind.expense,
+                  size: CategoryIconBadgeSize.row,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      final vectorIcons = tester.widgetList<HugeIcon>(find.byType(HugeIcon));
+      expect(vectorIcons.map((icon) => icon.size), [14, 17, 20]);
+      expect(vectorIcons.every((icon) => icon.strokeWidth == 1.8), isTrue);
+      expect(vectorIcons.first.icon, same(HugeIcons.strokeRoundedDentalTooth));
+      expect(find.byIcon(Icons.price_change_outlined), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('category badge uses assigned color and safe unknown fallback', (
     tester,

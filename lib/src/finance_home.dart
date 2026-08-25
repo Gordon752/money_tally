@@ -13789,17 +13789,6 @@ class BudgetPanel extends StatelessWidget {
       padding: EdgeInsets.all(compact ? AppSpacing.sm : AppSpacing.md),
       child: Column(
         children: [
-          if (showAll) ...[
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
-                onPressed: () => showBudgetDialog(context),
-                icon: Icon(AppIcon.add),
-                label: Text('Add budget'),
-              ),
-            ),
-            SizedBox(height: 12),
-          ],
           if (visibleBudgets.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
@@ -13818,6 +13807,7 @@ class BudgetPanel extends StatelessWidget {
                   if (showAll) ...[
                     const SizedBox(height: AppSpacing.sm),
                     OutlinedButton(
+                      key: const ValueKey('budgets-empty-create'),
                       onPressed: () => showBudgetDialog(context),
                       child: const Text('Create Budget'),
                     ),
@@ -18576,6 +18566,44 @@ Future<void> showTransferDialog(
                             }
                           },
                   ),
+                  if (reservationChoices.isNotEmpty) ...[
+                    const TransactionFormDivider(),
+                    const TransactionFormLabel('Use reserved money'),
+                    InkWell(
+                      key: const ValueKey('transfer-reservation'),
+                      onTap: chooseReservation,
+                      borderRadius: BorderRadius.circular(AppRadii.control),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            TransactionFormIcon(
+                              Icons.account_balance_wallet_outlined,
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    selectedReservation?.name ?? 'None',
+                                    style: fieldValueStyle,
+                                  ),
+                                  Text(
+                                    selectedReservation == null
+                                        ? 'Optional · Choose a Goal or Fund'
+                                        : '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
+                                    style: mutedStyle,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(AppIcon.chevronRight),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                   TransactionFormDivider(),
                   TransactionFormLabel('Description'),
                   Row(
@@ -18665,43 +18693,6 @@ Future<void> showTransferDialog(
                     onChanged: (value) =>
                         setDialogState(() => transactionStatus = value),
                   ),
-                  if (reservationChoices.isNotEmpty) ...[
-                    const TransactionFormDivider(),
-                    const TransactionFormLabel('Reservation'),
-                    InkWell(
-                      onTap: chooseReservation,
-                      borderRadius: BorderRadius.circular(AppRadii.control),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
-                        child: Row(
-                          children: [
-                            TransactionFormIcon(
-                              Icons.account_balance_wallet_outlined,
-                            ),
-                            const SizedBox(width: AppSpacing.md),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    selectedReservation?.name ?? 'None',
-                                    style: fieldValueStyle,
-                                  ),
-                                  Text(
-                                    selectedReservation == null
-                                        ? 'Optionally use money from a Goal or Fund'
-                                        : '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
-                                    style: mutedStyle,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Icon(AppIcon.chevronRight),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
                   if (linkedSchedule == null) ...[
                     const TransactionFormDivider(),
                     InkWell(
@@ -19743,6 +19734,19 @@ Future<bool> showScheduledTransactionDialog(
                           ? null
                           : () => chooseAccount(destination: true),
                     ),
+                    if (reservationChoices.isNotEmpty) ...[
+                      const TransactionFormDivider(),
+                      const TransactionFormLabel('Use reserved money'),
+                      choiceRow(
+                        rowKey: const ValueKey('scheduled-reservation'),
+                        icon: Icons.account_balance_wallet_outlined,
+                        value: selectedReservation?.name ?? 'None',
+                        secondary: selectedReservation == null
+                            ? 'Optional · Applied when marked paid'
+                            : '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
+                        onTap: chooseReservation,
+                      ),
+                    ],
                     TransactionFormDivider(),
                     TransactionFormLabel('Description'),
                     Row(
@@ -19872,7 +19876,8 @@ Future<bool> showScheduledTransactionDialog(
                             : enterScheduledSplitMode,
                       ),
                   ],
-                  if (reservationChoices.isNotEmpty) ...[
+                  if (type != TransactionType.transfer &&
+                      reservationChoices.isNotEmpty) ...[
                     const TransactionFormDivider(),
                     const TransactionFormLabel('Use reserved money'),
                     choiceRow(
@@ -19880,7 +19885,7 @@ Future<bool> showScheduledTransactionDialog(
                       icon: Icons.account_balance_wallet_outlined,
                       value: selectedReservation?.name ?? 'None',
                       secondary: selectedReservation == null
-                          ? 'Optional'
+                          ? 'Optional · Applied when marked paid'
                           : '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
                       onTap: chooseReservation,
                     ),
@@ -23562,6 +23567,25 @@ Future<void> showTransactionDialog(
                       ],
                     ],
                   ),
+                  if (isExpense && reservationChoices.isNotEmpty) ...[
+                    const TransactionFormDivider(),
+                    const TransactionFormLabel('Use reserved money'),
+                    selectableRow(
+                      icon: Icons.account_balance_wallet_outlined,
+                      title: Text(selectedReservation?.name ?? 'None'),
+                      subtitle: selectedReservation == null
+                          ? Text(
+                              'Optional · Choose a Goal or Fund',
+                              style: mutedStyle,
+                            )
+                          : Text(
+                              '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
+                              style: mutedStyle,
+                            ),
+                      onTap: reservationSpendContext ? null : chooseReservation,
+                    ),
+                    if (selectedReservation != null) reservationSpendPreview(),
+                  ],
                   const TransactionFormDivider(),
                   const TransactionFormLabel('Date'),
                   InkWell(
@@ -23614,25 +23638,6 @@ Future<void> showTransactionDialog(
                     ),
                   ),
                   TransactionFormDivider(),
-                  if (isExpense && reservationChoices.isNotEmpty) ...[
-                    const TransactionFormLabel('Using reserved money'),
-                    selectableRow(
-                      icon: Icons.account_balance_wallet_outlined,
-                      title: Text(selectedReservation?.name ?? 'None'),
-                      subtitle: selectedReservation == null
-                          ? Text(
-                              'Optionally use money from a Goal or Fund',
-                              style: mutedStyle,
-                            )
-                          : Text(
-                              '${money(selectedReservation.amountMinor, dataStore.preferences.currency)} reserved',
-                              style: mutedStyle,
-                            ),
-                      onTap: reservationSpendContext ? null : chooseReservation,
-                    ),
-                    if (selectedReservation != null) reservationSpendPreview(),
-                    const TransactionFormDivider(),
-                  ],
                   _TransactionPendingToggle(
                     key: const ValueKey('transaction-pending-toggle'),
                     status: transactionStatus,

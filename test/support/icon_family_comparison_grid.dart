@@ -432,7 +432,7 @@ class IconFamilyComparisonGrid extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         'Same Trackmark badge treatment at 14 / 17 / 20 px. '
-                        'Current uses the present iOS mapping.',
+                        'Current uses the production mapping.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: AppColors.muted,
                         ),
@@ -472,7 +472,7 @@ class _HeaderRow extends StatelessWidget {
             width: IconFamilyComparisonGrid._labelWidth,
             child: _HeaderLabel('Concept'),
           ),
-          _HeaderFamily('Current iOS'),
+          _HeaderFamily('Production'),
           _HeaderFamily('Hugeicons'),
           _HeaderFamily('Material Symbols'),
           _HeaderFamily('Tabler'),
@@ -565,11 +565,25 @@ class _ComparisonRow extends StatelessWidget {
           ),
         ),
         _FamilyCell(
-          name: 'current',
+          name: current.hugeIcon == null ? 'Flutter fallback' : 'Hugeicons',
           builders: [
             for (final size in _PreviewSize.values)
-              (color) =>
-                  Icon(current.cupertinoIcon, size: size.glyph, color: color),
+              (color) {
+                final hugeIcon = current.hugeIcon;
+                if (hugeIcon != null) {
+                  return HugeIcon(
+                    icon: hugeIcon,
+                    size: size.glyph,
+                    color: color,
+                    strokeWidth: 1.8,
+                  );
+                }
+                return Icon(
+                  current.cupertinoIcon,
+                  size: size.glyph,
+                  color: color,
+                );
+              },
           ],
         ),
         _FamilyCell(

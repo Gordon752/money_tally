@@ -193,6 +193,44 @@ void main() {
     expect(store.goals.single.goalType, GoalType.reachTarget);
   });
 
+  testWidgets('Create Goal dismisses name focus when another field is tapped', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    await tester.pumpWidget(
+      _testApp(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showCreateGoalSheet(context),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    final nameField = find.byKey(const ValueKey('goal-name'));
+    await tester.enterText(nameField, 'Emergency');
+    await tester.showKeyboard(nameField);
+    expect(tester.testTextInput.isVisible, isTrue);
+
+    await tester.tap(find.byKey(const ValueKey('goal-type')));
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isFalse);
+
+    await tester.tap(find.text('Reach a Target').last);
+    await tester.pumpAndSettle();
+    await tester.showKeyboard(nameField);
+    expect(tester.testTextInput.isVisible, isTrue);
+
+    await tester.tap(find.byKey(const ValueKey('goal-funding-account')));
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isFalse);
+  });
+
   testWidgets('new Goals start at zero without a Starting Balance field', (
     tester,
   ) async {

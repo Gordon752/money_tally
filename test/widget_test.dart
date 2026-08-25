@@ -8706,6 +8706,30 @@ void main() {
     expect(find.textContaining('Categories:'), findsWidgets);
   });
 
+  testWidgets('empty Budgets uses one inline first-use action', (tester) async {
+    final legacyStore = FinanceStore.seeded();
+    final dataStore = FinanceDataStore(
+      dataSet: const FinanceDataSet(
+        accounts: [],
+        categories: [],
+        transactions: [],
+        scheduledTransactions: [],
+        budgets: [],
+        preferences: UserPreferences(),
+      ),
+    );
+    await tester.pumpWidget(
+      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+    );
+
+    await tester.tap(find.text('Plan').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add budget'), findsNothing);
+    expect(find.byKey(const ValueKey('budgets-empty-create')), findsOneWidget);
+    expect(find.byTooltip('Add'), findsOneWidget);
+  });
+
   testWidgets('budget dialog creates budget with categories', (tester) async {
     final legacyStore = FinanceStore.seeded();
     final dataSet = const V1SnapshotMigrator().migrate(
@@ -8719,7 +8743,10 @@ void main() {
 
     await tester.tap(find.text('Plan').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add budget'));
+    expect(find.text('Add budget'), findsNothing);
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Budget').last);
     await tester.pumpAndSettle();
 
     final fields = find.byType(TextField);
@@ -8861,6 +8888,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('No Goals yet'), findsOneWidget);
+    expect(find.byKey(const ValueKey('goals-empty-create')), findsOneWidget);
     expect(dataStore.preferences.preferredPlanSegment, PlanSegment.goals);
 
     await tester.tap(find.text('Dashboard'));
@@ -8888,6 +8916,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('plan-create-goal')), findsNothing);
+    expect(find.byKey(const ValueKey('plan-fund-goals')), findsNothing);
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
 

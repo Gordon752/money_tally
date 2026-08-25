@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 
 import '../../domain/category.dart';
 import '../app_icons.dart';
@@ -85,9 +86,10 @@ class CategoryIconBadge extends StatelessWidget {
         : archived
         ? 0.58
         : 1.0;
-    final icon = CategoryIconCatalog.find(iconName)?.icon ?? _fallbackIcon;
-    final glyph = Icon(
-      icon,
+    final option = CategoryIconCatalog.find(iconName);
+    final glyph = CategoryIconGlyph(
+      option: option,
+      fallbackIcon: _fallbackIcon,
       size: size.glyphSize,
       color: identityColor.withValues(alpha: 0.92 * emphasis),
     );
@@ -125,4 +127,36 @@ class CategoryIconBadge extends StatelessWidget {
     CategoryKind.transfer => AppIcon.transfer,
     CategoryKind.system => AppIcon.category,
   };
+}
+
+/// Renders the production glyph for a category while preserving its existing
+/// Flutter icon as a compatibility fallback.
+class CategoryIconGlyph extends StatelessWidget {
+  const CategoryIconGlyph({
+    required this.option,
+    required this.fallbackIcon,
+    required this.size,
+    required this.color,
+    super.key,
+  });
+
+  final AppCategoryIcon? option;
+  final IconData fallbackIcon;
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final hugeIcon = option?.hugeIcon;
+    if (hugeIcon != null) {
+      return HugeIcon(
+        icon: hugeIcon,
+        color: color,
+        size: size,
+        strokeWidth: 1.8,
+      );
+    }
+
+    return Icon(option?.icon ?? fallbackIcon, size: size, color: color);
+  }
 }

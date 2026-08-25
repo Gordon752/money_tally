@@ -135,11 +135,11 @@ void main() {
     expect(find.text('Paid from'), findsOneWidget);
     expect(find.text('CTBI'), findsOneWidget);
     expect(find.text('Reserved money is held in this account'), findsOneWidget);
-    expect(find.text('Using reserved money'), findsOneWidget);
+    expect(find.text('Use reserved money'), findsOneWidget);
     expect(find.text('Mark as Pending'), findsOneWidget);
     expect(find.text('Schedule future occurrences'), findsOneWidget);
     final reservationTop = tester
-        .getTopLeft(find.text('Using reserved money'))
+        .getTopLeft(find.text('Use reserved money'))
         .dy;
     final pendingTop = tester.getTopLeft(find.text('Mark as Pending')).dy;
     final scheduleTop = tester
@@ -211,7 +211,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Spend from MacBook'), findsOneWidget);
     expect(find.text('Paid from'), findsOneWidget);
-    expect(find.text('Using reserved money'), findsOneWidget);
+    expect(find.text('Use reserved money'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('transaction-amount')),
       '210000',
@@ -887,12 +887,62 @@ void main() {
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('scheduled-reservation')), findsOneWidget);
+    expect(find.text('Optional · Applied when marked paid'), findsOneWidget);
+    final destinationTop = tester.getTopLeft(find.text('To Account')).dy;
+    final reservationTop = tester
+        .getTopLeft(find.text('Use reserved money'))
+        .dy;
+    final descriptionTop = tester.getTopLeft(find.text('Description')).dy;
+    expect(destinationTop, lessThan(reservationTop));
+    expect(reservationTop, lessThan(descriptionTop));
     await tester.ensureVisible(
       find.byKey(const ValueKey('scheduled-reservation')),
     );
     await tester.tap(find.byKey(const ValueKey('scheduled-reservation')));
     await tester.pumpAndSettle();
     expect(find.text('Monthly Bills'), findsOneWidget);
+  });
+
+  testWidgets('transfer reservation follows destination account context', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 50000,
+      date: DateTime.now(),
+    );
+    await tester.pumpWidget(
+      _app(
+        store,
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () =>
+                showTransferDialog(context, initialFromAccountId: 'checking'),
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('transfer-reservation')), findsOneWidget);
+    expect(find.text('Optional · Choose a Goal or Fund'), findsOneWidget);
+    final destinationTop = tester.getTopLeft(find.text('To Account')).dy;
+    final reservationTop = tester
+        .getTopLeft(find.text('Use reserved money'))
+        .dy;
+    final descriptionTop = tester.getTopLeft(find.text('Description')).dy;
+    expect(destinationTop, lessThan(reservationTop));
+    expect(reservationTop, lessThan(descriptionTop));
   });
 
   testWidgets(
