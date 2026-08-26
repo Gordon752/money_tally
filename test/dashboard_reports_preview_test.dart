@@ -1,4 +1,3 @@
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
@@ -15,7 +14,7 @@ void main() {
   final now = DateTime(2026, 7, 23);
 
   testWidgets(
-    'dashboard report preview uses report totals and renders six-month trend',
+    'dashboard report preview uses report totals and shows top spending',
     (tester) async {
       var viewFullCount = 0;
       await pumpPreview(
@@ -27,22 +26,23 @@ void main() {
 
       expect(find.text('This Month'), findsOneWidget);
       expect(find.text(r'$1,000.00'), findsOneWidget);
-      expect(find.text(r'$250.00'), findsOneWidget);
-      expect(find.text(r'$750.00'), findsOneWidget);
+      expect(find.text(r'$450.00'), findsOneWidget);
+      expect(find.text(r'$550.00'), findsOneWidget);
+      expect(find.text('Top Spending'), findsOneWidget);
       expect(
-        find.byKey(const ValueKey('dashboard-monthly-trend-chart')),
+        find.byKey(const ValueKey('dashboard-top-spending-groceries')),
         findsOneWidget,
       );
-
-      final chart = tester.widget<BarChart>(
-        find.descendant(
-          of: find.byKey(const ValueKey('dashboard-reports-preview')),
-          matching: find.byType(BarChart),
-        ),
+      expect(
+        find.byKey(const ValueKey('dashboard-top-spending-fuel')),
+        findsOneWidget,
       );
-      expect(chart.data.barGroups, hasLength(6));
-      expect(chart.data.barGroups.last.barRods[0].toY, 1000);
-      expect(chart.data.barGroups.last.barRods[1].toY, 250);
+      expect(
+        find.byKey(const ValueKey('dashboard-top-spending-dining')),
+        findsNothing,
+      );
+      expect(find.text(r'$250.00'), findsOneWidget);
+      expect(find.text(r'$150.00'), findsOneWidget);
 
       await tester.tap(
         find.byKey(const ValueKey('dashboard-view-full-report')),
@@ -59,11 +59,8 @@ void main() {
       onViewFull: () {},
     );
 
-    expect(find.text('No income or expense activity yet'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('dashboard-monthly-trend-chart')),
-      findsNothing,
-    );
+    expect(find.text('Top Spending'), findsOneWidget);
+    expect(find.text('No expenses recorded this month.'), findsOneWidget);
     expect(find.text('View Full Report'), findsOneWidget);
   });
 
@@ -165,6 +162,18 @@ FinanceDataStore dashboardReportStore(DateTime now) {
           kind: v2_category.CategoryKind.expense,
           sync: sync,
         ),
+        v2_category.CategoryRecord(
+          id: 'fuel',
+          name: 'Fuel',
+          kind: v2_category.CategoryKind.expense,
+          sync: sync,
+        ),
+        v2_category.CategoryRecord(
+          id: 'dining',
+          name: 'Dining',
+          kind: v2_category.CategoryKind.expense,
+          sync: sync,
+        ),
       ],
       transactions: [
         dashboardTransaction(
@@ -176,11 +185,27 @@ FinanceDataStore dashboardReportStore(DateTime now) {
           sync: sync,
         ),
         dashboardTransaction(
-          id: 'expense',
+          id: 'groceries-expense',
           type: TransactionType.expense,
           date: DateTime(now.year, now.month, 3),
           amountMinor: 25000,
           categoryId: 'groceries',
+          sync: sync,
+        ),
+        dashboardTransaction(
+          id: 'fuel-expense',
+          type: TransactionType.expense,
+          date: DateTime(now.year, now.month, 3),
+          amountMinor: 15000,
+          categoryId: 'fuel',
+          sync: sync,
+        ),
+        dashboardTransaction(
+          id: 'dining-expense',
+          type: TransactionType.expense,
+          date: DateTime(now.year, now.month, 3),
+          amountMinor: 5000,
+          categoryId: 'dining',
           sync: sync,
         ),
         dashboardTransaction(

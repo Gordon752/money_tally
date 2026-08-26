@@ -1009,10 +1009,21 @@ class FirestoreRecordRepository
     final document = generation == null
         ? _preferencesDoc(userId)
         : _generationPreferencesDoc(userId, generation);
-    await document.set(
-      _cloudWriteJson(preferences.toJson()),
-      SetOptions(merge: true),
-    );
+    await firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(document);
+      final remotePreferences = snapshot.exists
+          ? UserPreferences.fromJson(snapshot.data()!)
+          : const UserPreferences();
+      final mergedPreferences = mergePayeeCatalogPreferences(
+        preferred: preferences,
+        other: remotePreferences,
+      );
+      transaction.set(
+        document,
+        _cloudWriteJson(mergedPreferences.toJson()),
+        SetOptions(merge: true),
+      );
+    });
   }
 
   @override

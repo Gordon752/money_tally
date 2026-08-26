@@ -1100,6 +1100,7 @@ class FinanceDataStore extends ChangeNotifier {
             savedPayeeNames: const [],
             archivedPayeeNames: const {},
             deletedPayeeNames: const {},
+            payeeCatalogStates: const {},
           );
     return restoreBackupDataSet(
       FinanceDataSet(
@@ -4732,11 +4733,16 @@ class FinanceDataStore extends ChangeNotifier {
   }
 
   Future<void> savePreferences(UserPreferences preferences) async {
+    final resolvedPreferences = reconcilePayeeCatalogMutation(
+      current: _dataSet.preferences,
+      requested: preferences,
+      newOperationId: newReservationOperationId,
+    );
     final notificationsChanged =
         _dataSet.preferences.notificationsEnabled !=
-        preferences.notificationsEnabled;
-    _dataSet = _dataSet.copyWith(preferences: preferences);
-    await _commit(preferences: preferences);
+        resolvedPreferences.notificationsEnabled;
+    _dataSet = _dataSet.copyWith(preferences: resolvedPreferences);
+    await _commit(preferences: resolvedPreferences);
     if (notificationsChanged) {
       await refreshScheduledNotifications();
     }
@@ -6008,7 +6014,10 @@ FinanceDataSet mergeFinanceDataSetsPreferCurrent({
       incoming: incoming.reservationOperations,
       current: current.reservationOperations,
     ),
-    preferences: current.preferences,
+    preferences: mergePayeeCatalogPreferences(
+      preferred: current.preferences,
+      other: incoming.preferences,
+    ),
   );
 }
 
@@ -6069,8 +6078,11 @@ FinanceDataSet mergeFinanceDataSetsPreferIncoming({
       incoming: incoming.reservationOperations,
       current: current.reservationOperations,
     ),
-    preferences: incoming.preferences.copyWith(
-      legacyV1MigrationCompleted: true,
+    preferences: mergePayeeCatalogPreferences(
+      preferred: incoming.preferences.copyWith(
+        legacyV1MigrationCompleted: true,
+      ),
+      other: current.preferences,
     ),
   );
 }

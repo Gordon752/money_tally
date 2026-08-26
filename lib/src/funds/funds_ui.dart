@@ -1,5 +1,159 @@
 part of '../../main.dart';
 
+class FundsPreviewCard extends StatelessWidget {
+  const FundsPreviewCard({this.onViewAll, this.onCreate, super.key});
+
+  final VoidCallback? onViewAll;
+  final VoidCallback? onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = FinanceDataStoreScope.watch(context);
+    final funds = [...store.activeFunds]
+      ..sort((left, right) => left.name.compareTo(right.name));
+    final preview = funds.take(2).toList(growable: false);
+    return AppCard(
+      title: 'Funds',
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      child: preview.isEmpty
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                CompactEmptyRow(icon: AppIcon.savings, label: 'No funds yet'),
+                Padding(
+                  padding: const EdgeInsets.only(left: 32, top: AppSpacing.xxs),
+                  child: Text(
+                    'Create a Fund to reserve money for upcoming needs.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    key: const ValueKey('dashboard-create-fund'),
+                    onPressed: onCreate ?? () => showFundEditor(context),
+                    icon: Icon(AppIcon.add, size: AppIconSize.inline),
+                    label: const Text('Create Fund'),
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              children: [
+                for (var index = 0; index < preview.length; index++) ...[
+                  FundPreviewRow(fund: preview[index]),
+                  if (index != preview.length - 1)
+                    Divider(
+                      height: 14,
+                      color: Theme.of(
+                        context,
+                      ).dividerColor.withValues(alpha: 0.24),
+                    ),
+                ],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    key: const ValueKey('dashboard-view-all-funds'),
+                    onPressed: onViewAll,
+                    iconAlignment: IconAlignment.end,
+                    icon: Icon(AppIcon.arrowForward, size: AppIconSize.inline),
+                    label: const Text('View All Funds'),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class FundPreviewRow extends StatelessWidget {
+  const FundPreviewRow({required this.fund, super.key});
+
+  final FundRecord fund;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = FinanceDataStoreScope.watch(context);
+    final current = store.currentFundAmountMinor(fund.id);
+    final target = fund.targetBalanceMinor;
+    final difference = current - target;
+    final progress = target <= 0 ? 0.0 : (current / target).clamp(0.0, 1.0);
+    final status = target <= 0
+        ? 'No target set'
+        : difference >= 0
+        ? '${money(difference, store.preferences.currency)} above target'
+        : '${money(difference.abs(), store.preferences.currency)} needed to fully fund';
+    final accent = Color(fund.accentColorValue);
+    return Semantics(
+      button: true,
+      label:
+          '${fund.name}, ${money(current, store.preferences.currency)} available, $status',
+      child: InkWell(
+        key: ValueKey('dashboard-fund-${fund.id}'),
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        onTap: () => showFundActions(context, fund.id),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      fund.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Text(
+                    status,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xxs),
+              Text(
+                '${money(current, store.preferences.currency)} available',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontFeatures: const [AppTextStyles.tabularFigures],
+                ),
+              ),
+              if (target > 0) ...[
+                const SizedBox(height: AppSpacing.xs),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                  child: LinearProgressIndicator(
+                    minHeight: 5,
+                    value: progress,
+                    color: accent,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class FundsPlanContent extends StatelessWidget {
   const FundsPlanContent({super.key});
 

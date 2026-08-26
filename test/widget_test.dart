@@ -1405,6 +1405,7 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          key: const ValueKey('scoped-ledger-transfer-metadata-test'),
           theme: ThemeData(platform: TargetPlatform.iOS),
           home: FinanceDataStoreScope(
             store: dataStore,
@@ -1430,7 +1431,7 @@ void main() {
       );
       expect(expenseMetadata.data, category.name);
       expect(expenseMetadata.data, isNot(contains(currentAccount.name)));
-      expect(transferMetadata.data, 'Transfer • ${otherAccount.name}');
+      expect(transferMetadata.data, 'To ${otherAccount.name}');
       expect(
         find.byKey(
           const ValueKey('ledger-running-balance-account-metadata-transfer'),
@@ -1471,6 +1472,30 @@ void main() {
             )
             .initialAccountFilterId,
         currentAccount.id,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          key: const ValueKey('unfiltered-main-ledger-transfer-test'),
+          theme: ThemeData(platform: TargetPlatform.iOS),
+          home: FinanceDataStoreScope(
+            store: dataStore,
+            child: const Scaffold(
+              body: SingleChildScrollView(child: LedgerView()),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final mainLedgerTransferMetadata = tester.widget<Text>(
+        find.byKey(
+          const ValueKey('ledger-metadata-details-account-metadata-transfer'),
+        ),
+      );
+      expect(
+        mainLedgerTransferMetadata.data,
+        '${currentAccount.name} • To ${otherAccount.name}',
       );
     },
   );
@@ -6497,7 +6522,24 @@ void main() {
       ),
     );
     expect((ordinaryDecoration.decoration as BoxDecoration).color, isNull);
-    expect((ordinaryDecoration.decoration as BoxDecoration).border, isNull);
+    expect((ordinaryDecoration.decoration as BoxDecoration).border, isNotNull);
+    final referenceCellSize = tester.getSize(
+      find.byKey(
+        ValueKey('scheduled-calendar-selection-${month.year}-${month.month}-1'),
+      ),
+    );
+    for (final day in <int>[10, 15, daysInMonth(month)]) {
+      expect(
+        tester.getSize(
+          find.byKey(
+            ValueKey(
+              'scheduled-calendar-selection-${month.year}-${month.month}-$day',
+            ),
+          ),
+        ),
+        referenceCellSize,
+      );
+    }
     final pageScroll = tester.state<ScrollableState>(
       find.byType(Scrollable).first,
     );
@@ -6946,7 +6988,7 @@ void main() {
     }
   });
 
-  testWidgets('calendar edge badges stay inside Sunday and Saturday cells', (
+  testWidgets('calendar count badges start at two and stay inside cells', (
     tester,
   ) async {
     final month = DateTime(2026, 8);
@@ -6965,6 +7007,14 @@ void main() {
     }
 
     final sundayActivities = [CalendarDayActivity.scheduled(occurrence(2, 0))];
+    final mondayActivities = [
+      for (var index = 0; index < 2; index++)
+        CalendarDayActivity.scheduled(occurrence(3, index)),
+    ];
+    final tuesdayActivities = [
+      for (var index = 0; index < 3; index++)
+        CalendarDayActivity.scheduled(occurrence(4, index)),
+    ];
     final saturdayActivities = [
       for (var index = 0; index < 123; index++)
         CalendarDayActivity.scheduled(occurrence(8, index)),
@@ -6988,6 +7038,10 @@ void main() {
                 activitySummaryByDay: {
                   calendarDateKey(DateTime(2026, 8, 2)):
                       CalendarDayActivitySummary(sundayActivities),
+                  calendarDateKey(DateTime(2026, 8, 3)):
+                      CalendarDayActivitySummary(mondayActivities),
+                  calendarDateKey(DateTime(2026, 8, 4)):
+                      CalendarDayActivitySummary(tuesdayActivities),
                   calendarDateKey(DateTime(2026, 8, 8)):
                       CalendarDayActivitySummary(saturdayActivities),
                 },
@@ -7003,8 +7057,16 @@ void main() {
       ),
     );
 
-    for (final day in const [2, 8]) {
-      final cell = find.byKey(ValueKey('scheduled-calendar-day-2026-8-$day'));
+    expect(
+      find.byKey(const ValueKey('scheduled-calendar-count-2026-8-2')),
+      findsNothing,
+    );
+
+    for (final entry in const <int, String>{3: '2', 4: '3', 8: '99+'}.entries) {
+      final day = entry.key;
+      final cell = find.byKey(
+        ValueKey('scheduled-calendar-selection-2026-8-$day'),
+      );
       final badge = find.byKey(
         ValueKey('scheduled-calendar-count-2026-8-$day'),
       );
@@ -7016,10 +7078,128 @@ void main() {
       expect(badgeRect.right, lessThanOrEqualTo(cellRect.right));
       expect(badgeRect.top, greaterThanOrEqualTo(cellRect.top));
       expect(badgeRect.bottom, lessThanOrEqualTo(cellRect.bottom));
+      expect(
+        find.descendant(of: badge, matching: find.text(entry.value)),
+        findsOneWidget,
+      );
     }
-    expect(find.text('1'), findsWidgets);
-    expect(find.text('123'), findsOneWidget);
     expect(find.text(r'-$100,000.00'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('calendar activity dots retain colors and centered geometry', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: const Scaffold(
+          body: Center(
+            child: CalendarActivityDots(
+              types: <CalendarActivityType>{
+                CalendarActivityType.income,
+                CalendarActivityType.expense,
+                CalendarActivityType.transfer,
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final dotFinders =
+        <CalendarActivityType>[
+              CalendarActivityType.income,
+              CalendarActivityType.expense,
+              CalendarActivityType.transfer,
+            ]
+            .map(
+              (type) =>
+                  find.byKey(ValueKey('calendar-activity-dot-${type.name}')),
+            )
+            .toList(growable: false);
+    final rects = dotFinders.map(tester.getRect).toList(growable: false);
+    for (final rect in rects) {
+      expect(rect.size, const Size(6, 6));
+      expect(rect.center.dy, rects.first.center.dy);
+    }
+
+    final incomeDecoration = tester.widget<DecoratedBox>(dotFinders[0]);
+    final expenseDecoration = tester.widget<DecoratedBox>(dotFinders[1]);
+    expect(
+      (incomeDecoration.decoration as BoxDecoration).color,
+      AppTheme.accent,
+    );
+    expect(
+      (expenseDecoration.decoration as BoxDecoration).color,
+      AppColors.danger,
+    );
+  });
+
+  testWidgets('sparse calendar keeps subtle uniform cells at iPad width', (
+    tester,
+  ) async {
+    final month = DateTime(2026, 2);
+    final scheduled = scheduledExpense(
+      id: 'sparse-calendar-item',
+      payee: 'Sparse',
+      amountMinor: 2500,
+      nextDate: DateTime(2026, 2, 14),
+    );
+    final occurrence = ScheduledCalendarOccurrence(
+      transaction: scheduled,
+      scheduledDate: scheduled.nextDate,
+      plannedAmountMinor: scheduled.amountMinor,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 760,
+              child: ScheduledCalendarGrid(
+                month: month,
+                activitySummaryByDay: {
+                  calendarDateKey(
+                    DateTime(2026, 2, 14),
+                  ): CalendarDayActivitySummary([
+                    CalendarDayActivity.scheduled(occurrence),
+                  ]),
+                },
+                activityFilter: CalendarActivityFilter.expenses,
+                currency: const UserPreferences().currency,
+                selectedDate: DateTime(2026, 2, 14),
+                onSelectDate: (_) {},
+                onActivityFilterChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final firstDay = find.byKey(
+      const ValueKey('scheduled-calendar-selection-2026-2-1'),
+    );
+    final lastDay = find.byKey(
+      const ValueKey('scheduled-calendar-selection-2026-2-28'),
+    );
+    final activeDay = find.byKey(
+      const ValueKey('scheduled-calendar-selection-2026-2-14'),
+    );
+    expect(tester.getSize(firstDay), tester.getSize(lastDay));
+    expect(tester.getSize(firstDay), tester.getSize(activeDay));
+
+    final firstDayDecoration =
+        tester.widget<DecoratedBox>(firstDay).decoration as BoxDecoration;
+    final firstDayBorder = firstDayDecoration.border! as Border;
+    expect(firstDayBorder.top.color.a, lessThan(0.35));
+    expect(
+      find.byKey(const ValueKey('scheduled-calendar-count-2026-2-14')),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -8061,6 +8241,13 @@ void main() {
       final occurrenceRow = find.byKey(
         ValueKey('scheduled-row-${schedule.id}-${calendarDateId(dueDate)}'),
       );
+      final occurrenceInkWell = find.descendant(
+        of: occurrenceRow,
+        matching: find.byType(InkWell),
+      );
+      final occurrenceInkRect = tester.getRect(occurrenceInkWell);
+      expect(occurrenceInkRect.left, closeTo(highlightRect.left, 0.1));
+      expect(occurrenceInkRect.right, closeTo(highlightRect.right, 0.1));
       await tester.ensureVisible(occurrenceRow);
       await tester.pumpAndSettle();
       await tester.longPress(occurrenceRow);

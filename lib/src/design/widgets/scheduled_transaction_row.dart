@@ -34,7 +34,10 @@ class ScheduledTransactionRow extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: AppSpacing.sm,
+        ),
         child: Row(
           children: [
             Expanded(

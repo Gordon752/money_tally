@@ -81,7 +81,11 @@ class _FinanceHomeState extends State<FinanceHome> {
     );
   }
 
-  void _openPlan(PlanSegment segment, {bool createGoal = false}) {
+  void _openPlan(
+    PlanSegment segment, {
+    bool createGoal = false,
+    bool createFund = false,
+  }) {
     setState(() {
       selected = FinanceSection.plan;
       _planSegment = segment;
@@ -95,6 +99,10 @@ class _FinanceHomeState extends State<FinanceHome> {
     if (createGoal) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(showCreateGoalSheet(context));
+      });
+    } else if (createFund) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(showFundEditor(context));
       });
     }
   }
@@ -449,6 +457,9 @@ class _FinanceHomeState extends State<FinanceHome> {
                     selected = FinanceSection.ledger;
                   }),
                   onViewBudgets: () => _openPlan(PlanSegment.budgets),
+                  onViewFunds: () => _openPlan(PlanSegment.funds),
+                  onCreateFund: () =>
+                      _openPlan(PlanSegment.funds, createFund: true),
                   onViewGoals: () => _openPlan(PlanSegment.goals),
                   onCreateGoal: () =>
                       _openPlan(PlanSegment.goals, createGoal: true),
@@ -1435,6 +1446,8 @@ class DashboardView extends StatelessWidget {
   const DashboardView({
     required this.onViewLedger,
     required this.onViewBudgets,
+    required this.onViewFunds,
+    required this.onCreateFund,
     required this.onViewGoals,
     required this.onCreateGoal,
     required this.onViewScheduled,
@@ -1444,6 +1457,8 @@ class DashboardView extends StatelessWidget {
 
   final VoidCallback onViewLedger;
   final VoidCallback onViewBudgets;
+  final VoidCallback onViewFunds;
+  final VoidCallback onCreateFund;
   final VoidCallback onViewGoals;
   final VoidCallback onCreateGoal;
   final VoidCallback onViewScheduled;
@@ -1471,6 +1486,7 @@ class DashboardView extends StatelessWidget {
               currency: currency,
             ),
             DashboardReportsPreviewCard(onViewFull: onViewReports),
+            FundsPreviewCard(onViewAll: onViewFunds, onCreate: onCreateFund),
             GoalsPreviewCard(onViewAll: onViewGoals, onCreate: onCreateGoal),
             NextScheduledCard(
               scheduled: scheduled,
@@ -1745,22 +1761,59 @@ class _DashboardReportsPreviewCardState
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
-          if (report.hasTrendData)
-            DashboardMonthlyTrendChart(
-              totals: report.monthlyTotals,
-              currency: currency,
-            )
-          else
+          Text(
+            'Top Spending',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          if (report.categoryTotals.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
               child: Text(
-                'No income or expense activity yet',
-                textAlign: TextAlign.center,
+                'No expenses recorded this month.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-            ),
+            )
+          else
+            for (final category in report.categoryTotals.take(2))
+              Padding(
+                key: ValueKey('dashboard-top-spending-${category.id}'),
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: category.colorValue == null
+                            ? AppTheme.accent
+                            : Color(category.colorValue!),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    Expanded(
+                      child: Text(
+                        category.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text(
+                      money(category.amountMinor, currency),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           Align(
             alignment: Alignment.centerRight,
             child: TextButton.icon(
@@ -1773,115 +1826,6 @@ class _DashboardReportsPreviewCardState
           ),
         ],
       ),
-    );
-  }
-}
-
-class DashboardMonthlyTrendChart extends StatelessWidget {
-  const DashboardMonthlyTrendChart({
-    required this.totals,
-    required this.currency,
-    super.key,
-  });
-
-  final List<MonthlyReportTotal> totals;
-  final CurrencyFormatSettings currency;
-
-  @override
-  Widget build(BuildContext context) {
-    final maxAmount = totals.fold<int>(
-      0,
-      (maximum, month) =>
-          max(maximum, max(month.incomeMinor, month.expensesMinor)),
-    );
-    final maxY = max(1, maxAmount).toDouble() / 100 * 1.12;
-    return Column(
-      children: [
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ReportLegendDot(color: AppTheme.accent, label: 'Income'),
-            SizedBox(width: AppSpacing.md),
-            ReportLegendDot(color: AppTheme.rose, label: 'Expenses'),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Semantics(
-          label: monthlyTrendSemantics(totals, currency),
-          child: ExcludeSemantics(
-            child: SizedBox(
-              key: const ValueKey('dashboard-monthly-trend-chart'),
-              height: 112,
-              child: BarChart(
-                BarChartData(
-                  minY: 0,
-                  maxY: maxY,
-                  alignment: BarChartAlignment.spaceAround,
-                  borderData: FlBorderData(show: false),
-                  gridData: const FlGridData(show: false),
-                  barTouchData: BarTouchData(enabled: false),
-                  titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    leftTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 24,
-                        getTitlesWidget: (value, _) {
-                          final index = value.toInt();
-                          if (index < 0 || index >= totals.length) {
-                            return const SizedBox.shrink();
-                          }
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 5),
-                            child: Text(
-                              reportMonthAbbreviation(totals[index].month),
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  barGroups: [
-                    for (var index = 0; index < totals.length; index += 1)
-                      BarChartGroupData(
-                        x: index,
-                        barsSpace: 2,
-                        barRods: [
-                          BarChartRodData(
-                            toY: totals[index].incomeMinor / 100,
-                            width: 6,
-                            color: AppTheme.accent,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(2),
-                            ),
-                          ),
-                          BarChartRodData(
-                            toY: totals[index].expensesMinor / 100,
-                            width: 6,
-                            color: AppTheme.rose,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(2),
-                            ),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -5234,6 +5178,9 @@ String _ledgerMetadataDetails(
   required String? categoryName,
   String? reservationLabel,
 }) {
+  final transferDestinationName = transaction.isTransfer
+      ? accountsById[transaction.transferAccountId]?.name
+      : null;
   if (scopedAccountId == null) {
     return [
       accountsById[transaction.accountId]?.name,
@@ -5241,18 +5188,22 @@ String _ledgerMetadataDetails(
       reservationLabel,
       if (transaction.type == TransactionType.adjustment)
         'Manual balance adjustment',
-      if (transaction.isTransfer) 'Transfer',
+      if (transaction.isTransfer)
+        transferDestinationName == null || transferDestinationName.isEmpty
+            ? 'Transfer'
+            : 'To $transferDestinationName',
     ].whereType<String>().where((value) => value.isNotEmpty).join(' • ');
   }
   if (transaction.isTransfer) {
-    final otherAccountId = transaction.accountId == scopedAccountId
+    final isOutgoing = transaction.accountId == scopedAccountId;
+    final otherAccountId = isOutgoing
         ? transaction.transferAccountId
         : transaction.accountId;
     final otherAccountName = accountsById[otherAccountId]?.name;
     return [
-      'Transfer',
-      if (otherAccountName != null && otherAccountName.isNotEmpty)
-        otherAccountName,
+      otherAccountName == null || otherAccountName.isEmpty
+          ? 'Transfer'
+          : '${isOutgoing ? 'To' : 'From'} $otherAccountName',
       reservationLabel,
     ].whereType<String>().where((value) => value.isNotEmpty).join(' • ');
   }
@@ -8520,10 +8471,7 @@ class _ScheduledViewState extends State<ScheduledView> {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: actionableRow,
-            ),
+            actionableRow,
             Positioned(
               left: 8,
               top: 8,
@@ -9270,6 +9218,10 @@ class ScheduledCalendarDayCell extends StatelessWidget {
         activitySummary?.types ?? const <CalendarActivityType>{};
     final isAll = activityFilter == CalendarActivityFilter.all;
     final isMarked = matchingCount > 0;
+    const cellRadius = BorderRadius.all(Radius.circular(10));
+    final cellBorderColor = isSelected
+        ? AppTheme.accent.withValues(alpha: 0.58)
+        : theme.colorScheme.outlineVariant.withValues(alpha: 0.28);
     return Semantics(
       label:
           '$day, $matchingCount ${matchingCount == 1 ? 'activity' : 'activities'}'
@@ -9278,123 +9230,128 @@ class ScheduledCalendarDayCell extends StatelessWidget {
       button: true,
       child: SizedBox(
         height: 72,
-        child: InkWell(
-          key: ValueKey(
-            'scheduled-calendar-day-${month.year}-${month.month}-$day',
-          ),
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => onSelectDate(DateTime(month.year, month.month, day!)),
-          child: Center(
-            child: SizedBox(
-              width: 52,
-              height: 68,
-              child: Stack(
-                clipBehavior: Clip.hardEdge,
-                children: [
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      key: ValueKey(
-                        'scheduled-calendar-selection-${month.year}-${month.month}-$day',
-                      ),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? AppTheme.accent.withValues(alpha: 0.10)
-                            : null,
-                        borderRadius: BorderRadius.circular(14),
-                        border: isSelected
-                            ? Border.all(
-                                color: AppTheme.accent.withValues(alpha: 0.55),
-                              )
-                            : null,
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(1, 6, 1, 4),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 24,
-                              height: 22,
-                              alignment: Alignment.center,
-                              decoration: isToday
-                                  ? BoxDecoration(
-                                      border: Border.all(
-                                        color: AppTheme.accent,
-                                        width: 1.2,
-                                      ),
-                                      borderRadius: BorderRadius.circular(
-                                        AppRadii.pill,
-                                      ),
-                                    )
-                                  : null,
-                              child: Text(
-                                '$day',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontWeight: isMarked || isSelected
-                                      ? FontWeight.w900
-                                      : FontWeight.w600,
-                                  color: isSelected ? AppTheme.accent : null,
-                                  height: 1,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                            if (isAll)
-                              CalendarActivityDots(types: presentTypes)
-                            else if (matchingAmount != null)
-                              CalendarCellAmount(
-                                key: ValueKey(
-                                  'calendar-filtered-total-'
-                                  '${month.year}-${month.month}-$day',
-                                ),
-                                amountMinor: matchingAmount,
-                                currency: currency,
-                                color: activityFilter.color(context),
-                              )
-                            else
-                              const SizedBox(height: 14),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (matchingCount > 0)
-                    Positioned(
-                      top: 1,
-                      right: 1,
+        child: Padding(
+          padding: const EdgeInsets.all(1.5),
+          child: DecoratedBox(
+            key: ValueKey(
+              'scheduled-calendar-selection-${month.year}-${month.month}-$day',
+            ),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppTheme.accent.withValues(alpha: 0.09)
+                  : null,
+              borderRadius: cellRadius,
+              border: Border.all(
+                color: cellBorderColor,
+                width: isSelected ? 1.15 : 0.65,
+              ),
+            ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: ValueKey(
+                  'scheduled-calendar-day-${month.year}-${month.month}-$day',
+                ),
+                borderRadius: cellRadius,
+                onTap: () =>
+                    onSelectDate(DateTime(month.year, month.month, day!)),
+                child: Stack(
+                  clipBehavior: Clip.hardEdge,
+                  alignment: Alignment.center,
+                  children: [
+                    Center(
                       child: Container(
-                        key: ValueKey(
-                          'scheduled-calendar-count-'
-                          '${month.year}-${month.month}-$day',
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 17,
-                          minHeight: 17,
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        width: 24,
+                        height: 22,
                         alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? AppTheme.accent.withValues(alpha: 0.16)
-                              : AppTheme.accent.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(AppRadii.pill),
-                          border: Border.all(
-                            color: AppTheme.accent.withValues(alpha: 0.24),
-                            width: 1,
-                          ),
-                        ),
+                        decoration: isToday && !isSelected
+                            ? BoxDecoration(
+                                border: Border.all(
+                                  color: AppTheme.accent,
+                                  width: 1.2,
+                                ),
+                                borderRadius: BorderRadius.circular(
+                                  AppRadii.pill,
+                                ),
+                              )
+                            : null,
                         child: Text(
-                          matchingCount > 999 ? '999+' : '$matchingCount',
-                          style: const TextStyle(
-                            color: AppTheme.accent,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w900,
+                          '$day',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontWeight: isMarked || isSelected
+                                ? FontWeight.w900
+                                : FontWeight.w600,
+                            color: isSelected ? AppTheme.accent : null,
                             height: 1,
                           ),
                         ),
                       ),
                     ),
-                ],
+                    if (isAll && presentTypes.isNotEmpty)
+                      Positioned(
+                        left: 2,
+                        right: 2,
+                        bottom: 6,
+                        child: Center(
+                          child: CalendarActivityDots(types: presentTypes),
+                        ),
+                      )
+                    else if (!isAll && matchingAmount != null)
+                      Positioned(
+                        left: 3,
+                        right: 3,
+                        bottom: 5,
+                        child: CalendarCellAmount(
+                          key: ValueKey(
+                            'calendar-filtered-total-'
+                            '${month.year}-${month.month}-$day',
+                          ),
+                          amountMinor: matchingAmount,
+                          currency: currency,
+                          color: activityFilter.color(context),
+                        ),
+                      ),
+                    if (matchingCount >= 2)
+                      Positioned(
+                        top: 3,
+                        right: 3,
+                        child: Container(
+                          key: ValueKey(
+                            'scheduled-calendar-count-'
+                            '${month.year}-${month.month}-$day',
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 17,
+                            minHeight: 17,
+                            maxWidth: 24,
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? AppTheme.accent.withValues(alpha: 0.16)
+                                : AppTheme.accent.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(AppRadii.pill),
+                            border: Border.all(
+                              color: AppTheme.accent.withValues(alpha: 0.25),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Text(
+                            matchingCount > 99 ? '99+' : '$matchingCount',
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            style: const TextStyle(
+                              color: AppTheme.accent,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              height: 1,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -9428,6 +9385,7 @@ class CalendarActivityDots extends StatelessWidget {
       CalendarActivityType.fund => AppTheme.accent,
       CalendarActivityType.goal => _goalBlue,
     };
+    final visibleTypes = order.where(types.contains).toList(growable: false);
 
     return SizedBox(
       key: const ValueKey('calendar-activity-dots'),
@@ -9436,20 +9394,22 @@ class CalendarActivityDots extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          for (final type in order)
-            if (types.contains(type)) ...[
-              Semantics(
-                label: calendarActivityTypeLabel(type),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: colorFor(type),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const SizedBox(width: 6, height: 6),
+          for (var index = 0; index < visibleTypes.length; index++) ...[
+            Semantics(
+              label: calendarActivityTypeLabel(visibleTypes[index]),
+              child: DecoratedBox(
+                key: ValueKey(
+                  'calendar-activity-dot-${visibleTypes[index].name}',
                 ),
+                decoration: BoxDecoration(
+                  color: colorFor(visibleTypes[index]),
+                  shape: BoxShape.circle,
+                ),
+                child: const SizedBox(width: 6, height: 6),
               ),
-              if (type != order.last) const SizedBox(width: 3),
-            ],
+            ),
+            if (index < visibleTypes.length - 1) const SizedBox(width: 3),
+          ],
         ],
       ),
     );
@@ -9474,7 +9434,6 @@ class CalendarCellAmount extends StatelessWidget {
       currency,
     ).formatMinor(amountMinor, showPositiveSign: false);
     return SizedBox(
-      width: 52,
       height: 14,
       child: FittedBox(
         fit: BoxFit.scaleDown,

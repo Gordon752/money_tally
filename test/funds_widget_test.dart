@@ -22,6 +22,93 @@ import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
 void main() {
+  testWidgets('Funds preview shows a focused empty-state action', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    var createCount = 0;
+    await tester.pumpWidget(
+      _app(
+        store,
+        SingleChildScrollView(
+          child: FundsPreviewCard(
+            onCreate: () => createCount += 1,
+            onViewAll: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('No funds yet'), findsOneWidget);
+    expect(
+      find.text('Create a Fund to reserve money for upcoming needs.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('dashboard-create-fund')));
+    expect(createCount, 1);
+  });
+
+  testWidgets('Funds preview shows two active funds and opens all Funds', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final bills = await store.createFund(
+      name: 'Bills',
+      fundingAccountId: 'checking',
+      targetBalanceMinor: 100000,
+    );
+    final repairs = await store.createFund(
+      name: 'Repairs',
+      fundingAccountId: 'checking',
+      targetBalanceMinor: 50000,
+    );
+    await store.createFund(
+      name: 'Travel',
+      fundingAccountId: 'checking',
+      targetBalanceMinor: 20000,
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: bills.id,
+      amountMinor: 60000,
+      date: DateTime(2026, 8, 25),
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: repairs.id,
+      amountMinor: 50000,
+      date: DateTime(2026, 8, 25),
+    );
+    var viewAllCount = 0;
+    await tester.pumpWidget(
+      _app(
+        store,
+        SingleChildScrollView(
+          child: FundsPreviewCard(
+            onCreate: () {},
+            onViewAll: () => viewAllCount += 1,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(ValueKey('dashboard-fund-${bills.id}')), findsOneWidget);
+    expect(
+      find.byKey(ValueKey('dashboard-fund-${repairs.id}')),
+      findsOneWidget,
+    );
+    expect(find.text('Travel'), findsNothing);
+    expect(find.text(r'$600.00 available'), findsOneWidget);
+    expect(find.text(r'$400.00 needed to fully fund'), findsOneWidget);
+    expect(find.text(r'$500.00 available'), findsOneWidget);
+    expect(find.text(r'$0.00 above target'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('dashboard-view-all-funds')));
+    expect(viewAllCount, 1);
+  });
+
   testWidgets('Fund allocation amount receives focus immediately', (
     tester,
   ) async {
