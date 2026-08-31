@@ -12,9 +12,32 @@ readonly installed_app="${install_dir}/${app_name}"
 readonly staging_app="${install_dir}/.Trackmark Money.installing.app"
 readonly build_project="/private/tmp/trackmark_macos_release_workspace"
 readonly previous_app="${build_project}/previous-installed.app"
+readonly minimum_free_gib="${TRACKMARK_MAC_MIN_FREE_GIB:-20}"
+
+if [[ "${minimum_free_gib}" != <-> ]] || (( minimum_free_gib <= 0 )); then
+  echo "TRACKMARK_MAC_MIN_FREE_GIB must be a positive whole number." >&2
+  exit 1
+fi
+
+readonly minimum_free_kib=$((minimum_free_gib * 1024 * 1024))
 
 echo "Preparing a clean Trackmark Money macOS build..."
 mkdir -p "${build_project}"
+
+readonly available_kib="$(df -Pk "${build_project}" | awk 'NR == 2 { print $4 }')"
+if [[ "${available_kib}" != <-> ]]; then
+  echo "Could not determine available disk space; refusing to start the Mac build." >&2
+  exit 1
+fi
+
+readonly available_gib=$((available_kib / 1024 / 1024))
+if (( available_kib < minimum_free_kib )); then
+  echo "At least ${minimum_free_gib} GB of free disk space is required for a safe Mac build; ${available_gib} GB is available." >&2
+  echo "Free additional space and run the installer again. The installed app was not changed." >&2
+  exit 1
+fi
+
+echo "Disk-space preflight passed (${available_gib} GB available)."
 rsync -a --delete \
   --exclude '.dart_tool' \
   --exclude '.git' \
