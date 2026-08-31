@@ -1770,11 +1770,17 @@ class FinanceDataStore extends ChangeNotifier {
     required ReservationContainerType containerType,
     required String containerId,
   }) {
-    return reservationOperations
+    final effective = effectiveReservationOperationsForContainer(
+      operations: reservationOperations,
+      transactions: transactions,
+      scheduledTransactions: scheduledTransactions,
+      containerType: containerType,
+      containerId: containerId,
+    );
+    final ledger = calculateReservationLedger(operations: effective);
+    return effective
         .where(
-          (operation) =>
-              operation.containerType == containerType &&
-              operation.containerId == containerId,
+          (operation) => ledger.acceptedOperationIds.contains(operation.id),
         )
         .toList(growable: false)
       ..sort((left, right) {

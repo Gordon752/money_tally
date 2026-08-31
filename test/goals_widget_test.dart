@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
+import 'package:money_tally/src/domain/category.dart' as v2_category;
 import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/goal.dart';
 import 'package:money_tally/src/domain/goal_funding.dart';
@@ -69,7 +70,7 @@ void main() {
         ),
         currency,
       ),
-      r'Ahead by $100.00',
+      r'$100.00 ahead of schedule',
     );
     expect(
       goalCurrentStateLabel(
@@ -82,10 +83,13 @@ void main() {
         ),
         currency,
       ),
-      r'Behind by $100.00',
+      r'$100.00 behind schedule',
     );
 
-    final achieved = dated.copyWith(status: GoalStatus.completed);
+    final achieved = dated.copyWith(
+      status: GoalStatus.completed,
+      completedAt: DateTime(2026, 8, 23),
+    );
     expect(
       goalCurrentStateLabel(
         achieved,
@@ -97,7 +101,20 @@ void main() {
         ),
         currency,
       ),
-      'Achieved',
+      '✓ Achieved August 23, 2026',
+    );
+    expect(
+      goalCurrentStateLabel(
+        achieved,
+        metrics(
+          status: GoalProgressStatus.ahead,
+          current: 75000,
+          remaining: 25000,
+          difference: 5000,
+        ),
+        currency,
+      ),
+      r'$250.00 needed to reach target',
     );
 
     final maintain = _goal(
@@ -664,6 +681,46 @@ void main() {
     expect(find.text('On track'), findsNothing);
   });
 
+  testWidgets('Goal card and details agree on ahead-of-schedule amount', (
+    tester,
+  ) async {
+    await _setPhoneSize(tester);
+    final store = _store();
+    final goal = await store.createGoal(
+      name: 'Christmas',
+      targetAmountMinor: 50000,
+      startingAmountMinor: 0,
+      targetDate: DateTime(2026, 12, 11),
+      defaultFundingAccountId: 'checking',
+      now: DateTime(2026, 8, 24),
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.goal,
+      containerId: goal.id,
+      amountMinor: 40000,
+      date: DateTime(2026, 8, 30),
+    );
+    final expectedLabel = goalCurrentStateLabel(
+      goal,
+      store.goalMetrics(goal.id),
+      store.preferences.currency,
+    );
+
+    await tester.pumpWidget(_testApp(store, GoalCard(goal: goal)));
+    expect(expectedLabel, contains('ahead of schedule'));
+    expect(find.text(expectedLabel), findsOneWidget);
+    expect(find.text('On track'), findsNothing);
+
+    await tester.tap(find.byKey(ValueKey('goal-card-${goal.id}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('View Activity'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Goal Details'), findsOneWidget);
+    expect(find.text(expectedLabel), findsWidgets);
+    expect(find.text('On track'), findsNothing);
+  });
+
   testWidgets('undated funded Goal uses remaining language everywhere', (
     tester,
   ) async {
@@ -684,7 +741,7 @@ void main() {
     );
     await tester.pumpWidget(_testApp(store, GoalCard(goal: goal)));
 
-    expect(find.text(r'$750.00 remaining'), findsOneWidget);
+    expect(find.text(r'$750.00 needed to reach target'), findsOneWidget);
     expect(find.text('On track'), findsNothing);
     expect(find.textContaining('Ahead'), findsNothing);
     expect(find.textContaining('Behind'), findsNothing);
@@ -696,7 +753,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Goal Details'), findsOneWidget);
-    expect(find.text(r'$750.00 remaining'), findsWidgets);
+    expect(find.text(r'$750.00 needed to reach target'), findsWidgets);
     expect(find.text('On track'), findsNothing);
     expect(find.textContaining('Ahead'), findsNothing);
     expect(find.textContaining('Behind'), findsNothing);
@@ -720,10 +777,22 @@ void main() {
         amountMinor: 50000,
         date: DateTime(2026, 8, 23),
       );
+      final achievedAt = store.goalById(goal.id).completedAt;
+      expect(achievedAt, isNotNull);
+      await store.addExpense(
+        accountId: 'checking',
+        categoryId: 'general-expense',
+        date: DateTime(2026, 8, 24, 14, 41),
+        payee: 'Hotel',
+        amountMinor: 10000,
+        reservationContainerType: ReservationContainerType.goal,
+        reservationContainerId: goal.id,
+      );
 
       await tester.pumpWidget(_testApp(store, const GoalsPage()));
       expect(find.text('Vacation'), findsOneWidget);
-      expect(find.textContaining('Achieved'), findsOneWidget);
+      expect(find.text(r'$100.00 needed to reach target'), findsOneWidget);
+      expect(find.textContaining('Achieved'), findsNothing);
 
       await tester.tap(find.byKey(ValueKey('goal-card-${goal.id}')));
       await tester.pumpAndSettle();
@@ -738,10 +807,14 @@ void main() {
       expect(find.text('Goal Details'), findsOneWidget);
       expect(find.text('Activity'), findsOneWidget);
       expect(find.textContaining('Allocated'), findsOneWidget);
+      expect(find.textContaining('Spent'), findsOneWidget);
+      expect(find.textContaining('Hotel'), findsOneWidget);
+      expect(find.text('Previously achieved'), findsOneWidget);
+      expect(find.text(fullMonthDateLabel(achievedAt!)), findsWidgets);
       expect(
         find.byKey(
           ValueKey(
-            'goal-reservation-activity-${store.reservationOperations.single.id}',
+            'goal-reservation-activity-${store.reservationOperations.first.id}',
           ),
         ),
         findsOneWidget,
@@ -1424,7 +1497,17 @@ FinanceDataStore _store({
           sync: v2_sync.SyncMetadata.fresh(now: DateTime.utc(2026, 7, 1)),
         ),
       ],
-      categories: const [],
+      categories: [
+        v2_category.CategoryRecord(
+          id: 'general-expense',
+          name: 'General',
+          kind: v2_category.CategoryKind.expense,
+          sync: v2_sync.SyncMetadata.fresh(
+            now: DateTime.utc(2026, 7, 1),
+            deviceId: 'test',
+          ),
+        ),
+      ],
       transactions: const [],
       scheduledTransactions: const [],
       budgets: const [],

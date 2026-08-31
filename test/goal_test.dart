@@ -99,8 +99,8 @@ void main() {
       ], now: DateTime(2026, 7, 16));
 
       expect(metrics.currentAmountMinor, 52500);
-      expect(metrics.expectedAmountMinor, 55000);
-      expect(metrics.aheadBehindMinor, -2500);
+      expect(metrics.expectedAmountMinor, 50000);
+      expect(metrics.aheadBehindMinor, 2500);
       expect(metrics.requiredWeeklyMinor, 22167);
       expect(metrics.requiredMonthlyMinor, 96386);
       expect(metrics.status, GoalProgressStatus.onTrack);
@@ -130,6 +130,151 @@ void main() {
 
       expect(moderatelyBehind.status, GoalProgressStatus.behind);
       expect(seriouslyBehind.status, GoalProgressStatus.seriouslyBehind);
+    });
+
+    test('dated Goals expose exact ahead and behind pace amounts', () {
+      final goal = _goal(
+        targetAmountMinor: 50000,
+        targetDate: DateTime(2026, 12, 11),
+        createdAt: DateTime(2026, 7, 1),
+      );
+      final ahead = const GoalCalculator().calculate(goal, [
+        _contribution(goalId: goal.id, amountMinor: 40000),
+      ], now: DateTime(2026, 8, 1));
+      final behind = const GoalCalculator().calculate(goal, [
+        _contribution(goalId: goal.id, amountMinor: 2000),
+      ], now: DateTime(2026, 8, 1));
+
+      expect(ahead.status, GoalProgressStatus.ahead);
+      expect(ahead.aheadBehindMinor, greaterThan(0));
+      expect(behind.status, GoalProgressStatus.seriouslyBehind);
+      expect(behind.aheadBehindMinor, lessThan(0));
+    });
+
+    test('dated Reach Target pace uses the creation-to-target window', () {
+      final goal = _goal(
+        targetAmountMinor: 100000,
+        targetDate: DateTime(2026, 4, 12),
+        createdAt: DateTime(2026, 1, 1),
+      );
+      const calculator = GoalCalculator();
+
+      final notStarted = calculator.calculate(
+        goal,
+        const [],
+        currentAmountMinorOverride: 0,
+        now: DateTime(2026, 2, 20),
+      );
+      final onTrack = calculator.calculate(
+        goal,
+        const [],
+        currentAmountMinorOverride: 50000,
+        now: DateTime(2026, 2, 20),
+      );
+      final ahead = calculator.calculate(
+        goal,
+        const [],
+        currentAmountMinorOverride: 70000,
+        now: DateTime(2026, 2, 20),
+      );
+      final behind = calculator.calculate(
+        goal,
+        const [],
+        currentAmountMinorOverride: 30000,
+        now: DateTime(2026, 2, 20),
+      );
+      final achieved = calculator.calculate(
+        goal,
+        const [],
+        currentAmountMinorOverride: 100000,
+        now: DateTime(2026, 2, 20),
+      );
+
+      expect(notStarted.status, GoalProgressStatus.notStarted);
+      expect(onTrack.expectedAmountMinor, 50000);
+      expect(onTrack.aheadBehindMinor, 0);
+      expect(onTrack.status, GoalProgressStatus.onTrack);
+      expect(ahead.aheadBehindMinor, 20000);
+      expect(ahead.status, GoalProgressStatus.ahead);
+      expect(behind.aheadBehindMinor, -20000);
+      expect(
+        behind.status,
+        anyOf(GoalProgressStatus.behind, GoalProgressStatus.seriouslyBehind),
+      );
+      expect(achieved.status, GoalProgressStatus.completed);
+    });
+
+    test('Christmas example is materially ahead of expected progress', () {
+      final goal = _goal(
+        targetAmountMinor: 50000,
+        startingAmountMinor: 40000,
+        targetDate: DateTime(2026, 12, 11),
+        createdAt: DateTime(2026, 8, 24),
+      );
+
+      final metrics = const GoalCalculator().calculate(
+        goal,
+        const [],
+        now: DateTime(2026, 8, 30),
+      );
+
+      expect(metrics.expectedAmountMinor, 2752);
+      expect(metrics.aheadBehindMinor, 37248);
+      expect(metrics.status, GoalProgressStatus.ahead);
+      expect(metrics.requiredWeeklyMinor, 680);
+      expect(metrics.requiredMonthlyMinor, 2956);
+    });
+
+    test('minor-unit tolerance prevents false pace changes from rounding', () {
+      final goal = _goal(
+        targetAmountMinor: 10001,
+        targetDate: DateTime(2026, 1, 4),
+        createdAt: DateTime(2026, 1, 1),
+      );
+      const calculator = GoalCalculator();
+
+      final roundedExpected = calculator.calculate(
+        goal,
+        const [],
+        currentAmountMinorOverride: 3334,
+        now: DateTime(2026, 1, 2),
+      );
+      final toleranceEdge = calculator.calculate(
+        goal,
+        const [],
+        currentAmountMinorOverride: 3585,
+        now: DateTime(2026, 1, 2),
+      );
+      final meaningfulLead = calculator.calculate(
+        goal,
+        const [],
+        currentAmountMinorOverride: 3586,
+        now: DateTime(2026, 1, 2),
+      );
+
+      expect(roundedExpected.expectedAmountMinor, 3334);
+      expect(roundedExpected.status, GoalProgressStatus.onTrack);
+      expect(toleranceEdge.aheadBehindMinor, 251);
+      expect(toleranceEdge.status, GoalProgressStatus.onTrack);
+      expect(meaningfulLead.aheadBehindMinor, 252);
+      expect(meaningfulLead.status, GoalProgressStatus.ahead);
+    });
+
+    test('historically completed Goal below target uses current metrics', () {
+      final achievedAt = DateTime(2026, 7, 20);
+      final goal = _goal(
+        targetAmountMinor: 100000,
+        targetDate: DateTime(2026, 9, 1),
+        createdAt: DateTime(2026, 7, 1),
+      ).copyWith(status: GoalStatus.completed, completedAt: achievedAt);
+      final metrics = const GoalCalculator().calculate(goal, [
+        _contribution(goalId: goal.id, amountMinor: 75000),
+      ], now: DateTime(2026, 7, 24));
+
+      expect(metrics.currentAmountMinor, 75000);
+      expect(metrics.remainingAmountMinor, 25000);
+      expect(metrics.status, GoalProgressStatus.ahead);
+      expect(goal.completedAt, achievedAt);
     });
 
     test('target edits recalculate without rewriting contributions', () {

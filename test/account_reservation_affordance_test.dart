@@ -6,6 +6,8 @@ import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/reservation.dart';
 import 'package:money_tally/src/domain/sync_metadata.dart' as v2_sync;
 import 'package:money_tally/src/domain/user_preferences.dart';
+import 'package:money_tally/src/design/design_tokens.dart';
+import 'package:money_tally/src/design/widgets/account_card.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
@@ -63,6 +65,16 @@ void main() {
     );
     expect(planningText.style?.decoration, TextDecoration.underline);
     expect(planningText.style?.decorationThickness, lessThanOrEqualTo(0.7));
+    final planningSpans = (planningText.textSpan as TextSpan).children!;
+    expect((planningSpans.first as TextSpan).style?.color, AppColors.accent);
+    expect(
+      (planningSpans.first as TextSpan).style?.fontWeight,
+      FontWeight.w700,
+    );
+    expect(
+      (planningSpans.last as TextSpan).style?.color,
+      AppTheme.light().colorScheme.onSurfaceVariant,
+    );
     await tester.tap(planningAction);
     await tester.pumpAndSettle();
     expect(ledgerOpenCount, 3);
@@ -108,6 +120,46 @@ void main() {
     expect(planningAction, findsOneWidget);
     expect(tester.getSize(planningAction).height, greaterThanOrEqualTo(44));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('negative Available uses restrained overcommit emphasis', (
+    tester,
+  ) async {
+    await _setSize(tester, const Size(393, 852));
+    final account = v2_account.AccountRecord(
+      id: 'checking',
+      name: 'CTBI',
+      type: v2_account.AccountType.checking,
+      openingBalanceMinor: 10000,
+      sync: v2_sync.SyncMetadata.fresh(deviceId: 'test'),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: AccountCard(
+            account: account,
+            balanceMinor: 10000,
+            availableToSpendMinor: -2500,
+            reservedMinor: 12500,
+          ),
+        ),
+      ),
+    );
+
+    final text = tester.widget<Text>(
+      find.byKey(const ValueKey('account-availability-checking')),
+    );
+    final spans = (text.textSpan as TextSpan).children!;
+    expect((spans.first as TextSpan).style?.color, AppColors.warning);
+    expect(
+      (spans.last as TextSpan).style?.color,
+      AppTheme.light().colorScheme.onSurfaceVariant,
+    );
+    expect(
+      find.textContaining('Overcommitted by', findRichText: true),
+      findsOneWidget,
+    );
   });
 }
 

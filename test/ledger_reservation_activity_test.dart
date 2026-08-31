@@ -113,6 +113,21 @@ void main() {
       expect(find.text('Checking • Emergency Goal'), findsNWidgets(2));
       expect(find.text('Checking • Bills Fund'), findsNWidgets(2));
       expect(find.text('Funded Goals'), findsNothing);
+
+      final utilityY = tester.getTopLeft(find.text('Utility Bill')).dy;
+      final returnedY = tester.getTopLeft(find.text('Returned from Bills')).dy;
+      final allocatedY = tester.getTopLeft(find.text('Allocated to Bills')).dy;
+      expect(utilityY, lessThan(returnedY));
+      expect(returnedY, lessThan(allocatedY));
+      expect(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey('ledger-timestamp-slot-reservation-fund-return'),
+          ),
+          matching: find.text('11:00 AM'),
+        ),
+        findsOneWidget,
+      );
     },
   );
 
@@ -410,13 +425,16 @@ FinanceDataStore _reservationLedgerStore() {
       fundingAccountId: fundingAccountId,
       kind: kind,
       amountMinor: amountMinor,
-      effectiveDate: day.add(Duration(days: dayOffset, hours: hour)),
+      effectiveDate: day.add(Duration(days: dayOffset)),
       revision: revision,
       baseRevision: revision - 1,
       operationId: id,
       deviceId: 'test',
       transactionId: transactionId,
-      sync: sync,
+      sync: v2_sync.SyncMetadata.fresh(
+        now: day.add(Duration(days: dayOffset, hours: hour)),
+        deviceId: 'test',
+      ),
     );
   }
 

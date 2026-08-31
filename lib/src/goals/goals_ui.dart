@@ -56,20 +56,23 @@ String goalCurrentStateLabel(
         ? 'Target met'
         : '${money(metrics.remainingAmountMinor, currency)} needed to replenish';
   }
-  if (goal.isAchieved) {
+  if (metrics.currentAmountMinor >= goal.targetAmountMinor.abs()) {
     return goal.completedAt == null
         ? 'Achieved'
         : '✓ Achieved ${fullMonthDateLabel(goal.completedAt!)}';
   }
   if (metrics.currentAmountMinor == 0) return 'Not started';
+  if (goal.completedAt != null) {
+    return '${money(metrics.remainingAmountMinor, currency)} needed to reach target';
+  }
   if (goal.targetDate == null) {
-    return '${money(metrics.remainingAmountMinor, currency)} remaining';
+    return '${money(metrics.remainingAmountMinor, currency)} needed to reach target';
   }
   return switch (metrics.status) {
     GoalProgressStatus.ahead =>
-      'Ahead by ${money(metrics.aheadBehindMinor.abs(), currency)}',
+      '${money(metrics.aheadBehindMinor.abs(), currency)} ahead of schedule',
     GoalProgressStatus.behind || GoalProgressStatus.seriouslyBehind =>
-      'Behind by ${money(metrics.aheadBehindMinor.abs(), currency)}',
+      '${money(metrics.aheadBehindMinor.abs(), currency)} behind schedule',
     _ => metrics.status.label,
   };
 }
@@ -752,14 +755,6 @@ class GoalCard extends StatelessWidget {
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              if (goal.isAchieved && metrics.remainingAmountMinor > 0)
-                Text(
-                  '${money(metrics.remainingAmountMinor, store.preferences.currency)} below original target',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontFeatures: const [AppTextStyles.tabularFigures],
-                  ),
-                ),
               if (!compact) ...[
                 if (goal.targetDate != null)
                   Text(
@@ -768,7 +763,7 @@ class GoalCard extends StatelessWidget {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                if (goal.targetDate != null && goal.isActive)
+                if (goal.targetDate != null && goal.isOnMainGoalsScreen)
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -2562,9 +2557,9 @@ class GoalContributionHeader extends StatelessWidget {
             fontFeatures: const [AppTextStyles.tabularFigures],
           ),
         ),
-        if (goal.isAchieved && goal.completedAt != null)
+        if (goal.completedAt != null)
           Text(
-            '✓ Achieved ${fullMonthDateLabel(goal.completedAt!)}',
+            'Previously achieved ${fullMonthDateLabel(goal.completedAt!)}',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: _goalBlue,
               fontWeight: FontWeight.w800,
@@ -2575,11 +2570,9 @@ class GoalContributionHeader extends StatelessWidget {
               ? metrics.remainingAmountMinor == 0
                     ? 'Target met'
                     : '${money(metrics.remainingAmountMinor, currency)} needed to replenish'
-              : goal.isAchieved
-              ? metrics.remainingAmountMinor == 0
-                    ? 'Original target remains met'
-                    : '${money(metrics.remainingAmountMinor, currency)} below original target'
-              : '${money(metrics.remainingAmountMinor, currency)} remaining',
+              : metrics.remainingAmountMinor == 0
+              ? 'Target met'
+              : '${money(metrics.remainingAmountMinor, currency)} needed to reach target',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: Theme.of(context).colorScheme.onSurfaceVariant,
             fontFeatures: const [AppTextStyles.tabularFigures],
@@ -2595,6 +2588,8 @@ class ReservationActivityRow extends StatelessWidget {
     required this.operation,
     required this.currency,
     this.fundingAccountName,
+    this.linkedTransaction,
+    this.reversedOperation,
     this.accentColor = _goalBlue,
     this.keyPrefix = 'reservation-activity',
     super.key,
@@ -2603,11 +2598,15 @@ class ReservationActivityRow extends StatelessWidget {
   final ReservationOperationRecord operation;
   final CurrencyFormatSettings currency;
   final String? fundingAccountName;
+  final TransactionRecord? linkedTransaction;
+  final ReservationOperationRecord? reversedOperation;
   final Color accentColor;
   final String keyPrefix;
 
   @override
   Widget build(BuildContext context) {
+    final reversalDecreases =
+        reversedOperation?.kind == ReservationOperationKind.allocate;
     final (label, icon, isDecrease) = switch (operation.kind) {
       ReservationOperationKind.allocate => (
         'Allocated',
@@ -2620,35 +2619,58 @@ class ReservationActivityRow extends StatelessWidget {
         true,
       ),
       ReservationOperationKind.consume => ('Spent', AppIcon.expense, true),
-      ReservationOperationKind.reversal => ('Reversed', AppIcon.undo, false),
+      ReservationOperationKind.reversal => (
+        'Reversed',
+        AppIcon.undo,
+        reversalDecreases,
+      ),
     };
-    final accountSuffix = fundingAccountName == null
-        ? ''
-        : operation.kind == ReservationOperationKind.allocate
-        ? ' from $fundingAccountName'
-        : operation.kind == ReservationOperationKind.returnFunds
-        ? ' to $fundingAccountName'
-        : '';
+    final contextLabel = switch (operation.kind) {
+      ReservationOperationKind.allocate =>
+        fundingAccountName == null ? null : 'From $fundingAccountName',
+      ReservationOperationKind.returnFunds =>
+        fundingAccountName == null ? null : 'To $fundingAccountName',
+      ReservationOperationKind.consume =>
+        linkedTransaction?.payee.trim().isNotEmpty == true
+            ? linkedTransaction!.payee.trim()
+            : 'Reservation spend',
+      ReservationOperationKind.reversal => switch (reversedOperation?.kind) {
+        ReservationOperationKind.allocate => 'Allocation undone',
+        ReservationOperationKind.returnFunds => 'Return undone',
+        ReservationOperationKind.consume => 'Spend undone',
+        _ => 'Reservation action undone',
+      },
+    };
+    final timeLabel = ledgerTransactionTimeLabel(
+      context,
+      operation.sync.createdAt,
+    );
+    final dateTimeLabel = [
+      fullMonthDateLabel(operation.effectiveDate),
+      ?timeLabel,
+    ].join(' · ');
+    final subtitleParts = <String>[
+      ?contextLabel,
+      dateTimeLabel,
+      if (operation.note.trim().isNotEmpty) operation.note.trim(),
+    ];
     return ListTile(
       key: ValueKey('$keyPrefix-${operation.id}'),
       contentPadding: EdgeInsets.zero,
       leading: TransactionFormIcon(icon, color: accentColor),
       title: Text(
-        '$label ${money(operation.amountMinor, currency)}$accountSuffix',
+        '$label ${money(operation.amountMinor, currency)}',
         style: const TextStyle(fontWeight: FontWeight.w800),
       ),
       subtitle: Text(
-        '${fullMonthDateLabel(operation.effectiveDate)}${operation.note.trim().isEmpty ? '' : ' · ${operation.note.trim()}'}',
+        subtitleParts.join(' · '),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: Text(
-        '${isDecrease ? '−' : '+'}${money(operation.amountMinor, currency)}',
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: isDecrease ? AppColors.muted : accentColor,
-          fontWeight: FontWeight.w800,
-          fontFeatures: const [AppTextStyles.tabularFigures],
-        ),
+      trailing: Icon(
+        isDecrease ? AppIcon.arrowDown : AppIcon.arrowUp,
+        color: isDecrease ? AppColors.muted : accentColor,
+        size: AppIconSize.inline,
       ),
     );
   }
@@ -2670,7 +2692,8 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
     useRootNavigator: false,
     builder: (dialogContext) {
       final metrics = store.goalMetrics(goal.id);
-      final goalTransactions = goal.accountId == null
+      final goalTransactions =
+          goal.usesReservationModel || goal.accountId == null
           ? const <TransactionRecord>[]
           : (store.transactions
                 .where(
@@ -2736,8 +2759,6 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               label: 'Status',
               value: goal.isArchived
                   ? 'Archived'
-                  : goal.isAchieved
-                  ? 'Achieved'
                   : goalCurrentStateLabel(
                       goal,
                       metrics,
@@ -2748,7 +2769,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
             if (goal.goalType == GoalType.reachTarget &&
                 goal.completedAt != null)
               GoalDetailValue(
-                label: 'Achieved',
+                label: 'Previously achieved',
                 value: fullMonthDateLabel(goal.completedAt!),
                 icon: AppIcon.success,
               ),
@@ -2764,7 +2785,7 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                 value: fullMonthDateLabel(goal.targetDate!),
                 icon: AppIcon.calendar,
               ),
-            if (goal.targetDate != null && goal.isActive)
+            if (goal.targetDate != null && goal.isOnMainGoalsScreen)
               GoalDetailValue(
                 label: 'Required',
                 value:
@@ -2778,14 +2799,16 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
               GoalDetailValue(
                 label: goal.goalType == GoalType.maintainBalance
                     ? 'Reserve balance'
-                    : 'Ahead / behind',
+                    : 'Pace',
                 value: goal.goalType == GoalType.maintainBalance
                     ? metrics.aheadBehindMinor >= 0
                           ? '${money(metrics.aheadBehindMinor, store.preferences.currency)} above reserve target'
                           : '${money(metrics.aheadBehindMinor.abs(), store.preferences.currency)} below reserve target'
-                    : metrics.aheadBehindMinor >= 0
-                    ? '${money(metrics.aheadBehindMinor, store.preferences.currency)} ahead'
-                    : '${money(metrics.aheadBehindMinor.abs(), store.preferences.currency)} behind',
+                    : goalCurrentStateLabel(
+                        goal,
+                        metrics,
+                        store.preferences.currency,
+                      ),
                 icon: AppIcon.adjustment,
               ),
             if (goal.description.trim().isNotEmpty)
@@ -2815,6 +2838,23 @@ Future<void> showGoalDetails(BuildContext context, String goalId) async {
                   operation: operation,
                   currency: store.preferences.currency,
                   keyPrefix: 'goal-reservation-activity',
+                  linkedTransaction: operation.transactionId == null
+                      ? null
+                      : store.transactions
+                            .where(
+                              (transaction) =>
+                                  transaction.id == operation.transactionId &&
+                                  !transaction.isDeleted,
+                            )
+                            .firstOrNull,
+                  reversedOperation: operation.reversesOperationId == null
+                      ? null
+                      : store.reservationOperations
+                            .where(
+                              (candidate) =>
+                                  candidate.id == operation.reversesOperationId,
+                            )
+                            .firstOrNull,
                   fundingAccountName: store.accounts
                       .where(
                         (account) => account.id == operation.fundingAccountId,

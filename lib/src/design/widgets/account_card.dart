@@ -236,24 +236,37 @@ class AccountCard extends StatelessWidget {
   }
 
   Widget _availabilitySummaryWidget(BuildContext context) {
-    final text = Text(
-      _availabilitySummary(),
+    final theme = Theme.of(context);
+    final parts = _availabilitySummary().split(' · ');
+    final baseStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontWeight: FontWeight.w600,
+      decoration: onAvailabilityTap == null
+          ? TextDecoration.none
+          : TextDecoration.underline,
+      decorationColor: theme.colorScheme.onSurfaceVariant.withValues(
+        alpha: 0.42,
+      ),
+      decorationThickness: 0.7,
+    );
+    final text = Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: parts.first,
+            style: baseStyle?.copyWith(
+              color: _isOvercommitted ? AppColors.warning : AppColors.accent,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          for (final part in parts.skip(1))
+            TextSpan(text: ' · $part', style: baseStyle),
+        ],
+      ),
       key: ValueKey('account-availability-${account.id}'),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-        color: _isOvercommitted
-            ? AppColors.warning
-            : Theme.of(context).colorScheme.onSurfaceVariant,
-        fontWeight: FontWeight.w600,
-        decoration: onAvailabilityTap == null
-            ? TextDecoration.none
-            : TextDecoration.underline,
-        decorationColor: Theme.of(
-          context,
-        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.42),
-        decorationThickness: 0.7,
-      ),
+      style: baseStyle,
     );
     if (onAvailabilityTap == null) {
       return Align(alignment: Alignment.centerLeft, child: text);

@@ -1,5 +1,181 @@
 part of '../../main.dart';
 
+class FundTargetPresentation {
+  const FundTargetPresentation({
+    required this.status,
+    required this.currentCycleProgress,
+    required this.nextCycleProgress,
+    required this.showsTwoCycles,
+  });
+
+  final String status;
+  final double currentCycleProgress;
+  final double nextCycleProgress;
+  final bool showsTwoCycles;
+}
+
+FundTargetPresentation fundTargetPresentation({
+  required FundRecord fund,
+  required int currentMinor,
+  required CurrencyFormatSettings currency,
+  DateTime? asOf,
+}) {
+  final target = fund.targetBalanceMinor;
+  if (target <= 0) {
+    return const FundTargetPresentation(
+      status: 'No target set',
+      currentCycleProgress: 0,
+      nextCycleProgress: 0,
+      showsTwoCycles: false,
+    );
+  }
+  final current = currentMinor.clamp(0, 0x7FFFFFFFFFFFFFFF).toInt();
+  if (current < target) {
+    return FundTargetPresentation(
+      status: '${money(target - current, currency)} needed to fully fund',
+      currentCycleProgress: current / target,
+      nextCycleProgress: 0,
+      showsTwoCycles: fund.targetCadence == FundTargetCadence.monthly,
+    );
+  }
+  if (current == target) {
+    return FundTargetPresentation(
+      status: 'Target met',
+      currentCycleProgress: 1,
+      nextCycleProgress: 0,
+      showsTwoCycles: fund.targetCadence == FundTargetCadence.monthly,
+    );
+  }
+  if (fund.targetCadence != FundTargetCadence.monthly) {
+    return FundTargetPresentation(
+      status: '${money(current - target, currency)} above target',
+      currentCycleProgress: 1,
+      nextCycleProgress: 0,
+      showsTwoCycles: false,
+    );
+  }
+
+  final targetDate = effectiveFundTargetDate(fund, asOf: asOf);
+  final currentCycle = targetDate == null
+      ? 'Current cycle'
+      : _fundMonthName(targetDate);
+  final nextDate = targetDate == null
+      ? null
+      : DateTime(targetDate.year, targetDate.month + 1);
+  final nextCycle = nextDate == null ? 'Next cycle' : _fundMonthName(nextDate);
+  final thirdDate = targetDate == null
+      ? null
+      : DateTime(targetDate.year, targetDate.month + 2);
+  final thirdCycle = thirdDate == null
+      ? 'the following cycle'
+      : _fundMonthName(thirdDate);
+  final secondCycleAmount = current - target;
+  if (current < target * 2) {
+    final nextPercent = (secondCycleAmount * 100 / target).round().clamp(
+      0,
+      100,
+    );
+    return FundTargetPresentation(
+      status: '$currentCycle funded · $nextCycle $nextPercent% funded',
+      currentCycleProgress: 1,
+      nextCycleProgress: secondCycleAmount / target,
+      showsTwoCycles: true,
+    );
+  }
+  if (current == target * 2) {
+    return const FundTargetPresentation(
+      status: '2 months funded',
+      currentCycleProgress: 1,
+      nextCycleProgress: 1,
+      showsTwoCycles: true,
+    );
+  }
+  return FundTargetPresentation(
+    status:
+        '2 months funded · ${money(current - (target * 2), currency)} toward $thirdCycle',
+    currentCycleProgress: 1,
+    nextCycleProgress: 1,
+    showsTwoCycles: true,
+  );
+}
+
+String _fundMonthName(DateTime date) => const [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+][date.month - 1];
+
+class FundTargetProgressBar extends StatelessWidget {
+  const FundTargetProgressBar({
+    required this.presentation,
+    required this.color,
+    this.minHeight = 6,
+    super.key,
+  });
+
+  final FundTargetPresentation presentation;
+  final Color color;
+  final double minHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final background = Theme.of(context).colorScheme.surfaceContainerHighest;
+    if (!presentation.showsTwoCycles) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        child: LinearProgressIndicator(
+          minHeight: minHeight,
+          value: presentation.currentCycleProgress.clamp(0.0, 1.0),
+          color: color,
+          backgroundColor: background,
+        ),
+      );
+    }
+    return Semantics(
+      label: presentation.status,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        child: SizedBox(
+          height: minHeight,
+          child: Row(
+            children: [
+              Expanded(
+                child: LinearProgressIndicator(
+                  minHeight: minHeight,
+                  value: presentation.currentCycleProgress.clamp(0.0, 1.0),
+                  color: color,
+                  backgroundColor: background,
+                ),
+              ),
+              Container(
+                width: 1.5,
+                color: Theme.of(context).colorScheme.surface,
+              ),
+              Expanded(
+                child: LinearProgressIndicator(
+                  minHeight: minHeight,
+                  value: presentation.nextCycleProgress.clamp(0.0, 1.0),
+                  color: color,
+                  backgroundColor: background,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class FundsPreviewCard extends StatelessWidget {
   const FundsPreviewCard({this.onViewAll, this.onCreate, super.key});
 
@@ -78,13 +254,12 @@ class FundPreviewRow extends StatelessWidget {
     final store = FinanceDataStoreScope.watch(context);
     final current = store.currentFundAmountMinor(fund.id);
     final target = fund.targetBalanceMinor;
-    final difference = current - target;
-    final progress = target <= 0 ? 0.0 : (current / target).clamp(0.0, 1.0);
-    final status = target <= 0
-        ? 'No target set'
-        : difference >= 0
-        ? '${money(difference, store.preferences.currency)} above target'
-        : '${money(difference.abs(), store.preferences.currency)} needed to fully fund';
+    final targetPresentation = fundTargetPresentation(
+      fund: fund,
+      currentMinor: current,
+      currency: store.preferences.currency,
+    );
+    final status = targetPresentation.status;
     final accent = Color(fund.accentColorValue);
     return Semantics(
       button: true,
@@ -113,13 +288,16 @@ class FundPreviewRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  Text(
-                    status,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w700,
+                  Flexible(
+                    child: Text(
+                      status,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -134,16 +312,10 @@ class FundPreviewRow extends StatelessWidget {
               ),
               if (target > 0) ...[
                 const SizedBox(height: AppSpacing.xs),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadii.pill),
-                  child: LinearProgressIndicator(
-                    minHeight: 5,
-                    value: progress,
-                    color: accent,
-                    backgroundColor: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHighest,
-                  ),
+                FundTargetProgressBar(
+                  presentation: targetPresentation,
+                  color: accent,
+                  minHeight: 5,
                 ),
               ],
             ],
@@ -262,18 +434,17 @@ class FundPlanCard extends StatelessWidget {
     final store = FinanceDataStoreScope.watch(context);
     final current = store.currentFundAmountMinor(fund.id);
     final target = fund.targetBalanceMinor;
-    final difference = current - target;
-    final progress = target <= 0 ? 0.0 : (current / target).clamp(0.0, 1.0);
     final effectiveTargetDate = effectiveFundTargetDate(fund);
     final accountName = store.accounts
         .where((account) => account.id == fund.fundingAccountId)
         .map((account) => account.name)
         .firstOrNull;
-    final status = target <= 0
-        ? 'No target set'
-        : difference >= 0
-        ? '${money(difference, store.preferences.currency)} above target'
-        : '${money(difference.abs(), store.preferences.currency)} needed to fully fund';
+    final targetPresentation = fundTargetPresentation(
+      fund: fund,
+      currentMinor: current,
+      currency: store.preferences.currency,
+    );
+    final status = targetPresentation.status;
     return Semantics(
       button: true,
       label:
@@ -359,16 +530,9 @@ class FundPlanCard extends StatelessWidget {
                 ),
                 if (target > 0) ...[
                   const SizedBox(height: AppSpacing.xs),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadii.pill),
-                    child: LinearProgressIndicator(
-                      minHeight: 6,
-                      value: progress,
-                      color: AppTheme.accent,
-                      backgroundColor: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                    ),
+                  FundTargetProgressBar(
+                    presentation: targetPresentation,
+                    color: AppTheme.accent,
                   ),
                   const SizedBox(height: AppSpacing.xs),
                 ],
@@ -1286,6 +1450,11 @@ Future<void> showFundDetails(BuildContext context, String fundId) async {
   }
   final current = store.currentFundAmountMinor(fund.id);
   final target = fund.targetBalanceMinor;
+  final targetPresentation = fundTargetPresentation(
+    fund: fund,
+    currentMinor: current,
+    currency: store.preferences.currency,
+  );
   final fundingAccountName = store.accounts
       .where((account) => account.id == fund.fundingAccountId)
       .firstOrNull
@@ -1324,15 +1493,17 @@ Future<void> showFundDetails(BuildContext context, String fundId) async {
           ),
           if (target > 0) ...[
             const SizedBox(height: AppSpacing.sm),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadii.pill),
-              child: LinearProgressIndicator(
-                minHeight: 8,
-                value: (current / target).clamp(0.0, 1.0),
-                color: Color(fund.accentColorValue),
-                backgroundColor: Theme.of(
-                  dialogContext,
-                ).colorScheme.surfaceContainerHighest,
+            FundTargetProgressBar(
+              presentation: targetPresentation,
+              color: Color(fund.accentColorValue),
+              minHeight: 8,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              targetPresentation.status,
+              style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -1378,6 +1549,23 @@ Future<void> showFundDetails(BuildContext context, String fundId) async {
               ReservationActivityRow(
                 operation: operation,
                 currency: store.preferences.currency,
+                linkedTransaction: operation.transactionId == null
+                    ? null
+                    : store.transactions
+                          .where(
+                            (transaction) =>
+                                transaction.id == operation.transactionId &&
+                                !transaction.isDeleted,
+                          )
+                          .firstOrNull,
+                reversedOperation: operation.reversesOperationId == null
+                    ? null
+                    : store.reservationOperations
+                          .where(
+                            (candidate) =>
+                                candidate.id == operation.reversesOperationId,
+                          )
+                          .firstOrNull,
                 fundingAccountName: store.accounts
                     .where(
                       (account) => account.id == operation.fundingAccountId,

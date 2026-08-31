@@ -5,11 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
 import 'package:money_tally/src/domain/budget.dart';
-import 'package:money_tally/src/domain/category.dart';
+import 'package:money_tally/src/domain/category.dart' as v2_category;
 import 'package:money_tally/src/domain/finance_data_set.dart';
 import 'package:money_tally/src/domain/fund.dart';
 import 'package:money_tally/src/domain/goal.dart';
 import 'package:money_tally/src/domain/goal_funding.dart';
+import 'package:money_tally/src/domain/money.dart';
 import 'package:money_tally/src/domain/reservation.dart';
 import 'package:money_tally/src/domain/scheduled_transaction.dart'
     as v2_scheduled;
@@ -22,6 +23,126 @@ import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
 void main() {
+  test('Fund target presentation covers exact and recurring cycle states', () {
+    const currency = CurrencyFormatSettings();
+    final sync = v2_sync.SyncMetadata.fresh(
+      now: DateTime.utc(2026, 8, 25),
+      deviceId: 'test',
+    );
+    FundRecord fund({FundTargetCadence cadence = FundTargetCadence.none}) =>
+        FundRecord(
+          id: 'bills',
+          name: 'Bills',
+          fundingAccountId: 'checking',
+          status: FundStatus.active,
+          targetBalanceMinor: 360000,
+          targetCadence: cadence,
+          nextTargetDate: cadence == FundTargetCadence.monthly
+              ? DateTime(2026, 9, 30)
+              : null,
+          sync: sync,
+        );
+
+    expect(
+      fundTargetPresentation(
+        fund: fund(),
+        currentMinor: 320000,
+        currency: currency,
+      ).status,
+      r'$400.00 needed to fully fund',
+    );
+    expect(
+      fundTargetPresentation(
+        fund: fund(),
+        currentMinor: 360000,
+        currency: currency,
+      ).status,
+      'Target met',
+    );
+    expect(
+      fundTargetPresentation(
+        fund: fund(),
+        currentMinor: 400000,
+        currency: currency,
+      ).status,
+      r'$400.00 above target',
+    );
+
+    final oneAndAHalf = fundTargetPresentation(
+      fund: fund(cadence: FundTargetCadence.monthly),
+      currentMinor: 540000,
+      currency: currency,
+      asOf: DateTime(2026, 8, 25),
+    );
+    expect(oneAndAHalf.status, 'September funded · October 50% funded');
+    expect(oneAndAHalf.currentCycleProgress, 1);
+    expect(oneAndAHalf.nextCycleProgress, 0.5);
+
+    expect(
+      fundTargetPresentation(
+        fund: fund(cadence: FundTargetCadence.monthly),
+        currentMinor: 720000,
+        currency: currency,
+        asOf: DateTime(2026, 8, 25),
+      ).status,
+      '2 months funded',
+    );
+    expect(
+      fundTargetPresentation(
+        fund: fund(cadence: FundTargetCadence.monthly),
+        currentMinor: 800000,
+        currency: currency,
+        asOf: DateTime(2026, 8, 25),
+      ).status,
+      r'2 months funded · $800.00 toward November',
+    );
+    expect(
+      fundTargetPresentation(
+        fund: fund(cadence: FundTargetCadence.monthly),
+        currentMinor: 350000,
+        currency: currency,
+        asOf: DateTime(2026, 8, 25),
+      ).status,
+      r'$100.00 needed to fully fund',
+    );
+  });
+
+  testWidgets('two-cycle Fund card stays valid on narrow iPhone and iPad', (
+    tester,
+  ) async {
+    final store = _store();
+    final fund = await store.createFund(
+      name: 'Monthly Bills',
+      fundingAccountId: 'checking',
+      targetBalanceMinor: 300000,
+      targetCadence: FundTargetCadence.monthly,
+      nextTargetDate: DateTime(2026, 9, 30),
+    );
+    await store.allocateReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 450000,
+      date: DateTime(2026, 8, 25),
+    );
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    for (final size in const [Size(320, 568), Size(1024, 1366)]) {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        _app(store, SingleChildScrollView(child: FundPlanCard(fund: fund))),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('September funded · October 50% funded'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('Funds preview shows a focused empty-state action', (
     tester,
   ) async {
@@ -103,7 +224,7 @@ void main() {
     expect(find.text(r'$600.00 available'), findsOneWidget);
     expect(find.text(r'$400.00 needed to fully fund'), findsOneWidget);
     expect(find.text(r'$500.00 available'), findsOneWidget);
-    expect(find.text(r'$0.00 above target'), findsOneWidget);
+    expect(find.text('Target met'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('dashboard-view-all-funds')));
     expect(viewAllCount, 1);
@@ -1296,13 +1417,27 @@ void main() {
       name: 'Bills',
       fundingAccountId: 'checking',
     );
-    await store.allocateReservation(
+    final allocation = await store.allocateReservation(
       containerType: ReservationContainerType.fund,
       containerId: fund.id,
       amountMinor: 20000,
       date: DateTime(2026, 8, 23),
     );
-    final operation = store.reservationOperations.single;
+    await store.returnReservation(
+      containerType: ReservationContainerType.fund,
+      containerId: fund.id,
+      amountMinor: 5000,
+      date: DateTime(2026, 8, 24),
+    );
+    await store.addExpense(
+      accountId: 'checking',
+      categoryId: 'general-expense',
+      date: DateTime(2026, 8, 25, 14, 41),
+      payee: 'Electric Company',
+      amountMinor: 3000,
+      reservationContainerType: ReservationContainerType.fund,
+      reservationContainerId: fund.id,
+    );
     await tester.pumpWidget(_app(store, FundPlanCard(fund: fund)));
 
     await tester.tap(find.byKey(ValueKey('fund-card-${fund.id}')));
@@ -1315,8 +1450,16 @@ void main() {
     expect(find.text('Fund Details'), findsOneWidget);
     expect(find.text('Activity'), findsOneWidget);
     expect(find.textContaining('Allocated'), findsOneWidget);
+    expect(find.textContaining('Returned'), findsOneWidget);
+    expect(find.textContaining('Spent'), findsOneWidget);
+    expect(find.textContaining('Electric Company'), findsOneWidget);
+    final spentY = tester.getTopLeft(find.textContaining('Spent')).dy;
+    final returnedY = tester.getTopLeft(find.textContaining('Returned')).dy;
+    final allocatedY = tester.getTopLeft(find.textContaining('Allocated')).dy;
+    expect(spentY, lessThan(returnedY));
+    expect(returnedY, lessThan(allocatedY));
     expect(
-      find.byKey(ValueKey('fund-reservation-activity-${operation.id}')),
+      find.byKey(ValueKey('fund-reservation-activity-${allocation.id}')),
       findsOneWidget,
     );
   });
@@ -1434,7 +1577,14 @@ FinanceDataStore _store({
           sync: sync,
         ),
       ],
-      categories: const [],
+      categories: [
+        v2_category.CategoryRecord(
+          id: 'general-expense',
+          name: 'General',
+          kind: v2_category.CategoryKind.expense,
+          sync: sync,
+        ),
+      ],
       transactions: const [],
       scheduledTransactions: const [],
       budgets: const [],
@@ -1524,7 +1674,7 @@ class _FailingOccurrenceRepository
   @override
   Future<void> saveCategory({
     required String userId,
-    required CategoryRecord category,
+    required v2_category.CategoryRecord category,
   }) async {}
 
   @override

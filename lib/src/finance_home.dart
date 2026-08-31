@@ -4269,6 +4269,20 @@ DateTime _ledgerActivityCreatedAt(_LedgerActivity activity) =>
     activity.fundingEvent?.sync.createdAt ??
     activity.reservationActivity!.createdAt;
 
+DateTime _ledgerActivitySortTimestamp(_LedgerActivity activity) {
+  if (activity.reservationActivity != null) {
+    return activity.reservationActivity!.createdAt;
+  }
+  final date = activity.date;
+  final carriesTime =
+      date.hour != 0 ||
+      date.minute != 0 ||
+      date.second != 0 ||
+      date.millisecond != 0 ||
+      date.microsecond != 0;
+  return carriesTime ? date : _ledgerActivityCreatedAt(activity);
+}
+
 String _ledgerActivityId(_LedgerActivity activity) =>
     activity.projection?.transaction.id ??
     activity.fundingEvent?.id ??
@@ -4342,11 +4356,13 @@ class LedgerMonthSection extends StatelessWidget {
               reservationActivity: reservationActivity,
             ),
         ]..sort((left, right) {
-          final dateOrder = right.date.compareTo(left.date);
+          final dateOrder = ledgerCalendarDay(
+            right.date,
+          ).compareTo(ledgerCalendarDay(left.date));
           if (dateOrder != 0) return dateOrder;
-          final leftCreated = _ledgerActivityCreatedAt(left);
-          final rightCreated = _ledgerActivityCreatedAt(right);
-          final createdOrder = rightCreated.compareTo(leftCreated);
+          final leftTimestamp = _ledgerActivitySortTimestamp(left);
+          final rightTimestamp = _ledgerActivitySortTimestamp(right);
+          final createdOrder = rightTimestamp.compareTo(leftTimestamp);
           if (createdOrder != 0) return createdOrder;
           final leftId = _ledgerActivityId(left);
           final rightId = _ledgerActivityId(right);
@@ -5493,10 +5509,7 @@ class ReservationLedgerRow extends StatelessWidget {
       if (!isAccountScoped && account != null) account!.name,
       '${activity.containerName} $containerKind',
     ].join(' • ');
-    final timeLabel = ledgerTransactionTimeLabel(
-      context,
-      activity.effectiveDate,
-    );
+    final timeLabel = ledgerTransactionTimeLabel(context, activity.createdAt);
     final secondaryStyle =
         theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,

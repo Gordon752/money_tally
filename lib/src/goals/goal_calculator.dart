@@ -68,9 +68,6 @@ class GoalProgressMetrics {
 class GoalCalculator {
   const GoalCalculator();
 
-  static const onTrackFloor = 0.95;
-  static const moderatelyBehindFloor = 0.75;
-  static const aheadTolerance = 1.05;
   static const reserveSlightlyBelowFloor = 0.95;
   static const reserveNeedsAttentionFloor = 0.75;
   static const reserveAboveTolerance = 1.05;
@@ -129,7 +126,7 @@ class GoalCalculator {
         status: GoalProgressStatus.archived,
       );
     }
-    if (goal.status == GoalStatus.completed) {
+    if (goal.status == GoalStatus.completed && current >= target) {
       return GoalProgressMetrics(
         currentAmountMinor: current,
         remainingAmountMinor: remaining,
@@ -207,11 +204,9 @@ class GoalCalculator {
     final elapsedDays = totalDays <= 0
         ? 0
         : today.difference(start).inDays.clamp(0, totalDays);
-    final plannedGrowth = (target - goal.startingAmountMinor).clamp(0, target);
     final expected = totalDays <= 0
         ? target
-        : goal.startingAmountMinor +
-              (plannedGrowth * elapsedDays / totalDays).round();
+        : _roundedIntegerRatio(target * elapsedDays, totalDays);
     final aheadBehind = current - expected;
     final daysRemaining = targetDate.difference(today).inDays;
     final weekly = daysRemaining <= 0
@@ -220,16 +215,20 @@ class GoalCalculator {
     final monthly = daysRemaining <= 0
         ? remaining
         : (remaining * averageDaysPerMonth / daysRemaining).ceil();
-    final expectedProgress = expected <= 0 ? 1.0 : current / expected;
+    // A 2.5-percent target band absorbs ordinary day-boundary and cent-rounding
+    // noise while leaving meaningful pace differences visible. Keep this
+    // entirely in minor units so status cannot oscillate because of
+    // floating-point comparisons.
+    final paceToleranceMinor = ((target + 39) ~/ 40).clamp(1, target).toInt();
     final status = targetDate.isBefore(today)
         ? GoalProgressStatus.seriouslyBehind
-        : expectedProgress >= aheadTolerance
+        : aheadBehind > paceToleranceMinor
         ? GoalProgressStatus.ahead
-        : expectedProgress >= onTrackFloor
-        ? GoalProgressStatus.onTrack
-        : expectedProgress >= moderatelyBehindFloor
-        ? GoalProgressStatus.behind
-        : GoalProgressStatus.seriouslyBehind;
+        : aheadBehind < -paceToleranceMinor
+        ? current * 4 < expected * 3
+              ? GoalProgressStatus.seriouslyBehind
+              : GoalProgressStatus.behind
+        : GoalProgressStatus.onTrack;
 
     return GoalProgressMetrics(
       currentAmountMinor: current,
@@ -248,6 +247,11 @@ class GoalCalculator {
       ),
       status: status,
     );
+  }
+
+  int _roundedIntegerRatio(int numerator, int denominator) {
+    if (denominator <= 0 || numerator <= 0) return 0;
+    return (numerator + denominator ~/ 2) ~/ denominator;
   }
 
   GoalProgressMetrics _calculateMaintainBalance({
