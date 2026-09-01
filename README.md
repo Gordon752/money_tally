@@ -21,23 +21,38 @@ To use a different simulator, pass its device name:
 ./tool/run_simulator.sh "iPhone 17 Pro"
 ```
 
-## macOS Release Builds
+## Apple Release Builds and Device Installs
 
-Build and install the Mac app only through the repository's verified installer:
+Use the repository's guarded installers instead of running overlapping Flutter
+or Xcode builds by hand. To build once, install the same signed iOS app on every
+connected iPhone/iPad, and then replace and launch the Mac app:
 
 ```sh
-./tool/install_macos_release.sh
+./tool/install_apple_release.sh all
 ```
 
-Run the installer from the normal Terminal app so macOS can access the
-protected Apple Development signing identity. The installer requires at least
-20 GB of free disk space and stops before copying or building if that safety
-margin is unavailable.
+Individual workflows and safe retries are also available:
 
-The source checkout lives under an iCloud File Provider-managed `Documents`
-folder. Building a signed app directly into the checkout with
-`flutter build macos` can attach Finder/File Provider metadata to the app and
-its embedded frameworks, causing code signing to fail. The installer builds in
-a clean local workspace outside iCloud, verifies the signed bundle, preserves
-the previous installed copy for rollback, and installs the current app in
-`/Applications`.
+```sh
+./tool/install_apple_release.sh ios
+./tool/install_apple_release.sh ios --install-only
+./tool/install_apple_release.sh macos
+./tool/install_apple_release.sh macos --install-only
+./tool/install_apple_release.sh all --preflight-only
+./tool/install_apple_release.sh all --build-only
+```
+
+Run Apple installers from the normal Terminal app so macOS can access the
+protected Apple Development signing identity. Keep physical devices connected,
+unlocked, and trusted until installation finishes. If only a device install
+fails, correct the connection and use `--install-only`; the verified build is
+retained and does not need to be rebuilt.
+
+The workflow uses one global lock so two Apple builds cannot overlap, refuses
+to start beside an unmanaged Flutter/Xcode build, checks for at least 20 GB of
+free space, and keeps full logs while showing concise progress. It builds in a
+stable local workspace outside the iCloud File Provider-managed source checkout
+to avoid signing metadata problems. Interrupted builds are marked for focused
+cleanup on the next run. Signed app bundles and bundle identifiers are verified
+before installation, and the Mac installer preserves the previous app until
+post-install verification succeeds.
