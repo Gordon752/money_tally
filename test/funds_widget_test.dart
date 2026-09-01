@@ -75,27 +75,46 @@ void main() {
       asOf: DateTime(2026, 8, 25),
     );
     expect(oneAndAHalf.status, 'September funded · October 50% funded');
-    expect(oneAndAHalf.currentCycleProgress, 1);
-    expect(oneAndAHalf.nextCycleProgress, 0.5);
+    expect(oneAndAHalf.barProgress, 1);
+    expect(oneAndAHalf.completedCycles, 1);
+    expect(oneAndAHalf.activeCycleProgress, 0.5);
+    expect(oneAndAHalf.showsMovingCycleBoundary, isTrue);
 
-    expect(
-      fundTargetPresentation(
-        fund: fund(cadence: FundTargetCadence.monthly),
-        currentMinor: 720000,
-        currency: currency,
-        asOf: DateTime(2026, 8, 25),
-      ).status,
-      '2 months funded',
+    final exactlyTwo = fundTargetPresentation(
+      fund: fund(cadence: FundTargetCadence.monthly),
+      currentMinor: 720000,
+      currency: currency,
+      asOf: DateTime(2026, 8, 25),
+    );
+    expect(exactlyTwo.status, '2 months funded');
+    expect(exactlyTwo.completedCycles, 2);
+    expect(exactlyTwo.activeCycleProgress, 0);
+    expect(exactlyTwo.showsMovingCycleBoundary, isFalse);
+
+    final twoAndChange = fundTargetPresentation(
+      fund: fund(cadence: FundTargetCadence.monthly),
+      currentMinor: 800000,
+      currency: currency,
+      asOf: DateTime(2026, 8, 25),
+    );
+    expect(twoAndChange.status, r'2 months funded · $800.00 toward November');
+    expect(twoAndChange.completedCycles, 2);
+    expect(twoAndChange.activeCycleProgress, closeTo(2 / 9, 0.000001));
+    expect(twoAndChange.showsMovingCycleBoundary, isTrue);
+
+    final threeAndFortyPercent = fundTargetPresentation(
+      fund: fund(cadence: FundTargetCadence.monthly),
+      currentMinor: 1224000,
+      currency: currency,
+      asOf: DateTime(2026, 8, 25),
     );
     expect(
-      fundTargetPresentation(
-        fund: fund(cadence: FundTargetCadence.monthly),
-        currentMinor: 800000,
-        currency: currency,
-        asOf: DateTime(2026, 8, 25),
-      ).status,
-      r'2 months funded · $800.00 toward November',
+      threeAndFortyPercent.status,
+      r'3 months funded · $1,440.00 toward December',
     );
+    expect(threeAndFortyPercent.completedCycles, 3);
+    expect(threeAndFortyPercent.activeCycleProgress, 0.4);
+
     expect(
       fundTargetPresentation(
         fund: fund(cadence: FundTargetCadence.monthly),
@@ -105,6 +124,121 @@ void main() {
       ).status,
       r'$100.00 needed to fully fund',
     );
+  });
+
+  test('Fund cycle presentation unwinds the newest funded cycle first', () {
+    const currency = CurrencyFormatSettings();
+    final fund = FundRecord(
+      id: 'bills',
+      name: 'Bills',
+      fundingAccountId: 'checking',
+      status: FundStatus.active,
+      targetBalanceMinor: 360000,
+      targetCadence: FundTargetCadence.monthly,
+      nextTargetDate: DateTime(2026, 9, 30),
+      sync: v2_sync.SyncMetadata.fresh(
+        now: DateTime.utc(2026, 8, 25),
+        deviceId: 'test',
+      ),
+    );
+
+    FundTargetPresentation presentation(int currentMinor) =>
+        fundTargetPresentation(
+          fund: fund,
+          currentMinor: currentMinor,
+          currency: currency,
+          asOf: DateTime(2026, 8, 25),
+        );
+
+    final twoAndAHalf = presentation(900000);
+    expect(twoAndAHalf.status, r'2 months funded · $1,800.00 toward November');
+    expect(twoAndAHalf.completedCycles, 2);
+    expect(twoAndAHalf.activeCycleProgress, 0.5);
+
+    final afterPartialReturn = presentation(810000);
+    expect(
+      afterPartialReturn.status,
+      r'2 months funded · $900.00 toward November',
+    );
+    expect(afterPartialReturn.completedCycles, 2);
+    expect(afterPartialReturn.activeCycleProgress, 0.25);
+
+    final afterNewestCycleRemoved = presentation(720000);
+    expect(afterNewestCycleRemoved.status, '2 months funded');
+    expect(afterNewestCycleRemoved.showsMovingCycleBoundary, isFalse);
+
+    final afterCrossingBoundary = presentation(630000);
+    expect(
+      afterCrossingBoundary.status,
+      'September funded · October 75% funded',
+    );
+    expect(afterCrossingBoundary.completedCycles, 1);
+    expect(afterCrossingBoundary.activeCycleProgress, 0.75);
+  });
+
+  testWidgets('moving Fund cycle segment grows from right to left', (
+    tester,
+  ) async {
+    final sync = v2_sync.SyncMetadata.fresh(
+      now: DateTime.utc(2026, 8, 25),
+      deviceId: 'test',
+    );
+    final fund = FundRecord(
+      id: 'bills',
+      name: 'Bills',
+      fundingAccountId: 'checking',
+      status: FundStatus.active,
+      targetBalanceMinor: 40000,
+      targetCadence: FundTargetCadence.monthly,
+      nextTargetDate: DateTime(2026, 9, 30),
+      sync: sync,
+    );
+    FundTargetPresentation presentation(int currentMinor) =>
+        fundTargetPresentation(
+          fund: fund,
+          currentMinor: currentMinor,
+          currency: const CurrencyFormatSettings(),
+          asOf: DateTime(2026, 8, 25),
+        );
+    Future<void> pumpBar(FundTargetPresentation value) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 200,
+              child: FundTargetProgressBar(
+                presentation: value,
+                color: Colors.teal,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await pumpBar(presentation(50000));
+    final quarterSegment = find.byKey(
+      const ValueKey('fund-active-cycle-segment'),
+    );
+    final quarterRect = tester.getRect(quarterSegment);
+    expect(quarterRect.width, closeTo(50, 0.1));
+    expect(quarterRect.height, closeTo(6, 0.1));
+
+    final quarterDecoration = tester.widget<DecoratedBox>(
+      find.descendant(of: quarterSegment, matching: find.byType(DecoratedBox)),
+    );
+    final boxDecoration = quarterDecoration.decoration as BoxDecoration;
+    expect(boxDecoration.color, isNot(Colors.teal));
+    expect((boxDecoration.border! as Border).left.width, 2);
+
+    await pumpBar(presentation(70000));
+    final threeQuarterRect = tester.getRect(quarterSegment);
+    expect(threeQuarterRect.width, closeTo(150, 0.1));
+    expect(threeQuarterRect.right, closeTo(quarterRect.right, 0.1));
+    expect(threeQuarterRect.left, lessThan(quarterRect.left));
+
+    await pumpBar(presentation(80000));
+    expect(quarterSegment, findsNothing);
   });
 
   testWidgets('two-cycle Fund card stays valid on narrow iPhone and iPad', (

@@ -3,15 +3,17 @@ part of '../../main.dart';
 class FundTargetPresentation {
   const FundTargetPresentation({
     required this.status,
-    required this.currentCycleProgress,
-    required this.nextCycleProgress,
-    required this.showsTwoCycles,
+    required this.barProgress,
+    required this.completedCycles,
+    required this.activeCycleProgress,
+    required this.showsMovingCycleBoundary,
   });
 
   final String status;
-  final double currentCycleProgress;
-  final double nextCycleProgress;
-  final bool showsTwoCycles;
+  final double barProgress;
+  final int completedCycles;
+  final double activeCycleProgress;
+  final bool showsMovingCycleBoundary;
 }
 
 FundTargetPresentation fundTargetPresentation({
@@ -24,34 +26,38 @@ FundTargetPresentation fundTargetPresentation({
   if (target <= 0) {
     return const FundTargetPresentation(
       status: 'No target set',
-      currentCycleProgress: 0,
-      nextCycleProgress: 0,
-      showsTwoCycles: false,
+      barProgress: 0,
+      completedCycles: 0,
+      activeCycleProgress: 0,
+      showsMovingCycleBoundary: false,
     );
   }
   final current = currentMinor.clamp(0, 0x7FFFFFFFFFFFFFFF).toInt();
   if (current < target) {
     return FundTargetPresentation(
       status: '${money(target - current, currency)} needed to fully fund',
-      currentCycleProgress: current / target,
-      nextCycleProgress: 0,
-      showsTwoCycles: fund.targetCadence == FundTargetCadence.monthly,
+      barProgress: current / target,
+      completedCycles: 0,
+      activeCycleProgress: current / target,
+      showsMovingCycleBoundary: false,
     );
   }
   if (current == target) {
     return FundTargetPresentation(
       status: 'Target met',
-      currentCycleProgress: 1,
-      nextCycleProgress: 0,
-      showsTwoCycles: fund.targetCadence == FundTargetCadence.monthly,
+      barProgress: 1,
+      completedCycles: fund.targetCadence == FundTargetCadence.monthly ? 1 : 0,
+      activeCycleProgress: 0,
+      showsMovingCycleBoundary: false,
     );
   }
   if (fund.targetCadence != FundTargetCadence.monthly) {
     return FundTargetPresentation(
       status: '${money(current - target, currency)} above target',
-      currentCycleProgress: 1,
-      nextCycleProgress: 0,
-      showsTwoCycles: false,
+      barProgress: 1,
+      completedCycles: 0,
+      activeCycleProgress: 0,
+      showsMovingCycleBoundary: false,
     );
   }
 
@@ -59,43 +65,40 @@ FundTargetPresentation fundTargetPresentation({
   final currentCycle = targetDate == null
       ? 'Current cycle'
       : _fundMonthName(targetDate);
-  final nextDate = targetDate == null
-      ? null
-      : DateTime(targetDate.year, targetDate.month + 1);
-  final nextCycle = nextDate == null ? 'Next cycle' : _fundMonthName(nextDate);
-  final thirdDate = targetDate == null
-      ? null
-      : DateTime(targetDate.year, targetDate.month + 2);
-  final thirdCycle = thirdDate == null
-      ? 'the following cycle'
-      : _fundMonthName(thirdDate);
-  final secondCycleAmount = current - target;
-  if (current < target * 2) {
-    final nextPercent = (secondCycleAmount * 100 / target).round().clamp(
-      0,
-      100,
-    );
+  // Quotient and remainder keep the bar independent of any fixed number of
+  // months. Reducing the reserved total naturally unwinds the newest partial
+  // cycle before crossing back into an earlier completed cycle.
+  final completedCycles = current ~/ target;
+  final activeCycleAmount = current % target;
+  if (activeCycleAmount == 0) {
     return FundTargetPresentation(
-      status: '$currentCycle funded · $nextCycle $nextPercent% funded',
-      currentCycleProgress: 1,
-      nextCycleProgress: secondCycleAmount / target,
-      showsTwoCycles: true,
+      status: '$completedCycles months funded',
+      barProgress: 1,
+      completedCycles: completedCycles,
+      activeCycleProgress: 0,
+      showsMovingCycleBoundary: false,
     );
   }
-  if (current == target * 2) {
-    return const FundTargetPresentation(
-      status: '2 months funded',
-      currentCycleProgress: 1,
-      nextCycleProgress: 1,
-      showsTwoCycles: true,
-    );
-  }
+  final activeCycleDate = targetDate == null
+      ? null
+      : DateTime(targetDate.year, targetDate.month + completedCycles);
+  final activeCycle = activeCycleDate == null
+      ? 'Next cycle'
+      : _fundMonthName(activeCycleDate);
+  final activeCycleProgress = activeCycleAmount / target;
+  final activeCyclePercent = (activeCycleAmount * 100 / target).round().clamp(
+    0,
+    100,
+  );
+  final status = completedCycles == 1
+      ? '$currentCycle funded · $activeCycle $activeCyclePercent% funded'
+      : '$completedCycles months funded · ${money(activeCycleAmount, currency)} toward $activeCycle';
   return FundTargetPresentation(
-    status:
-        '2 months funded · ${money(current - (target * 2), currency)} toward $thirdCycle',
-    currentCycleProgress: 1,
-    nextCycleProgress: 1,
-    showsTwoCycles: true,
+    status: status,
+    barProgress: 1,
+    completedCycles: completedCycles,
+    activeCycleProgress: activeCycleProgress,
+    showsMovingCycleBoundary: true,
   );
 }
 
@@ -129,12 +132,12 @@ class FundTargetProgressBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final background = Theme.of(context).colorScheme.surfaceContainerHighest;
-    if (!presentation.showsTwoCycles) {
+    if (!presentation.showsMovingCycleBoundary) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(AppRadii.pill),
         child: LinearProgressIndicator(
           minHeight: minHeight,
-          value: presentation.currentCycleProgress.clamp(0.0, 1.0),
+          value: presentation.barProgress.clamp(0.0, 1.0),
           color: color,
           backgroundColor: background,
         ),
@@ -146,26 +149,27 @@ class FundTargetProgressBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.pill),
         child: SizedBox(
           height: minHeight,
-          child: Row(
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              Expanded(
-                child: LinearProgressIndicator(
-                  minHeight: minHeight,
-                  value: presentation.currentCycleProgress.clamp(0.0, 1.0),
-                  color: color,
-                  backgroundColor: background,
-                ),
-              ),
-              Container(
-                width: 1.5,
-                color: Theme.of(context).colorScheme.surface,
-              ),
-              Expanded(
-                child: LinearProgressIndicator(
-                  minHeight: minHeight,
-                  value: presentation.nextCycleProgress.clamp(0.0, 1.0),
-                  color: color,
-                  backgroundColor: background,
+              ColoredBox(key: const ValueKey('fund-cycle-base'), color: color),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FractionallySizedBox(
+                  key: const ValueKey('fund-active-cycle-segment'),
+                  widthFactor: presentation.activeCycleProgress.clamp(0.0, 1.0),
+                  heightFactor: 1,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Color.lerp(color, background, 0.62),
+                      border: Border(
+                        left: BorderSide(
+                          color: Theme.of(context).colorScheme.surface,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],

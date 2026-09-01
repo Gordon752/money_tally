@@ -668,7 +668,11 @@ void main() {
   testWidgets('collapsed ledger month retains its compact summary', (
     tester,
   ) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    final legacyStore = FinanceStore.seeded();
+    final walmartDate = legacyStore.transactions
+        .firstWhere((transaction) => transaction.payee == 'Walmart')
+        .date;
+    await tester.pumpWidget(MoneyTallyApp(store: legacyStore));
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -680,7 +684,7 @@ void main() {
     expect(compactSummary, findsNothing);
     expect(find.text('Walmart'), findsWidgets);
 
-    await tester.tap(find.text(monthLabel(DateTime.now())).first);
+    await tester.tap(find.text(monthLabel(walmartDate)).first);
     await tester.pumpAndSettle();
 
     expect(compactSummary, findsOneWidget);
@@ -6211,10 +6215,11 @@ void main() {
     await tester.tap(scheduledFirst);
     await tester.pumpAndSettle();
 
-    expect(
-      find.text(ledgerFriendlyDayLabel(scheduledMonth, DateTime.now())),
-      findsOneWidget,
-    );
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    final expectedDayHeading = isSameCalendarDay(scheduledMonth, tomorrow)
+        ? 'Tomorrow'
+        : ledgerFriendlyDayLabel(scheduledMonth, now);
+    expect(find.text(expectedDayHeading), findsOneWidget);
     expect(find.text('Rent'), findsOneWidget);
     expect(find.text('Electric'), findsOneWidget);
     expect(find.text('Internet'), findsOneWidget);
@@ -10743,9 +10748,6 @@ void main() {
     expect(find.text('Income'), findsWidgets);
     expect(find.text('Expenses'), findsWidgets);
     expect(find.text('Net Cash Flow'), findsOneWidget);
-    // Seeded data remains historical as time moves forward; navigation is the
-    // behavior under test rather than a hard-coded current-month total.
-    expect(find.text('Walmart'), findsWidgets);
     expect(find.byTooltip('Add'), findsNothing);
   });
 

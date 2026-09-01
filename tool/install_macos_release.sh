@@ -55,6 +55,11 @@ rsync -a --delete \
 
 cd "${build_project}"
 env COPYFILE_DISABLE=1 "${flutter_bin}" pub get
+
+# A cancelled or overlapping Xcode build can leave an incomplete app bundle and
+# stale intermediates behind. Always start the release portion clean while
+# retaining downloaded dependencies and the generated CocoaPods workspace.
+rm -rf "${build_project}/build/macos"
 env COPYFILE_DISABLE=1 "${flutter_bin}" build macos --release
 
 readonly built_app="${build_project}/build/macos/Build/Products/Release/${app_name}"
