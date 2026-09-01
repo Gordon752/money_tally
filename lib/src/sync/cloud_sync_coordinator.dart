@@ -202,6 +202,17 @@ class SyncExecutionStateStore {
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove('$_leasePrefix$userId');
   }
+
+  Future<void> clearForDeletedUser(String userId) async {
+    final preferences = await SharedPreferences.getInstance();
+    await Future.wait([
+      preferences.remove('$_lastSuccessPrefix$userId'),
+      preferences.remove('$_lastOutcomePrefix$userId'),
+      preferences.remove('$_leasePrefix$userId'),
+      preferences.remove('$_lastErrorPrefix$userId'),
+      preferences.remove('$_lastDiagnosticPrefix$userId'),
+    ]);
+  }
 }
 
 /// The single entry point for foreground, manual, and background cloud sync.

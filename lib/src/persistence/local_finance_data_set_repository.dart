@@ -27,6 +27,11 @@ class LocalFinanceDataSetRepository {
     await preferences.setString(storageKey, jsonEncode(dataSet.toJson()));
   }
 
+  Future<void> clear() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(storageKey);
+  }
+
   Future<String?> loadAcknowledgedRestoreGeneration(String userId) async {
     final preferences = await SharedPreferences.getInstance();
     return preferences.getString(_restoreGenerationKey(userId));
@@ -38,5 +43,10 @@ class LocalFinanceDataSetRepository {
   ) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_restoreGenerationKey(userId), generation);
+  }
+
+  Future<void> clearAcknowledgedRestoreGeneration(String userId) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_restoreGenerationKey(userId));
   }
 }

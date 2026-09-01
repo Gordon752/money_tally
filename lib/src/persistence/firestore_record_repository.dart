@@ -64,6 +64,7 @@ class FirestoreRecordRepository
         FinanceRecordRepository,
         BulkFinanceRecordRepository,
         IncrementalFinanceRecordRepository,
+        DeletedAccountLocalStateCleaner,
         CloudSyncMetricsProvider,
         ReservationRecordRepository,
         ScheduledReservationOperationRepository,
@@ -376,6 +377,13 @@ class FirestoreRecordRepository
       throw StateError('Cloud sync cache could not be saved locally.');
     }
     _updateSyncMetrics(cacheBytes: utf8.encode(encoded).length);
+  }
+
+  @override
+  Future<void> clearDeletedAccountLocalState(String userId) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove('$_incrementalCachePrefix$userId');
+    _activeGenerations.remove(userId);
   }
 
   void _recordSnapshotReads(List<Object> snapshots) {

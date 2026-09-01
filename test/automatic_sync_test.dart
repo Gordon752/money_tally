@@ -361,6 +361,15 @@ class _MemorySyncStateStore implements SyncExecutionStateStore {
   CloudSyncDiagnostic? lastDiagnostic;
 
   @override
+  Future<void> clearForDeletedUser(String userId) async {
+    lastSuccess = null;
+    lastSucceeded = null;
+    leased = false;
+    lastError = null;
+    lastDiagnostic = null;
+  }
+
+  @override
   Future<DateTime?> loadLastSuccessfulSync(String userId) async => lastSuccess;
 
   @override

@@ -35,6 +35,7 @@ class FinanceHome extends StatefulWidget {
     this.lastSuccessfulSyncLabel,
     this.onSyncNow,
     this.onSignOut,
+    this.onDeleteAccount,
     super.key,
   });
 
@@ -44,6 +45,7 @@ class FinanceHome extends StatefulWidget {
   final String? lastSuccessfulSyncLabel;
   final Future<void> Function()? onSyncNow;
   final VoidCallback? onSignOut;
+  final Future<void> Function()? onDeleteAccount;
 
   @override
   State<FinanceHome> createState() => _FinanceHomeState();
@@ -506,6 +508,7 @@ class _FinanceHomeState extends State<FinanceHome> {
                   lastSuccessfulSyncLabel: widget.lastSuccessfulSyncLabel,
                   onSyncNow: widget.onSyncNow,
                   onSignOut: widget.onSignOut,
+                  onDeleteAccount: widget.onDeleteAccount,
                 ),
               },
             ),
@@ -9864,6 +9867,7 @@ class SettingsView extends StatefulWidget {
     this.lastSuccessfulSyncLabel,
     this.onSyncNow,
     this.onSignOut,
+    this.onDeleteAccount,
     this.exportFileService,
     this.backupImportFileService,
     this.backupSafetyFileService,
@@ -9881,6 +9885,7 @@ class SettingsView extends StatefulWidget {
   final String? lastSuccessfulSyncLabel;
   final Future<void> Function()? onSyncNow;
   final VoidCallback? onSignOut;
+  final Future<void> Function()? onDeleteAccount;
   final ExportFileService? exportFileService;
   final BackupImportFileService? backupImportFileService;
   final BackupSafetyFileService? backupSafetyFileService;
@@ -9916,6 +9921,7 @@ class _SettingsViewState extends State<SettingsView> {
   _ExportKind? _sharingExport;
   var _isImportingBackup = false;
   var _isResettingData = false;
+  var _isDeletingAccount = false;
   AutomaticBackupStatus? _automaticBackupStatus;
   ICloudBackupStorage? _defaultICloudBackupStorage;
 
@@ -10048,8 +10054,24 @@ class _SettingsViewState extends State<SettingsView> {
                 title: 'Sign out',
                 subtitle: 'Sign out of your account',
                 destructive: true,
+                showDivider: widget.onDeleteAccount != null,
+                onTap: _isDeletingAccount ? null : widget.onSignOut,
+              ),
+            if (widget.onDeleteAccount != null)
+              SettingsActionRow(
+                key: const ValueKey('delete-trackmark-account-row'),
+                icon: AppIcon.delete,
+                title: 'Delete Trackmark Account',
+                subtitle: _isDeletingAccount
+                    ? 'Permanently deleting your account…'
+                    : 'Permanently delete your sign-in and synced data',
+                trailingText: _isDeletingAccount ? 'Working…' : null,
+                showProgress: _isDeletingAccount,
+                destructive: true,
                 showDivider: false,
-                onTap: widget.onSignOut,
+                onTap: _isDeletingAccount || isSyncing
+                    ? null
+                    : _confirmAndDeleteAccount,
               ),
           ],
         ),
@@ -10286,6 +10308,36 @@ class _SettingsViewState extends State<SettingsView> {
         ),
       ],
     );
+  }
+
+  Future<void> _confirmAndDeleteAccount() async {
+    final deleteAccount = widget.onDeleteAccount;
+    if (deleteAccount == null || _isDeletingAccount) return;
+    final confirmed = await _showDeleteTrackmarkAccountConfirmation(context);
+    if (!mounted || !confirmed) return;
+
+    setState(() => _isDeletingAccount = true);
+    try {
+      await deleteAccount();
+    } on AuthException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.message)));
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Trackmark could not delete the account. Nothing was deleted.',
+            ),
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _isDeletingAccount = false);
+    }
   }
 
   Widget _buildDataManagementContent(
@@ -11163,6 +11215,83 @@ class _ResetTrackmarkDataChoice {
   const _ResetTrackmarkDataChoice({required this.resetAppSettings});
 
   final bool resetAppSettings;
+}
+
+Future<bool> _showDeleteTrackmarkAccountConfirmation(
+  BuildContext context,
+) async {
+  var confirmation = '';
+  return await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('Delete Trackmark Account?'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'This permanently deletes your Sign in with Apple '
+                    'account and all Trackmark financial data stored in '
+                    'Trackmark cloud sync. This cannot be undone.',
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  const Text(
+                    'Trackmark will ask Apple to verify this request. Data '
+                    'on this device will then be cleared. Backup or export '
+                    'files you previously saved outside Trackmark are not '
+                    'deleted; remove those separately if you no longer want '
+                    'them.',
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  const Text('Type DELETE to continue.'),
+                  const SizedBox(height: AppSpacing.sm),
+                  TextField(
+                    key: const ValueKey(
+                      'delete-trackmark-account-confirmation',
+                    ),
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: InputDecoration(
+                      hintText: 'DELETE',
+                      hintStyle: TextStyle(
+                        color: Theme.of(
+                          dialogContext,
+                        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.42),
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    onChanged: (value) => setDialogState(() {
+                      confirmation = value.trim();
+                    }),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                key: const ValueKey('confirm-trackmark-account-deletion'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.danger,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: confirmation == 'DELETE'
+                    ? () => Navigator.of(dialogContext).pop(true)
+                    : null,
+                child: const Text('Delete Account'),
+              ),
+            ],
+          ),
+        ),
+      ) ??
+      false;
 }
 
 Future<_ResetTrackmarkDataChoice?> _showResetTrackmarkDataConfirmation(

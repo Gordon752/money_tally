@@ -13,6 +13,7 @@ PRODUCT_BUNDLE_IDENTIFIER = com.gordonbowles.moneytally
 // Apple development team used for local macOS builds with app capabilities.
 DEVELOPMENT_TEAM = KCQ74BLAU7
 CODE_SIGN_IDENTITY = Apple Development
+ENABLE_APP_SANDBOX = YES
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.gordonbowles. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Gordon Bowles. All rights reserved.

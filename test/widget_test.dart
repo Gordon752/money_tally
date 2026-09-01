@@ -10071,6 +10071,81 @@ void main() {
     expect(signOutCount, 1);
   });
 
+  testWidgets(
+    'signed-in settings requires typed confirmation before account deletion',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final legacyStore = FinanceStore.seeded();
+      final dataStore = FinanceDataStore(
+        dataSet: const V1SnapshotMigrator().migrate(
+          legacyStore.snapshot().toJson(),
+        ),
+      );
+      final deletion = Completer<void>();
+      var deletionCount = 0;
+      await tester.pumpWidget(
+        FinanceStoreScope(
+          store: legacyStore,
+          child: FinanceDataStoreScope(
+            store: dataStore,
+            child: MaterialApp(
+              home: FinanceHome(
+                syncLabel: 'Synced',
+                onSyncNow: () async {},
+                onSignOut: () {},
+                onDeleteAccount: () {
+                  deletionCount += 1;
+                  return deletion.future;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Settings').last);
+      await tester.pumpAndSettle();
+
+      final deleteRow = find.byKey(
+        const ValueKey('delete-trackmark-account-row'),
+      );
+      await tester.ensureVisible(deleteRow);
+      await tester.tap(deleteRow);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delete Trackmark Account?'), findsOneWidget);
+      final confirm = find.byKey(
+        const ValueKey('confirm-trackmark-account-deletion'),
+      );
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('delete-trackmark-account-confirmation')),
+        'DELETE',
+      );
+      await tester.pump();
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull);
+      await tester.tap(confirm);
+      await tester.pump();
+
+      expect(deletionCount, 1);
+      expect(find.text('Permanently deleting your account…'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: deleteRow,
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+      deletion.complete();
+      await tester.pumpAndSettle();
+      expect(deletionCount, 1);
+      expect(find.text('Permanently deleting your account…'), findsNothing);
+    },
+  );
+
   testWidgets('settings keeps sync diagnostics discoverable before capture', (
     tester,
   ) async {

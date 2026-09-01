@@ -205,6 +205,14 @@ abstract interface class IncrementalFinanceRecordRepository {
   });
 }
 
+/// Removes device-local cloud-sync state that belongs to a deleted account.
+/// The user's authoritative cloud records are deleted by the trusted backend;
+/// this capability prevents a later local-only session from retaining an
+/// incremental copy of those records on the device.
+abstract interface class DeletedAccountLocalStateCleaner {
+  Future<void> clearDeletedAccountLocalState(String userId);
+}
+
 /// Optional capability for causally ordered, field-scoped schedule occurrence
 /// writes. Implementations must compare occurrence authority remotely rather
 /// than replacing an enclosing schedule snapshot.
