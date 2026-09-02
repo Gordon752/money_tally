@@ -16146,9 +16146,9 @@ class _CreditCardAccountDetails extends StatelessWidget {
         if (account.interestEstimationEnabled) ...[
           const SizedBox(height: AppSpacing.md),
           _AccountDetailsSection(
-            title: 'Credit Insights',
+            title: 'Credit Projection',
             trailing: IconButton(
-              tooltip: 'About Credit Insights',
+              tooltip: 'About Credit Projection',
               visualDensity: VisualDensity.compact,
               icon: Icon(AppIcon.info, size: AppIconSize.inline),
               onPressed: () => showCreditInsightsInfoDialog(context),
@@ -16363,14 +16363,14 @@ Future<bool> showCreditInsightsInfoDialog(
     builder: (dialogContext) => PopScope(
       canPop: !requiresAcknowledgement,
       child: AlertDialog(
-        title: const Text('About Credit Insights'),
+        title: const Text('About Credit Projection'),
         content: const Text(
-          'Credit Insights estimates your upcoming interest using your APR, '
+          'Credit Projection estimates your upcoming interest using your APR, '
           'statement closing date, and recorded transactions.\n\n'
           'If your transactions are entered accurately, the estimate will '
           'generally be close. Actual interest may differ because card issuers '
           'may use different calculation methods.\n\n'
-          'Credit Insights is designed to help you understand your credit card '
+          'Credit Projection is designed to help you understand your credit card '
           'costs and projected statement balance. It is an estimate and should '
           'not replace your card issuer’s official statement.',
         ),
@@ -16456,9 +16456,9 @@ class _CreditInsightsFormSectionState extends State<CreditInsightsFormSection> {
       children: [
         Row(
           children: [
-            const Expanded(child: TransactionFormLabel('Credit Insights')),
+            const Expanded(child: TransactionFormLabel('Credit Projection')),
             IconButton(
-              tooltip: 'About Credit Insights',
+              tooltip: 'About Credit Projection',
               icon: Icon(AppIcon.info, size: AppIconSize.inline),
               onPressed: () => showCreditInsightsInfoDialog(context),
             ),
@@ -16467,7 +16467,10 @@ class _CreditInsightsFormSectionState extends State<CreditInsightsFormSection> {
         TrackmarkSwitchListTile(
           contentPadding: EdgeInsets.zero,
           secondary: TransactionFormIcon(AppIcon.insights),
-          title: Text('Enable Credit Insights', style: widget.fieldValueStyle),
+          title: Text(
+            'Enable Credit Projection',
+            style: widget.fieldValueStyle,
+          ),
           value: widget.enabled,
           onChanged: AppHaptics.toggleHandler((value) async {
             if (!value || widget.disclosureAcknowledged) {
@@ -16693,7 +16696,7 @@ Future<void> showCreditInsightsValidationDialog(BuildContext context) {
   return showDialog<void>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('Complete Credit Insights'),
+      title: const Text('Complete Credit Projection'),
       content: const Text(
         'Enter an APR and valid statement closing and payment due days from 1 to 31.',
       ),

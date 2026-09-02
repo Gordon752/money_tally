@@ -394,6 +394,9 @@ void main() {
       expect(matches.map((icon) => icon.key), contains(entry.value));
       expect(matches.map((icon) => icon.key).toSet().length, matches.length);
     }
+
+    expect(CategoryIconCatalog.find('transport.truckStop')?.label, 'Truck');
+    expect(CategoryIconCatalog.find('business.scaleTicket')?.label, 'Scale');
   });
 
   test('Phase 1 aliases find the intended semantic entries', () {
@@ -629,14 +632,14 @@ void main() {
               iconName: 'transport.truckStop',
               kind: CategoryKind.expense,
               colorValue: 0xFF60A5FA,
-              semanticLabel: 'Truck Stop category',
+              semanticLabel: 'Truck category',
             ),
           ),
         ),
       ),
     );
 
-    expect(find.bySemanticsLabel('Truck Stop category'), findsOneWidget);
+    expect(find.bySemanticsLabel('Truck category'), findsOneWidget);
     expect(find.byIcon(Icons.local_shipping_outlined), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

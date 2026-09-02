@@ -93,7 +93,7 @@ Future<void> showCreditInsightsCompletenessDialog(
       'Not Enough History',
       'Trackmark does not yet have enough reliable account history to '
           'estimate interest for this statement cycle.\n\nAs more account '
-          'history is recorded, Credit Insights will begin estimating '
+          'history is recorded, Credit Projection will begin estimating '
           'interest automatically.',
     ),
     CreditInsightsEstimateCompleteness.complete => ('', ''),

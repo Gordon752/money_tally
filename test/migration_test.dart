@@ -41,6 +41,7 @@ void main() {
     );
     expect(migrated.transactions.last.amountMinor, 126400);
     expect(migrated.budgets.first.categoryIds, ['dining']);
+    expect(migrated.preferences.showLedgerIcons, isTrue);
   });
 
   test('v1 transfer without destination migrates as an adjustment', () {

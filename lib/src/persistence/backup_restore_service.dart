@@ -516,7 +516,7 @@ class BackupRestoreValidator {
           !_validDay(account.statementClosingDay) ||
           !_validDay(account.paymentDueDay)) {
         throw BackupValidationException(
-          'Credit Insights settings for ${account.name} are invalid.',
+          'Credit Projection settings for ${account.name} are invalid.',
         );
       }
       final goalId = account.goalId;

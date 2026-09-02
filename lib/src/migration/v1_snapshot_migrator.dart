@@ -50,7 +50,10 @@ class V1SnapshotMigrator {
       budgets: _jsonList(snapshotJson['budgets'])
           .map((budget) => _budgetFromV1(budget, categoriesById))
           .toList(growable: false),
-      preferences: const UserPreferences(),
+      // Legacy users previously always saw Ledger icons. Preserve that
+      // experience when importing v1 data while new installs use the current
+      // first-launch default.
+      preferences: const UserPreferences(showLedgerIcons: true),
     );
   }
 

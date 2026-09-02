@@ -5067,7 +5067,7 @@ void main() {
     expect(find.text(r'Credit Available $2,061.78 of $2,500.00'), findsWidgets);
   });
 
-  testWidgets('credit card Account Details shows read-only Credit Insights', (
+  testWidgets('credit card Account Details shows read-only Credit Projection', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1200, 1500);
@@ -5118,7 +5118,7 @@ void main() {
     for (final label in [
       'Credit Available',
       'Credit Limit',
-      'Credit Insights',
+      'Credit Projection',
       'APR',
       '28.49%',
       'Next Statement',
@@ -5136,7 +5136,7 @@ void main() {
     expect(
       find.descendant(
         of: details,
-        matching: find.byTooltip('About Credit Insights'),
+        matching: find.byTooltip('About Credit Projection'),
       ),
       findsOneWidget,
     );
@@ -5149,7 +5149,7 @@ void main() {
     );
   });
 
-  testWidgets('enabled credit card shows additive Credit Insights preview', (
+  testWidgets('enabled credit card shows additive Credit Projection preview', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(393, 852);
@@ -5465,7 +5465,7 @@ void main() {
     },
   );
 
-  testWidgets('complete Credit Insights estimate has no status indicator', (
+  testWidgets('complete Credit Projection estimate has no status indicator', (
     tester,
   ) async {
     final now = DateTime.now();
@@ -5806,7 +5806,7 @@ void main() {
     );
   });
 
-  testWidgets('Credit Insights shows placeholders when APR is unavailable', (
+  testWidgets('Credit Projection shows placeholders when APR is unavailable', (
     tester,
   ) async {
     final account = v2_account.AccountRecord(
@@ -5838,7 +5838,7 @@ void main() {
   });
 
   testWidgets(
-    'Credit Insights setup uses guidance and advances keyboard focus',
+    'Credit Projection setup uses guidance and advances keyboard focus',
     (tester) async {
       final apr = TextEditingController();
       final statementDay = TextEditingController();
@@ -5871,10 +5871,10 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Enable Credit Insights'));
+      await tester.tap(find.text('Enable Credit Projection'));
       await tester.pumpAndSettle();
 
-      expect(find.text('About Credit Insights'), findsOneWidget);
+      expect(find.text('About Credit Projection'), findsOneWidget);
       expect(find.text('Continue'), findsOneWidget);
       expect(find.byKey(const ValueKey('credit-insights-apr')), findsNothing);
       await tester.tap(find.text('Continue'));
@@ -5935,23 +5935,23 @@ void main() {
         isFalse,
       );
 
-      await tester.tap(find.byTooltip('About Credit Insights'));
+      await tester.tap(find.byTooltip('About Credit Projection'));
       await tester.pumpAndSettle();
       expect(find.text('Close'), findsOneWidget);
       expect(find.text('Continue'), findsNothing);
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Enable Credit Insights'));
+      await tester.tap(find.text('Enable Credit Projection'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Enable Credit Insights'));
+      await tester.tap(find.text('Enable Credit Projection'));
       await tester.pumpAndSettle();
-      expect(find.text('About Credit Insights'), findsNothing);
+      expect(find.text('About Credit Projection'), findsNothing);
       expect(find.byKey(const ValueKey('credit-insights-apr')), findsOneWidget);
     },
   );
 
-  testWidgets('Credit Insights setup preserves existing saved values', (
+  testWidgets('Credit Projection setup preserves existing saved values', (
     tester,
   ) async {
     final apr = TextEditingController(text: '28.49');

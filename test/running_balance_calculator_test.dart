@@ -172,7 +172,7 @@ void main() {
 
   test('Ledger display preferences use defaults and survive backup', () {
     const defaults = UserPreferences();
-    expect(defaults.showLedgerIcons, isTrue);
+    expect(defaults.showLedgerIcons, isFalse);
     expect(defaults.showLedgerTimestamps, isTrue);
     expect(defaults.showLedgerSplitIndicator, isTrue);
     expect(defaults.showRunningBalance, isFalse);
@@ -198,6 +198,15 @@ void main() {
     expect(restored.preferences.showLedgerTimestamps, isFalse);
     expect(restored.preferences.showLedgerSplitIndicator, isFalse);
     expect(restored.preferences.showRunningBalance, isTrue);
+
+    final restoredEnabled = UserPreferences.fromJson(
+      const UserPreferences(showLedgerIcons: true).toJson(),
+    );
+    expect(restoredEnabled.showLedgerIcons, isTrue);
+
+    // Preference records created before this setting existed keep the former
+    // icons-on behavior during an update.
+    expect(UserPreferences.fromJson(const {}).showLedgerIcons, isTrue);
   });
 }
 

@@ -297,11 +297,17 @@ abstract final class CategoryIconCatalog {
     ),
     AppCategoryIcon(
       key: 'transport.truckStop',
-      label: 'Truck Stop',
+      label: 'Truck',
       group: 'Transportation',
       materialIcon: Icons.local_shipping_outlined,
       cupertinoIcon: Icons.local_shipping_outlined,
-      aliases: ['truck stop', 'travel plaza', 'fuel stop', 'rest area'],
+      aliases: [
+        'truck',
+        'truck stop',
+        'travel plaza',
+        'fuel stop',
+        'rest area',
+      ],
     ),
 
     // Fuel
@@ -695,7 +701,7 @@ abstract final class CategoryIconCatalog {
     ),
     AppCategoryIcon(
       key: 'business.scaleTicket',
-      label: 'Scale Ticket',
+      label: 'Scale',
       group: 'Business',
       materialIcon: Icons.scale_outlined,
       cupertinoIcon: Icons.scale_outlined,
@@ -1277,11 +1283,11 @@ abstract final class CategoryIconCatalog {
     ),
     AppCategoryIcon(
       key: 'goals.truck',
-      label: 'Truck',
+      label: 'Truck Goal',
       group: 'Goals',
       materialIcon: Icons.local_shipping_outlined,
       cupertinoIcon: Icons.local_shipping_outlined,
-      aliases: ['semi', 'lorry'],
+      aliases: ['truck', 'semi', 'lorry'],
     ),
     AppCategoryIcon(
       key: 'goals.house',

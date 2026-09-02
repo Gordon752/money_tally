@@ -59,7 +59,7 @@ class UserPreferences {
     this.automaticBackupFrequency = AutomaticBackupFrequency.weekly,
     this.preferredAutomaticBackupMinutes = 23 * 60,
     this.automaticBackupLocation = AutomaticBackupLocation.local,
-    this.showLedgerIcons = true,
+    this.showLedgerIcons = false,
     this.showLedgerTimestamps = true,
     this.showLedgerSplitIndicator = true,
     this.showRunningBalance = false,
