@@ -17,6 +17,64 @@ import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
 void main() {
+  for (final (platform, width) in [
+    (TargetPlatform.iOS, 393.0),
+    (TargetPlatform.iOS, 1024.0),
+    (TargetPlatform.macOS, 1440.0),
+  ]) {
+    testWidgets('Ledger aligns reservation timestamps at $platform / $width', (
+      tester,
+    ) async {
+      await _setPhoneSize(tester);
+      tester.view.physicalSize = Size(width, 1366);
+      for (final scopedAccount in [null, 'checking']) {
+        for (final showSplit in [true, false]) {
+          await tester.pumpWidget(const SizedBox.shrink());
+          final store = _reservationLedgerStore(showSplitIndicator: showSplit);
+          addTearDown(store.dispose);
+          await tester.pumpWidget(
+            _testApp(
+              store,
+              initialAccountFilterId: scopedAccount,
+              platform: platform,
+            ),
+          );
+          await tester.pumpAndSettle();
+          final reference = find.byKey(
+            const ValueKey('ledger-timestamp-slot-spend'),
+          );
+          for (final id in [
+            'goal-allocate',
+            'goal-return',
+            'fund-allocate',
+            'fund-return',
+          ]) {
+            final timestamp = find.byKey(
+              ValueKey('ledger-timestamp-slot-reservation-$id'),
+            );
+            expect(
+              tester.getTopRight(timestamp).dx,
+              closeTo(tester.getTopRight(reference).dx, 0.01),
+            );
+            expect(
+              find.byKey(ValueKey('ledger-split-slot-reservation-$id')),
+              showSplit ? findsOneWidget : findsNothing,
+            );
+            expect(
+              find.byKey(ValueKey('ledger-split-indicator-reservation-$id')),
+              findsNothing,
+            );
+            expect(
+              find.byKey(ValueKey('ledger-pending-indicator-reservation-$id')),
+              findsNothing,
+            );
+          }
+          expect(tester.takeException(), isNull);
+        }
+      }
+    });
+  }
+
   test(
     'same-day reservation activity uses creation order before lexical IDs',
     () {
@@ -385,9 +443,13 @@ Future<void> _openFilterRow(WidgetTester tester, Key rowKey) async {
   await tester.pumpAndSettle();
 }
 
-Widget _testApp(FinanceDataStore store, {String? initialAccountFilterId}) {
+Widget _testApp(
+  FinanceDataStore store, {
+  String? initialAccountFilterId,
+  TargetPlatform? platform,
+}) {
   return MaterialApp(
-    theme: AppTheme.light(),
+    theme: AppTheme.light().copyWith(platform: platform),
     home: FinanceDataStoreScope(
       store: store,
       child: Scaffold(
@@ -399,7 +461,7 @@ Widget _testApp(FinanceDataStore store, {String? initialAccountFilterId}) {
   );
 }
 
-FinanceDataStore _reservationLedgerStore() {
+FinanceDataStore _reservationLedgerStore({bool showSplitIndicator = true}) {
   final today = DateTime.now();
   final day = DateTime(today.year, today.month, today.day);
   final sync = v2_sync.SyncMetadata.fresh(
@@ -586,7 +648,10 @@ FinanceDataStore _reservationLedgerStore() {
           dayOffset: -40,
         ),
       ],
-      preferences: const UserPreferences(showRunningBalance: true),
+      preferences: UserPreferences(
+        showRunningBalance: true,
+        showLedgerSplitIndicator: showSplitIndicator,
+      ),
     ),
     deviceId: 'test',
   );

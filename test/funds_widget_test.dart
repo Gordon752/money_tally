@@ -43,22 +43,21 @@ void main() {
           sync: sync,
         );
 
-    expect(
-      fundTargetPresentation(
-        fund: fund(),
-        currentMinor: 320000,
-        currency: currency,
-      ).status,
-      r'$400.00 needed to fully fund',
+    final belowTarget = fundTargetPresentation(
+      fund: fund(),
+      currentMinor: 320000,
+      currency: currency,
     );
-    expect(
-      fundTargetPresentation(
-        fund: fund(),
-        currentMinor: 360000,
-        currency: currency,
-      ).status,
-      'Target met',
+    expect(belowTarget.status, r'$400.00 needed to fully fund');
+    expect(belowTarget.secondaryStatus, isNull);
+
+    final exactlyOne = fundTargetPresentation(
+      fund: fund(),
+      currentMinor: 360000,
+      currency: currency,
     );
+    expect(exactlyOne.status, 'Target met');
+    expect(exactlyOne.secondaryStatus, isNull);
     expect(
       fundTargetPresentation(
         fund: fund(),
@@ -74,7 +73,11 @@ void main() {
       currency: currency,
       asOf: DateTime(2026, 8, 25),
     );
-    expect(oneAndAHalf.status, 'September funded · October 50% funded');
+    expect(
+      oneAndAHalf.status,
+      r'September fully funded · $1,800.00 needed for October',
+    );
+    expect(oneAndAHalf.secondaryStatus, 'October 50% funded');
     expect(oneAndAHalf.barProgress, 1);
     expect(oneAndAHalf.completedCycles, 1);
     expect(oneAndAHalf.activeCycleProgress, 0.5);
@@ -86,7 +89,8 @@ void main() {
       currency: currency,
       asOf: DateTime(2026, 8, 25),
     );
-    expect(exactlyTwo.status, '2 months funded');
+    expect(exactlyTwo.status, '2 months fully funded');
+    expect(exactlyTwo.secondaryStatus, isNull);
     expect(exactlyTwo.completedCycles, 2);
     expect(exactlyTwo.activeCycleProgress, 0);
     expect(exactlyTwo.showsMovingCycleBoundary, isFalse);
@@ -97,7 +101,11 @@ void main() {
       currency: currency,
       asOf: DateTime(2026, 8, 25),
     );
-    expect(twoAndChange.status, r'2 months funded · $800.00 toward November');
+    expect(
+      twoAndChange.status,
+      r'2 months fully funded · $2,800.00 needed for November',
+    );
+    expect(twoAndChange.secondaryStatus, 'November 22% funded');
     expect(twoAndChange.completedCycles, 2);
     expect(twoAndChange.activeCycleProgress, closeTo(2 / 9, 0.000001));
     expect(twoAndChange.showsMovingCycleBoundary, isTrue);
@@ -110,10 +118,78 @@ void main() {
     );
     expect(
       threeAndFortyPercent.status,
-      r'3 months funded · $1,440.00 toward December',
+      r'3 months fully funded · $2,160.00 needed for December',
     );
+    expect(threeAndFortyPercent.secondaryStatus, 'December 40% funded');
     expect(threeAndFortyPercent.completedCycles, 3);
     expect(threeAndFortyPercent.activeCycleProgress, 0.4);
+
+    final roundedThirdCycle = fundTargetPresentation(
+      fund: fund(cadence: FundTargetCadence.monthly),
+      currentMinor: 844831,
+      currency: currency,
+      asOf: DateTime(2026, 8, 25),
+    );
+    expect(
+      roundedThirdCycle.status,
+      r'2 months fully funded · $2,351.69 needed for November',
+    );
+    expect(roundedThirdCycle.secondaryStatus, 'November 35% funded');
+
+    final nearlyThreeCycles = fundTargetPresentation(
+      fund: fund(cadence: FundTargetCadence.monthly),
+      currentMinor: 1079999,
+      currency: currency,
+      asOf: DateTime(2026, 8, 25),
+    );
+    expect(
+      nearlyThreeCycles.status,
+      r'2 months fully funded · $0.01 needed for November',
+    );
+    expect(nearlyThreeCycles.secondaryStatus, 'November 99% funded');
+
+    final exactlyThreeCycles = fundTargetPresentation(
+      fund: fund(cadence: FundTargetCadence.monthly),
+      currentMinor: 1080000,
+      currency: currency,
+      asOf: DateTime(2026, 8, 25),
+    );
+    expect(exactlyThreeCycles.status, '3 months fully funded');
+    expect(exactlyThreeCycles.secondaryStatus, isNull);
+
+    final intoFourthCycle = fundTargetPresentation(
+      fund: fund(cadence: FundTargetCadence.monthly),
+      currentMinor: 1170000,
+      currency: currency,
+      asOf: DateTime(2026, 8, 25),
+    );
+    expect(
+      intoFourthCycle.status,
+      r'3 months fully funded · $2,700.00 needed for December',
+    );
+    expect(intoFourthCycle.secondaryStatus, 'December 25% funded');
+
+    final midMonthFund = FundRecord(
+      id: 'mid-month-bills',
+      name: 'Mid-month bills',
+      fundingAccountId: 'checking',
+      status: FundStatus.active,
+      targetBalanceMinor: 360000,
+      targetCadence: FundTargetCadence.monthly,
+      nextTargetDate: DateTime(2026, 9, 15),
+      sync: sync,
+    );
+    final midMonthCycle = fundTargetPresentation(
+      fund: midMonthFund,
+      currentMinor: 540000,
+      currency: currency,
+      asOf: DateTime(2026, 9, 20),
+    );
+    expect(
+      midMonthCycle.status,
+      r'October fully funded · $1,800.00 needed for November',
+    );
+    expect(midMonthCycle.secondaryStatus, 'November 50% funded');
 
     expect(
       fundTargetPresentation(
@@ -151,27 +227,34 @@ void main() {
         );
 
     final twoAndAHalf = presentation(900000);
-    expect(twoAndAHalf.status, r'2 months funded · $1,800.00 toward November');
+    expect(
+      twoAndAHalf.status,
+      r'2 months fully funded · $1,800.00 needed for November',
+    );
+    expect(twoAndAHalf.secondaryStatus, 'November 50% funded');
     expect(twoAndAHalf.completedCycles, 2);
     expect(twoAndAHalf.activeCycleProgress, 0.5);
 
     final afterPartialReturn = presentation(810000);
     expect(
       afterPartialReturn.status,
-      r'2 months funded · $900.00 toward November',
+      r'2 months fully funded · $2,700.00 needed for November',
     );
+    expect(afterPartialReturn.secondaryStatus, 'November 25% funded');
     expect(afterPartialReturn.completedCycles, 2);
     expect(afterPartialReturn.activeCycleProgress, 0.25);
 
     final afterNewestCycleRemoved = presentation(720000);
-    expect(afterNewestCycleRemoved.status, '2 months funded');
+    expect(afterNewestCycleRemoved.status, '2 months fully funded');
+    expect(afterNewestCycleRemoved.secondaryStatus, isNull);
     expect(afterNewestCycleRemoved.showsMovingCycleBoundary, isFalse);
 
     final afterCrossingBoundary = presentation(630000);
     expect(
       afterCrossingBoundary.status,
-      'September funded · October 75% funded',
+      r'September fully funded · $900.00 needed for October',
     );
+    expect(afterCrossingBoundary.secondaryStatus, 'October 75% funded');
     expect(afterCrossingBoundary.completedCycles, 1);
     expect(afterCrossingBoundary.activeCycleProgress, 0.75);
   });
@@ -241,27 +324,31 @@ void main() {
     expect(quarterSegment, findsNothing);
   });
 
-  testWidgets('two-cycle Fund card stays valid on narrow iPhone and iPad', (
+  testWidgets('recurring Fund wording fits narrow iPhone, iPad, and Mac', (
     tester,
   ) async {
     final store = _store();
     final fund = await store.createFund(
       name: 'Monthly Bills',
       fundingAccountId: 'checking',
-      targetBalanceMinor: 300000,
+      targetBalanceMinor: 100000,
       targetCadence: FundTargetCadence.monthly,
       nextTargetDate: DateTime(2026, 9, 30),
     );
     await store.allocateReservation(
       containerType: ReservationContainerType.fund,
       containerId: fund.id,
-      amountMinor: 450000,
+      amountMinor: 235000,
       date: DateTime(2026, 8, 25),
     );
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    for (final size in const [Size(320, 568), Size(1024, 1366)]) {
+    for (final size in const [
+      Size(320, 568),
+      Size(1024, 1366),
+      Size(1280, 800),
+    ]) {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       await tester.pumpWidget(
@@ -270,12 +357,171 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('September funded · October 50% funded'),
+        find.text(r'2 months fully funded · $650.00 needed for November'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('November 35% funded · Fund by Oct 30, 2026'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
     }
   });
+
+  testWidgets(
+    'EOM Fund card and Details use one snapshot through live returns',
+    (tester) async {
+      final store = _store();
+      final now = DateTime.now();
+      final anchor = DateTime(now.year, 1, 30);
+      final fund = await store.createFund(
+        name: 'Monthly Bills',
+        fundingAccountId: 'checking',
+        targetBalanceMinor: 100000,
+        targetCadence: FundTargetCadence.monthly,
+        targetDayRule: FundTargetDayRule.endOfMonth,
+        nextTargetDate: anchor,
+      );
+      await store.allocateReservation(
+        containerType: ReservationContainerType.fund,
+        containerId: fund.id,
+        amountMinor: 235000,
+        date: now,
+      );
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        _app(
+          store,
+          SingleChildScrollView(
+            child: Column(
+              children: [
+                FundPlanCard(fund: fund),
+                Builder(
+                  builder: (context) => TextButton(
+                    onPressed: () => showFundDetails(context, fund.id),
+                    child: const Text('Open Details'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      for (final amountToReturn in [0, 60000, 75000, 50000]) {
+        if (amountToReturn > 0) {
+          await store.returnReservation(
+            containerType: ReservationContainerType.fund,
+            containerId: fund.id,
+            amountMinor: amountToReturn,
+            date: now,
+          );
+          await tester.pumpAndSettle();
+        }
+        final snapshot = store.recurringFundCycleProgress(fund.id);
+        expect(
+          snapshot.activeCycleTargetDate,
+          DateTime(now.year, now.month + snapshot.completedCycles + 1, 0),
+        );
+        expect(
+          snapshot.activeCycleFundingDeadline,
+          DateTime(now.year, now.month + snapshot.completedCycles, 0),
+        );
+        final presentation = fundTargetPresentation(
+          fund: fund,
+          currentMinor: snapshot.reservedMinor,
+          currency: store.preferences.currency,
+          recurringCycleProgress: snapshot,
+        );
+        expect(find.text(presentation.status), findsOneWidget);
+        final expectedSecondary = [
+          ?presentation.secondaryStatus,
+          if (presentation.fundingDeadline != null)
+            'Fund by ${shortDate(presentation.fundingDeadline!)}',
+        ].join(' · ');
+        if (expectedSecondary.isNotEmpty) {
+          expect(find.text(expectedSecondary), findsOneWidget);
+        } else {
+          expect(find.textContaining('Fund by'), findsNothing);
+          expect(find.textContaining('0% funded'), findsNothing);
+        }
+        final bar = tester.widget<FundTargetProgressBar>(
+          find.byType(FundTargetProgressBar),
+        );
+        expect(
+          bar.presentation.activeCycleProgress,
+          snapshot.activeCycleProgress,
+        );
+        expect(
+          bar.presentation.showsMovingCycleBoundary,
+          snapshot.showsMovingCycleBoundary,
+        );
+        final segment = find.byKey(const ValueKey('fund-active-cycle-segment'));
+        if (snapshot.showsMovingCycleBoundary) {
+          final rect = tester.getRect(find.byType(FundTargetProgressBar));
+          expect(
+            tester.getSize(segment).width,
+            closeTo(rect.width * snapshot.activeCycleProgress, 0.1),
+          );
+        } else {
+          expect(segment, findsNothing);
+        }
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(find.text('Open Details'));
+        await tester.pumpAndSettle();
+        final details = find.byType(TransactionSheetFrame);
+        expect(
+          find.descendant(
+            of: details,
+            matching: find.text(presentation.status),
+          ),
+          findsOneWidget,
+        );
+        if (presentation.fundingDeadline != null) {
+          expect(
+            find.descendant(of: details, matching: find.text('Fund by')),
+            findsOneWidget,
+          );
+          expect(
+            find.descendant(
+              of: details,
+              matching: find.text(
+                fullMonthDateLabel(presentation.fundingDeadline!),
+              ),
+            ),
+            findsOneWidget,
+          );
+        } else {
+          expect(
+            find.descendant(of: details, matching: find.text('Fund by')),
+            findsNothing,
+          );
+        }
+        if (presentation.secondaryStatus != null) {
+          expect(
+            find.descendant(
+              of: details,
+              matching: find.text(presentation.secondaryStatus!),
+            ),
+            findsOneWidget,
+          );
+        }
+        expect(
+          find.descendant(of: details, matching: find.text('Next target')),
+          findsNothing,
+        );
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.text('Close'));
+        await tester.pumpAndSettle();
+      }
+      expect(store.fundById(fund.id).nextTargetDate, anchor);
+    },
+  );
 
   testWidgets('Funds preview shows a focused empty-state action', (
     tester,

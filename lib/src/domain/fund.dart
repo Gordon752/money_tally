@@ -5,6 +5,8 @@ enum FundStatus { active, archived }
 
 enum FundTargetCadence { none, monthly }
 
+enum FundTargetDayRule { fixedDay, endOfMonth }
+
 /// One non-persisted line in a batch Fund allocation request.
 ///
 /// The resulting reservation operations remain the authoritative persisted
@@ -27,6 +29,7 @@ class FundRecord {
     this.description = '',
     this.targetBalanceMinor = 0,
     this.targetCadence = FundTargetCadence.none,
+    this.targetDayRule = FundTargetDayRule.fixedDay,
     this.nextTargetDate,
     this.linkedAccountId,
     this.accentColorValue = 0xFF247C75,
@@ -40,6 +43,7 @@ class FundRecord {
   final FundStatus status;
   final int targetBalanceMinor;
   final FundTargetCadence targetCadence;
+  final FundTargetDayRule targetDayRule;
   final DateTime? nextTargetDate;
 
   /// Optional context such as the card or loan this Fund is intended to pay.
@@ -60,6 +64,7 @@ class FundRecord {
     FundStatus? status,
     int? targetBalanceMinor,
     FundTargetCadence? targetCadence,
+    FundTargetDayRule? targetDayRule,
     DateTime? nextTargetDate,
     String? linkedAccountId,
     int? accentColorValue,
@@ -77,6 +82,7 @@ class FundRecord {
       status: status ?? this.status,
       targetBalanceMinor: targetBalanceMinor ?? this.targetBalanceMinor,
       targetCadence: targetCadence ?? this.targetCadence,
+      targetDayRule: targetDayRule ?? this.targetDayRule,
       nextTargetDate: clearNextTargetDate
           ? null
           : nextTargetDate ?? this.nextTargetDate,
@@ -97,6 +103,7 @@ class FundRecord {
     'status': status.name,
     'targetBalanceMinor': targetBalanceMinor,
     'targetCadence': targetCadence.name,
+    'targetDayRule': targetDayRule.name,
     'nextTargetDate': nextTargetDate?.toIso8601String(),
     'linkedAccountId': linkedAccountId,
     'accentColorValue': accentColorValue,
@@ -116,6 +123,12 @@ class FundRecord {
       json['targetCadence'],
       FundTargetCadence.none,
     ),
+    // Older records store a numeric anchor only. Never infer month-end intent.
+    targetDayRule: enumByName(
+      FundTargetDayRule.values,
+      json['targetDayRule'],
+      FundTargetDayRule.fixedDay,
+    ),
     nextTargetDate: json['nextTargetDate'] == null
         ? null
         : dateTimeFromJson(json['nextTargetDate']),
@@ -126,9 +139,29 @@ class FundRecord {
   );
 }
 
+/// The single local-calendar boundary rule for recurring Fund presentation and
+/// consumption attribution. Months outside 1..12 are normalized by DateTime.
+/// Dates before the first target are also supported for the preceding funding
+/// deadline; this does not advance or mutate the persisted recurrence anchor.
+DateTime? fundTargetBoundary(
+  FundRecord fund, {
+  required int year,
+  required int month,
+}) {
+  final anchor = fund.nextTargetDate;
+  if (fund.targetCadence != FundTargetCadence.monthly || anchor == null) {
+    return null;
+  }
+  final monthStart = DateTime(year, month, 1);
+  final lastDay = DateTime(monthStart.year, monthStart.month + 1, 0).day;
+  final day = fund.targetDayRule == FundTargetDayRule.endOfMonth
+      ? lastDay
+      : anchor.day.clamp(1, lastDay);
+  return DateTime(monthStart.year, monthStart.month, day);
+}
+
 /// Resolves the next target checkpoint without changing or resetting money.
-/// [nextTargetDate] remains the user's monthly day anchor, so a target on the
-/// 31st clamps to February and then returns to the 31st in a longer month.
+/// Fixed days always use the original anchor, restoring the 31st after February.
 DateTime? effectiveFundTargetDate(FundRecord fund, {DateTime? asOf}) {
   final anchor = fund.nextTargetDate;
   if (fund.targetCadence == FundTargetCadence.none || anchor == null) {
@@ -138,13 +171,11 @@ DateTime? effectiveFundTargetDate(FundRecord fund, {DateTime? asOf}) {
   final today = DateTime(todayValue.year, todayValue.month, todayValue.day);
   var monthOffset = 0;
   while (monthOffset < 1200) {
-    final monthStart = DateTime(anchor.year, anchor.month + monthOffset, 1);
-    final lastDay = DateTime(monthStart.year, monthStart.month + 1, 0).day;
-    final candidate = DateTime(
-      monthStart.year,
-      monthStart.month,
-      anchor.day.clamp(1, lastDay),
-    );
+    final candidate = fundTargetBoundary(
+      fund,
+      year: anchor.year,
+      month: anchor.month + monthOffset,
+    )!;
     if (!candidate.isBefore(today)) return candidate;
     monthOffset += 1;
   }

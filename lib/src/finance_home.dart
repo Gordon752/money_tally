@@ -4613,6 +4613,9 @@ class _LedgerDayCard extends StatelessWidget {
                   currency: store.preferences.currency,
                   showIcon: store.preferences.showLedgerIcons,
                   showTimestamp: store.preferences.showLedgerTimestamps,
+                  showSplitIndicator:
+                      store.preferences.showLedgerSplitIndicator,
+                  reservePendingIndicatorSpace: reservePendingIndicatorSpace,
                   onTap: () => showReservationActivityDetails(
                     context,
                     reservationActivity,
@@ -4958,17 +4961,6 @@ class LedgerJournalRow extends StatelessWidget {
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ) ??
         const TextStyle(fontSize: 12);
-    final mediaSize = MediaQuery.sizeOf(context);
-    final isCompact = mediaSize.width < 600;
-    final isIPadLayout =
-        Theme.of(context).platform == TargetPlatform.iOS &&
-        mediaSize.shortestSide >= 600;
-    final secondaryAmountSlotWidth = isIPadLayout
-        ? (isAccountScoped ? 220.0 : 230.0)
-        : isAccountScoped
-        ? (isCompact ? 80.0 : 96.0)
-        : (isCompact ? 44.0 : 56.0);
-
     return Dismissible(
       key: ValueKey('ledger-swipe-${transaction.id}'),
       dismissThresholds: const {
@@ -5095,71 +5087,52 @@ class LedgerJournalRow extends StatelessWidget {
                       ),
                       if (resolvedMetadataDetails.isNotEmpty) ...[
                         const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _LedgerMetadataLine(
-                                rowId: transaction.id,
-                                details: resolvedMetadataDetails,
-                                timeLabel: showTimestamp ? timeLabel : null,
-                                reserveTimestampSpace: showTimestamp,
-                                showPending:
-                                    transaction.status ==
-                                    v2_transaction.TransactionStatus.pending,
-                                reservePendingSpace:
-                                    reservePendingIndicatorSpace,
-                                showSplit: showSplitIndicator && hasSplit,
-                                reserveSplitSpace: showSplitIndicator,
-                                style: secondaryStyle,
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.sm),
-                            SizedBox(
-                              key: ValueKey(
-                                'ledger-secondary-amount-slot-${transaction.id}',
-                              ),
-                              width: secondaryAmountSlotWidth,
-                              height: 18,
-                              child: runningBalanceMinor == null
-                                  ? null
-                                  : Align(
-                                      alignment: Alignment.centerRight,
-                                      child: runningBalanceAccount == null
-                                          ? MoneyText(
-                                              key: ValueKey(
-                                                'ledger-running-balance-${transaction.id}',
-                                              ),
-                                              amountMinor: runningBalanceMinor!,
-                                              currency: currency,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w500,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            )
-                                          : FittedBox(
-                                              fit: BoxFit.scaleDown,
-                                              alignment: Alignment.centerRight,
-                                              child: AccountBalanceText(
-                                                key: ValueKey(
-                                                  'ledger-running-balance-${transaction.id}',
-                                                ),
-                                                accountType:
-                                                    runningBalanceAccount!.type,
-                                                signedBalanceMinor:
-                                                    runningBalanceMinor!,
-                                                currency: currency,
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w500,
-                                                compactCreditLabel: true,
-                                                neutralColor: Theme.of(
-                                                  context,
-                                                ).colorScheme.onSurfaceVariant,
-                                              ),
-                                            ),
+                        _LedgerSecondaryLine(
+                          rowId: transaction.id,
+                          details: resolvedMetadataDetails,
+                          timeLabel: showTimestamp ? timeLabel : null,
+                          showTimestamp: showTimestamp,
+                          showPending:
+                              transaction.status ==
+                              v2_transaction.TransactionStatus.pending,
+                          reservePendingSpace: reservePendingIndicatorSpace,
+                          showSplit: showSplitIndicator && hasSplit,
+                          reserveSplitSpace: showSplitIndicator,
+                          isAccountScoped: isAccountScoped,
+                          style: secondaryStyle,
+                          trailing: runningBalanceMinor == null
+                              ? null
+                              : runningBalanceAccount == null
+                              ? MoneyText(
+                                  key: ValueKey(
+                                    'ledger-running-balance-${transaction.id}',
+                                  ),
+                                  amountMinor: runningBalanceMinor!,
+                                  currency: currency,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                )
+                              : FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: AccountBalanceText(
+                                    key: ValueKey(
+                                      'ledger-running-balance-${transaction.id}',
                                     ),
-                            ),
-                          ],
+                                    accountType: runningBalanceAccount!.type,
+                                    signedBalanceMinor: runningBalanceMinor!,
+                                    currency: currency,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    compactCreditLabel: true,
+                                    neutralColor: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                         ),
                       ],
                     ],
@@ -5256,6 +5229,78 @@ String? _transactionReservationMetadataLabel(
       '${funds.where((fund) => fund.id == containerId).firstOrNull?.name ?? 'Deleted'} Fund',
     null => null,
   };
+}
+
+/// All Ledger activity types use the same trailing columns. A reservation
+/// movement leaves the Split/Pending cells empty, but does not move the clock.
+class _LedgerSecondaryLine extends StatelessWidget {
+  const _LedgerSecondaryLine({
+    required this.rowId,
+    required this.details,
+    required this.timeLabel,
+    required this.style,
+    required this.isAccountScoped,
+    required this.showTimestamp,
+    required this.reserveSplitSpace,
+    required this.reservePendingSpace,
+    this.showSplit = false,
+    this.showPending = false,
+    this.trailing,
+  });
+
+  final String rowId;
+  final String details;
+  final String? timeLabel;
+  final TextStyle style;
+  final bool isAccountScoped;
+  final bool showTimestamp;
+  final bool reserveSplitSpace;
+  final bool reservePendingSpace;
+  final bool showSplit;
+  final bool showPending;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final mediaSize = MediaQuery.sizeOf(context);
+    final isCompact = mediaSize.width < 600;
+    final platform = Theme.of(context).platform;
+    final usesWideMetadataInset =
+        (platform == TargetPlatform.iOS && mediaSize.shortestSide >= 600) ||
+        (platform == TargetPlatform.macOS && !isCompact);
+    final amountSlotWidth = usesWideMetadataInset
+        ? (isAccountScoped ? 220.0 : 230.0)
+        : isAccountScoped
+        ? (isCompact ? 80.0 : 96.0)
+        : (isCompact ? 44.0 : 56.0);
+
+    return Row(
+      children: [
+        Expanded(
+          child: _LedgerMetadataLine(
+            rowId: rowId,
+            details: details,
+            timeLabel: timeLabel,
+            reserveTimestampSpace: showTimestamp,
+            reserveSplitSpace: reserveSplitSpace,
+            reservePendingSpace: reservePendingSpace,
+            showSplit: showSplit,
+            showPending: showPending,
+            style: style,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        SizedBox(
+          key: ValueKey('ledger-secondary-amount-slot-$rowId'),
+          width: amountSlotWidth,
+          height: 18,
+          child: trailing == null
+              ? null
+              : Align(alignment: Alignment.centerRight, child: trailing),
+        ),
+      ],
+    );
+  }
 }
 
 class _LedgerMetadataLine extends StatelessWidget {
@@ -5483,6 +5528,8 @@ class ReservationLedgerRow extends StatelessWidget {
     this.showDateContext = true,
     this.showIcon = true,
     this.showTimestamp = true,
+    this.showSplitIndicator = true,
+    this.reservePendingIndicatorSpace = false,
     this.isAccountScoped = false,
     super.key,
   });
@@ -5493,6 +5540,8 @@ class ReservationLedgerRow extends StatelessWidget {
   final bool showDateContext;
   final bool showIcon;
   final bool showTimestamp;
+  final bool showSplitIndicator;
+  final bool reservePendingIndicatorSpace;
   final bool isAccountScoped;
   final VoidCallback onTap;
 
@@ -5599,39 +5648,28 @@ class ReservationLedgerRow extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _LedgerMetadataLine(
-                              rowId:
-                                  'reservation-${activity.reservationOperationId}',
-                              details: metadataDetails,
-                              timeLabel: showTimestamp ? timeLabel : null,
-                              reserveTimestampSpace: showTimestamp,
-                              // Reservation activity can never carry a Split or
-                              // Pending indicator. Keep that space available for
-                              // the stable Goal/Fund identity instead.
-                              reserveSplitSpace: false,
-                              reservePendingSpace: false,
-                              style: secondaryStyle,
+                      _LedgerSecondaryLine(
+                        rowId: 'reservation-${activity.reservationOperationId}',
+                        details: metadataDetails,
+                        timeLabel: showTimestamp ? timeLabel : null,
+                        showTimestamp: showTimestamp,
+                        reserveSplitSpace: showSplitIndicator,
+                        reservePendingSpace: reservePendingIndicatorSpace,
+                        isAccountScoped: isAccountScoped,
+                        style: secondaryStyle,
+                        trailing: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            amountLabel,
+                            maxLines: 1,
+                            softWrap: false,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(width: AppSpacing.sm),
-                          SizedBox(
-                            width: 104,
-                            height: 18,
-                            child: Align(
-                              alignment: Alignment.centerRight,
-                              child: Text(
-                                amountLabel,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
@@ -5794,24 +5832,46 @@ class GoalFundingLedgerRow extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Funded Goals',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.15,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Funded Goals',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.15,
+                                ),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        SizedBox(
+                          width: 104,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: MoneyText(
+                              amountMinor: -event.totalAmountMinor.abs(),
+                              currency: currency,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 3),
-                    _LedgerMetadataLine(
+                    _LedgerSecondaryLine(
                       rowId: 'goal-${event.id}',
                       details: metadataDetails,
                       timeLabel: showTimestamp ? timeLabel : null,
-                      reserveTimestampSpace: showTimestamp,
+                      showTimestamp: showTimestamp,
                       reserveSplitSpace: showSplitIndicator,
                       reservePendingSpace: reservePendingIndicatorSpace,
+                      isAccountScoped: isAccountScoped,
                       style:
                           Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(
@@ -5819,30 +5879,10 @@ class GoalFundingLedgerRow extends StatelessWidget {
                             ).colorScheme.onSurfaceVariant,
                           ) ??
                           const TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              SizedBox(
-                width: 104,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    MoneyText(
-                      amountMinor: -event.totalAmountMinor.abs(),
-                      currency: currency,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.blue.shade700,
-                    ),
-                    const SizedBox(height: 3),
-                    SizedBox(
-                      height: 18,
-                      child: runningBalanceMinor == null
+                      trailing: runningBalanceMinor == null
                           ? null
-                          : Align(
+                          : FittedBox(
+                              fit: BoxFit.scaleDown,
                               alignment: Alignment.centerRight,
                               child: account == null
                                   ? MoneyText(

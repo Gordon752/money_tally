@@ -7,9 +7,13 @@ class FundTargetPresentation {
     required this.completedCycles,
     required this.activeCycleProgress,
     required this.showsMovingCycleBoundary,
+    this.secondaryStatus,
+    this.fundingDeadline,
   });
 
   final String status;
+  final String? secondaryStatus;
+  final DateTime? fundingDeadline;
   final double barProgress;
   final int completedCycles;
   final double activeCycleProgress;
@@ -21,6 +25,7 @@ FundTargetPresentation fundTargetPresentation({
   required int currentMinor,
   required CurrencyFormatSettings currency,
   DateTime? asOf,
+  RecurringFundCycleProgress? recurringCycleProgress,
 }) {
   final target = fund.targetBalanceMinor;
   if (target <= 0) {
@@ -33,25 +38,25 @@ FundTargetPresentation fundTargetPresentation({
     );
   }
   final current = currentMinor.clamp(0, 0x7FFFFFFFFFFFFFFF).toInt();
-  if (current < target) {
-    return FundTargetPresentation(
-      status: '${money(target - current, currency)} needed to fully fund',
-      barProgress: current / target,
-      completedCycles: 0,
-      activeCycleProgress: current / target,
-      showsMovingCycleBoundary: false,
-    );
-  }
-  if (current == target) {
-    return FundTargetPresentation(
-      status: 'Target met',
-      barProgress: 1,
-      completedCycles: fund.targetCadence == FundTargetCadence.monthly ? 1 : 0,
-      activeCycleProgress: 0,
-      showsMovingCycleBoundary: false,
-    );
-  }
   if (fund.targetCadence != FundTargetCadence.monthly) {
+    if (current < target) {
+      return FundTargetPresentation(
+        status: '${money(target - current, currency)} needed to fully fund',
+        barProgress: current / target,
+        completedCycles: 0,
+        activeCycleProgress: current / target,
+        showsMovingCycleBoundary: false,
+      );
+    }
+    if (current == target) {
+      return const FundTargetPresentation(
+        status: 'Target met',
+        barProgress: 1,
+        completedCycles: 0,
+        activeCycleProgress: 0,
+        showsMovingCycleBoundary: false,
+      );
+    }
     return FundTargetPresentation(
       status: '${money(current - target, currency)} above target',
       barProgress: 1,
@@ -61,44 +66,55 @@ FundTargetPresentation fundTargetPresentation({
     );
   }
 
-  final targetDate = effectiveFundTargetDate(fund, asOf: asOf);
+  final cycle =
+      recurringCycleProgress ??
+      RecurringFundCycleProgress.fromReservation(
+        fund: fund,
+        reservedMinor: current,
+        asOf: asOf,
+      );
+  final completedCycles = cycle.completedCycles;
+  FundTargetPresentation presentation(String status, {String? secondary}) =>
+      FundTargetPresentation(
+        status: status,
+        secondaryStatus: secondary,
+        // There is no partial next cycle to label in an exact-funded state.
+        fundingDeadline: cycle.isExactlyFunded
+            ? null
+            : cycle.activeCycleFundingDeadline,
+        barProgress: cycle.barProgress,
+        completedCycles: completedCycles,
+        activeCycleProgress: cycle.activeCycleProgress,
+        showsMovingCycleBoundary: cycle.showsMovingCycleBoundary,
+      );
+  if (completedCycles == 0) {
+    return presentation(
+      '${money(cycle.activeCycleRemainingMinor, currency)} needed to fully fund',
+    );
+  }
+  if (completedCycles == 1 && cycle.isExactlyFunded) {
+    return presentation('Target met');
+  }
+
+  final targetDate = cycle.currentCycleTargetDate;
   final currentCycle = targetDate == null
       ? 'Current cycle'
       : _fundMonthName(targetDate);
-  // Quotient and remainder keep the bar independent of any fixed number of
-  // months. Reducing the reserved total naturally unwinds the newest partial
-  // cycle before crossing back into an earlier completed cycle.
-  final completedCycles = current ~/ target;
-  final activeCycleAmount = current % target;
-  if (activeCycleAmount == 0) {
-    return FundTargetPresentation(
-      status: '$completedCycles months funded',
-      barProgress: 1,
-      completedCycles: completedCycles,
-      activeCycleProgress: 0,
-      showsMovingCycleBoundary: false,
-    );
+  if (cycle.isExactlyFunded) {
+    return presentation('$completedCycles months fully funded');
   }
-  final activeCycleDate = targetDate == null
-      ? null
-      : DateTime(targetDate.year, targetDate.month + completedCycles);
+  final activeCycleDate = cycle.activeCycleTargetDate;
   final activeCycle = activeCycleDate == null
       ? 'Next cycle'
       : _fundMonthName(activeCycleDate);
-  final activeCycleProgress = activeCycleAmount / target;
-  final activeCyclePercent = (activeCycleAmount * 100 / target).round().clamp(
-    0,
-    100,
-  );
+  final activeCyclePercent = cycle.activeCyclePercent;
+  final activeCycleRemaining = cycle.activeCycleRemainingMinor;
   final status = completedCycles == 1
-      ? '$currentCycle funded · $activeCycle $activeCyclePercent% funded'
-      : '$completedCycles months funded · ${money(activeCycleAmount, currency)} toward $activeCycle';
-  return FundTargetPresentation(
-    status: status,
-    barProgress: 1,
-    completedCycles: completedCycles,
-    activeCycleProgress: activeCycleProgress,
-    showsMovingCycleBoundary: true,
+      ? '$currentCycle fully funded · ${money(activeCycleRemaining, currency)} needed for $activeCycle'
+      : '$completedCycles months fully funded · ${money(activeCycleRemaining, currency)} needed for $activeCycle';
+  return presentation(
+    status,
+    secondary: '$activeCycle $activeCyclePercent% funded',
   );
 }
 
@@ -256,19 +272,22 @@ class FundPreviewRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
-    final current = store.currentFundAmountMinor(fund.id);
+    final cycleProgress = store.recurringFundCycleProgress(fund.id);
+    final current = cycleProgress.reservedMinor;
     final target = fund.targetBalanceMinor;
     final targetPresentation = fundTargetPresentation(
       fund: fund,
       currentMinor: current,
       currency: store.preferences.currency,
+      recurringCycleProgress: cycleProgress,
     );
     final status = targetPresentation.status;
+    final secondaryStatus = targetPresentation.secondaryStatus;
     final accent = Color(fund.accentColorValue);
     return Semantics(
       button: true,
       label:
-          '${fund.name}, ${money(current, store.preferences.currency)} available, $status',
+          '${fund.name}, ${money(current, store.preferences.currency)} available, $status${secondaryStatus == null ? '' : ', $secondaryStatus'}',
       child: InkWell(
         key: ValueKey('dashboard-fund-${fund.id}'),
         borderRadius: BorderRadius.circular(AppRadii.control),
@@ -436,9 +455,9 @@ class FundPlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = FinanceDataStoreScope.watch(context);
-    final current = store.currentFundAmountMinor(fund.id);
+    final cycleProgress = store.recurringFundCycleProgress(fund.id);
+    final current = cycleProgress.reservedMinor;
     final target = fund.targetBalanceMinor;
-    final effectiveTargetDate = effectiveFundTargetDate(fund);
     final accountName = store.accounts
         .where((account) => account.id == fund.fundingAccountId)
         .map((account) => account.name)
@@ -447,12 +466,19 @@ class FundPlanCard extends StatelessWidget {
       fund: fund,
       currentMinor: current,
       currency: store.preferences.currency,
+      recurringCycleProgress: cycleProgress,
     );
     final status = targetPresentation.status;
+    final secondaryStatus = targetPresentation.secondaryStatus;
+    final fundingDeadline = targetPresentation.fundingDeadline;
+    final secondaryParts = <String>[
+      ?secondaryStatus,
+      if (fundingDeadline != null) 'Fund by ${shortDate(fundingDeadline)}',
+    ];
     return Semantics(
       button: true,
       label:
-          '${fund.name}, ${money(current, store.preferences.currency)} available, $status',
+          '${fund.name}, ${money(current, store.preferences.currency)} available, $status${secondaryStatus == null ? '' : ', $secondaryStatus'}',
       child: Material(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(AppRadii.card),
@@ -547,10 +573,10 @@ class FundPlanCard extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (effectiveTargetDate != null)
+                if (secondaryParts.isNotEmpty)
                   Text(
-                    'Next target ${shortDate(effectiveTargetDate)}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    secondaryParts.join(' · '),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -1452,12 +1478,14 @@ Future<void> showFundDetails(BuildContext context, String fundId) async {
     );
     return;
   }
-  final current = store.currentFundAmountMinor(fund.id);
+  final cycleProgress = store.recurringFundCycleProgress(fund.id);
+  final current = cycleProgress.reservedMinor;
   final target = fund.targetBalanceMinor;
   final targetPresentation = fundTargetPresentation(
     fund: fund,
     currentMinor: current,
     currency: store.preferences.currency,
+    recurringCycleProgress: cycleProgress,
   );
   final fundingAccountName = store.accounts
       .where((account) => account.id == fund.fundingAccountId)
@@ -1467,7 +1495,7 @@ Future<void> showFundDetails(BuildContext context, String fundId) async {
     containerType: ReservationContainerType.fund,
     containerId: fund.id,
   );
-  final effectiveTargetDate = effectiveFundTargetDate(fund);
+  final fundingDeadline = targetPresentation.fundingDeadline;
   await showDialog<void>(
     context: context,
     useRootNavigator: false,
@@ -1510,6 +1538,13 @@ Future<void> showFundDetails(BuildContext context, String fundId) async {
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (targetPresentation.secondaryStatus != null)
+              Text(
+                targetPresentation.secondaryStatus!,
+                style: Theme.of(dialogContext).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
+                ),
+              ),
           ],
           const SizedBox(height: AppSpacing.md),
           if (fundingAccountName != null)
@@ -1524,10 +1559,10 @@ Future<void> showFundDetails(BuildContext context, String fundId) async {
               value: money(target, store.preferences.currency),
               icon: AppIcon.goal,
             ),
-          if (effectiveTargetDate != null)
+          if (fundingDeadline != null)
             GoalDetailValue(
-              label: 'Next target',
-              value: fullMonthDateLabel(effectiveTargetDate),
+              label: 'Fund by',
+              value: fullMonthDateLabel(fundingDeadline),
               icon: AppIcon.calendar,
             ),
           if (fund.description.trim().isNotEmpty)
@@ -1936,6 +1971,8 @@ Future<void> showReservationAmountDialog(
   }
 }
 
+enum _FundTargetTiming { none, endOfMonth, fixedDay }
+
 Future<void> showFundEditor(
   BuildContext context, {
   FundRecord? initialFund,
@@ -1948,11 +1985,13 @@ Future<void> showFundEditor(
   var fundingAccountId = initialFund?.fundingAccountId;
   var targetMinor = initialFund?.targetBalanceMinor ?? 0;
   var cadence = initialFund?.targetCadence ?? FundTargetCadence.none;
+  var dayRule = initialFund?.targetDayRule ?? FundTargetDayRule.fixedDay;
   var nextTargetDate = initialFund?.nextTargetDate;
   String? error;
-  await showDialog<void>(
+  final navigator = Navigator.of(context);
+  final route = DialogRoute<void>(
     context: context,
-    useRootNavigator: false,
+    themes: InheritedTheme.capture(from: context, to: navigator.context),
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setState) {
         final accounts = store.activeAccountsInDisplayOrder
@@ -1983,6 +2022,7 @@ Future<void> showFundEditor(
                     fundingAccountId: fundingAccountId!,
                     targetBalanceMinor: targetMinor,
                     targetCadence: cadence,
+                    targetDayRule: dayRule,
                     nextTargetDate: nextTargetDate,
                   );
                 } else {
@@ -1993,6 +2033,7 @@ Future<void> showFundEditor(
                       fundingAccountId: fundingAccountId,
                       targetBalanceMinor: targetMinor,
                       targetCadence: cadence,
+                      targetDayRule: dayRule,
                       nextTargetDate: nextTargetDate,
                       clearNextTargetDate: cadence == FundTargetCadence.none,
                       sync: initialFund.sync.touched(deviceId: store.deviceId),
@@ -2047,14 +2088,19 @@ Future<void> showFundEditor(
               ),
               if (cadence == FundTargetCadence.monthly) ...[
                 TransactionFormDivider(),
-                TransactionFormLabel('Target date'),
+                TransactionFormLabel('First target date'),
                 PolishedFormValueRow(
                   key: const ValueKey('fund-target-date'),
                   icon: AppIcon.calendar,
                   value: nextTargetDate == null
                       ? 'Choose date'
                       : fullMonthDateLabel(nextTargetDate!),
-                  secondary: 'The balance rolls over after every checkpoint',
+                  secondary: dayRule == FundTargetDayRule.endOfMonth
+                      ? 'Last day of every month'
+                      : nextTargetDate == null
+                      ? 'Choose the day to repeat each month'
+                      : 'Repeats on day ${nextTargetDate?.day ?? ''} each month; '
+                            'uses the last day in shorter months',
                   onTap: () async {
                     final now = DateTime.now();
                     final selected = await pickDateForField(
@@ -2062,7 +2108,11 @@ Future<void> showFundEditor(
                       nextTargetDate ?? DateTime(now.year, now.month + 1, 0),
                     );
                     if (selected != null && dialogContext.mounted) {
-                      setState(() => nextTargetDate = selected);
+                      setState(() {
+                        nextTargetDate = dayRule == FundTargetDayRule.endOfMonth
+                            ? DateTime(selected.year, selected.month + 1, 0)
+                            : selected;
+                      });
                     }
                   },
                 ),
@@ -2090,33 +2140,67 @@ Future<void> showFundEditor(
                 key: const ValueKey('fund-target-cadence'),
                 icon: AppIcon.recurrence,
                 value: cadence == FundTargetCadence.monthly
-                    ? 'Monthly target balance'
+                    ? dayRule == FundTargetDayRule.endOfMonth
+                          ? 'End of every month'
+                          : nextTargetDate == null
+                          ? 'Choose date'
+                          : 'Monthly on day ${nextTargetDate!.day}'
                     : 'No recurring target',
                 secondary: 'Money rolls over and never resets',
                 onTap: () async {
                   final selected =
-                      await showPolishedChoicePicker<FundTargetCadence>(
+                      await showPolishedChoicePicker<_FundTargetTiming>(
                         dialogContext,
                         title: 'Target timing',
-                        selected: cadence,
+                        selected: cadence != FundTargetCadence.monthly
+                            ? _FundTargetTiming.none
+                            : dayRule == FundTargetDayRule.endOfMonth
+                            ? _FundTargetTiming.endOfMonth
+                            : _FundTargetTiming.fixedDay,
                         choices: const [
                           PolishedChoice(
-                            value: FundTargetCadence.none,
+                            value: _FundTargetTiming.none,
                             label: 'No recurring target',
                           ),
                           PolishedChoice(
-                            value: FundTargetCadence.monthly,
-                            label: 'Monthly target balance',
+                            value: _FundTargetTiming.endOfMonth,
+                            label: 'End of every month',
+                          ),
+                          PolishedChoice(
+                            value: _FundTargetTiming.fixedDay,
+                            label: 'Choose date — repeat monthly on that day',
                           ),
                         ],
                       );
                   if (selected != null && dialogContext.mounted) {
+                    final now = DateTime.now();
+                    final initialDate =
+                        nextTargetDate ?? DateTime(now.year, now.month + 1, 0);
+                    DateTime? chosenDate;
+                    if (selected == _FundTargetTiming.fixedDay) {
+                      chosenDate = await pickDateForField(
+                        dialogContext,
+                        initialDate,
+                      );
+                      // Cancelling the date picker preserves the existing rule.
+                      if (chosenDate == null || !dialogContext.mounted) return;
+                    }
                     setState(() {
-                      cadence = selected;
-                      if (cadence == FundTargetCadence.monthly &&
-                          nextTargetDate == null) {
-                        final now = DateTime.now();
-                        nextTargetDate = DateTime(now.year, now.month + 1, 0);
+                      switch (selected) {
+                        case _FundTargetTiming.none:
+                          cadence = FundTargetCadence.none;
+                        case _FundTargetTiming.endOfMonth:
+                          cadence = FundTargetCadence.monthly;
+                          dayRule = FundTargetDayRule.endOfMonth;
+                          nextTargetDate = DateTime(
+                            initialDate.year,
+                            initialDate.month + 1,
+                            0,
+                          );
+                        case _FundTargetTiming.fixedDay:
+                          cadence = FundTargetCadence.monthly;
+                          dayRule = FundTargetDayRule.fixedDay;
+                          nextTargetDate = chosenDate;
                       }
                     });
                   }
@@ -2148,6 +2232,9 @@ Future<void> showFundEditor(
       },
     ),
   );
+  await navigator.push(route);
+  // Popping resolves push before the reverse animation unmounts the fields.
+  await route.completed;
   name.dispose();
   description.dispose();
 }

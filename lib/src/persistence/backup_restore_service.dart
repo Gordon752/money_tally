@@ -11,8 +11,8 @@ import '../domain/scheduled_transaction.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
 
-const currentBackupSchemaVersion = 5;
-const supportedBackupSchemaVersions = {2, 4, currentBackupSchemaVersion};
+const currentBackupSchemaVersion = 6;
+const supportedBackupSchemaVersions = {2, 4, 5, currentBackupSchemaVersion};
 
 class BackupValidationException implements Exception {
   const BackupValidationException(this.message);
@@ -178,6 +178,20 @@ class BackupRestoreValidator {
     int sourceVersion,
   ) {
     if (sourceVersion == currentBackupSchemaVersion) return root;
+    if (sourceVersion == 5) {
+      return {
+        ...root,
+        'schemaVersion': currentBackupSchemaVersion,
+        'funds': [
+          for (final fund in _recordMaps(root, 'funds'))
+            {
+              ...fund,
+              // v5 had no explicit rule, even for dates at month-end.
+              'targetDayRule': FundTargetDayRule.fixedDay.name,
+            },
+        ],
+      };
+    }
     if (sourceVersion == 2) {
       return {
         ...root,
@@ -325,6 +339,7 @@ class BackupRestoreValidator {
     _validateEnums(root, 'goals', 'goalType', GoalType.values, optional: true);
     _validateEnums(root, 'funds', 'status', FundStatus.values);
     _validateEnums(root, 'funds', 'targetCadence', FundTargetCadence.values);
+    _validateEnums(root, 'funds', 'targetDayRule', FundTargetDayRule.values);
     _validateEnums(
       root,
       'reservationOperations',

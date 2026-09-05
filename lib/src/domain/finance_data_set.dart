@@ -208,7 +208,7 @@ class FinanceDataSet {
 
   Map<String, Object?> toJson() {
     return {
-      'schemaVersion': 5,
+      'schemaVersion': 6,
       'accounts': accounts.map((item) => item.toJson()).toList(),
       'categories': categories.map((item) => item.toJson()).toList(),
       'transactions': transactions.map((item) => item.toJson()).toList(),

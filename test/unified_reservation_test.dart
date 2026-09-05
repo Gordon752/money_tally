@@ -320,7 +320,7 @@ void main() {
     );
   });
 
-  test('schema 5 backup round trip preserves definitions and operations', () {
+  test('schema 6 backup round trip preserves definitions and operations', () {
     final original = _baseDataSet(sync: sync).copyWith(
       reservationOperations: [
         _operation(
@@ -337,7 +337,7 @@ void main() {
       const BackupCodec().encodeJson(original, exportedAt: today),
     );
 
-    expect(decoded.toJson()['schemaVersion'], 5);
+    expect(decoded.toJson()['schemaVersion'], 6);
     expect(decoded.funds.single.id, 'bills');
     expect(decoded.goals.single.reservationModelVersion, 1);
     expect(decoded.reservationOperations.single.amountMinor, 12345);

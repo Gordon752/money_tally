@@ -17,6 +17,7 @@ import '../domain/scheduled_occurrence_authority.dart';
 import '../domain/sync_metadata.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
+import '../funds/recurring_fund_cycle_calculator.dart';
 import '../goals/goal_calculator.dart';
 import '../notifications/notification_scheduler.dart';
 import '../persistence/finance_record_repository.dart';
@@ -1749,6 +1750,25 @@ class FinanceDataStore extends ChangeNotifier {
         asOf: asOf,
       );
 
+  RecurringFundCycleProgress recurringFundCycleProgress(
+    String fundId, {
+    DateTime? asOf,
+  }) {
+    final effectiveAsOf = asOf ?? DateTime.now();
+    return calculateRecurringFundCycleProgress(
+      fund: fundById(fundId),
+      effectiveOperations: effectiveReservationOperationsForContainer(
+        operations: reservationOperations,
+        transactions: transactions,
+        scheduledTransactions: scheduledTransactions,
+        containerType: ReservationContainerType.fund,
+        containerId: fundId,
+      ),
+      transactions: transactions,
+      asOf: effectiveAsOf,
+    );
+  }
+
   int reservationAmountMinor({
     required ReservationContainerType containerType,
     required String containerId,
@@ -1797,6 +1817,7 @@ class FinanceDataStore extends ChangeNotifier {
     required String fundingAccountId,
     int targetBalanceMinor = 0,
     FundTargetCadence targetCadence = FundTargetCadence.none,
+    FundTargetDayRule targetDayRule = FundTargetDayRule.fixedDay,
     DateTime? nextTargetDate,
     String description = '',
     String? linkedAccountId,
@@ -1821,6 +1842,7 @@ class FinanceDataStore extends ChangeNotifier {
       status: FundStatus.active,
       targetBalanceMinor: targetBalanceMinor.abs(),
       targetCadence: targetCadence,
+      targetDayRule: targetDayRule,
       nextTargetDate: nextTargetDate,
       linkedAccountId: linkedAccountId,
       accentColorValue: accentColorValue,

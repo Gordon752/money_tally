@@ -52,6 +52,7 @@ import 'src/domain/transaction.dart';
 import 'src/domain/transaction.dart' as v2_transaction;
 import 'src/domain/user_preferences.dart';
 import 'src/export/export_file_service.dart';
+import 'src/funds/recurring_fund_cycle_calculator.dart';
 import 'src/goals/goal_calculator.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
 import 'src/migration/finance_data_bootstrapper.dart';
