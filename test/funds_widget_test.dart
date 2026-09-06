@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/main.dart';
 import 'package:money_tally/src/domain/account.dart' as v2_account;
@@ -23,6 +26,9 @@ import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(_loadDashboardTextFont);
+
   test('Fund target presentation covers exact and recurring cycle states', () {
     const currency = CurrencyFormatSettings();
     final sync = v2_sync.SyncMetadata.fresh(
@@ -609,6 +615,143 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('dashboard-view-all-funds')));
     expect(viewAllCount, 1);
   });
+
+  for (final (label, size, scale) in [
+    ('narrow iPhone', const Size(320, 700), 1.0),
+    ('iPhone', const Size(393, 852), 1.0),
+    ('iPhone larger text', const Size(393, 852), 1.3),
+    ('iPad portrait', const Size(768, 1024), 1.0),
+    ('iPad landscape', const Size(1024, 768), 1.0),
+    ('Mac', const Size(1440, 900), 1.0),
+  ]) {
+    testWidgets('Dashboard Funds status uses full width below bar on $label', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final seed = _store().dataSet;
+      final store = FinanceDataStore(
+        dataSet: seed.copyWith(
+          accounts: [
+            for (final account in seed.accounts)
+              account.id == 'checking'
+                  ? account.copyWith(openingBalanceMinor: 2000000)
+                  : account,
+          ],
+        ),
+      );
+      final now = DateTime.now();
+      final fund = await store.createFund(
+        name: 'Monthly Bills',
+        fundingAccountId: 'checking',
+        targetBalanceMinor: 360000,
+        targetCadence: FundTargetCadence.monthly,
+        targetDayRule: FundTargetDayRule.endOfMonth,
+        nextTargetDate: DateTime(now.year, now.month + 1, 0),
+      );
+      await store.allocateReservation(
+        containerType: ReservationContainerType.fund,
+        containerId: fund.id,
+        amountMinor: 844831,
+        date: now,
+      );
+      final before = store.dataSet.toJson();
+      final cycle = store.recurringFundCycleProgress(fund.id);
+      final presentation = fundTargetPresentation(
+        fund: fund,
+        currentMinor: cycle.reservedMinor,
+        currency: store.preferences.currency,
+        recurringCycleProgress: cycle,
+      );
+      expect(
+        presentation.status,
+        startsWith(r'2 months fully funded · $2,351.69 needed for '),
+      );
+      expect(presentation.secondaryStatus, endsWith('35% funded'));
+      var viewAllCount = 0;
+      await tester.pumpWidget(
+        _app(
+          store,
+          Builder(
+            builder: (context) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(scale)),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Theme(
+                    data: Theme.of(context).copyWith(
+                      textTheme: Theme.of(
+                        context,
+                      ).textTheme.apply(fontFamily: 'DashboardText'),
+                    ),
+                    child: DashboardCardFlow(
+                      children: [
+                        const SizedBox(height: 100),
+                        const SizedBox(height: 120),
+                        FundsPreviewCard(onViewAll: () => viewAllCount++),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final row = find.byKey(ValueKey('dashboard-fund-${fund.id}'));
+      final status = find.byKey(ValueKey('dashboard-fund-status-${fund.id}'));
+      final title = find.descendant(of: row, matching: find.text(fund.name));
+      final amount = find.descendant(
+        of: row,
+        matching: find.text(r'$8,448.31 available'),
+      );
+      final bar = find.descendant(
+        of: row,
+        matching: find.byType(FundTargetProgressBar),
+      );
+      final statusWidget = tester.widget<Text>(status);
+      final paragraph = tester.renderObject<RenderParagraph>(
+        find.descendant(of: status, matching: find.byType(RichText)),
+      );
+      expect(statusWidget.data, presentation.status);
+      expect(statusWidget.maxLines, 2);
+      expect(statusWidget.softWrap, isTrue);
+      expect(statusWidget.textAlign, TextAlign.start);
+      expect(
+        paragraph.didExceedMaxLines,
+        isFalse,
+        reason: 'The full status must be visible on $label',
+      );
+      final titleRect = tester.getRect(title);
+      final amountRect = tester.getRect(amount);
+      final barRect = tester.getRect(bar);
+      final statusRect = tester.getRect(status);
+      expect(amountRect.top, greaterThan(titleRect.bottom));
+      expect(barRect.top, greaterThan(amountRect.bottom));
+      expect(statusRect.top, greaterThan(barRect.bottom));
+      expect(statusRect.left, closeTo(barRect.left, 0.01));
+      expect(statusRect.right, closeTo(barRect.right, 0.01));
+      expect(statusRect.width, closeTo(titleRect.width, 0.01));
+      final renderedBar = tester
+          .widget<FundTargetProgressBar>(bar)
+          .presentation;
+      expect(renderedBar.barProgress, presentation.barProgress);
+      expect(renderedBar.activeCycleProgress, presentation.activeCycleProgress);
+      expect(renderedBar.completedCycles, presentation.completedCycles);
+      final viewAll = find.byKey(const ValueKey('dashboard-view-all-funds'));
+      expect(tester.getRect(viewAll).top, greaterThan(statusRect.bottom));
+      await tester.ensureVisible(viewAll);
+      await tester.tap(viewAll);
+      expect(viewAllCount, 1);
+      expect(store.dataSet.toJson(), before);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('Fund allocation amount receives focus immediately', (
     tester,
@@ -1912,6 +2055,28 @@ void _expectReservationPreview({
     find.descendant(of: unreservedRow, matching: find.text(unreserved)),
     findsOneWidget,
   );
+}
+
+// Ahem's square test glyphs do not represent real wrapping. Use Flutter's
+// bundled proportional font only for the Dashboard text-fit checks.
+Future<void> _loadDashboardTextFont() async {
+  var directory = File(Platform.resolvedExecutable).parent;
+  while (directory.parent.path != directory.path) {
+    for (final relative in [
+      'material_fonts/Roboto-Regular.ttf',
+      'artifacts/material_fonts/Roboto-Regular.ttf',
+    ]) {
+      final file = File('${directory.path}/$relative');
+      if (!file.existsSync()) continue;
+      final bytes = await file.readAsBytes();
+      await (FontLoader(
+        'DashboardText',
+      )..addFont(Future.value(ByteData.sublistView(bytes)))).load();
+      return;
+    }
+    directory = directory.parent;
+  }
+  throw StateError('Could not locate Flutter material font Roboto-Regular.ttf');
 }
 
 Future<void> _setPhoneSize(WidgetTester tester) async {

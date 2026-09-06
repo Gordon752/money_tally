@@ -306,6 +306,8 @@ class ScheduledTransactionRecord {
     this.endDate,
     this.alertPreference = AlertPreference.none,
     this.customAlertTimeMinutes,
+    this.customAlertOffsetDays = 0,
+    int? scheduledTimeMinutes,
     this.repeatAlertUntilResolved = false,
     this.scheduledNotificationIds = const [],
     this.lastReminderScheduledAt,
@@ -317,7 +319,8 @@ class ScheduledTransactionRecord {
     this.reservationContainerId,
     this.reservationFundingContainerType,
     this.reservationFundingContainerId,
-  });
+  }) : scheduledTimeMinutes =
+           scheduledTimeMinutes ?? customAlertTimeMinutes ?? 9 * 60;
 
   final String id;
   final TransactionType type;
@@ -339,7 +342,17 @@ class ScheduledTransactionRecord {
   final RecurrenceFrequency frequency;
   final DateTime? endDate;
   final AlertPreference alertPreference;
+
+  /// Reminder wall clock in local minutes after midnight, for presets and
+  /// Custom alike. Retain the existing field so old reminders keep their time.
   final int? customAlertTimeMinutes;
+
+  /// Civil calendar days before each occurrence; legacy Custom meant same day.
+  final int customAlertOffsetDays;
+
+  /// Independent of the reminder clock. Legacy records displayed the latter
+  /// in the transaction Time row, so preserve that value when first loaded.
+  final int scheduledTimeMinutes;
   final bool repeatAlertUntilResolved;
   final List<int> scheduledNotificationIds;
   final DateTime? lastReminderScheduledAt;
@@ -359,6 +372,13 @@ class ScheduledTransactionRecord {
   final SyncMetadata sync;
 
   bool get hasAlert => alertPreference != AlertPreference.none;
+  bool get hasValidReminderTiming =>
+      customAlertOffsetDays >= 0 &&
+      customAlertOffsetDays <= 36500 &&
+      scheduledTimeMinutes >= 0 &&
+      scheduledTimeMinutes < 24 * 60 &&
+      (customAlertTimeMinutes == null ||
+          (customAlertTimeMinutes! >= 0 && customAlertTimeMinutes! < 24 * 60));
   bool get isDeleted => sync.isDeleted;
   bool get isScheduledFundFunding =>
       type == TransactionType.goalFunding &&
@@ -434,6 +454,8 @@ class ScheduledTransactionRecord {
     DateTime? endDate,
     AlertPreference? alertPreference,
     int? customAlertTimeMinutes,
+    int? customAlertOffsetDays,
+    int? scheduledTimeMinutes,
     bool? repeatAlertUntilResolved,
     List<int>? scheduledNotificationIds,
     DateTime? lastReminderScheduledAt,
@@ -474,6 +496,9 @@ class ScheduledTransactionRecord {
       frequency: frequency ?? this.frequency,
       endDate: clearEndDate ? null : endDate ?? this.endDate,
       alertPreference: alertPreference ?? this.alertPreference,
+      customAlertOffsetDays:
+          customAlertOffsetDays ?? this.customAlertOffsetDays,
+      scheduledTimeMinutes: scheduledTimeMinutes ?? this.scheduledTimeMinutes,
       customAlertTimeMinutes: clearCustomAlertTime
           ? null
           : customAlertTimeMinutes ?? this.customAlertTimeMinutes,
@@ -526,6 +551,8 @@ class ScheduledTransactionRecord {
       'endDate': endDate?.toIso8601String(),
       'alertPreference': alertPreference.name,
       'customAlertTimeMinutes': customAlertTimeMinutes,
+      'customAlertOffsetDays': customAlertOffsetDays,
+      'scheduledTimeMinutes': scheduledTimeMinutes,
       'repeatAlertUntilResolved': repeatAlertUntilResolved,
       'scheduledNotificationIds': scheduledNotificationIds,
       'lastReminderScheduledAt': lastReminderScheduledAt?.toIso8601String(),
@@ -582,6 +609,8 @@ class ScheduledTransactionRecord {
         AlertPreference.none,
       ),
       customAlertTimeMinutes: json['customAlertTimeMinutes'] as int?,
+      customAlertOffsetDays: json['customAlertOffsetDays'] as int? ?? 0,
+      scheduledTimeMinutes: json['scheduledTimeMinutes'] as int?,
       repeatAlertUntilResolved:
           json['repeatAlertUntilResolved'] as bool? ?? false,
       scheduledNotificationIds:

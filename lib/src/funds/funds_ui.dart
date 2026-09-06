@@ -297,33 +297,14 @@ class FundPreviewRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      fund.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Flexible(
-                    child: Text(
-                      status,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
+              Text(
+                fund.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
               const SizedBox(height: AppSpacing.xxs),
               Text(
@@ -341,6 +322,19 @@ class FundPreviewRow extends StatelessWidget {
                   minHeight: 5,
                 ),
               ],
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                status,
+                key: ValueKey('dashboard-fund-status-${fund.id}'),
+                maxLines: 2,
+                softWrap: true,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.start,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
         ),
@@ -1220,6 +1214,8 @@ Future<bool> showScheduledFundFundingDialog(
   var alertPreference =
       existing?.alertPreference ?? v2_scheduled.AlertPreference.none;
   var customAlertTimeMinutes = existing?.customAlertTimeMinutes ?? 9 * 60;
+  var customAlertOffsetDays = existing?.customAlertOffsetDays ?? 0;
+  final scheduledTimeMinutes = existing?.scheduledTimeMinutes ?? 9 * 60;
   var repeatAlertUntilResolved = existing?.repeatAlertUntilResolved ?? false;
   var isSaving = false;
   String? errorText;
@@ -1279,6 +1275,8 @@ Future<bool> showScheduledFundFundingDialog(
                     endDate: existing?.endDate,
                     alertPreference: alertPreference,
                     customAlertTimeMinutes: customAlertTimeMinutes,
+                    customAlertOffsetDays: customAlertOffsetDays,
+                    scheduledTimeMinutes: scheduledTimeMinutes,
                     repeatAlertUntilResolved: repeatAlertUntilResolved,
                     goalFundingAllocations: const [],
                     reservationFundingContainerType:
@@ -1410,17 +1408,25 @@ Future<bool> showScheduledFundFundingDialog(
                   icon: alertPreference == v2_scheduled.AlertPreference.none
                       ? AppIcon.notificationNone
                       : AppIcon.notificationActive,
-                  value: alertPreferenceLabel(alertPreference),
+                  value: reminderRuleLabel(
+                    alertPreference,
+                    daysBefore: customAlertOffsetDays,
+                    timeMinutes: customAlertTimeMinutes,
+                  ),
                   onTap: () async {
-                    final selected = await showScheduledChoicePicker(
+                    final selected = await pickReminderRule(
                       dialogContext,
-                      title: 'Reminder',
-                      values: v2_scheduled.AlertPreference.values,
-                      selected: alertPreference,
-                      label: alertPreferenceLabel,
+                      preference: alertPreference,
+                      daysBefore: customAlertOffsetDays,
+                      timeMinutes: customAlertTimeMinutes,
+                      scheduledTimeMinutes: scheduledTimeMinutes,
                     );
                     if (selected != null) {
-                      setDialogState(() => alertPreference = selected);
+                      setDialogState(() {
+                        alertPreference = selected.preference;
+                        customAlertOffsetDays = selected.daysBefore;
+                        customAlertTimeMinutes = selected.timeMinutes;
+                      });
                     }
                   },
                 ),

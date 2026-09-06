@@ -127,9 +127,15 @@ class ScheduledAlertOccurrence {
 }
 
 class ScheduledNotificationPlanner {
-  const ScheduledNotificationPlanner({this.defaultAlertTimeMinutes = 9 * 60});
+  const ScheduledNotificationPlanner({
+    this.defaultAlertTimeMinutes = 9 * 60,
+    this.localCalendarDateTime = DateTime.new,
+  });
 
   final int defaultAlertTimeMinutes;
+
+  /// Civil-time constructor, injectable for deterministic timezone/DST tests.
+  final DateTime Function(int, int, int, int, int) localCalendarDateTime;
 
   List<ScheduledNotificationRequest> plan(
     Iterable<ScheduledTransactionRecord> scheduledTransactions, {
@@ -149,6 +155,7 @@ class ScheduledNotificationPlanner {
     required DateTime now,
   }) {
     if (scheduledTransaction.isDeleted ||
+        !scheduledTransaction.hasValidReminderTiming ||
         scheduledTransaction.alertPreference == AlertPreference.none) {
       return null;
     }
@@ -189,18 +196,21 @@ class ScheduledNotificationPlanner {
       AlertPreference.oneDayBefore => 1,
       AlertPreference.threeDaysBefore => 3,
       AlertPreference.oneWeekBefore => 7,
-      AlertPreference.custom => 0,
+      AlertPreference.custom => scheduledTransaction.customAlertOffsetDays,
     };
-    final alertDate = DateTime(
-      dueDate.year,
-      dueDate.month,
-      dueDate.day,
-    ).subtract(Duration(days: offsetDays));
     final minutes = scheduledTransaction.customAlertTimeMinutes;
-    final timeMinutes = minutes == null || minutes < 0
+    final timeMinutes = minutes == null || minutes < 0 || minutes >= 24 * 60
         ? defaultAlertTimeMinutes
         : minutes;
-    return alertDate.add(Duration(minutes: timeMinutes));
+    // Subtract calendar dates, not 24-hour durations: DST days can contain
+    // 23/25 hours. Construct the chosen wall clock directly on the result day.
+    return localCalendarDateTime(
+      dueDate.year,
+      dueDate.month,
+      dueDate.day - offsetDays,
+      timeMinutes ~/ 60,
+      timeMinutes % 60,
+    );
   }
 }
 

@@ -1940,6 +1940,8 @@ Future<bool> showScheduledGoalFundingDialog(
   var alertPreference =
       existing?.alertPreference ?? v2_scheduled.AlertPreference.none;
   var customAlertTimeMinutes = existing?.customAlertTimeMinutes ?? 9 * 60;
+  var customAlertOffsetDays = existing?.customAlertOffsetDays ?? 0;
+  final scheduledTimeMinutes = existing?.scheduledTimeMinutes ?? 9 * 60;
   var repeatAlertUntilResolved = existing?.repeatAlertUntilResolved ?? false;
   var isSaving = false;
   String? errorText;
@@ -2066,6 +2068,8 @@ Future<bool> showScheduledGoalFundingDialog(
                     endDate: existing?.endDate,
                     alertPreference: alertPreference,
                     customAlertTimeMinutes: customAlertTimeMinutes,
+                    customAlertOffsetDays: customAlertOffsetDays,
+                    scheduledTimeMinutes: scheduledTimeMinutes,
                     repeatAlertUntilResolved: repeatAlertUntilResolved,
                     goalFundingAllocations: useGoalFundingRecord
                         ? [
@@ -2278,17 +2282,25 @@ Future<bool> showScheduledGoalFundingDialog(
                   icon: alertPreference == v2_scheduled.AlertPreference.none
                       ? AppIcon.notificationNone
                       : AppIcon.notificationActive,
-                  value: alertPreferenceLabel(alertPreference),
+                  value: reminderRuleLabel(
+                    alertPreference,
+                    daysBefore: customAlertOffsetDays,
+                    timeMinutes: customAlertTimeMinutes,
+                  ),
                   onTap: () async {
-                    final selected = await showScheduledChoicePicker(
+                    final selected = await pickReminderRule(
                       dialogContext,
-                      title: 'Reminder',
-                      values: v2_scheduled.AlertPreference.values,
-                      selected: alertPreference,
-                      label: alertPreferenceLabel,
+                      preference: alertPreference,
+                      daysBefore: customAlertOffsetDays,
+                      timeMinutes: customAlertTimeMinutes,
+                      scheduledTimeMinutes: scheduledTimeMinutes,
                     );
                     if (selected != null) {
-                      setDialogState(() => alertPreference = selected);
+                      setDialogState(() {
+                        alertPreference = selected.preference;
+                        customAlertOffsetDays = selected.daysBefore;
+                        customAlertTimeMinutes = selected.timeMinutes;
+                      });
                     }
                   },
                 ),

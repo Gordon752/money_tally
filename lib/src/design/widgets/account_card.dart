@@ -108,6 +108,20 @@ class AccountCard extends StatelessWidget {
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      if (metric != null &&
+                          metric.isCreditUtilization &&
+                          metric.isOver)
+                        Text(
+                          'Over limit',
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: creditUtilizationFillColor(
+                                  metric.progress,
+                                  brightness: Theme.of(context).brightness,
+                                ),
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
                       if (accountBalancePresentation(
                         account.type,
                         balanceMinor,
@@ -198,7 +212,7 @@ class AccountCard extends StatelessWidget {
         if (limit == null || limit <= 0) return null;
         final used = metricBalance.isNegative ? metricBalance.abs() : 0;
         final available = limit - used;
-        final progress = (used / limit).clamp(0.0, 1.0).toDouble();
+        final progress = used / limit;
         return _AccountMetric(
           label:
               'Credit Available ${formatter.formatMinor(available)} of ${formatter.formatMinor(limit)}',
@@ -655,7 +669,9 @@ class _AccountMetricBar extends StatelessWidget {
                   softWrap: false,
                   textAlign: TextAlign.right,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    color: metric.isCreditUtilization && metric.isOver
+                        ? fillColor
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                     fontFeatures: const [AppTextStyles.tabularFigures],
                   ),

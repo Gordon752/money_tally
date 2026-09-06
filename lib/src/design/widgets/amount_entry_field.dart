@@ -99,6 +99,9 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
       key: widget.fieldKey,
       controller: _controller,
       focusNode: _focusNode,
+      // Selection is managed below, including the explicit one-time opt-in
+      // for split editing. Desktop's default select-all must not override it.
+      selectAllOnFocus: false,
       keyboardType:
           widget.keyboardType ??
           TextInputType.numberWithOptions(

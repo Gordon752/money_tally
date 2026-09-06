@@ -61,6 +61,7 @@ import 'src/ledger/ledger_projection.dart';
 import 'src/ledger/pending_ledger_summary.dart';
 import 'src/ledger/reservation_ledger_activity.dart';
 import 'src/ledger/running_balance_calculator.dart';
+import 'src/ledger/transaction_account_preview.dart';
 import 'src/notifications/local_notification_scheduler.dart';
 import 'src/notifications/notification_scheduler.dart';
 import 'src/persistence/backup_codec.dart';

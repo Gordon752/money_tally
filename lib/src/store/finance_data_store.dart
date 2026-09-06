@@ -5487,6 +5487,11 @@ class FinanceDataStore extends ChangeNotifier {
   void _validateScheduledTransaction(
     ScheduledTransactionRecord scheduledTransaction,
   ) {
+    if (!scheduledTransaction.hasValidReminderTiming) {
+      throw const FinanceDataValidationException(
+        'Invalid scheduled reminder timing.',
+      );
+    }
     if (scheduledTransaction.type != TransactionType.goalFunding &&
         (scheduledTransaction.reservationFundingContainerType != null ||
             scheduledTransaction.reservationFundingContainerId != null)) {

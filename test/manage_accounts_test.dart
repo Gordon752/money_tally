@@ -363,7 +363,7 @@ void main() {
         find.byKey(const ValueKey('transaction-insufficient-funds')),
         findsOneWidget,
       );
-      expect(find.text('Balance \$10.00'), findsOneWidget);
+      expect(find.text('Balance -\$10.00'), findsOneWidget);
       expect(
         find.text('This transaction would leave Pocket Cash at -\$10.00.'),
         findsOneWidget,

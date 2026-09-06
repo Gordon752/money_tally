@@ -187,13 +187,13 @@ void main() {
   });
 
   test(
-    'schema 6 preserves both rules through backup restore and local storage',
+    'current schema preserves both rules through backup restore and local storage',
     () async {
       SharedPreferences.setMockInitialValues({});
       final original = _dataSet();
       final raw = const BackupCodec().encodeJson(original);
-      expect((jsonDecode(raw) as Map)['schemaVersion'], 6);
-      expect(currentBackupSchemaVersion, 6);
+      expect((jsonDecode(raw) as Map)['schemaVersion'], 7);
+      expect(currentBackupSchemaVersion, 7);
       final validated = const BackupRestoreValidator().validate(raw);
       expect(validated.dataSet.toJson(), original.toJson());
       const local = LocalFinanceDataSetRepository(
@@ -217,7 +217,7 @@ void main() {
         jsonEncode(original),
       );
       expect(validated.sourceSchemaVersion, 5);
-      expect(validated.schemaVersion, 6);
+      expect(validated.schemaVersion, 7);
       for (final fund in validated.dataSet.funds) {
         expect(fund.targetDayRule, FundTargetDayRule.fixedDay);
         expect(fund.nextTargetDate, DateTime(2026, 9, 30));

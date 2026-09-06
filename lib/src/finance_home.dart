@@ -8997,7 +8997,8 @@ class _ScheduledNeedsAttentionRow extends StatelessWidget {
         'Reminder: 3 days before due date',
       v2_scheduled.AlertPreference.oneWeekBefore =>
         'Reminder: 1 week before due date',
-      v2_scheduled.AlertPreference.custom => 'Reminder: custom',
+      v2_scheduled.AlertPreference.custom =>
+        'Reminder: ${reminderRuleLabel(schedule.alertPreference, daysBefore: schedule.customAlertOffsetDays, timeMinutes: schedule.customAlertTimeMinutes ?? 9 * 60)}',
     };
     final title = schedule.isScheduledFundFunding
         ? schedule.payee
@@ -18175,6 +18176,69 @@ Future<void> showAccountDialog(BuildContext context) async {
   );
 }
 
+/// Shared by entry and Mark as Paid so draft amounts never use a second
+/// direction/status calculation or mutate the real account state.
+class _TransactionAccountPreviewSummary extends StatelessWidget {
+  const _TransactionAccountPreviewSummary({
+    required this.account,
+    required this.preview,
+    required this.currency,
+    this.style,
+  });
+
+  final v2_account.AccountRecord account;
+  final TransactionAccountPreview preview;
+  final CurrencyFormatSettings currency;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final balance = preview.balanceMinor(account.id);
+    final pending = preview.pendingMinor(account.id);
+    final future = preview.futureMinor(account.id);
+    final available = preview.availableCreditMinor(account);
+    final overLimit = available != null && available < 0;
+    final textStyle = style ?? Theme.of(context).textTheme.bodySmall;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '${account.type == v2_account.AccountType.loan ? 'Balance Due' : 'Balance'} ${accountContextBalanceLabel(account, balance, currency)}',
+          style: textStyle?.copyWith(
+            color:
+                account.type == v2_account.AccountType.creditCard && balance > 0
+                ? AppTheme.accent
+                : null,
+          ),
+        ),
+        if (pending != 0)
+          Text('Pending ${money(pending, currency)}', style: textStyle),
+        if (future != 0)
+          Text('Future ${money(future, currency)}', style: textStyle),
+        if (available != null)
+          Text(
+            'Available ${money(available, currency)}',
+            style: textStyle?.copyWith(
+              color: overLimit ? AppColors.danger : null,
+            ),
+          ),
+        if (account.type == v2_account.AccountType.loan)
+          Text('Remaining ${money(balance.abs(), currency)}', style: textStyle),
+        if (overLimit)
+          Text(
+            'Exceeds available credit by ${money(-available, currency)}',
+            key: ValueKey('credit-limit-warning-${account.id}'),
+            style: textStyle?.copyWith(
+              color: AppColors.danger,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 Future<void> showTransferDialog(
   BuildContext context, {
   String? initialFromAccountId,
@@ -18263,6 +18327,8 @@ Future<void> showTransferDialog(
           DateTime firstScheduledDate,
           int scheduledTimeMinutes,
           v2_scheduled.RecurrenceFrequency scheduledFrequency,
+          int reminderTimeMinutes,
+          int customAlertOffsetDays,
           v2_scheduled.AlertPreference scheduledAlertPreference,
           ReservationContainerType? reservationContainerType,
           String? reservationContainerId,
@@ -18326,17 +18392,22 @@ Future<void> showTransferDialog(
               reservationContainerType = null;
               reservationContainerId = null;
             }
-            final sourceCurrentBalanceMinor = selectedFromAccount == null
-                ? 0
-                : dataStore.balanceForAccount(selectedFromAccount.id);
-            final sourceBalanceWithoutExistingTransfer =
-                selectedFromAccount == null
-                ? 0
-                : sourceCurrentBalanceMinor -
-                      (transfer?.deltaForAccount(selectedFromAccount.id) ?? 0);
+            final accountPreview = TransactionAccountPreview(
+              dataSet: dataStore.dataSet,
+              type: TransactionType.transfer,
+              accountId: fromAccountId,
+              transferAccountId: toAccountId,
+              amountMinor: amountMinor,
+              date: parseTransactionDateInput(
+                date.text,
+                transfer?.date ?? DateTime.now(),
+              ),
+              status: transactionStatus,
+              replacing: transfer,
+            );
             final projectedSourceBalanceMinor = selectedFromAccount == null
                 ? 0
-                : sourceBalanceWithoutExistingTransfer - amountMinor.abs();
+                : accountPreview.economicBalanceMinor(selectedFromAccount.id);
             final wouldOverdrawSource =
                 selectedFromAccount != null &&
                 accountIsAsset(selectedFromAccount) &&
@@ -18447,32 +18518,30 @@ Future<void> showTransferDialog(
               v2_account.AccountRecord account, {
               required bool isSource,
             }) {
-              if (!isSource || !showOverdrawSourceWarning) {
-                return Text(
-                  'Balance ${accountContextBalanceLabel(account, dataStore.balanceForAccount(account.id), dataStore.preferences.currency)}',
-                  style: mutedStyle,
-                );
-              }
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Balance ${money(projectedSourceBalanceMinor, dataStore.preferences.currency)}',
-                    style: mutedStyle?.copyWith(color: AppColors.danger),
+                  _TransactionAccountPreviewSummary(
+                    account: account,
+                    preview: accountPreview,
+                    currency: dataStore.preferences.currency,
+                    style: mutedStyle,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Insufficient funds',
-                    key: const ValueKey('transfer-insufficient-funds'),
-                    style: mutedStyle?.copyWith(
-                      color: AppColors.danger,
-                      fontWeight: FontWeight.w800,
+                  if (isSource && showOverdrawSourceWarning) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Insufficient funds',
+                      key: const ValueKey('transfer-insufficient-funds'),
+                      style: mutedStyle?.copyWith(
+                        color: AppColors.danger,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
-                  Text(
-                    'This transaction would leave ${account.name} at ${money(projectedSourceBalanceMinor, dataStore.preferences.currency)}.',
-                    style: mutedStyle?.copyWith(color: AppColors.danger),
-                  ),
+                    Text(
+                      'This transaction would leave ${account.name} at ${money(projectedSourceBalanceMinor, dataStore.preferences.currency)}.',
+                      style: mutedStyle?.copyWith(color: AppColors.danger),
+                    ),
+                  ],
                 ],
               );
             }
@@ -18565,6 +18634,8 @@ Future<void> showTransferDialog(
                 ),
                 scheduledTimeMinutes: futureSchedule.timeMinutes,
                 scheduledFrequency: futureSchedule.frequency,
+                reminderTimeMinutes: futureSchedule.reminderTimeMinutes,
+                customAlertOffsetDays: futureSchedule.customAlertOffsetDays,
                 scheduledAlertPreference: futureSchedule.alertPreference,
                 reservationContainerType: reservationContainerType,
                 reservationContainerId: reservationContainerId,
@@ -19001,7 +19072,9 @@ Future<void> showTransferDialog(
         nextDate: result.firstScheduledDate,
         frequency: result.scheduledFrequency,
         alertPreference: result.scheduledAlertPreference,
-        customAlertTimeMinutes: result.scheduledTimeMinutes,
+        customAlertTimeMinutes: result.reminderTimeMinutes,
+        scheduledTimeMinutes: result.scheduledTimeMinutes,
+        customAlertOffsetDays: result.customAlertOffsetDays,
         reservationContainerType: result.reservationContainerType,
         reservationContainerId: result.reservationContainerId,
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
@@ -19069,7 +19142,9 @@ Future<void> showTransferDialog(
       nextDate: result.firstScheduledDate,
       frequency: result.scheduledFrequency,
       alertPreference: result.scheduledAlertPreference,
-      customAlertTimeMinutes: result.scheduledTimeMinutes,
+      customAlertTimeMinutes: result.reminderTimeMinutes,
+      scheduledTimeMinutes: result.scheduledTimeMinutes,
+      customAlertOffsetDays: result.customAlertOffsetDays,
       reservationContainerType: result.reservationContainerType,
       reservationContainerId: result.reservationContainerId,
       sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
@@ -19178,9 +19253,11 @@ Future<bool> showScheduledTransactionDialog(
               : firstMonthlyDateAfter(sourceTransaction.date, DateTime.now())),
     ),
   );
-  final customAlertTime = TextEditingController(
-    text: alertTimeInput(existing?.customAlertTimeMinutes ?? 9 * 60),
+  final scheduledTime = TextEditingController(
+    text: alertTimeInput(existing?.scheduledTimeMinutes ?? 9 * 60),
   );
+  var reminderTimeMinutes = existing?.customAlertTimeMinutes ?? 9 * 60;
+  var customAlertOffsetDays = existing?.customAlertOffsetDays ?? 0;
   var type =
       existing?.type ??
       sourceTransaction?.type ??
@@ -19252,6 +19329,8 @@ Future<bool> showScheduledTransactionDialog(
           v2_scheduled.RecurrenceFrequency frequency,
           v2_scheduled.AlertPreference alertPreference,
           int? customAlertTimeMinutes,
+          int scheduledTimeMinutes,
+          int customAlertOffsetDays,
           bool repeatAlertUntilResolved,
           ReservationContainerType? reservationContainerType,
           String? reservationContainerId,
@@ -19668,8 +19747,10 @@ Future<bool> showScheduledTransactionDialog(
                 nextDate: parseDateInput(nextDate.text, DateTime.now()),
                 frequency: frequency,
                 alertPreference: alertPreference,
-                customAlertTimeMinutes: parseAlertTimeMinutes(
-                  customAlertTime.text,
+                customAlertTimeMinutes: reminderTimeMinutes,
+                customAlertOffsetDays: customAlertOffsetDays,
+                scheduledTimeMinutes: parseAlertTimeMinutes(
+                  scheduledTime.text,
                   9 * 60,
                 ),
                 repeatAlertUntilResolved:
@@ -20097,11 +20178,11 @@ Future<bool> showScheduledTransactionDialog(
                   choiceRow(
                     rowKey: ValueKey('scheduled-alert-time'),
                     icon: AppIcon.schedule,
-                    value: customAlertTime.text,
+                    value: scheduledTime.text,
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
                       final minutes = parseAlertTimeMinutes(
-                        customAlertTime.text,
+                        scheduledTime.text,
                         9 * 60,
                       );
                       final picked = await showTimePicker(
@@ -20119,7 +20200,7 @@ Future<bool> showScheduledTransactionDialog(
                       );
                       if (picked != null) {
                         setDialogState(
-                          () => customAlertTime.text = alertTimeInput(
+                          () => scheduledTime.text = alertTimeInput(
                             picked.hour * 60 + picked.minute,
                           ),
                         );
@@ -20134,20 +20215,30 @@ Future<bool> showScheduledTransactionDialog(
                     icon: alertPreference == v2_scheduled.AlertPreference.none
                         ? AppIcon.notificationNone
                         : AppIcon.notificationActive,
-                    value: alertPreferenceLabel(alertPreference),
+                    value: reminderRuleLabel(
+                      alertPreference,
+                      daysBefore: customAlertOffsetDays,
+                      timeMinutes: reminderTimeMinutes,
+                    ),
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
-                      final selected = await showScheduledChoicePicker(
+                      final selected = await pickReminderRule(
                         context,
-                        title: 'Reminder',
-                        values: v2_scheduled.AlertPreference.values,
-                        selected: alertPreference,
-                        label: alertPreferenceLabel,
+                        preference: alertPreference,
+                        daysBefore: customAlertOffsetDays,
+                        timeMinutes: reminderTimeMinutes,
+                        scheduledTimeMinutes: parseAlertTimeMinutes(
+                          scheduledTime.text,
+                          9 * 60,
+                        ),
                       );
                       if (selected != null) {
                         setDialogState(() {
-                          alertPreference = selected;
-                          if (selected == v2_scheduled.AlertPreference.none) {
+                          alertPreference = selected.preference;
+                          customAlertOffsetDays = selected.daysBefore;
+                          reminderTimeMinutes = selected.timeMinutes;
+                          if (selected.preference ==
+                              v2_scheduled.AlertPreference.none) {
                             repeatAlertUntilResolved = false;
                           }
                         });
@@ -20284,6 +20375,8 @@ Future<bool> showScheduledTransactionDialog(
           frequency: result.frequency,
           alertPreference: result.alertPreference,
           customAlertTimeMinutes: result.customAlertTimeMinutes,
+          customAlertOffsetDays: result.customAlertOffsetDays,
+          scheduledTimeMinutes: result.scheduledTimeMinutes,
           repeatAlertUntilResolved: result.repeatAlertUntilResolved,
           reservationContainerType: result.reservationContainerType,
           reservationContainerId: result.reservationContainerId,
@@ -20303,6 +20396,8 @@ Future<bool> showScheduledTransactionDialog(
           alertPreference: result.alertPreference,
           customAlertTimeMinutes: result.customAlertTimeMinutes,
           repeatAlertUntilResolved: result.repeatAlertUntilResolved,
+          customAlertOffsetDays: result.customAlertOffsetDays,
+          scheduledTimeMinutes: result.scheduledTimeMinutes,
           reservationContainerType: result.reservationContainerType,
           reservationContainerId: result.reservationContainerId,
           scheduledNotificationIds: const [],
@@ -20589,7 +20684,11 @@ Future<void> showScheduledTransactionDetails(
                 ? AppIcon.notificationNone
                 : AppIcon.notificationActive,
             label: 'Alert',
-            value: alertPreferenceLabel(item.alertPreference),
+            value: reminderRuleLabel(
+              item.alertPreference,
+              daysBefore: item.customAlertOffsetDays,
+              timeMinutes: item.customAlertTimeMinutes ?? 9 * 60,
+            ),
           ),
           if (item.note.trim().isNotEmpty) ...[
             TransactionFormDivider(),
@@ -21155,6 +21254,8 @@ Future<void> restoreScheduledTransactionAfterOccurrence(
           : null,
       alertPreference: item.alertPreference,
       customAlertTimeMinutes: item.customAlertTimeMinutes,
+      customAlertOffsetDays: item.customAlertOffsetDays,
+      scheduledTimeMinutes: item.scheduledTimeMinutes,
       repeatAlertUntilResolved: item.repeatAlertUntilResolved,
       sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
     ),
@@ -21354,6 +21455,8 @@ Future<void> editScheduledTransactionFromOccurrence(
     endDate: item.endDate,
     alertPreference: item.alertPreference,
     customAlertTimeMinutes: item.customAlertTimeMinutes,
+    customAlertOffsetDays: item.customAlertOffsetDays,
+    scheduledTimeMinutes: item.scheduledTimeMinutes,
     repeatAlertUntilResolved: item.repeatAlertUntilResolved,
     sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
   );
@@ -21428,6 +21531,15 @@ Future<void> markScheduledTransactionPaid(
         final sourceAccount = accountById(item.accountId);
         final destinationAccount = accountById(item.transferAccountId);
         final isTransfer = item.type == TransactionType.transfer;
+        final accountPreview = TransactionAccountPreview(
+          dataSet: dataStore.dataSet,
+          type: item.type,
+          accountId: item.accountId,
+          transferAccountId: item.transferAccountId,
+          amountMinor: actualAmountMinor,
+          date: parseTransactionDateInput(paymentDate.text, DateTime.now()),
+          status: transactionStatus,
+        );
         final reservationChoices =
             <
               ({
@@ -21527,6 +21639,7 @@ Future<void> markScheduledTransactionPaid(
           required IconData icon,
           required String value,
           String? secondary,
+          Widget? secondaryWidget,
           bool tabular = false,
           VoidCallback? onTap,
         }) {
@@ -21550,6 +21663,10 @@ Future<void> markScheduledTransactionPaid(
                             : null,
                       ),
                     ),
+                    if (secondaryWidget != null) ...[
+                      const SizedBox(height: 4),
+                      secondaryWidget,
+                    ],
                     if (secondary != null) ...[
                       const SizedBox(height: 4),
                       Text(
@@ -21764,7 +21881,7 @@ Future<void> markScheduledTransactionPaid(
                       initialMinor: actualAmount,
                       currency: dataStore.preferences.currency,
                       labelText: null,
-                      selectAllOnFocus: true,
+                      selectAllOnFocus: false,
                       textAlign: TextAlign.left,
                       decoration: const InputDecoration(
                         border: InputBorder.none,
@@ -21852,9 +21969,13 @@ Future<void> markScheduledTransactionPaid(
                     ? AppIcon.wallet
                     : v2AccountIcon(sourceAccount.type),
                 value: sourceAccount?.name ?? 'Unavailable account',
-                secondary: sourceAccount == null
+                secondaryWidget: sourceAccount == null
                     ? null
-                    : 'Balance ${money(dataStore.balanceForAccount(sourceAccount.id), dataStore.preferences.currency)}',
+                    : _TransactionAccountPreviewSummary(
+                        account: sourceAccount,
+                        preview: accountPreview,
+                        currency: dataStore.preferences.currency,
+                      ),
               ),
               if (isTransfer) ...[
                 TransactionFormDivider(),
@@ -21865,9 +21986,13 @@ Future<void> markScheduledTransactionPaid(
                       ? AppIcon.wallet
                       : v2AccountIcon(destinationAccount.type),
                   value: destinationAccount?.name ?? 'Unavailable destination',
-                  secondary: destinationAccount == null
+                  secondaryWidget: destinationAccount == null
                       ? null
-                      : 'Balance ${money(dataStore.balanceForAccount(destinationAccount.id), dataStore.preferences.currency)}',
+                      : _TransactionAccountPreviewSummary(
+                          account: destinationAccount,
+                          preview: accountPreview,
+                          currency: dataStore.preferences.currency,
+                        ),
                 ),
               ],
               if (reservationChoices.isNotEmpty ||
@@ -22343,6 +22468,8 @@ Future<void> duplicateScheduledTransaction(
       endDate: item.endDate,
       alertPreference: item.alertPreference,
       customAlertTimeMinutes: item.customAlertTimeMinutes,
+      customAlertOffsetDays: item.customAlertOffsetDays,
+      scheduledTimeMinutes: item.scheduledTimeMinutes,
       repeatAlertUntilResolved: item.repeatAlertUntilResolved,
       scheduledNotificationIds: const [],
       lastAction: v2_scheduled.ScheduledAction.none,
@@ -22663,6 +22790,8 @@ Future<void> showTransactionDialog(
           int scheduledTimeMinutes,
           v2_scheduled.RecurrenceFrequency scheduledFrequency,
           v2_scheduled.AlertPreference scheduledAlertPreference,
+          int reminderTimeMinutes,
+          int customAlertOffsetDays,
           ReservationContainerType? reservationContainerType,
           String? reservationContainerId,
         })
@@ -22694,18 +22823,23 @@ Future<void> showTransactionDialog(
                 : activeAccounts.firstWhere(
                     (account) => account.id == accountId,
                   );
-            final currentBalanceMinor = selectedAccount == null
-                ? 0
-                : dataStore.balanceForAccount(selectedAccount.id);
-            final balanceWithoutExistingTransaction = selectedAccount == null
-                ? 0
-                : currentBalanceMinor -
-                      (transaction?.deltaForAccount(selectedAccount.id) ?? 0);
+            final accountPreview = TransactionAccountPreview(
+              dataSet: dataStore.dataSet,
+              type: isExpense
+                  ? TransactionType.expense
+                  : TransactionType.income,
+              accountId: accountId,
+              amountMinor: amountMinor,
+              date: parseTransactionDateInput(
+                date.text,
+                transaction?.date ?? DateTime.now(),
+              ),
+              status: transactionStatus,
+              replacing: transaction,
+            );
             final previewBalanceMinor = selectedAccount == null
                 ? 0
-                : isExpense
-                ? balanceWithoutExistingTransaction - amountMinor.abs()
-                : balanceWithoutExistingTransaction + amountMinor.abs();
+                : accountPreview.economicBalanceMinor(selectedAccount.id);
             final showOverdrawAssetWarning =
                 selectedAccount != null &&
                 isExpense &&
@@ -23151,6 +23285,8 @@ Future<void> showTransactionDialog(
                 scheduledTimeMinutes: futureSchedule.timeMinutes,
                 scheduledFrequency: futureSchedule.frequency,
                 scheduledAlertPreference: futureSchedule.alertPreference,
+                reminderTimeMinutes: futureSchedule.reminderTimeMinutes,
+                customAlertOffsetDays: futureSchedule.customAlertOffsetDays,
                 reservationContainerType: reservationContainerType,
                 reservationContainerId: reservationContainerId,
               ));
@@ -23225,75 +23361,32 @@ Future<void> showTransactionDialog(
 
             Widget accountSubtitle() {
               if (selectedAccount == null) return const SizedBox.shrink();
-              switch (selectedAccount.type) {
-                case v2_account.AccountType.creditCard:
-                  final available = selectedAccount.creditLimitMinor == null
-                      ? null
-                      : selectedAccount.creditLimitMinor! -
-                            (currentBalanceMinor.isNegative
-                                ? currentBalanceMinor.abs()
-                                : 0);
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Balance ${accountContextBalanceLabel(selectedAccount, currentBalanceMinor, dataStore.preferences.currency)}',
-                        style: mutedStyle?.copyWith(
-                          color: currentBalanceMinor > 0
-                              ? AppTheme.accent
-                              : null,
-                        ),
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _TransactionAccountPreviewSummary(
+                    account: selectedAccount,
+                    preview: accountPreview,
+                    currency: dataStore.preferences.currency,
+                    style: mutedStyle,
+                  ),
+                  if (showOverdrawAssetWarning) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Insufficient funds',
+                      key: const ValueKey('transaction-insufficient-funds'),
+                      style: mutedStyle?.copyWith(
+                        color: AppColors.danger,
+                        fontWeight: FontWeight.w800,
                       ),
-                      if (available != null)
-                        Text(
-                          'Available ${money(available, dataStore.preferences.currency)}',
-                          style: mutedStyle,
-                        ),
-                    ],
-                  );
-                case v2_account.AccountType.loan:
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Balance Due ${accountContextBalanceLabel(selectedAccount, currentBalanceMinor, dataStore.preferences.currency)}',
-                        style: mutedStyle,
-                      ),
-                      Text(
-                        'Remaining ${money(currentBalanceMinor.abs(), dataStore.preferences.currency)}',
-                        style: mutedStyle,
-                      ),
-                    ],
-                  );
-                case v2_account.AccountType.checking:
-                case v2_account.AccountType.savings:
-                case v2_account.AccountType.cash:
-                case v2_account.AccountType.otherBanking:
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Balance ${money(currentBalanceMinor, dataStore.preferences.currency)}',
-                        style: mutedStyle,
-                      ),
-                      if (showOverdrawAssetWarning) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          'Insufficient funds',
-                          key: const ValueKey('transaction-insufficient-funds'),
-                          style: mutedStyle?.copyWith(
-                            color: AppColors.danger,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        Text(
-                          'This transaction would leave ${selectedAccount.name} at ${money(previewBalanceMinor, dataStore.preferences.currency)}.',
-                          style: mutedStyle?.copyWith(color: AppColors.danger),
-                        ),
-                      ],
-                    ],
-                  );
-              }
+                    ),
+                    Text(
+                      'This transaction would leave ${selectedAccount.name} at ${money(previewBalanceMinor, dataStore.preferences.currency)}.',
+                      style: mutedStyle?.copyWith(color: AppColors.danger),
+                    ),
+                  ],
+                ],
+              );
             }
 
             Widget selectableRow({
@@ -23960,7 +24053,9 @@ Future<void> showTransactionDialog(
         nextDate: result.firstScheduledDate,
         frequency: result.scheduledFrequency,
         alertPreference: result.scheduledAlertPreference,
-        customAlertTimeMinutes: result.scheduledTimeMinutes,
+        customAlertTimeMinutes: result.reminderTimeMinutes,
+        scheduledTimeMinutes: result.scheduledTimeMinutes,
+        customAlertOffsetDays: result.customAlertOffsetDays,
         reservationContainerType: result.reservationContainerType,
         reservationContainerId: result.reservationContainerId,
         sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
@@ -24042,7 +24137,9 @@ Future<void> showTransactionDialog(
       nextDate: result.firstScheduledDate,
       frequency: result.scheduledFrequency,
       alertPreference: result.scheduledAlertPreference,
-      customAlertTimeMinutes: result.scheduledTimeMinutes,
+      customAlertTimeMinutes: result.reminderTimeMinutes,
+      scheduledTimeMinutes: result.scheduledTimeMinutes,
+      customAlertOffsetDays: result.customAlertOffsetDays,
       reservationContainerType: result.reservationContainerType,
       reservationContainerId: result.reservationContainerId,
       sync: v2_sync.SyncMetadata.fresh(deviceId: dataStore.deviceId),
@@ -25566,6 +25663,229 @@ String alertPreferenceLabel(v2_scheduled.AlertPreference preference) {
   };
 }
 
+String reminderRuleLabel(
+  v2_scheduled.AlertPreference preference, {
+  required int daysBefore,
+  required int timeMinutes,
+}) {
+  if (preference != v2_scheduled.AlertPreference.custom) {
+    return alertPreferenceLabel(preference);
+  }
+  final days = daysBefore == 0
+      ? 'Same day'
+      : '$daysBefore ${daysBefore == 1 ? 'day' : 'days'} before';
+  return '$days · ${alertTimeInput(timeMinutes)}';
+}
+
+Future<
+  ({v2_scheduled.AlertPreference preference, int daysBefore, int timeMinutes})?
+>
+pickReminderRule(
+  BuildContext context, {
+  required v2_scheduled.AlertPreference preference,
+  required int daysBefore,
+  required int timeMinutes,
+  required int scheduledTimeMinutes,
+}) async {
+  FocusManager.instance.primaryFocus?.unfocus();
+  final selected = await showScheduledChoicePicker(
+    context,
+    title: 'Reminder',
+    values: v2_scheduled.AlertPreference.values,
+    selected: preference,
+    label: (value) =>
+        value == v2_scheduled.AlertPreference.custom &&
+            preference == v2_scheduled.AlertPreference.custom
+        ? 'Custom · ${reminderRuleLabel(value, daysBefore: daysBefore, timeMinutes: timeMinutes)}'
+        : alertPreferenceLabel(value),
+  );
+  if (selected == null || !context.mounted) return null;
+  if (selected != v2_scheduled.AlertPreference.custom) {
+    return (
+      preference: selected,
+      daysBefore: daysBefore,
+      timeMinutes: timeMinutes,
+    );
+  }
+  final result = await showCustomReminderDialog(
+    context,
+    daysBefore: daysBefore,
+    timeMinutes: timeMinutes,
+    scheduledTimeMinutes: scheduledTimeMinutes,
+  );
+  if (result == null) return null;
+  return (
+    preference: selected,
+    daysBefore: result.daysBefore,
+    timeMinutes: result.timeMinutes,
+  );
+}
+
+Future<({int daysBefore, int timeMinutes})?> showCustomReminderDialog(
+  BuildContext context, {
+  required int daysBefore,
+  required int timeMinutes,
+  required int scheduledTimeMinutes,
+}) async {
+  return showDialog<({int daysBefore, int timeMinutes})>(
+    context: context,
+    builder: (_) => _CustomReminderDialog(
+      daysBefore: daysBefore,
+      timeMinutes: timeMinutes,
+      scheduledTimeMinutes: scheduledTimeMinutes,
+    ),
+  );
+}
+
+class _CustomReminderDialog extends StatefulWidget {
+  const _CustomReminderDialog({
+    required this.daysBefore,
+    required this.timeMinutes,
+    required this.scheduledTimeMinutes,
+  });
+  final int daysBefore;
+  final int timeMinutes;
+  final int scheduledTimeMinutes;
+
+  @override
+  State<_CustomReminderDialog> createState() => _CustomReminderDialogState();
+}
+
+class _CustomReminderDialogState extends State<_CustomReminderDialog> {
+  late final days = TextEditingController(text: '${widget.daysBefore}');
+  late int reminderTime = widget.timeMinutes;
+
+  @override
+  void dispose() {
+    days.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final offset = int.tryParse(days.text);
+    final valid = offset != null && offset >= 0 && offset <= 36500;
+    final atOrAfter =
+        offset == 0 && reminderTime >= widget.scheduledTimeMinutes;
+    final theme = Theme.of(context);
+    return TransactionSheetFrame(
+      title: 'Custom Reminder',
+      actions: TransactionFormActions(
+        onCancel: () => Navigator.pop(context),
+        saveKey: const ValueKey('custom-reminder-save'),
+        canSave: valid,
+        onSave: valid
+            ? () => Navigator.pop(context, (
+                daysBefore: offset,
+                timeMinutes: reminderTime,
+              ))
+            : null,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Repeats before every occurrence at this local time.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const TransactionFormLabel('Days before'),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xxs),
+                child: TransactionFormIcon(AppIcon.calendar),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Semantics(
+                  label: 'Days before',
+                  child: TextField(
+                    key: const ValueKey('custom-reminder-days'),
+                    controller: days,
+                    keyboardType: TextInputType.number,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w400,
+                      letterSpacing: 0,
+                      height: 1.15,
+                    ),
+                    decoration: InputDecoration(
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      errorBorder: InputBorder.none,
+                      focusedErrorBorder: InputBorder.none,
+                      isDense: true,
+                      constraints: const BoxConstraints(minHeight: 48),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                      helperText: '0 means same day',
+                      helperStyle: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      errorMaxLines: 3,
+                      errorText: valid
+                          ? null
+                          : 'Enter a whole number from 0 to 36500',
+                    ),
+                    onChanged: (_) => setState(() {}),
+                    onTapOutside: (_) =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const TransactionFormDivider(),
+          const TransactionFormLabel('Reminder time'),
+          PolishedFormValueRow(
+            key: const ValueKey('custom-reminder-time'),
+            icon: AppIcon.schedule,
+            value: alertTimeInput(reminderTime),
+            onTap: () async {
+              FocusManager.instance.primaryFocus?.unfocus();
+              final picked = await showTimePicker(
+                context: context,
+                initialTime: TimeOfDay(
+                  hour: reminderTime ~/ 60,
+                  minute: reminderTime % 60,
+                ),
+                builder: (context, child) => polishedPickerBuilder(
+                  context,
+                  child,
+                  forceTwelveHourTime: true,
+                ),
+              );
+              if (picked != null && context.mounted) {
+                setState(() => reminderTime = picked.hour * 60 + picked.minute);
+              }
+            },
+          ),
+          if (atOrAfter) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                'This reminder is at or after the scheduled time.',
+                key: const ValueKey('custom-reminder-time-warning'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppColors.warning,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 String alertTimeInput(int minutesAfterMidnight) {
   final normalized = minutesAfterMidnight.clamp(0, 23 * 60 + 59);
   final hours24 = normalized ~/ 60;
@@ -25581,13 +25901,18 @@ class FutureScheduleDraft {
     this.frequency = v2_scheduled.RecurrenceFrequency.monthly,
     this.alertPreference = v2_scheduled.AlertPreference.none,
     int timeMinutes = 9 * 60,
+    int? reminderTimeMinutes,
+    this.customAlertOffsetDays = 0,
   }) : firstDate = TextEditingController(text: dateInput(firstDate)),
-       time = TextEditingController(text: alertTimeInput(timeMinutes));
+       time = TextEditingController(text: alertTimeInput(timeMinutes)),
+       reminderTimeMinutes = reminderTimeMinutes ?? timeMinutes;
 
   final TextEditingController firstDate;
   final TextEditingController time;
   v2_scheduled.RecurrenceFrequency frequency;
   v2_scheduled.AlertPreference alertPreference;
+  int reminderTimeMinutes;
+  int customAlertOffsetDays;
 
   DateTime parsedFirstDate(DateTime fallback) =>
       parseDateInput(firstDate.text, fallback);
@@ -25748,18 +26073,24 @@ class InlineFutureScheduleSection extends StatelessWidget {
           icon: draft.alertPreference == v2_scheduled.AlertPreference.none
               ? AppIcon.notificationNone
               : AppIcon.notificationActive,
-          value: alertPreferenceLabel(draft.alertPreference),
+          value: reminderRuleLabel(
+            draft.alertPreference,
+            daysBefore: draft.customAlertOffsetDays,
+            timeMinutes: draft.reminderTimeMinutes,
+          ),
           onTap: () async {
             FocusManager.instance.primaryFocus?.unfocus();
-            final selected = await showScheduledChoicePicker(
+            final selected = await pickReminderRule(
               context,
-              title: 'Reminder',
-              values: v2_scheduled.AlertPreference.values,
-              selected: draft.alertPreference,
-              label: alertPreferenceLabel,
+              preference: draft.alertPreference,
+              daysBefore: draft.customAlertOffsetDays,
+              timeMinutes: draft.reminderTimeMinutes,
+              scheduledTimeMinutes: draft.timeMinutes,
             );
             if (selected != null) {
-              draft.alertPreference = selected;
+              draft.alertPreference = selected.preference;
+              draft.customAlertOffsetDays = selected.daysBefore;
+              draft.reminderTimeMinutes = selected.timeMinutes;
               onChanged();
             }
           },

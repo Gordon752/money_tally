@@ -8868,7 +8868,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Time'), findsOneWidget);
-    expect(find.text('11:15 AM'), findsOneWidget);
+    expect(find.text('9:00 AM'), findsOneWidget);
+    expect(find.text('Same day · 11:15 AM'), findsOneWidget);
     await tester.ensureVisible(
       find.byKey(const ValueKey('scheduled-repeat-alert')),
     );
@@ -8883,6 +8884,8 @@ void main() {
     );
     expect(edited.alertPreference, v2_scheduled.AlertPreference.custom);
     expect(edited.customAlertTimeMinutes, 11 * 60 + 15);
+    expect(edited.scheduledTimeMinutes, 9 * 60);
+    expect(edited.customAlertOffsetDays, 0);
     expect(edited.repeatAlertUntilResolved, isFalse);
   });
 

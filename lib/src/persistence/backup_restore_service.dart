@@ -11,8 +11,8 @@ import '../domain/scheduled_transaction.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
 
-const currentBackupSchemaVersion = 6;
-const supportedBackupSchemaVersions = {2, 4, 5, currentBackupSchemaVersion};
+const currentBackupSchemaVersion = 7;
+const supportedBackupSchemaVersions = {2, 4, 5, 6, currentBackupSchemaVersion};
 
 class BackupValidationException implements Exception {
   const BackupValidationException(this.message);
@@ -178,6 +178,11 @@ class BackupRestoreValidator {
     int sourceVersion,
   ) {
     if (sourceVersion == currentBackupSchemaVersion) return root;
+    if (sourceVersion == 6) {
+      // Missing reminder offset is same-day. ScheduledTransactionRecord keeps
+      // the old shared time for both clocks without inferring another rule.
+      return {...root, 'schemaVersion': currentBackupSchemaVersion};
+    }
     if (sourceVersion == 5) {
       return {
         ...root,
@@ -602,6 +607,11 @@ class BackupRestoreValidator {
     }
 
     for (final schedule in dataSet.scheduledTransactions) {
+      if (!schedule.hasValidReminderTiming) {
+        throw const BackupValidationException(
+          'A scheduled reminder has invalid timing.',
+        );
+      }
       _requireAccount(accounts, schedule.accountId, 'scheduled transaction');
       if (schedule.type == TransactionType.transfer) {
         final destination = schedule.transferAccountId;
