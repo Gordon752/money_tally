@@ -9,8 +9,15 @@ import 'package:money_tally/src/design/widgets/trackmark_switch.dart';
 import 'package:money_tally/src/migration/v1_snapshot_migrator.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:money_tally/src/onboarding/onboarding_preferences.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({
+      OnboardingPreferences.storageKey: currentOnboardingVersion,
+    });
+  });
   test('manage-account preferences round trip with safe legacy defaults', () {
     const preferences = UserPreferences(
       defaultTransactionAccountMode: AccountDefaultMode.specific,
@@ -184,7 +191,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: migrated);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
@@ -346,7 +357,11 @@ void main() {
       );
 
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.byTooltip('Add'));
       await tester.pumpAndSettle();
@@ -505,7 +520,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -653,7 +672,11 @@ void main() {
       );
 
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.byTooltip('Add'));
       await tester.pumpAndSettle();
@@ -710,7 +733,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();

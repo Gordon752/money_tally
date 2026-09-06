@@ -37,6 +37,7 @@ import 'package:money_tally/src/persistence/local_finance_data_set_repository.da
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:money_tally/src/onboarding/onboarding_preferences.dart';
 
 Finder ledgerRowWithText(String text) => find.ancestor(
   of: find.text(text),
@@ -198,6 +199,12 @@ class FailingLocalFinanceRepository extends LocalFinanceDataSetRepository {
 }
 
 void main() {
+  setUp(() {
+    // These existing feature fixtures represent an already-onboarded user.
+    SharedPreferences.setMockInitialValues({
+      OnboardingPreferences.storageKey: currentOnboardingVersion,
+    });
+  });
   test('categories and credit cards share one curated accent palette', () {
     expect(categoryColorOptions, same(TrackmarkAccentCatalog.options));
     expect(TrackmarkAccentCatalog.options.map((option) => option.label), [
@@ -450,7 +457,9 @@ void main() {
   );
 
   testWidgets('renders finance dashboard', (tester) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     expect(find.text('Trackmark Money'), findsOneWidget);
     expect(find.text('Dashboard'), findsWidgets);
@@ -479,6 +488,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -497,6 +507,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -512,7 +523,9 @@ void main() {
   });
 
   testWidgets('accounts screen renders v2 account cards', (tester) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
@@ -523,7 +536,9 @@ void main() {
   });
 
   testWidgets('accounts screen can collapse account groups', (tester) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Accounts').last);
     await tester.pumpAndSettle();
@@ -560,7 +575,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Accounts').last);
@@ -589,7 +608,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Accounts').last);
@@ -632,7 +655,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     expect(
@@ -656,7 +683,9 @@ void main() {
   });
 
   testWidgets('ledger screen renders v2 transaction rows', (tester) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -672,7 +701,12 @@ void main() {
     final walmartDate = legacyStore.transactions
         .firstWhere((transaction) => transaction.payee == 'Walmart')
         .date;
-    await tester.pumpWidget(MoneyTallyApp(store: legacyStore));
+    await tester.pumpWidget(
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+      ),
+    );
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -715,7 +749,9 @@ void main() {
   testWidgets('ledger tap opens transaction details before editing', (
     tester,
   ) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -795,7 +831,11 @@ void main() {
       final balanceBeforeUndo = dataStore.balanceForAccount('checking');
 
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.text('Ledger').last);
       await tester.pumpAndSettle();
@@ -982,7 +1022,11 @@ void main() {
       final initialScheduleCount = dataStore.scheduledTransactions.length;
 
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.text('Ledger').last);
       await tester.pumpAndSettle();
@@ -1040,7 +1084,9 @@ void main() {
   );
 
   testWidgets('ledger search filters visible transactions', (tester) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -1089,7 +1135,11 @@ void main() {
       }
 
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.text('Ledger').last);
       await tester.pumpAndSettle();
@@ -1138,7 +1188,11 @@ void main() {
     );
     final dataStore = FinanceDataStore(dataSet: migrated);
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Ledger').last);
@@ -1227,7 +1281,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -1530,7 +1588,11 @@ void main() {
     final originalBalance = dataStore.balanceForAccount(pending.accountId);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -1614,7 +1676,11 @@ void main() {
       dataSet: migrated.copyWith(scheduledTransactions: [schedule]),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -1654,7 +1720,11 @@ void main() {
         ),
       );
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.byTooltip('Add'));
       await tester.pumpAndSettle();
@@ -1807,7 +1877,11 @@ void main() {
       );
       final originalBalance = dataStore.balanceForAccount(pending.accountId);
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.text('Ledger').last);
       await tester.pumpAndSettle();
@@ -1880,6 +1954,7 @@ void main() {
       final legacyStore = FinanceStore.seeded();
       await tester.pumpWidget(
         MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
           store: legacyStore,
           dataStore: FinanceDataStore(
             dataSet: const V1SnapshotMigrator().migrate(
@@ -1940,7 +2015,9 @@ void main() {
   testWidgets('ledger filters by account type category and date', (
     tester,
   ) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -2008,7 +2085,9 @@ void main() {
   testWidgets(
     'ledger filter button clearly distinguishes neutral and active states',
     (tester) async {
-      await tester.pumpWidget(MoneyTallyApp());
+      await tester.pumpWidget(
+        MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+      );
       await tester.tap(find.text('Ledger').last);
       await tester.pumpAndSettle();
 
@@ -2077,7 +2156,9 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      await tester.pumpWidget(MoneyTallyApp());
+      await tester.pumpWidget(
+        MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+      );
       await tester.tap(find.text('Ledger').last);
       await tester.pumpAndSettle();
 
@@ -2118,7 +2199,9 @@ void main() {
   testWidgets('filtered main Ledger X uses the same clear-filter result', (
     tester,
   ) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ledger-filter-button')));
@@ -2152,7 +2235,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -2188,7 +2275,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Ledger').last);
@@ -2225,7 +2316,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Ledger').last);
@@ -2308,7 +2403,11 @@ void main() {
         .date;
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Ledger').last);
@@ -2392,7 +2491,11 @@ void main() {
     final initialScheduleCount = dataStore.scheduledTransactions.length;
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Ledger').last);
     await tester.pumpAndSettle();
@@ -2436,7 +2539,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Ledger').last);
@@ -2532,7 +2639,11 @@ void main() {
     final initialScheduleCount = dataStore.scheduledTransactions.length;
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Ledger').last);
@@ -2605,7 +2716,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Ledger').last);
@@ -2653,7 +2768,11 @@ void main() {
     );
     final initialScheduleCount = dataStore.scheduledTransactions.length;
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Ledger').last);
@@ -2687,6 +2806,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -2717,7 +2837,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -2884,7 +3008,11 @@ void main() {
         ),
       );
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
 
       await tester.tap(find.byTooltip('Add'));
@@ -3001,7 +3129,11 @@ void main() {
     );
     final initialScheduleCount = dataStore.scheduledTransactions.length;
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -3055,6 +3187,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -3085,6 +3218,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -3103,7 +3237,9 @@ void main() {
   testWidgets(
     'transaction category flow creates, selects, and preserves form',
     (tester) async {
-      SharedPreferences.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({
+        OnboardingPreferences.storageKey: currentOnboardingVersion,
+      });
       final legacyStore = FinanceStore.seeded();
       final dataSet = const V1SnapshotMigrator().migrate(
         legacyStore.snapshot().toJson(),
@@ -3117,7 +3253,11 @@ void main() {
       );
 
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
 
       await tester.tap(find.text('Ledger').last);
@@ -3222,7 +3362,11 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          home: MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+          home: MoneyTallyApp(
+            initialOnboardingVersionSeen: currentOnboardingVersion,
+            store: legacyStore,
+            dataStore: dataStore,
+          ),
         ),
       );
 
@@ -3256,7 +3400,11 @@ void main() {
       );
       final dataStore = FinanceDataStore(dataSet: dataSet);
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
 
       await tester.tap(find.byTooltip('Add'));
@@ -3320,7 +3468,11 @@ void main() {
         ),
       );
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.byTooltip('Add'));
       await tester.pumpAndSettle();
@@ -3358,7 +3510,11 @@ void main() {
       localRepository: repository,
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -3399,7 +3555,11 @@ void main() {
       localRepository: const FailingLocalFinanceRepository(),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -3457,7 +3617,11 @@ void main() {
         ),
       );
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.byTooltip('Add'));
       await tester.pumpAndSettle();
@@ -3512,7 +3676,11 @@ void main() {
         ),
       );
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.byTooltip('Add'));
       await tester.pumpAndSettle();
@@ -3613,7 +3781,11 @@ void main() {
         ),
       );
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.tap(find.byTooltip('Add'));
       await tester.pumpAndSettle();
@@ -3664,7 +3836,11 @@ void main() {
     );
     final dataStore = FinanceDataStore(dataSet: migrated);
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -3708,7 +3884,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: emptyLegacyStore, dataStore: emptyDataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: emptyLegacyStore,
+        dataStore: emptyDataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -3738,7 +3918,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -3763,7 +3947,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Ledger').last);
@@ -3831,7 +4019,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -3856,7 +4048,9 @@ void main() {
   testWidgets('floating add menu opens income transaction dialog', (
     tester,
   ) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -3890,6 +4084,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -3917,6 +4112,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -3938,7 +4134,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -3988,7 +4188,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -4031,7 +4235,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -4145,7 +4353,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -4209,7 +4421,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -4324,7 +4540,9 @@ void main() {
     final today = DateTime(now.year, now.month, now.day);
     final selectedDate = DateTime(today.year, today.month + 1, 7);
 
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
 
@@ -4358,7 +4576,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -4469,7 +4691,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -4558,7 +4784,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Scheduled Transaction'));
@@ -4609,7 +4837,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -4673,7 +4905,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -4773,7 +5009,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Accounts').last);
@@ -4835,7 +5075,11 @@ void main() {
       );
 
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -4906,6 +5150,7 @@ void main() {
         );
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: migrated),
       ),
@@ -4941,7 +5186,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Accounts').last);
@@ -4985,7 +5234,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Accounts').last);
@@ -5017,7 +5270,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     final card = find.byWidgetPredicate(
@@ -5103,7 +5360,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     final accountCard = find.byWidgetPredicate(
       (widget) => widget is AccountCard && widget.account.id == card.id,
@@ -5681,7 +5942,11 @@ void main() {
     );
     final originalAccount = dataStore.accountById('checking');
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Accounts').last);
@@ -5756,7 +6021,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.byTooltip('Add'));
@@ -6010,7 +6279,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     final cashCard = find.byWidgetPredicate(
@@ -6065,7 +6338,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     final checkingCard = find.byWidgetPredicate(
@@ -6109,7 +6386,11 @@ void main() {
 
     final dataStore = FinanceDataStore(dataSet: dataSet);
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Accounts').last);
@@ -6131,7 +6412,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Accounts').last);
@@ -6171,6 +6456,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -6364,7 +6650,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -6862,7 +7152,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -7387,6 +7681,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -7424,6 +7719,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(
           dataSet: migrated.copyWith(
@@ -7456,6 +7752,7 @@ void main() {
     );
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(
           dataSet: migrated.copyWith(scheduledTransactions: [orphaned]),
@@ -7519,7 +7816,11 @@ void main() {
         ),
       );
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
 
       await tester.tap(find.byTooltip('Settings'));
@@ -7586,7 +7887,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Scheduled').last);
@@ -7633,6 +7938,7 @@ void main() {
 
       await tester.pumpWidget(
         MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
           store: legacyStore,
           dataStore: FinanceDataStore(dataSet: dataSet),
         ),
@@ -7719,7 +8025,11 @@ void main() {
       dataSet: migrated.copyWith(scheduledTransactions: [schedule]),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -7783,7 +8093,11 @@ void main() {
       dataSet: migrated.copyWith(scheduledTransactions: [schedule]),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -7836,7 +8150,11 @@ void main() {
       dataSet: migrated.copyWith(scheduledTransactions: [schedule]),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -7906,7 +8224,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -8015,7 +8337,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -8073,7 +8399,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -8196,7 +8526,11 @@ void main() {
       );
 
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       expect(find.byType(CountBadge), findsOneWidget);
       await tester.tap(find.text('Scheduled').last);
@@ -8294,7 +8628,11 @@ void main() {
       ).encode();
 
       await tester.pumpWidget(
-        MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+        MoneyTallyApp(
+          initialOnboardingVersionSeen: currentOnboardingVersion,
+          store: legacyStore,
+          dataStore: dataStore,
+        ),
       );
       await tester.pump(const Duration(milliseconds: 450));
 
@@ -8336,7 +8674,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -8499,7 +8841,11 @@ void main() {
       dataSet: migrated.copyWith(scheduledTransactions: [schedule]),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
@@ -8550,7 +8896,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Scheduled').last);
@@ -8625,7 +8975,11 @@ void main() {
         .copyWith(scheduledTransactions: [schedule]);
     final dataStore = FinanceDataStore(dataSet: dataSet);
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Scheduled').last);
@@ -8659,7 +9013,11 @@ void main() {
         .copyWith(scheduledTransactions: [rentSchedule(nextDate: dueDate)]);
     final dataStore = FinanceDataStore(dataSet: dataSet);
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Scheduled').last);
@@ -8707,7 +9065,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Scheduled').last);
@@ -8770,7 +9132,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Scheduled').last);
@@ -8855,7 +9221,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Scheduled').last);
@@ -8890,7 +9260,9 @@ void main() {
   });
 
   testWidgets('budgets screen renders v2 budget progress text', (tester) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Plan').last);
     await tester.pumpAndSettle();
@@ -8914,7 +9286,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Plan').last);
@@ -8933,7 +9309,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Plan').last);
@@ -8971,7 +9351,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Plan').last);
@@ -9000,7 +9384,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Plan').last);
@@ -9025,7 +9413,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Plan').last);
@@ -9055,7 +9447,11 @@ void main() {
     );
     final dataStore = FinanceDataStore(dataSet: dataSet);
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     expect(find.text('Plan'), findsOneWidget);
@@ -9100,7 +9496,9 @@ void main() {
   testWidgets('Plan Goals floating add menu exposes Goal actions', (
     tester,
   ) async {
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Plan'));
     await tester.pumpAndSettle();
@@ -9129,7 +9527,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Categories').last);
     await tester.pumpAndSettle();
@@ -9191,7 +9591,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Categories').last);
@@ -9273,7 +9677,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Categories').last);
@@ -9319,7 +9727,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Categories').last);
@@ -9348,7 +9760,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Categories').last);
@@ -9375,7 +9791,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Categories').last);
@@ -9406,7 +9826,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Categories').last);
@@ -9449,7 +9873,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
@@ -9501,7 +9929,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
@@ -9600,7 +10032,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
@@ -9638,7 +10074,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
@@ -9703,7 +10143,11 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
@@ -9737,7 +10181,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
@@ -9807,7 +10255,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
@@ -9835,7 +10287,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
@@ -9871,7 +10325,9 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      OnboardingPreferences.storageKey: currentOnboardingVersion,
+    });
     final legacyStore = FinanceStore.seeded();
     final migrated = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
@@ -9886,7 +10342,11 @@ void main() {
       localRepository: repository,
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
@@ -9968,7 +10428,9 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      OnboardingPreferences.storageKey: currentOnboardingVersion,
+    });
     final legacyStore = FinanceStore.seeded();
     final migrated = const V1SnapshotMigrator().migrate(
       legacyStore.snapshot().toJson(),
@@ -9981,7 +10443,11 @@ void main() {
       localRepository: repository,
     );
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
@@ -10226,7 +10692,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
@@ -10249,7 +10717,9 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      await tester.pumpWidget(MoneyTallyApp());
+      await tester.pumpWidget(
+        MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+      );
 
       await tester.tap(find.text('Settings').last);
       await tester.pumpAndSettle();
@@ -10305,7 +10775,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Settings').last);
@@ -10337,7 +10811,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Settings').last);
@@ -10391,7 +10869,11 @@ void main() {
     final dataStore = FinanceDataStore(dataSet: dataSet);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: legacyStore, dataStore: dataStore),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: legacyStore,
+        dataStore: dataStore,
+      ),
     );
 
     await tester.tap(find.text('Settings').last);
@@ -10603,6 +11085,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Trackmark Data Reset'), findsOneWidget);
+      expect(
+        await const OnboardingPreferences().readOnboardingVersionSeen(),
+        currentOnboardingVersion,
+      );
       expect(dataStore.accounts, isEmpty);
       expect(dataStore.categories, isEmpty);
       expect(dataStore.transactions, isEmpty);
@@ -10702,6 +11188,7 @@ void main() {
 
     const expected = UserPreferences(legacyV1MigrationCompleted: true);
     expect(dataStore.preferences.toJson(), expected.toJson());
+    expect(await const OnboardingPreferences().readOnboardingVersionSeen(), 0);
     final restoredSafety = const BackupRestoreValidator().validate(
       safetyService.savedContent!,
     );
@@ -10769,6 +11256,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -10794,6 +11282,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),
@@ -10816,7 +11305,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(MoneyTallyApp());
+    await tester.pumpWidget(
+      MoneyTallyApp(initialOnboardingVersionSeen: currentOnboardingVersion),
+    );
 
     await tester.tap(find.text('Reports').last);
     await tester.pumpAndSettle();
@@ -10843,6 +11334,7 @@ void main() {
 
     await tester.pumpWidget(
       MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
         store: legacyStore,
         dataStore: FinanceDataStore(dataSet: dataSet),
       ),

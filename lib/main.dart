@@ -64,6 +64,7 @@ import 'src/ledger/running_balance_calculator.dart';
 import 'src/ledger/transaction_account_preview.dart';
 import 'src/notifications/local_notification_scheduler.dart';
 import 'src/notifications/notification_scheduler.dart';
+import 'src/onboarding/onboarding_preferences.dart';
 import 'src/persistence/backup_codec.dart';
 import 'src/persistence/backup_restore_service.dart';
 import 'src/persistence/backup_storage.dart';
@@ -80,6 +81,7 @@ import 'src/sync/cloud_sync_coordinator.dart';
 part 'src/app_theme.dart';
 part 'src/accounts/manage_accounts.dart';
 part 'src/auth_service.dart';
+part 'src/onboarding/onboarding_view.dart';
 part 'src/domain.dart';
 part 'src/finance_home.dart';
 part 'src/goals/goals_ui.dart';
@@ -165,7 +167,11 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
       debugPrintStack(stackTrace: stackTrace);
     }
     await updateBackupCoordinator.markLaunchSuccessful(currentVersion);
-    final stores = AppStores(dataStore: dataStore);
+    final stores = AppStores(
+      dataStore: dataStore,
+      onboardingVersionSeen: await const OnboardingPreferences()
+          .readOnboardingVersionSeen(),
+    );
     final remainingPresentation =
         _minimumLaunchPresentation - launchStopwatch.elapsed;
     if (!remainingPresentation.isNegative) {
@@ -203,6 +209,7 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
           }
           return MoneyTallyApp(
             dataStore: stores.dataStore,
+            initialOnboardingVersionSeen: stores.onboardingVersionSeen,
             authService: FirebaseAuthService(),
             recordRepository: FirestoreRecordRepository(),
           );
@@ -213,9 +220,13 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
 }
 
 class AppStores {
-  const AppStores({required this.dataStore});
+  const AppStores({
+    required this.dataStore,
+    required this.onboardingVersionSeen,
+  });
 
   final FinanceDataStore dataStore;
+  final int onboardingVersionSeen;
 }
 
 /// Brand palette used only by the public launch and sign-in surfaces. The
@@ -444,6 +455,7 @@ class MoneyTallyApp extends StatelessWidget {
     AuthService? authService,
     FinanceRemoteRepository? remoteRepository,
     FinanceRecordRepository? recordRepository,
+    int? initialOnboardingVersionSeen,
     Key? key,
   }) {
     // Widget fixtures historically construct MoneyTallyApp directly. Keep
@@ -463,6 +475,7 @@ class MoneyTallyApp extends StatelessWidget {
       authService: authService ?? LocalOnlyAuthService(),
       remoteRepository: remoteRepository,
       recordRepository: recordRepository,
+      initialOnboardingVersionSeen: initialOnboardingVersionSeen,
       key: key,
     );
   }
@@ -473,6 +486,7 @@ class MoneyTallyApp extends StatelessWidget {
     required this.authService,
     this.remoteRepository,
     this.recordRepository,
+    this.initialOnboardingVersionSeen,
     super.key,
   });
 
@@ -481,6 +495,8 @@ class MoneyTallyApp extends StatelessWidget {
   final AuthService authService;
   final FinanceRemoteRepository? remoteRepository;
   final FinanceRecordRepository? recordRepository;
+  // Loaded with startup state so the first app frame is already the right page.
+  final int? initialOnboardingVersionSeen;
 
   @override
   Widget build(BuildContext context) {
@@ -496,10 +512,13 @@ class MoneyTallyApp extends StatelessWidget {
             darkTheme: AppTheme.dark(),
             themeMode: themeModeFor(preferences.appearanceMode),
             navigatorObservers: [TrackmarkNavigationObserver()],
-            home: AuthGate(
-              authService: authService,
-              remoteRepository: remoteRepository,
-              recordRepository: recordRepository,
+            home: OnboardingGate(
+              initialVersionSeen: initialOnboardingVersionSeen,
+              child: AuthGate(
+                authService: authService,
+                remoteRepository: remoteRepository,
+                recordRepository: recordRepository,
+              ),
             ),
           );
         },

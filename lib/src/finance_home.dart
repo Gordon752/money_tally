@@ -10342,8 +10342,26 @@ class _SettingsViewState extends State<SettingsView> {
               icon: AppIcon.backup,
               title: 'Data Management',
               subtitle: 'Backups, exports, imports, and reset options',
-              showDivider: false,
+              showDivider: true,
               onTap: _openDataManagement,
+            ),
+            SettingsActionRow(
+              key: const ValueKey('settings-help-guides'),
+              icon: AppIcon.info,
+              title: 'Help & Guides',
+              subtitle:
+                  'A quick guide to understanding and planning your money',
+              showDivider: true,
+              onTap: () => showTrackmarkGuides(context),
+            ),
+            SettingsActionRow(
+              key: const ValueKey('settings-replay-onboarding'),
+              icon: AppIcon.restore,
+              title: 'Replay Onboarding',
+              subtitle:
+                  'Revisit the introduction without changing your settings or data',
+              showDivider: false,
+              onTap: () => replayTrackmarkOnboarding(context),
             ),
           ],
         ),
@@ -10391,6 +10409,14 @@ class _SettingsViewState extends State<SettingsView> {
         SettingsSectionCard(
           title: 'Data Management',
           children: [
+            SettingsActionRow(
+              key: const ValueKey('reset-preferences-row'),
+              icon: AppIcon.restore,
+              title: 'Reset Preferences',
+              subtitle:
+                  'Restore app settings and replay the introduction on next launch. Financial data stays unchanged.',
+              onTap: _confirmResetPreferences,
+            ),
             SettingsActionRow(
               icon: AppIcon.history,
               title: 'Reset Scheduled Calendar History',
@@ -10550,6 +10576,49 @@ class _SettingsViewState extends State<SettingsView> {
         ),
       ),
     );
+  }
+
+  Future<void> _confirmResetPreferences() async {
+    final store = FinanceDataStoreScope.read(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => TransactionSheetFrame(
+        title: 'Reset Preferences?',
+        actions: TransactionFormActions(
+          saveLabel: 'Reset Preferences',
+          saveKey: const ValueKey('confirm-reset-preferences'),
+          onCancel: () => Navigator.pop(dialogContext, false),
+          onSave: () => Navigator.pop(dialogContext, true),
+        ),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+          child: Text(
+            'Restore app settings to their defaults, including notification and automatic sync/backup preferences. The introduction will appear on your next launch.\n\nYour accounts, transactions, Plans, payees, sign-in, and existing backups will not be deleted.',
+          ),
+        ),
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    try {
+      await resetTrackmarkPreferences(store);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Preferences reset. The introduction will appear on your next launch.',
+          ),
+        ),
+      );
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Preferences could not be fully reset. Please try again.',
+          ),
+        ),
+      );
+    }
   }
 
   String _backupStatusDateLabel(DateTime value) {
@@ -10746,6 +10815,21 @@ class _SettingsViewState extends State<SettingsView> {
         return;
       }
 
+      if (resetChoice.resetAppSettings) {
+        try {
+          await const OnboardingPreferences().reset();
+        } on Object {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Data was reset, but welcome preferences could not be reset. Use Reset Preferences to try again.',
+                ),
+              ),
+            );
+          }
+        }
+      }
       if (!mounted) return;
       await showDialog<void>(
         context: context,

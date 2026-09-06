@@ -17,10 +17,15 @@ import 'package:money_tally/src/goals/goal_calculator.dart';
 import 'package:money_tally/src/persistence/local_finance_data_set_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/store/finance_data_store_scope.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:money_tally/src/onboarding/onboarding_preferences.dart';
 
 void main() {
   setUp(() {
     TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({
+      OnboardingPreferences.storageKey: currentOnboardingVersion,
+    });
   });
 
   test('Goal status copy expresses pace, achievement, and replenishment', () {
@@ -1426,7 +1431,11 @@ void main() {
     final store = _store(goals: [goal], contributions: [contribution]);
 
     await tester.pumpWidget(
-      MoneyTallyApp(store: FinanceStore.seeded(), dataStore: store),
+      MoneyTallyApp(
+        initialOnboardingVersionSeen: currentOnboardingVersion,
+        store: FinanceStore.seeded(),
+        dataStore: store,
+      ),
     );
     await tester.tap(find.text('Scheduled').last);
     await tester.pumpAndSettle();
