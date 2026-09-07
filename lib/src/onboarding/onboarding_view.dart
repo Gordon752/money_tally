@@ -680,6 +680,15 @@ class TrackmarkGuidesPage extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              const Card(
+                clipBehavior: Clip.antiAlias,
+                child: TrackmarkSupportLinkRow(
+                  key: ValueKey('guides-website-link'),
+                  link: TrackmarkSupportLink.help,
+                  showDivider: false,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
               const _WelcomeParagraph(
                 'Trackmark uses manual entry, so you stay in control of what gets recorded. No bank connection is required.',
               ),

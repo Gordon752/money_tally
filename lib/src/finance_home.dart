@@ -10360,8 +10360,17 @@ class _SettingsViewState extends State<SettingsView> {
               title: 'Replay Onboarding',
               subtitle:
                   'Revisit the introduction without changing your settings or data',
-              showDivider: false,
+              showDivider: true,
               onTap: () => replayTrackmarkOnboarding(context),
+            ),
+            const TrackmarkSupportLinkRow(
+              key: ValueKey('settings-support-link'),
+              link: TrackmarkSupportLink.support,
+            ),
+            const TrackmarkSupportLinkRow(
+              key: ValueKey('settings-privacy-link'),
+              link: TrackmarkSupportLink.privacy,
+              showDivider: false,
             ),
           ],
         ),

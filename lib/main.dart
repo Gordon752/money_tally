@@ -75,6 +75,7 @@ import 'src/persistence/firestore_record_repository.dart';
 import 'src/reporting/report_calculator.dart';
 import 'src/store/finance_data_store.dart';
 import 'src/store/finance_data_store_scope.dart';
+import 'src/support/support_links.dart';
 import 'src/sync/automatic_sync_service.dart';
 import 'src/sync/cloud_sync_coordinator.dart';
 
@@ -82,6 +83,7 @@ part 'src/app_theme.dart';
 part 'src/accounts/manage_accounts.dart';
 part 'src/auth_service.dart';
 part 'src/onboarding/onboarding_view.dart';
+part 'src/support/support_link_row.dart';
 part 'src/domain.dart';
 part 'src/finance_home.dart';
 part 'src/goals/goals_ui.dart';

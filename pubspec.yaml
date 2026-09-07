@@ -50,6 +50,7 @@ dependencies:
   timezone: ^0.11.1
   workmanager: ^0.10.0
   package_info_plus: ^10.2.1
+  url_launcher: ^6.3.2
   hugeicons: ^1.1.7
 
 dev_dependencies:

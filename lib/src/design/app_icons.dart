@@ -102,6 +102,8 @@ abstract final class AppIcon {
       _platform(Icons.insights_outlined, CupertinoIcons.chart_bar);
   static IconData get info =>
       _platform(Icons.info_outline, CupertinoIcons.info_circle);
+  static IconData get support =>
+      _platform(Icons.help_outline, CupertinoIcons.question_circle);
 
   // Calendar, recurrence, and notifications.
   static IconData get calendar =>
