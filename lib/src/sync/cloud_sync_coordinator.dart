@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../persistence/finance_record_repository.dart';
 import '../store/finance_data_store.dart';
+import 'sync_attempt_authority.dart';
 
 enum CloudSyncStatus { idle, syncing, synced, issue }
 
@@ -234,6 +235,8 @@ class CloudSyncCoordinator extends ChangeNotifier {
   String? _lastErrorDescription;
   CloudSyncDiagnostic? _lastDiagnostic;
   Future<bool>? _activeSync;
+  SyncAttemptAuthority? _attempt;
+  int _session = 0;
 
   CloudSyncStatus get status => _status;
   DateTime? get lastSuccessfulSyncAt => _lastSuccessfulSyncAt;
@@ -262,6 +265,8 @@ class CloudSyncCoordinator extends ChangeNotifier {
   }
 
   void reset() {
+    _session++;
+    _attempt?.invalidate();
     _currentUserId = null;
     _lastSuccessfulSyncAt = null;
     _lastErrorDescription = null;
@@ -307,6 +312,7 @@ class CloudSyncCoordinator extends ChangeNotifier {
     required CloudSyncTrigger trigger,
     required Duration timeout,
   }) async {
+    final session = _session;
     final acquired = await executionStateStore.tryAcquireLease(
       userId,
       now: now(),
@@ -316,6 +322,10 @@ class CloudSyncCoordinator extends ChangeNotifier {
     // is a successful no-op, not a failure that should trigger another task.
     if (!acquired) return true;
 
+    if (session != _session) {
+      await executionStateStore.releaseLease(userId);
+      return false;
+    }
     _currentUserId = userId;
     _setStatus(CloudSyncStatus.syncing);
     final metricsProvider = recordRepository is CloudSyncMetricsProvider
@@ -328,16 +338,23 @@ class CloudSyncCoordinator extends ChangeNotifier {
         attemptCount += 1;
         await _attach(userId, dataStore, timeout);
       } on Object {
-        if (!retryAfterTransientFailure) rethrow;
+        if (!retryAfterTransientFailure ||
+            session != _session ||
+            _attempt?.isValid == false) {
+          rethrow;
+        }
         await Future<void>.delayed(const Duration(milliseconds: 900));
+        if (session != _session || _attempt?.isValid == false) return false;
         attemptCount += 1;
         await _attach(userId, dataStore, timeout);
       }
 
       final completedAt = now();
+      if (session != _session || _attempt?.isValid == false) return false;
       _lastSuccessfulSyncAt = completedAt;
       _lastErrorDescription = null;
       await executionStateStore.saveLastSuccessfulSync(userId, completedAt);
+      if (session != _session || _attempt?.isValid == false) return false;
       _lastDiagnostic = CloudSyncDiagnostic(
         completedAt: completedAt,
         trigger: trigger,
@@ -351,9 +368,16 @@ class CloudSyncCoordinator extends ChangeNotifier {
         userId,
         _lastDiagnostic!,
       );
+      if (session != _session || _attempt?.isValid == false) return false;
       _setStatus(CloudSyncStatus.synced);
       return true;
     } on Object catch (error, stackTrace) {
+      if (session != _session) return false;
+      if (error is StaleSyncAttempt ||
+          (_attempt?.isValid == false && _attempt?.timedOut == false)) {
+        _setStatus(CloudSyncStatus.idle);
+        return false;
+      }
       debugPrint('Cloud record sync failed: $error');
       debugPrintStack(stackTrace: stackTrace);
       _lastErrorDescription = _describeSyncError(error);
@@ -361,6 +385,7 @@ class CloudSyncCoordinator extends ChangeNotifier {
         userId,
         _lastErrorDescription!,
       );
+      if (session != _session) return false;
       _lastDiagnostic = CloudSyncDiagnostic(
         completedAt: now(),
         trigger: trigger,
@@ -375,6 +400,7 @@ class CloudSyncCoordinator extends ChangeNotifier {
         userId,
         _lastDiagnostic!,
       );
+      if (session != _session) return false;
       _setStatus(CloudSyncStatus.issue);
       return false;
     } finally {
@@ -391,13 +417,23 @@ class CloudSyncCoordinator extends ChangeNotifier {
     FinanceDataStore dataStore,
     Duration timeout,
   ) {
+    final authority = SyncAttemptAuthority();
+    _attempt?.invalidate();
+    _attempt = authority;
     return dataStore
-        .attachRemoteSync(remoteRepository: recordRepository, userId: userId)
+        .attachRemoteSync(
+          remoteRepository: recordRepository,
+          userId: userId,
+          attemptAuthority: authority,
+        )
         .timeout(
           timeout,
-          onTimeout: () => throw TimeoutException(
-            'Cloud sync did not finish within ${timeout.inSeconds} seconds.',
-          ),
+          onTimeout: () {
+            authority.invalidate(timedOut: true);
+            throw TimeoutException(
+              'Cloud sync did not finish within ${timeout.inSeconds} seconds.',
+            );
+          },
         );
   }
 

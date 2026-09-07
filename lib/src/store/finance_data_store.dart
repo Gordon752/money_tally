@@ -21,8 +21,10 @@ import '../funds/recurring_fund_cycle_calculator.dart';
 import '../goals/goal_calculator.dart';
 import '../notifications/notification_scheduler.dart';
 import '../persistence/finance_record_repository.dart';
+import '../persistence/cloud_record_conflict.dart';
 import '../persistence/local_finance_data_set_repository.dart';
 import '../persistence/scheduled_notification_state_repository.dart';
+import '../sync/sync_attempt_authority.dart';
 
 class AuthoritativeRestoreLocalInstallException implements Exception {
   const AuthoritativeRestoreLocalInstallException(this.cause);
@@ -159,6 +161,10 @@ class FinanceDataStore extends ChangeNotifier {
   bool preferRemoteOnFirstSync;
   String? userId;
   bool _authoritativeRestoreInProgress = false;
+  SyncAttemptAuthority? _syncAttempt;
+  // Immediate edits have a session lifetime distinct from routine sync.
+  // Queued payloads must never acquire a later sign-in/restore authority.
+  SyncAttemptAuthority _editUploadAuthority = SyncAttemptAuthority();
 
   bool get hasRemoteSync => remoteRepository != null && userId != null;
   final String deviceId;
@@ -955,6 +961,18 @@ class FinanceDataStore extends ChangeNotifier {
     FinanceDataSet dataSet, {
     bool persistLocal = true,
   }) async {
+    await _tryReplaceDataSet(dataSet, persistLocal: persistLocal);
+  }
+
+  // Dataset instances are immutable snapshots. Routine sync must not install
+  // a merge if a local mutation replaced its base during an asynchronous save.
+  // Explicit restore/reset deliberately omit this precondition.
+  Future<bool> _tryReplaceDataSet(
+    FinanceDataSet dataSet, {
+    bool persistLocal = true,
+    FinanceDataSet? expectedBase,
+  }) async {
+    SyncAttemptAuthority.checkCurrent();
     final previousSchedules = scheduledTransactions;
     // Old local data and backups may still carry notification bookkeeping in
     // the schedule record. Treat it only as device-local migration input so
@@ -965,11 +983,13 @@ class FinanceDataStore extends ChangeNotifier {
           schedule.lastReminderScheduledAt == null) {
         continue;
       }
-      await notificationStateRepository.save(
-        schedule.id,
-        DeviceScheduledNotificationState(
-          notificationIds: schedule.scheduledNotificationIds,
-          lastScheduledAt: schedule.lastReminderScheduledAt,
+      await SyncAttemptAuthority.effect(
+        () => notificationStateRepository.save(
+          schedule.id,
+          DeviceScheduledNotificationState(
+            notificationIds: schedule.scheduledNotificationIds,
+            lastScheduledAt: schedule.lastReminderScheduledAt,
+          ),
         ),
       );
     }
@@ -987,11 +1007,40 @@ class FinanceDataStore extends ChangeNotifier {
       ],
     );
     if (persistLocal) {
-      await localRepository?.save(semanticDataSet);
+      await _persistSyncSnapshot(semanticDataSet);
+    }
+    SyncAttemptAuthority.checkCurrent();
+    if (expectedBase != null && !identical(_dataSet, expectedBase)) {
+      return false;
     }
     _dataSet = semanticDataSet;
-    await _reconcileScheduledNotifications(previousSchedules);
+    await SyncAttemptAuthority.effect(
+      () => _reconcileScheduledNotifications(previousSchedules),
+    );
     notifyListeners();
+    return true;
+  }
+
+  Future<void> _persistSyncSnapshot(FinanceDataSet snapshot) {
+    return SyncAttemptAuthority.effect(() async {
+      final authority = SyncAttemptAuthority.current;
+      try {
+        await localRepository?.save(snapshot);
+      } finally {
+        if (authority != null && !authority.isValid) {
+          // A platform write already submitted before timeout may finish
+          // afterward. Repair it from live state before releasing the effect
+          // fence, so neither restart nor the next attempt sees stale disk data.
+          await SyncAttemptAuthority.repairLocalWrite(() async {
+            while (true) {
+              final current = _dataSet;
+              await localRepository?.save(current);
+              if (identical(current, _dataSet)) break;
+            }
+          });
+        }
+      }
+    });
   }
 
   Future<void> _reconcileScheduledNotifications(
@@ -1003,6 +1052,7 @@ class FinanceDataStore extends ChangeNotifier {
     };
     for (final schedule in byId.values) {
       final stored = await notificationStateRepository.load(schedule.id);
+      SyncAttemptAuthority.checkCurrent();
       final ids = <int>{
         notificationIdFor(schedule.id),
         ...schedule.scheduledNotificationIds,
@@ -1014,15 +1064,25 @@ class FinanceDataStore extends ChangeNotifier {
           sync: schedule.sync,
         ),
       );
+      SyncAttemptAuthority.checkCurrent();
       await notificationStateRepository.remove(schedule.id);
+      SyncAttemptAuthority.checkCurrent();
     }
 
-    final reconciled = <ScheduledTransactionRecord>[];
-    for (final schedule in scheduledTransactions) {
-      reconciled.add(await _applyScheduledNotificationState(schedule));
+    // Bookkeeping is device-local; the installed dataset is already stripped
+    // of legacy notification fields. Never reinstall a schedule list captured
+    // before an await, which could discard a concurrent schedule edit.
+    while (true) {
+      SyncAttemptAuthority.checkCurrent();
+      final snapshot = _dataSet;
+      for (final schedule in snapshot.scheduledTransactions) {
+        await _applyScheduledNotificationState(schedule);
+      }
+      if (!identical(snapshot, _dataSet)) continue;
+      await _persistSyncSnapshot(snapshot);
+      SyncAttemptAuthority.checkCurrent();
+      if (identical(snapshot, _dataSet)) break;
     }
-    _dataSet = _dataSet.copyWith(scheduledTransactions: reconciled);
-    await localRepository?.save(_dataSet);
     await refreshScheduledNotificationBadge();
   }
 
@@ -1034,6 +1094,10 @@ class FinanceDataStore extends ChangeNotifier {
       throw StateError('A backup restore is already in progress.');
     }
     _authoritativeRestoreInProgress = true;
+    final previousAttempt = _syncAttempt;
+    previousAttempt?.invalidate();
+    final previousEdits = _editUploadAuthority;
+    previousEdits.invalidate();
     preferRemoteOnFirstSync = false;
     final restored = dataSet.copyWith(
       preferences: dataSet.preferences.copyWith(
@@ -1041,6 +1105,8 @@ class FinanceDataStore extends ChangeNotifier {
       ),
     );
     try {
+      await previousAttempt?.drain();
+      await previousEdits.drain();
       final remote = remoteRepository;
       final currentUserId = userId;
       String? activatedGeneration;
@@ -1069,6 +1135,9 @@ class FinanceDataStore extends ChangeNotifier {
         rethrow;
       }
     } finally {
+      if (identical(previousEdits, _editUploadAuthority)) {
+        _editUploadAuthority = SyncAttemptAuthority();
+      }
       _authoritativeRestoreInProgress = false;
     }
   }
@@ -1123,10 +1192,45 @@ class FinanceDataStore extends ChangeNotifier {
   Future<void> attachRemoteSync({
     required FinanceRecordRepository remoteRepository,
     required String userId,
+    SyncAttemptAuthority? attemptAuthority,
   }) async {
     if (_authoritativeRestoreInProgress) {
       throw StateError('Cloud sync is paused while a backup is restored.');
     }
+    final previous = _syncAttempt;
+    previous?.invalidate();
+    final attempt = attemptAuthority ?? SyncAttemptAuthority();
+    _syncAttempt = attempt;
+    // Retain the whole predecessor chain, including when this attempt times
+    // out while waiting. A third attempt must not bypass the first write.
+    await attempt.run(
+      () => SyncAttemptAuthority.effect(() async {
+        await previous?.drain();
+        final edits = _editUploadAuthority;
+        if (!edits.isValid ||
+            this.userId != userId ||
+            !identical(this.remoteRepository, remoteRepository)) {
+          edits.invalidate();
+          await edits.drain();
+          attempt.check();
+          if (identical(edits, _editUploadAuthority)) {
+            _editUploadAuthority = SyncAttemptAuthority();
+          }
+        }
+      }),
+    );
+    attempt.check();
+    return attempt.run(
+      () =>
+          _attachRemoteSync(remoteRepository: remoteRepository, userId: userId),
+    );
+  }
+
+  Future<void> _attachRemoteSync({
+    required FinanceRecordRepository remoteRepository,
+    required String userId,
+  }) async {
+    SyncAttemptAuthority.checkCurrent();
     this.remoteRepository = remoteRepository;
     this.userId = userId;
 
@@ -1140,27 +1244,33 @@ class FinanceDataStore extends ChangeNotifier {
     if (incrementalRepository != null) {
       debugPrint('Cloud sync stage: loading incremental remote data set');
       final load = await incrementalRepository.loadDataSetForSync(userId);
+      SyncAttemptAuthority.checkCurrent();
       incrementalLoad = load;
       remoteGeneration = load.generation;
       remoteDataSet = load.dataSet;
     } else {
       debugPrint('Cloud sync stage: loading restore authority');
       remoteGeneration = await remoteRepository.activeRestoreGeneration(userId);
+      SyncAttemptAuthority.checkCurrent();
       debugPrint('Cloud sync stage: loading remote data set');
       remoteDataSet = await remoteRepository.loadDataSet(userId);
+      SyncAttemptAuthority.checkCurrent();
     }
     debugPrint('Cloud sync stage: loading local authority acknowledgement');
     final acknowledgedGeneration = await localRepository
         ?.loadAcknowledgedRestoreGeneration(userId);
+    SyncAttemptAuthority.checkCurrent();
     debugPrint('Cloud sync stage: remote data set loaded');
 
-    Future<void> acknowledgeIncrementalLoad() async {
+    Future<void> acknowledgeIncrementalLoad(FinanceDataSet confirmed) async {
       final load = incrementalLoad;
       if (load == null || incrementalRepository == null) return;
-      await incrementalRepository.acknowledgeIncrementalSync(
-        userId: userId,
-        load: load,
-        resultingDataSet: _dataSet,
+      await SyncAttemptAuthority.effect(
+        () => incrementalRepository.acknowledgeIncrementalSync(
+          userId: userId,
+          load: load,
+          resultingDataSet: confirmed,
+        ),
       );
     }
 
@@ -1172,42 +1282,60 @@ class FinanceDataStore extends ChangeNotifier {
       // Otherwise an empty reset can be mistaken for an uninitialized cloud
       // and the stale device can republish the records that were just erased.
       await replaceDataSet(remoteDataSet);
-      await localRepository?.saveAcknowledgedRestoreGeneration(
-        userId,
-        remoteGeneration,
+      SyncAttemptAuthority.checkCurrent();
+      await SyncAttemptAuthority.effect(
+        () async => localRepository?.saveAcknowledgedRestoreGeneration(
+          userId,
+          remoteGeneration!,
+        ),
       );
       preferRemoteOnFirstSync = false;
       debugPrint('Cloud sync stage: migrating legacy Goals');
-      await migrateLegacyGoalsToAccounts();
-      await acknowledgeIncrementalLoad();
+      await SyncAttemptAuthority.effect(() => migrateLegacyGoalsToAccounts());
+      // Only the downloaded generation is confirmed here. Any concurrent
+      // edit or migration remains eligible for ordinary upload on next sync.
+      await acknowledgeIncrementalLoad(remoteDataSet);
       debugPrint('Cloud sync stage: complete');
       return;
     }
 
     if (financeDataSetHasRecords(remoteDataSet)) {
-      final merged = preferRemoteOnFirstSync
+      var base = _dataSet;
+      var merged = preferRemoteOnFirstSync
           ? mergeFinanceDataSetsPreferIncoming(
               incoming: remoteDataSet,
-              current: _dataSet,
+              current: base,
             )
           : mergeFinanceDataSetsPreferCurrent(
               incoming: remoteDataSet,
-              current: _dataSet,
+              current: base,
             );
-      await replaceDataSet(merged);
+      while (true) {
+        if (await _tryReplaceDataSet(merged, expectedBase: base)) break;
+        // Preserve only mutations made since this merge was prepared. Do not
+        // rerun timestamp conflict resolution against these later local edits
+        // (or first-import remote preference could discard them again).
+        final current = _dataSet;
+        merged = _rebaseConcurrentFinanceMutations(
+          prepared: merged,
+          base: base,
+          current: current,
+        );
+        base = current;
+      }
       preferRemoteOnFirstSync = false;
       debugPrint('Cloud sync stage: migrating legacy Goals');
-      await migrateLegacyGoalsToAccounts();
+      await SyncAttemptAuthority.effect(() => migrateLegacyGoalsToAccounts());
       debugPrint('Cloud sync stage: uploading merged data set');
-      await pushAllRecordsToRemote(baseline: remoteDataSet);
-      await acknowledgeIncrementalLoad();
+      final uploaded = await pushAllRecordsToRemote(baseline: remoteDataSet);
+      await acknowledgeIncrementalLoad(uploaded);
       debugPrint('Cloud sync stage: complete');
       return;
     }
 
     debugPrint('Cloud sync stage: seeding empty remote data set');
-    await pushAllRecordsToRemote(baseline: remoteDataSet);
-    await acknowledgeIncrementalLoad();
+    final uploaded = await pushAllRecordsToRemote(baseline: remoteDataSet);
+    await acknowledgeIncrementalLoad(uploaded);
     preferRemoteOnFirstSync = false;
     debugPrint('Cloud sync stage: complete');
   }
@@ -1217,6 +1345,7 @@ class FinanceDataStore extends ChangeNotifier {
   /// restart or a second device can finish an interrupted migration without
   /// duplicating money movements.
   Future<void> migrateLegacyGoalsToAccounts() async {
+    SyncAttemptAuthority.checkCurrent();
     // Account-backed Goals no longer use the reservation migration flag. Clear
     // stale flags as part of an idempotent load/sync migration so users never
     // see a permanent legacy-repair state after the account is valid.
@@ -1240,6 +1369,7 @@ class FinanceDataStore extends ChangeNotifier {
         ],
       );
       await _commit(goalRecords: reconciledGoals);
+      SyncAttemptAuthority.checkCurrent();
     }
 
     final candidates = goals
@@ -1436,37 +1566,106 @@ class FinanceDataStore extends ChangeNotifier {
   }
 
   void detachRemoteSync() {
+    _syncAttempt?.invalidate();
+    _editUploadAuthority.invalidate();
     remoteRepository = null;
     userId = null;
   }
 
-  Future<void> pushAllRecordsToRemote({FinanceDataSet? baseline}) async {
+  Future<FinanceDataSet> pushAllRecordsToRemote({
+    FinanceDataSet? baseline,
+  }) async {
+    try {
+      return await SyncAttemptAuthority.effect(
+        () => _pushAllRecordsToRemote(baseline: baseline),
+      );
+    } on CloudRecordWriteConflict catch (error) {
+      await _reconcileRejectedCloudWrites(error);
+      rethrow; // Do not acknowledge an incomplete upload/checkpoint.
+    }
+  }
+
+  Future<void> _reconcileRejectedCloudWrites(
+    CloudRecordWriteConflict error,
+  ) async {
+    final attempt = _syncAttempt;
+    if (attempt != null) {
+      if (!attempt.isValid) return;
+      await attempt.run(() => _applyRejectedCloudWrites(error));
+    } else {
+      await _applyRejectedCloudWrites(error);
+    }
+  }
+
+  Future<void> _applyRejectedCloudWrites(CloudRecordWriteConflict error) async {
+    SyncAttemptAuthority.checkCurrent();
+    final remote = remoteRepository;
+    final currentUser = userId;
+    final attempt = _syncAttempt;
+    while (true) {
+      if (_authoritativeRestoreInProgress ||
+          !identical(remote, remoteRepository) ||
+          userId != currentUser ||
+          (attempt != null && !attempt.isValid)) {
+        return;
+      }
+      final base = _dataSet;
+      final reconciled = reconcileCloudRecordConflicts(base, error);
+      if (identical(base, reconciled) ||
+          await _tryReplaceDataSet(reconciled, expectedBase: base)) {
+        if (identical(remote, remoteRepository) &&
+            userId == currentUser &&
+            !_authoritativeRestoreInProgress &&
+            (attempt == null || attempt.isValid) &&
+            remote is CloudRecordConflictRepository) {
+          (remote as CloudRecordConflictRepository)
+              .acknowledgeCloudRecordConflicts(error, _dataSet);
+        }
+        return;
+      }
+      // Re-evaluate exact rejected payloads against any edit made during save.
+    }
+  }
+
+  Future<FinanceDataSet> _pushAllRecordsToRemote({
+    FinanceDataSet? baseline,
+  }) async {
+    SyncAttemptAuthority.checkCurrent();
+    // Immutable snapshot shared by publication and cache acknowledgment.
+    // Never acknowledge edits that arrived while this upload was in flight.
+    final snapshot = _dataSet;
     final remote = remoteRepository;
     final currentUserId = userId;
-    if (remote == null || currentUserId == null) return;
+    if (remote == null || currentUserId == null) {
+      throw StateError('Cloud sync detached before upload.');
+    }
 
     if (remote case final BulkFinanceRecordRepository bulkRepository) {
       await bulkRepository.saveDataSet(
         userId: currentUserId,
-        dataSet: _dataSet,
+        dataSet: snapshot,
         baseline: baseline,
       );
-      return;
+      return snapshot;
     }
 
-    for (final account in accounts) {
+    for (final account in snapshot.accounts) {
+      SyncAttemptAuthority.checkCurrent();
       await remote.saveAccount(userId: currentUserId, account: account);
     }
-    for (final category in categories) {
+    for (final category in snapshot.categories) {
+      SyncAttemptAuthority.checkCurrent();
       await remote.saveCategory(userId: currentUserId, category: category);
     }
-    for (final transaction in transactions) {
+    for (final transaction in snapshot.transactions) {
+      SyncAttemptAuthority.checkCurrent();
       await remote.saveTransaction(
         userId: currentUserId,
         transaction: transaction,
       );
     }
-    for (final scheduledTransaction in scheduledTransactions) {
+    for (final scheduledTransaction in snapshot.scheduledTransactions) {
+      SyncAttemptAuthority.checkCurrent();
       await remote.saveScheduledTransaction(
         userId: currentUserId,
         scheduledTransaction: scheduledTransaction,
@@ -1477,6 +1676,7 @@ class FinanceDataStore extends ChangeNotifier {
         for (final entry in occurrenceAuthorityFor(
           scheduledTransaction,
         ).entries) {
+          SyncAttemptAuthority.checkCurrent();
           await occurrenceRepository.saveScheduledOccurrenceState(
             userId: currentUserId,
             scheduledTransactionId: scheduledTransaction.id,
@@ -1486,39 +1686,47 @@ class FinanceDataStore extends ChangeNotifier {
         }
       }
     }
-    for (final budget in budgets) {
+    for (final budget in snapshot.budgets) {
+      SyncAttemptAuthority.checkCurrent();
       await remote.saveBudget(userId: currentUserId, budget: budget);
     }
-    for (final goal in goals) {
+    for (final goal in snapshot.goals) {
+      SyncAttemptAuthority.checkCurrent();
       await remote.saveGoal(userId: currentUserId, goal: goal);
     }
-    for (final contribution in goalContributions) {
+    for (final contribution in snapshot.goalContributions) {
+      SyncAttemptAuthority.checkCurrent();
       await remote.saveGoalContribution(
         userId: currentUserId,
         contribution: contribution,
       );
     }
-    for (final fundingEvent in goalFundingEvents) {
+    for (final fundingEvent in snapshot.goalFundingEvents) {
+      SyncAttemptAuthority.checkCurrent();
       await remote.saveGoalFundingEvent(
         userId: currentUserId,
         fundingEvent: fundingEvent,
       );
     }
     if (remote case final ReservationRecordRepository reservationRepository) {
-      for (final fund in funds) {
+      for (final fund in snapshot.funds) {
+        SyncAttemptAuthority.checkCurrent();
         await reservationRepository.saveFund(userId: currentUserId, fund: fund);
       }
-      for (final operation in reservationOperations) {
+      for (final operation in snapshot.reservationOperations) {
+        SyncAttemptAuthority.checkCurrent();
         await reservationRepository.saveReservationOperation(
           userId: currentUserId,
           operation: operation,
         );
       }
     }
+    SyncAttemptAuthority.checkCurrent();
     await remote.savePreferences(
       userId: currentUserId,
-      preferences: preferences,
+      preferences: snapshot.preferences,
     );
+    return snapshot;
   }
 
   Future<void> saveAccount(AccountRecord account) async {
@@ -4808,6 +5016,7 @@ class FinanceDataStore extends ChangeNotifier {
     final storedState = await notificationStateRepository.load(
       scheduledTransaction.id,
     );
+    SyncAttemptAuthority.checkCurrent();
     final legacyIds = existing?.scheduledNotificationIds ?? const <int>[];
     final existingIds = storedState?.notificationIds.isNotEmpty == true
         ? storedState!.notificationIds
@@ -4828,7 +5037,9 @@ class FinanceDataStore extends ChangeNotifier {
         scheduledTransaction.hasAlert &&
         effectiveNextActionableDate(scheduledTransaction) != null;
     if (!shouldSchedule) {
+      SyncAttemptAuthority.checkCurrent();
       await notificationStateRepository.remove(scheduledTransaction.id);
+      SyncAttemptAuthority.checkCurrent();
       if (scheduledTransaction.scheduledNotificationIds.isEmpty &&
           scheduledTransaction.lastReminderScheduledAt == null) {
         return scheduledTransaction;
@@ -4840,8 +5051,10 @@ class FinanceDataStore extends ChangeNotifier {
       );
     }
 
+    SyncAttemptAuthority.checkCurrent();
     final hasPermission = await notificationScheduler
         .requestPermissionIfNeeded();
+    SyncAttemptAuthority.checkCurrent();
     if (!hasPermission) {
       await notificationStateRepository.remove(scheduledTransaction.id);
       return scheduledTransaction.copyWith(
@@ -4853,6 +5066,7 @@ class FinanceDataStore extends ChangeNotifier {
 
     final notificationIds = await notificationScheduler
         .scheduleScheduledTransaction(scheduledTransaction);
+    SyncAttemptAuthority.checkCurrent();
     await notificationStateRepository.save(
       scheduledTransaction.id,
       DeviceScheduledNotificationState(
@@ -5655,68 +5869,91 @@ class FinanceDataStore extends ChangeNotifier {
     UserPreferences? preferences,
     bool waitForRemote = true,
   }) async {
+    SyncAttemptAuthority.checkCurrent();
+    final uploadAuthority = _editUploadAuthority;
+    final commitRemote = remoteRepository;
+    final commitUser = userId;
     notifyListeners();
     await localRepository?.save(_dataSet);
+    SyncAttemptAuthority.checkCurrent();
     Future<void> saveRemote() async {
-      final remote = remoteRepository;
-      final currentUserId = userId;
+      SyncAttemptAuthority.checkCurrent();
+      final remote = commitRemote;
+      final currentUserId = commitUser;
+      if (!uploadAuthority.isValid ||
+          !identical(remoteRepository, remote) ||
+          userId != currentUserId) {
+        return;
+      }
       if (remote != null && currentUserId != null) {
         try {
           for (final account in accounts) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveAccount(userId: currentUserId, account: account);
           }
           if (category != null) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveCategory(
               userId: currentUserId,
               category: category,
             );
           }
           if (transaction != null) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveTransaction(
               userId: currentUserId,
               transaction: transaction,
             );
           }
           for (final transactionRecord in transactions) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveTransaction(
               userId: currentUserId,
               transaction: transactionRecord,
             );
           }
           if (scheduledTransaction != null) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveScheduledTransaction(
               userId: currentUserId,
               scheduledTransaction: scheduledTransaction,
             );
           }
           for (final scheduledTransactionRecord in scheduledTransactions) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveScheduledTransaction(
               userId: currentUserId,
               scheduledTransaction: scheduledTransactionRecord,
             );
           }
           if (budget != null) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveBudget(userId: currentUserId, budget: budget);
           }
           if (goal != null) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveGoal(userId: currentUserId, goal: goal);
           }
           for (final goalRecord in goalRecords) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveGoal(userId: currentUserId, goal: goalRecord);
           }
           if (goalContribution != null) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveGoalContribution(
               userId: currentUserId,
               contribution: goalContribution,
             );
           }
           for (final contribution in goalContributions) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveGoalContribution(
               userId: currentUserId,
               contribution: contribution,
             );
           }
           for (final fundingEvent in goalFundingEvents) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.saveGoalFundingEvent(
               userId: currentUserId,
               fundingEvent: fundingEvent,
@@ -5725,12 +5962,14 @@ class FinanceDataStore extends ChangeNotifier {
           if (remote
               case final ReservationRecordRepository reservationRepository) {
             for (final fund in funds) {
+              SyncAttemptAuthority.checkCurrent();
               await reservationRepository.saveFund(
                 userId: currentUserId,
                 fund: fund,
               );
             }
             for (final operation in reservationOperations) {
+              SyncAttemptAuthority.checkCurrent();
               await reservationRepository.saveReservationOperation(
                 userId: currentUserId,
                 operation: operation,
@@ -5738,11 +5977,19 @@ class FinanceDataStore extends ChangeNotifier {
             }
           }
           if (preferences != null) {
+            SyncAttemptAuthority.checkCurrent();
             await remote.savePreferences(
               userId: currentUserId,
               preferences: preferences,
             );
           }
+        } on CloudRecordWriteConflict catch (error) {
+          // The server winner is authoritative only for this exact rejected
+          // payload. Preserve concurrent edits and use the normal install path.
+          if (identical(remoteRepository, remote) && userId == currentUserId) {
+            await _reconcileRejectedCloudWrites(error);
+          }
+          debugPrint('Remote finance conflict reconciled: $error');
         } on Exception catch (error) {
           debugPrint(
             'Remote finance save failed; local change retained: $error',
@@ -5755,7 +6002,18 @@ class FinanceDataStore extends ChangeNotifier {
     // for durable local persistence. Without this queue, two quick reservation
     // actions could finish remotely out of order and leave an older merged
     // Goal/Fund snapshot as the last cloud write.
-    final queuedRemoteSave = _remoteCommitTail.then((_) => saveRemote());
+    final syncAuthority = SyncAttemptAuthority.current;
+    final queuedRemoteSave = _remoteCommitTail.then((_) async {
+      if (!uploadAuthority.isValid) return;
+      try {
+        // Keep sync-originated migrations under their original sync token.
+        // User edits instead track submitted effects under the edit session.
+        final authority = syncAuthority ?? uploadAuthority;
+        await authority.run(() => SyncAttemptAuthority.effect(saveRemote));
+      } on StaleSyncAttempt {
+        // Local persistence already succeeded; only obsolete publication stops.
+      }
+    });
     _remoteCommitTail = queuedRemoteSave.then<void>(
       (_) {},
       onError: (Object _, StackTrace _) {},
@@ -5823,6 +6081,96 @@ class FinanceDataStore extends ChangeNotifier {
   String _newId(String prefix) {
     return '${prefix}_${DateTime.now().microsecondsSinceEpoch}';
   }
+}
+
+/// Three-way rebase of immutable snapshots, not a new cloud conflict policy.
+/// The prepared merge has already resolved cloud/Scheduled authority. Only
+/// records actually changed locally since its base replace that prepared state.
+FinanceDataSet _rebaseConcurrentFinanceMutations({
+  required FinanceDataSet prepared,
+  required FinanceDataSet base,
+  required FinanceDataSet current,
+}) {
+  List<T> records<T>(
+    List<T> prepared,
+    List<T> base,
+    List<T> current,
+    String Function(T) idOf,
+  ) {
+    final old = {for (final record in base) idOf(record): record};
+    final latest = {for (final record in current) idOf(record): record};
+    final preparedIds = prepared.map(idOf).toSet();
+    return [
+      for (final record in prepared)
+        if (!old.containsKey(idOf(record)) || latest.containsKey(idOf(record)))
+          if (latest.containsKey(idOf(record)) &&
+              !identical(old[idOf(record)], latest[idOf(record)]))
+            latest[idOf(record)]!
+          else
+            record,
+      for (final record in current)
+        if (!preparedIds.contains(idOf(record))) record,
+    ];
+  }
+
+  return prepared.copyWith(
+    accounts: records(
+      prepared.accounts,
+      base.accounts,
+      current.accounts,
+      (x) => x.id,
+    ),
+    categories: records(
+      prepared.categories,
+      base.categories,
+      current.categories,
+      (x) => x.id,
+    ),
+    transactions: records(
+      prepared.transactions,
+      base.transactions,
+      current.transactions,
+      (x) => x.id,
+    ),
+    scheduledTransactions: records(
+      prepared.scheduledTransactions,
+      base.scheduledTransactions,
+      current.scheduledTransactions,
+      (x) => x.id,
+    ),
+    budgets: records(
+      prepared.budgets,
+      base.budgets,
+      current.budgets,
+      (x) => x.id,
+    ),
+    goals: records(prepared.goals, base.goals, current.goals, (x) => x.id),
+    funds: records(prepared.funds, base.funds, current.funds, (x) => x.id),
+    reservationOperations: records(
+      prepared.reservationOperations,
+      base.reservationOperations,
+      current.reservationOperations,
+      (x) => x.id,
+    ),
+    goalContributions: records(
+      prepared.goalContributions,
+      base.goalContributions,
+      current.goalContributions,
+      (x) => x.id,
+    ),
+    goalFundingEvents: records(
+      prepared.goalFundingEvents,
+      base.goalFundingEvents,
+      current.goalFundingEvents,
+      (x) => x.id,
+    ),
+    preferences: identical(base.preferences, current.preferences)
+        ? prepared.preferences
+        : mergePayeeCatalogPreferences(
+            preferred: current.preferences,
+            other: prepared.preferences,
+          ),
+  );
 }
 
 class AccountLinkedRecordSummary {

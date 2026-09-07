@@ -70,6 +70,7 @@ import 'src/persistence/backup_restore_service.dart';
 import 'src/persistence/backup_storage.dart';
 import 'src/persistence/automatic_backup_service.dart';
 import 'src/persistence/local_finance_data_set_repository.dart';
+import 'src/persistence/local_data_recovery_service.dart';
 import 'src/persistence/finance_record_repository.dart';
 import 'src/persistence/firestore_record_repository.dart';
 import 'src/reporting/report_calculator.dart';
@@ -91,6 +92,7 @@ part 'src/funds/funds_ui.dart';
 part 'src/finance_store.dart';
 part 'src/firestore_finance_repository.dart';
 part 'src/local_finance_repository.dart';
+part 'src/recovery/local_data_recovery_view.dart';
 
 final scheduledNotificationLaunchPayload = ValueNotifier<String?>(null);
 
@@ -117,7 +119,31 @@ class MoneyTallyBootstrap extends StatefulWidget {
 
 class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
   static const _minimumLaunchPresentation = Duration(milliseconds: 600);
-  late final Future<AppStores> _startup = _load();
+  late Future<AppStores> _startup = _load();
+
+  void _retryStartup() => setState(() => _startup = _load());
+
+  Future<RecoveryCloudTarget> _recoveryCloudTarget() async {
+    // Determine the existing session without attaching sync or loading cloud
+    // finance data. If this fails, recovery must not guess local-only mode.
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
+    );
+    final user = await firebase_auth.FirebaseAuth.instance
+        .authStateChanges()
+        .first;
+    return user == null
+        ? const RecoveryCloudTarget()
+        : RecoveryCloudTarget(
+            repository: FirestoreRecordRepository(),
+            userId: user.uid,
+          );
+  }
 
   Future<AppStores> _load() async {
     final launchStopwatch = Stopwatch()..start();
@@ -203,6 +229,13 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             debugPrint('$trackmarkMoneyName startup failed: ${snapshot.error}');
+            if (snapshot.error case final UnreadableLocalFinanceData failure) {
+              return LocalDataRecoveryView(
+                failure: failure,
+                onRetry: _retryStartup,
+                loadCloudTarget: _recoveryCloudTarget,
+              );
+            }
             return StartupErrorView(error: snapshot.error.toString());
           }
           final stores = snapshot.data;

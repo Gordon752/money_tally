@@ -17,6 +17,8 @@ import '../domain/scheduled_occurrence_authority.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
 import 'finance_record_repository.dart';
+import 'cloud_record_conflict.dart';
+import '../sync/sync_attempt_authority.dart';
 
 Map<String, Object?> _scheduledDefinitionJson(
   ScheduledTransactionRecord scheduledTransaction,
@@ -59,6 +61,22 @@ bool shouldAdvanceScheduledHistoryEpoch({
   return sameOccurrenceHistoryEpoch(winner, incomingEpoch);
 }
 
+// A strict allowlist: normal sync must never publish device-local settings.
+// Include causal states as well as legacy projections so delete/restore
+// authority is preserved across retries and older catalog representations.
+Map<String, Object?> _sharedPayeeCatalogJson(UserPreferences preferences) {
+  final json = preferences.toJson();
+  return {
+    for (final key in const [
+      'savedPayeeNames',
+      'archivedPayeeNames',
+      'deletedPayeeNames',
+      'payeeCatalogStates',
+    ])
+      key: json[key],
+  };
+}
+
 class FirestoreRecordRepository
     implements
         FinanceRecordRepository,
@@ -70,12 +88,18 @@ class FirestoreRecordRepository
         ScheduledReservationOperationRepository,
         ScheduledFundOccurrenceTransitionRepository,
         ScheduledOccurrenceStateRepository,
-        ScheduledHistoryResetRepository {
+        ScheduledHistoryResetRepository,
+        CloudRecordConflictRepository {
   FirestoreRecordRepository({FirebaseFirestore? firestore})
     : firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore firestore;
   final Map<String, String?> _activeGenerations = {};
+  // A read is not a write authorization by itself: each ordinary write checks
+  // this observed payload again inside the server transaction. Keys include
+  // user and restore generation. No new financial/persisted state is needed.
+  final Map<String, Map<String, Object?>> _observedRecords = {};
+  bool _needsFreshConflictRead = false;
   CloudSyncRepositoryMetrics _syncMetrics = const CloudSyncRepositoryMetrics();
 
   static const _batchWriteLimit = 400;
@@ -116,6 +140,7 @@ class FirestoreRecordRepository
     Map<String, int> uploadedByCollectionDelta = const {},
     Map<String, Map<String, int>> changedFieldsByCollectionDelta = const {},
   }) {
+    SyncAttemptAuthority.checkCurrent();
     final current = _syncMetrics;
     final uploadedByCollection = <String, int>{...current.uploadedByCollection};
     for (final entry in uploadedByCollectionDelta.entries) {
@@ -256,7 +281,7 @@ class FirestoreRecordRepository
 
     _recordSnapshotReads(results);
 
-    return FinanceDataSet(
+    final dataSet = FinanceDataSet(
       accounts: accountsSnapshot.docs
           .map((doc) => AccountRecord.fromJson(doc.data()))
           .toList(),
@@ -291,11 +316,14 @@ class FirestoreRecordRepository
           ? const UserPreferences()
           : UserPreferences.fromJson(preferencesSnapshot.data()!),
     );
+    _rememberObservedRecords(userId, generation, dataSet);
+    return dataSet;
   }
 
   @override
   Future<IncrementalFinanceSyncLoad> loadDataSetForSync(String userId) async {
     await firestore.enableNetwork();
+    SyncAttemptAuthority.checkCurrent();
     final generation = await _loadActiveGeneration(userId);
     final through = await _createServerCheckpoint(userId);
     final cacheResult = await _loadIncrementalCache(userId);
@@ -304,10 +332,13 @@ class FirestoreRecordRepository
         cached != null &&
         through.difference(cached.fullBootstrapAt).abs() >=
             const Duration(days: 7);
-    if (cached == null ||
+    if (_needsFreshConflictRead ||
+        cached == null ||
         cached.generation != generation ||
         fullBootstrapExpired) {
-      final reason = cached == null
+      final reason = _needsFreshConflictRead
+          ? 'ordinary record write conflict'
+          : cached == null
           ? cacheResult.missReason ?? 'incremental cache unavailable'
           : cached.generation != generation
           ? 'restore generation changed'
@@ -316,8 +347,11 @@ class FirestoreRecordRepository
         loadMode: CloudSyncLoadMode.fullBootstrap,
         fullBootstrapReason: reason,
       );
+      final freshDataSet = await _loadDataSetForGeneration(userId, generation);
+      SyncAttemptAuthority.checkCurrent();
+      _needsFreshConflictRead = false;
       return IncrementalFinanceSyncLoad(
-        dataSet: await _loadDataSetForGeneration(userId, generation),
+        dataSet: freshDataSet,
         generation: generation,
         through: through,
         wasFullBootstrap: true,
@@ -345,8 +379,10 @@ class FirestoreRecordRepository
     ]);
     _recordSnapshotReads(snapshots);
     final delta = _dataSetFromSnapshots(snapshots);
+    final dataSet = applyRemoteDataSetDelta(cached.dataSet, delta);
+    _rememberObservedRecords(userId, generation, dataSet);
     return IncrementalFinanceSyncLoad(
-      dataSet: applyRemoteDataSetDelta(cached.dataSet, delta),
+      dataSet: dataSet,
       generation: generation,
       through: through,
       wasFullBootstrap: false,
@@ -361,6 +397,7 @@ class FirestoreRecordRepository
     required FinanceDataSet resultingDataSet,
   }) async {
     final preferences = await SharedPreferences.getInstance();
+    SyncAttemptAuthority.checkCurrent();
     final encoded = jsonEncode({
       'generation': load.generation,
       'through': load.through.toUtc().toIso8601String(),
@@ -454,16 +491,20 @@ class FirestoreRecordRepository
   }
 
   Future<DateTime> _createServerCheckpoint(String userId) async {
+    SyncAttemptAuthority.checkCurrent();
     final reference = _syncClockDoc(userId);
     _updateSyncMetrics(writeDelta: 1);
-    await reference.set({
-      'checkpointAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    await SyncAttemptAuthority.effect(
+      () => reference.set({
+        'checkpointAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true)),
+    );
     _updateSyncMetrics(readDelta: 1);
     final snapshot = await reference.get(
       const GetOptions(source: Source.server),
     );
     final value = snapshot.data()?['checkpointAt'];
+    SyncAttemptAuthority.checkCurrent();
     if (value is! Timestamp) {
       throw StateError('Cloud sync checkpoint is unavailable.');
     }
@@ -475,6 +516,7 @@ class FirestoreRecordRepository
   ) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.reload();
+    SyncAttemptAuthority.checkCurrent();
     final encoded = preferences.getString('$_incrementalCachePrefix$userId');
     if (encoded == null) {
       return const _IncrementalCacheLoadResult(
@@ -499,7 +541,9 @@ class FirestoreRecordRepository
       );
     } on Object catch (error) {
       debugPrint('Discarding unreadable cloud sync cache: $error');
-      await preferences.remove('$_incrementalCachePrefix$userId');
+      await SyncAttemptAuthority.effect(
+        () => preferences.remove('$_incrementalCachePrefix$userId'),
+      );
       return _IncrementalCacheLoadResult(
         missReason: 'incremental cache was unreadable: ${error.runtimeType}',
       );
@@ -1017,21 +1061,42 @@ class FirestoreRecordRepository
     final document = generation == null
         ? _preferencesDoc(userId)
         : _generationPreferencesDoc(userId, generation);
-    await firestore.runTransaction((transaction) async {
-      final snapshot = await transaction.get(document);
-      final remotePreferences = snapshot.exists
-          ? UserPreferences.fromJson(snapshot.data()!)
-          : const UserPreferences();
-      final mergedPreferences = mergePayeeCatalogPreferences(
-        preferred: preferences,
-        other: remotePreferences,
+    SyncAttemptAuthority.checkCurrent();
+    final wrote = await SyncAttemptAuthority.effect(
+      () => firestore.runTransaction((transaction) async {
+        SyncAttemptAuthority.checkCurrent();
+        final snapshot = await transaction.get(document);
+        SyncAttemptAuthority.checkCurrent();
+        _updateSyncMetrics(readDelta: 1);
+        final remotePreferences = snapshot.exists
+            ? UserPreferences.fromJson(snapshot.data()!)
+            : const UserPreferences();
+        final mergedPreferences = mergePayeeCatalogPreferences(
+          preferred: preferences,
+          other: remotePreferences,
+        );
+        final catalog = _sharedPayeeCatalogJson(mergedPreferences);
+        if (equalRecordJson(
+          catalog,
+          _sharedPayeeCatalogJson(remotePreferences),
+        )) {
+          return false;
+        }
+        transaction.set(
+          document,
+          _cloudWriteJson(catalog),
+          SetOptions(merge: true),
+        );
+        return true;
+      }),
+    );
+    if (wrote) {
+      _updateSyncMetrics(
+        uploadedDelta: 1,
+        writeDelta: 1,
+        uploadedByCollectionDelta: const {'preferences': 1},
       );
-      transaction.set(
-        document,
-        _cloudWriteJson(mergedPreferences.toJson()),
-        SetOptions(merge: true),
-      );
-    });
+    }
   }
 
   @override
@@ -1041,6 +1106,7 @@ class FirestoreRecordRepository
     FinanceDataSet? baseline,
   }) async {
     final generation = await _activeGeneration(userId);
+    SyncAttemptAuthority.checkCurrent();
     final writes = <_GenerationWrite>[];
     final changedFieldsByCollection = <String, Map<String, int>>{};
 
@@ -1093,6 +1159,7 @@ class FirestoreRecordRepository
             collection: collection,
             reference: reference,
             data: _cloudWriteJson(data),
+            expected: baselineData,
           ),
         );
       }
@@ -1182,12 +1249,8 @@ class FirestoreRecordRepository
       (item) => item.id,
       (item) => item.toJson(),
     );
-    // Preferences are intentionally device-local during normal data-set
-    // merges (see mergeFinanceDataSetsPreferCurrent). Explicit user changes
-    // are published by savePreferences, while authoritative restore writes
-    // use replaceDataSetAuthoritatively. Including a device's retained local
-    // preferences in routine bulk reconciliation makes devices overwrite one
-    // another at every launch.
+    // Ordinary preferences remain device-local. The shared payee catalog is
+    // retried separately below through its field-scoped causal transaction.
 
     debugPrint('Cloud sync upload: ${writes.length} documents');
     final uploadedByCollection = <String, int>{};
@@ -1214,18 +1277,32 @@ class FirestoreRecordRepository
         0,
         writes.length,
       );
+      SyncAttemptAuthority.checkCurrent();
       debugPrint('Cloud sync upload: saving documents $offset–${end - 1}');
+      final conflicts = <CloudRecordConflict>[];
       await Future.wait(
-        writes
-            .sublist(offset, end)
-            .map(
-              (write) =>
-                  write.reference.set(write.data, SetOptions(merge: true)),
-            ),
+        writes.sublist(offset, end).map((write) async {
+          if (!ordinaryCloudCollections.contains(write.collection)) {
+            await write.reference.set(write.data, SetOptions(merge: true));
+            return;
+          }
+          try {
+            await _saveOrdinaryRecord(
+              write.reference,
+              write.collection,
+              write.data,
+              write.expected,
+            );
+          } on CloudRecordWriteConflict catch (error) {
+            conflicts.addAll(error.conflicts);
+          }
+        }),
       );
+      if (conflicts.isNotEmpty) throw CloudRecordWriteConflict(conflicts);
       debugPrint('Cloud sync upload: saved documents $offset–${end - 1}');
     }
     for (final schedule in dataSet.scheduledTransactions) {
+      SyncAttemptAuthority.checkCurrent();
       final baselineSchedule = baselineSchedulesById[schedule.id];
       if (baselineSchedule == null) continue;
       if (!shouldAdvanceScheduledHistoryEpoch(
@@ -1244,11 +1321,13 @@ class FirestoreRecordRepository
       );
     }
     for (final schedule in dataSet.scheduledTransactions) {
+      SyncAttemptAuthority.checkCurrent();
       final baselineSchedule = baselineSchedulesById[schedule.id];
       // New schedules carry their occurrence state in the atomic create above.
       if (baselineSchedule == null) continue;
       final baselineAuthority = occurrenceAuthorityFor(baselineSchedule);
       for (final entry in occurrenceAuthorityFor(schedule).entries) {
+        SyncAttemptAuthority.checkCurrent();
         final previous = baselineAuthority[entry.key];
         if (previous != null &&
             jsonEncode(previous.toJson()) == jsonEncode(entry.value.toJson())) {
@@ -1262,6 +1341,11 @@ class FirestoreRecordRepository
         );
       }
     }
+    // Retry even when a cached baseline already includes a locally retained
+    // payee edit. The server transaction merges only shared fields and is a
+    // no-op once that catalog has converged. Failure prevents sync ack.
+    SyncAttemptAuthority.checkCurrent();
+    await savePreferences(userId: userId, preferences: dataSet.preferences);
   }
 
   @override
@@ -1426,6 +1510,7 @@ class FirestoreRecordRepository
       throw StateError('Invalid Trackmark cloud restore authority marker');
     }
     final generation = value as String?;
+    SyncAttemptAuthority.checkCurrent();
     _activeGenerations[userId] = generation;
     return generation;
   }
@@ -1444,16 +1529,137 @@ class FirestoreRecordRepository
     Map<String, Object?> json,
   ) async {
     final generation = await _activeGeneration(userId);
+    SyncAttemptAuthority.checkCurrent();
     final reference = generation == null
         ? _collection(userId, collection)
         : _generationCollection(userId, generation, collection);
     final documentId = generation == null ? id : _encodedDocumentId(id);
+    if (ordinaryCloudCollections.contains(collection)) {
+      final document = reference.doc(documentId);
+      await _saveOrdinaryRecord(
+        document,
+        collection,
+        json,
+        _observedRecords[document.path],
+      );
+      return;
+    }
     await reference
         .doc(documentId)
         .set(_cloudWriteJson(json), SetOptions(merge: true));
   }
 
+  void _rememberObservedRecords(
+    String userId,
+    String? generation,
+    FinanceDataSet dataSet,
+  ) {
+    SyncAttemptAuthority.checkCurrent();
+    final json = dataSet.toJson();
+    for (final collection in ordinaryCloudCollections) {
+      final reference = generation == null
+          ? _collection(userId, collection)
+          : _generationCollection(userId, generation, collection);
+      for (final record in json[collection] as List) {
+        final data = Map<String, Object?>.from(record as Map);
+        final id = data['id'] as String;
+        final path = reference
+            .doc(generation == null ? id : _encodedDocumentId(id))
+            .path;
+        _observedRecords[path] = data;
+      }
+    }
+  }
+
+  Future<void> _saveOrdinaryRecord(
+    DocumentReference<Map<String, dynamic>> document,
+    String collection,
+    Map<String, Object?> data,
+    Map<String, Object?>? expected,
+  ) async {
+    final proposed = canonicalCloudRecord(collection, data);
+    final expectedRecord = expected == null
+        ? null
+        : canonicalCloudRecord(collection, expected);
+    final conflict = await SyncAttemptAuthority.effect(
+      () => firestore.runTransaction<CloudRecordConflict?>((transaction) async {
+        SyncAttemptAuthority.checkCurrent();
+        final snapshot = await transaction.get(document);
+        SyncAttemptAuthority.checkCurrent();
+        final raw = snapshot.data();
+        final cloud = raw == null
+            ? null
+            : canonicalCloudRecord(collection, raw);
+        // Exact repeats do not write, refresh timestamps, or resurrect anything.
+        if (equalRecordJson(cloud, proposed)) return null;
+        var authorized = equalRecordJson(cloud, expectedRecord);
+        if (cloud != null) {
+          final before = cloud['sync'] as Map;
+          final after = proposed['sync'] as Map;
+          // Merely observing a newer record cannot authorize an older payload.
+          // Ordinary deletion is terminal; restoration uses restore authority.
+          authorized =
+              authorized &&
+              after['createdAt'] == before['createdAt'] &&
+              (after['version'] as int) > (before['version'] as int) &&
+              !(before['deletedAt'] != null && after['deletedAt'] == null);
+        }
+        if (!authorized) {
+          // Return a read-only outcome, rather than sending an expected
+          // business conflict through the platform exception bridge.
+          return CloudRecordConflict(
+            collection: collection,
+            proposed: proposed,
+            authoritative: cloud,
+            documentPath: document.path,
+          );
+        }
+        transaction.set(
+          document,
+          _cloudWriteJson(proposed),
+          SetOptions(merge: true),
+        );
+        return null;
+      }),
+    );
+    if (conflict != null) {
+      SyncAttemptAuthority.checkCurrent();
+      // The incremental cache can include retained, not-yet-uploaded local
+      // edits. Never use that cache alone to retry a rejected precondition.
+      _needsFreshConflictRead = true;
+      throw CloudRecordWriteConflict([conflict]);
+    }
+    SyncAttemptAuthority.checkCurrent();
+    _observedRecords[document.path] = proposed;
+  }
+
+  @override
+  void acknowledgeCloudRecordConflicts(
+    CloudRecordWriteConflict error,
+    FinanceDataSet installed,
+  ) {
+    SyncAttemptAuthority.checkCurrent();
+    final json = installed.toJson();
+    for (final conflict in error.conflicts) {
+      final path = conflict.documentPath;
+      if (path == null) continue;
+      final records = json[conflict.collection] as List;
+      final matching = records.where(
+        (r) => (r as Map)['id'] == conflict.proposed['id'],
+      );
+      final record = matching.isEmpty ? null : matching.single;
+      if (!equalRecordJson(record, conflict.authoritative)) continue;
+      final authority = conflict.authoritative;
+      if (authority == null) {
+        _observedRecords.remove(path);
+      } else {
+        _observedRecords[path] = authority;
+      }
+    }
+  }
+
   Map<String, Object?> _cloudWriteJson(Map<String, Object?> json) {
+    SyncAttemptAuthority.checkCurrent();
     return Map<String, Object?>.from(json)
       ..[_cloudUpdatedAtField] = FieldValue.serverTimestamp();
   }
@@ -1723,9 +1929,11 @@ class _GenerationWrite {
     required this.collection,
     required this.reference,
     required this.data,
+    this.expected,
   });
 
   final String collection;
   final DocumentReference<Map<String, dynamic>> reference;
   final Map<String, Object?> data;
+  final Map<String, Object?>? expected;
 }

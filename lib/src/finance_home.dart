@@ -11098,6 +11098,7 @@ Future<bool?> _showRestorePreview(
   required ValidatedBackup backup,
   required String fileName,
   required bool cloudEnabled,
+  bool recoveringUnreadableData = false,
 }) {
   final dataSet = backup.dataSet;
   final exportedAt = backup.exportedAt?.toLocal();
@@ -11162,7 +11163,9 @@ Future<bool?> _showRestorePreview(
             ],
             const SizedBox(height: 10),
             Text(
-              'Trackmark will create and verify a pre-restore safety backup before changing any data.',
+              recoveringUnreadableData
+                  ? 'Trackmark will preserve an exact copy of the unreadable original and a verified copy of this backup before restoring. The unreadable copy is not a valid financial backup.'
+                  : 'Trackmark will create and verify a pre-restore safety backup before changing any data.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
