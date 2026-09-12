@@ -143,7 +143,7 @@ void main() {
       final reloaded = await repository.load();
 
       expect(validated.exportedAt, DateTime.utc(2026, 8, 8, 12, 34, 56));
-      expect(validated.sourceSchemaVersion, currentBackupSchemaVersion);
+      expect(validated.sourceSchemaVersion, original.toJson()['schemaVersion']);
       final expected = _withoutDeviceLocalNotificationMetadata(original);
       expect(store.dataSet.toJson(), expected.toJson());
       expect(reloaded?.toJson(), expected.toJson());

@@ -208,7 +208,8 @@ class FinanceDataSet {
 
   Map<String, Object?> toJson() {
     return {
-      'schemaVersion': 7,
+      'schemaVersion':
+          scheduledTransactions.any((s) => s.reminderTimeZone != null) ? 8 : 7,
       'accounts': accounts.map((item) => item.toJson()).toList(),
       'categories': categories.map((item) => item.toJson()).toList(),
       'transactions': transactions.map((item) => item.toJson()).toList(),

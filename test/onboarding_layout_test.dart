@@ -29,6 +29,13 @@ void main() {
       dark: false,
     ),
     (
+      name: 'iphone_compact',
+      size: const Size(375, 812),
+      scale: 1.0,
+      platform: TargetPlatform.iOS,
+      dark: false,
+    ),
+    (
       name: 'iphone_landscape',
       size: const Size(852, 393),
       scale: 1.0,
@@ -123,9 +130,15 @@ void main() {
                 debugShowCheckedModeBanner: false,
                 theme: theme,
                 builder: (context, child) => MediaQuery(
-                  data: MediaQuery.of(
-                    context,
-                  ).copyWith(textScaler: TextScaler.linear(layout.scale)),
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: TextScaler.linear(layout.scale),
+                    padding: layout.platform == TargetPlatform.iOS
+                        ? EdgeInsets.only(
+                            top: layout.size.shortestSide >= 600 ? 24 : 59,
+                            bottom: layout.size.shortestSide >= 600 ? 20 : 34,
+                          )
+                        : EdgeInsets.zero,
+                  ),
                   child: child!,
                 ),
                 home: app.TrackmarkOnboarding(
@@ -164,11 +177,7 @@ void main() {
               );
             }
             final button = find.byKey(_next);
-            final expectedGap =
-                page == 1 &&
-                (layout.name.startsWith('ipad') ||
-                    (layout.name.startsWith('mac') &&
-                        layout.size.width >= 600));
+            final expectedGap = page == 1;
             final gap = find.byKey(
               const ValueKey('onboarding-money-navigation-gap'),
             );
@@ -205,6 +214,27 @@ void main() {
               expect(find.text(r'$1,900'), findsNWidgets(2));
               expect(find.text(r'$1,500'), findsNWidgets(2));
               expect(find.text(r'$1,700'), findsOneWidget);
+              if (layout.scale == 1 &&
+                  [
+                    'iphone',
+                    'iphone_compact',
+                    'ipad',
+                    'ipad_landscape',
+                    'mac',
+                    'mac_dark',
+                  ].contains(layout.name)) {
+                final viewport = tester.state<ScrollableState>(
+                  find.descendant(
+                    of: find.byKey(const ValueKey('onboarding-page-1')),
+                    matching: find.byType(Scrollable),
+                  ),
+                );
+                expect(
+                  viewport.position.maxScrollExtent,
+                  0,
+                  reason: 'Screen 2 must fit without scrolling: ${layout.name}',
+                );
+              }
               await tester.ensureVisible(
                 find.text('The money doesn’t move. Its job changes.'),
               );

@@ -175,7 +175,7 @@ void main() {
         'Money still free after pending commitments and reservations.',
         'The money doesn’t move. Its job changes.',
       ]) {
-        expect(find.text(copy), findsOneWidget);
+        expect(find.textContaining(copy, findRichText: true), findsOneWidget);
       }
       expect(
         find.text('Money you know about that has not cleared yet.'),

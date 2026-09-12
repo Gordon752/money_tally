@@ -946,6 +946,17 @@ InputDecoration dialogFieldDecoration({String? hintText}) {
   );
 }
 
+InputDecoration polishedFormTextDecoration({String? hintText}) =>
+    InputDecoration(
+      hintText: hintText,
+      border: InputBorder.none,
+      enabledBorder: InputBorder.none,
+      focusedBorder: InputBorder.none,
+      filled: false,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+    );
+
 EdgeInsets transactionDialogInsetPadding(BuildContext context) {
   final topSafeArea = MediaQuery.paddingOf(context).top;
   final topInset = topSafeArea + AppSpacing.md;
@@ -10269,6 +10280,18 @@ class _SettingsViewState extends State<SettingsView> {
         SettingsSectionCard(
           title: 'Notifications',
           children: [
+            ValueListenableBuilder<String?>(
+              valueListenable: reminderSchedulingError,
+              builder: (context, error, _) => error == null
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        error,
+                        style: TextStyle(color: AppColors.warning),
+                      ),
+                    ),
+            ),
             SettingsSwitch(
               icon: AppIcon.notification,
               label: 'Scheduled transaction alerts',
@@ -15522,10 +15545,8 @@ Future<void> showAdjustBalanceDialog(
       : currentBalanceMinor;
   var isDebtBalance = currentBalanceMinor <= 0;
 
-  final value = await showModalBottomSheet<int>(
+  final value = await showDialog<int>(
     context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
     builder: (sheetContext) => StatefulBuilder(
       builder: (sheetContext, setSheetState) {
         final targetBalanceMinor = isCreditCard
@@ -15541,185 +15562,145 @@ Future<void> showAdjustBalanceDialog(
         );
         final amountStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
           color: showOverdrawWarning ? AppTheme.rose : null,
+          fontSize: 22,
           fontFeatures: const [FontFeature.tabularFigures()],
-          fontWeight: FontWeight.w900,
+          fontWeight: FontWeight.w600,
         );
 
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.xs,
-              AppSpacing.lg,
-              MediaQuery.viewInsetsOf(sheetContext).bottom + AppSpacing.lg,
-            ),
-            child: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Adjust Balance',
-                    style: Theme.of(sheetContext).textTheme.headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w900),
+        return TransactionSheetFrame(
+          title: 'Adjust Balance',
+          actions: TransactionFormActions(
+            onCancel: () => Navigator.pop(sheetContext),
+            canSave: targetBalanceMinor != currentBalanceMinor,
+            onSave: () async {
+              if (showOverdrawWarning &&
+                  !await confirmAssetAccountOverdraw(
+                    sheetContext,
+                    account: account,
+                    projectedBalanceMinor: targetBalanceMinor,
+                    currency: dataStore.preferences.currency,
+                  )) {
+                return;
+              }
+              if (!sheetContext.mounted) return;
+              Navigator.pop(sheetContext, targetBalanceMinor);
+            },
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                account.name,
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Current balance: ${accountContextBalanceLabel(account, currentBalanceMinor, dataStore.preferences.currency)}',
+                style: Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (showOverdrawWarning) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'Insufficient funds',
+                  key: const ValueKey('adjustment-insufficient-funds'),
+                  style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                    color: AppColors.danger,
+                    fontWeight: FontWeight.w800,
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  Text(
-                    account.name,
-                    style: Theme.of(sheetContext).textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Current balance: ${accountContextBalanceLabel(account, currentBalanceMinor, dataStore.preferences.currency)}',
-                    style: Theme.of(sheetContext).textTheme.bodyMedium
-                        ?.copyWith(
-                          color: Theme.of(
-                            sheetContext,
-                          ).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                  if (showOverdrawWarning) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      'Insufficient funds',
-                      key: const ValueKey('adjustment-insufficient-funds'),
-                      style: Theme.of(sheetContext).textTheme.bodySmall
-                          ?.copyWith(
-                            color: AppColors.danger,
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                    Text(
-                      'This adjustment would leave ${account.name} at ${money(targetBalanceMinor, dataStore.preferences.currency)}.',
-                      style: Theme.of(
-                        sheetContext,
-                      ).textTheme.bodySmall?.copyWith(color: AppColors.danger),
-                    ),
-                  ],
-                  const SizedBox(height: AppSpacing.lg),
-                  if (isCreditCard) ...[
-                    DialogFieldGroup(
-                      label: 'Balance type',
-                      child: SegmentedButton<bool>(
-                        segments: [
-                          ButtonSegment<bool>(
-                            value: true,
-                            label: Text('Debt'),
-                            icon: Icon(AppIcon.expense),
-                          ),
-                          ButtonSegment<bool>(
-                            value: false,
-                            label: Text('Credit'),
-                            icon: Icon(AppIcon.income),
-                          ),
-                        ],
-                        selected: {isDebtBalance},
-                        showSelectedIcon: false,
-                        onSelectionChanged: (selection) {
-                          AppHaptics.selection();
-                          setSheetState(() => isDebtBalance = selection.first);
-                        },
+                ),
+                Text(
+                  'This adjustment would leave ${account.name} at ${money(targetBalanceMinor, dataStore.preferences.currency)}.',
+                  style: Theme.of(
+                    sheetContext,
+                  ).textTheme.bodySmall?.copyWith(color: AppColors.danger),
+                ),
+              ],
+              const SizedBox(height: AppSpacing.lg),
+              if (isCreditCard) ...[
+                DialogFieldGroup(
+                  label: 'Balance type',
+                  child: SegmentedButton<bool>(
+                    segments: [
+                      ButtonSegment<bool>(
+                        value: true,
+                        label: Text('Debt'),
+                        icon: Icon(AppIcon.expense),
                       ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                  DialogFieldGroup(
-                    label: 'New balance',
-                    child: AmountEntryField(
-                      fieldKey: const ValueKey('account-adjust-balance'),
-                      initialMinor: targetBalanceMinor,
-                      currency: dataStore.preferences.currency,
-                      labelText: null,
-                      autofocus: true,
-                      selectAllOnFocus: false,
-                      allowNegative: !isCreditCard,
-                      forceNegative: isCreditCard && isDebtBalance,
-                      keyboardType: isCreditCard
-                          ? TextInputType.number
-                          : const TextInputType.numberWithOptions(signed: true),
-                      textStyle: amountStyle,
-                      onChanged: (value) {
-                        setSheetState(() {
-                          enteredBalanceMinor = isCreditCard
-                              ? value.abs()
-                              : value;
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: Theme.of(sheetContext)
-                          .colorScheme
-                          .surfaceContainerHighest
-                          .withValues(alpha: 0.42),
-                      borderRadius: BorderRadius.circular(AppRadii.control),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Adjustment',
-                            style: Theme.of(sheetContext).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                        MoneyText(
-                          amountMinor: adjustmentMinor,
-                          currency: dataStore.preferences.currency,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                          showPositiveSign: adjustmentMinor > 0,
-                          color: adjustmentMinor < 0 ? AppColors.danger : null,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(sheetContext),
-                          child: const Text('Cancel'),
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: targetBalanceMinor == currentBalanceMinor
-                              ? null
-                              : () async {
-                                  if (showOverdrawWarning &&
-                                      !await confirmAssetAccountOverdraw(
-                                        sheetContext,
-                                        account: account,
-                                        projectedBalanceMinor:
-                                            targetBalanceMinor,
-                                        currency:
-                                            dataStore.preferences.currency,
-                                      )) {
-                                    return;
-                                  }
-                                  if (!sheetContext.mounted) return;
-                                  Navigator.pop(
-                                    sheetContext,
-                                    targetBalanceMinor,
-                                  );
-                                },
-                          child: const Text('Save'),
-                        ),
+                      ButtonSegment<bool>(
+                        value: false,
+                        label: Text('Credit'),
+                        icon: Icon(AppIcon.income),
                       ),
                     ],
+                    selected: {isDebtBalance},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (selection) {
+                      AppHaptics.selection();
+                      setSheetState(() => isDebtBalance = selection.first);
+                    },
                   ),
-                ],
+                ),
+                const SizedBox(height: AppSpacing.md),
+              ],
+              DialogFieldGroup(
+                label: 'New balance',
+                child: AmountEntryField(
+                  fieldKey: const ValueKey('account-adjust-balance'),
+                  visualStyle: AmountEntryVisualStyle.inline,
+                  initialMinor: targetBalanceMinor,
+                  currency: dataStore.preferences.currency,
+                  labelText: null,
+                  autofocus: true,
+                  selectAllOnFocus: false,
+                  allowNegative: !isCreditCard,
+                  forceNegative: isCreditCard && isDebtBalance,
+                  keyboardType: isCreditCard
+                      ? TextInputType.number
+                      : const TextInputType.numberWithOptions(signed: true),
+                  textStyle: amountStyle,
+                  onChanged: (value) {
+                    setSheetState(() {
+                      enteredBalanceMinor = isCreditCard ? value.abs() : value;
+                    });
+                  },
+                ),
               ),
-            ),
+              const SizedBox(height: AppSpacing.md),
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: Theme.of(
+                    sheetContext,
+                  ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.42),
+                  borderRadius: BorderRadius.circular(AppRadii.control),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Adjustment',
+                        style: Theme.of(sheetContext).textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    MoneyText(
+                      amountMinor: adjustmentMinor,
+                      currency: dataStore.preferences.currency,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      showPositiveSign: adjustmentMinor > 0,
+                      color: adjustmentMinor < 0 ? AppColors.danger : null,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+            ],
           ),
         );
       },
@@ -18377,6 +18358,7 @@ Future<void> showTransferDialog(
         ),
       );
   var amountMinor = transfer?.amountMinor.abs() ?? 0;
+  var amountFocusRequest = 0;
   var fromAccountId =
       accounts.any(
         (account) =>
@@ -18424,6 +18406,7 @@ Future<void> showTransferDialog(
           int scheduledTimeMinutes,
           v2_scheduled.RecurrenceFrequency scheduledFrequency,
           int reminderTimeMinutes,
+          String? reminderTimeZone,
           int customAlertOffsetDays,
           v2_scheduled.AlertPreference scheduledAlertPreference,
           ReservationContainerType? reservationContainerType,
@@ -18731,6 +18714,7 @@ Future<void> showTransferDialog(
                 scheduledTimeMinutes: futureSchedule.timeMinutes,
                 scheduledFrequency: futureSchedule.frequency,
                 reminderTimeMinutes: futureSchedule.reminderTimeMinutes,
+                reminderTimeZone: futureSchedule.reminderTimeZone,
                 customAlertOffsetDays: futureSchedule.customAlertOffsetDays,
                 scheduledAlertPreference: futureSchedule.alertPreference,
                 reservationContainerType: reservationContainerType,
@@ -18811,6 +18795,7 @@ Future<void> showTransferDialog(
                       setDialogState(() {
                         fromAccountId = selectedAccountId;
                         if (toAccountId == fromAccountId) toAccountId = '';
+                        amountFocusRequest++;
                       });
                     },
                   ),
@@ -18826,8 +18811,8 @@ Future<void> showTransferDialog(
                           initialMinor: amountMinor,
                           currency: dataStore.preferences.currency,
                           labelText: null,
-                          autofocus:
-                              transfer == null && fromAccountId.isNotEmpty,
+                          autofocus: transfer == null,
+                          focusRequest: amountFocusRequest,
                           textAlign: TextAlign.left,
                           decoration: const InputDecoration(
                             border: InputBorder.none,
@@ -18871,9 +18856,10 @@ Future<void> showTransferDialog(
                                   selectedAccountId: toAccountId,
                                 );
                             if (selectedAccountId != null) {
-                              setDialogState(
-                                () => toAccountId = selectedAccountId,
-                              );
+                              setDialogState(() {
+                                toAccountId = selectedAccountId;
+                                amountFocusRequest++;
+                              });
                             }
                           },
                   ),
@@ -19169,6 +19155,7 @@ Future<void> showTransferDialog(
         frequency: result.scheduledFrequency,
         alertPreference: result.scheduledAlertPreference,
         customAlertTimeMinutes: result.reminderTimeMinutes,
+        reminderTimeZone: result.reminderTimeZone,
         scheduledTimeMinutes: result.scheduledTimeMinutes,
         customAlertOffsetDays: result.customAlertOffsetDays,
         reservationContainerType: result.reservationContainerType,
@@ -19239,6 +19226,7 @@ Future<void> showTransferDialog(
       frequency: result.scheduledFrequency,
       alertPreference: result.scheduledAlertPreference,
       customAlertTimeMinutes: result.reminderTimeMinutes,
+      reminderTimeZone: result.reminderTimeZone,
       scheduledTimeMinutes: result.scheduledTimeMinutes,
       customAlertOffsetDays: result.customAlertOffsetDays,
       reservationContainerType: result.reservationContainerType,
@@ -19341,6 +19329,7 @@ Future<bool> showScheduledTransactionDialog(
   );
   var amountMinor =
       existing?.amountMinor ?? sourceTransaction?.amountMinor.abs() ?? 0;
+  var amountFocusRequest = 0;
   final nextDate = TextEditingController(
     text: dateInput(
       existing?.nextDate ??
@@ -19353,6 +19342,7 @@ Future<bool> showScheduledTransactionDialog(
     text: alertTimeInput(existing?.scheduledTimeMinutes ?? 9 * 60),
   );
   var reminderTimeMinutes = existing?.customAlertTimeMinutes ?? 9 * 60;
+  var reminderTimeZone = existing?.reminderTimeZone;
   var customAlertOffsetDays = existing?.customAlertOffsetDays ?? 0;
   var type =
       existing?.type ??
@@ -19425,6 +19415,7 @@ Future<bool> showScheduledTransactionDialog(
           v2_scheduled.RecurrenceFrequency frequency,
           v2_scheduled.AlertPreference alertPreference,
           int? customAlertTimeMinutes,
+          String? reminderTimeZone,
           int scheduledTimeMinutes,
           int customAlertOffsetDays,
           bool repeatAlertUntilResolved,
@@ -19713,6 +19704,7 @@ Future<bool> showScheduledTransactionDialog(
                     transferAccountId = null;
                   }
                 }
+                amountFocusRequest++;
               });
             }
 
@@ -19844,6 +19836,7 @@ Future<bool> showScheduledTransactionDialog(
                 frequency: frequency,
                 alertPreference: alertPreference,
                 customAlertTimeMinutes: reminderTimeMinutes,
+                reminderTimeZone: reminderTimeZone,
                 customAlertOffsetDays: customAlertOffsetDays,
                 scheduledTimeMinutes: parseAlertTimeMinutes(
                   scheduledTime.text,
@@ -20020,7 +20013,8 @@ Future<bool> showScheduledTransactionDialog(
                           initialMinor: amountMinor,
                           currency: dataStore.preferences.currency,
                           labelText: null,
-                          autofocus: existing == null && accountId.isNotEmpty,
+                          autofocus: existing == null,
+                          focusRequest: amountFocusRequest,
                           textAlign: TextAlign.left,
                           decoration: const InputDecoration(
                             border: InputBorder.none,
@@ -20315,6 +20309,7 @@ Future<bool> showScheduledTransactionDialog(
                       alertPreference,
                       daysBefore: customAlertOffsetDays,
                       timeMinutes: reminderTimeMinutes,
+                      timeZone: reminderTimeZone,
                     ),
                     onTap: () async {
                       FocusManager.instance.primaryFocus?.unfocus();
@@ -20323,6 +20318,7 @@ Future<bool> showScheduledTransactionDialog(
                         preference: alertPreference,
                         daysBefore: customAlertOffsetDays,
                         timeMinutes: reminderTimeMinutes,
+                        timeZone: reminderTimeZone,
                         scheduledTimeMinutes: parseAlertTimeMinutes(
                           scheduledTime.text,
                           9 * 60,
@@ -20333,6 +20329,7 @@ Future<bool> showScheduledTransactionDialog(
                           alertPreference = selected.preference;
                           customAlertOffsetDays = selected.daysBefore;
                           reminderTimeMinutes = selected.timeMinutes;
+                          reminderTimeZone = selected.timeZone;
                           if (selected.preference ==
                               v2_scheduled.AlertPreference.none) {
                             repeatAlertUntilResolved = false;
@@ -20471,6 +20468,7 @@ Future<bool> showScheduledTransactionDialog(
           frequency: result.frequency,
           alertPreference: result.alertPreference,
           customAlertTimeMinutes: result.customAlertTimeMinutes,
+          reminderTimeZone: result.reminderTimeZone,
           customAlertOffsetDays: result.customAlertOffsetDays,
           scheduledTimeMinutes: result.scheduledTimeMinutes,
           repeatAlertUntilResolved: result.repeatAlertUntilResolved,
@@ -20491,6 +20489,8 @@ Future<bool> showScheduledTransactionDialog(
           frequency: result.frequency,
           alertPreference: result.alertPreference,
           customAlertTimeMinutes: result.customAlertTimeMinutes,
+          reminderTimeZone: result.reminderTimeZone,
+          clearReminderTimeZone: result.reminderTimeZone == null,
           repeatAlertUntilResolved: result.repeatAlertUntilResolved,
           customAlertOffsetDays: result.customAlertOffsetDays,
           scheduledTimeMinutes: result.scheduledTimeMinutes,
@@ -20593,6 +20593,11 @@ Future<void> showScheduledTransactionDetails(
   final dataStore = FinanceDataStoreScope.read(context);
   final occurrenceDate = scheduledDate ?? item.nextDate;
   final occurrenceAmount = plannedAmountMinor ?? item.amountMinor;
+  final localReminder = item.hasAlert && item.hasValidReminderTiming
+      ? const ScheduledNotificationPlanner()
+            .alertDateTimeForOccurrence(item, occurrenceDate)
+            .toLocal()
+      : null;
   final isFundFunding = item.isScheduledFundFunding;
   final isGoalFunding = item.isScheduledGoalFunding;
   String accountName(String? id) {
@@ -20784,8 +20789,18 @@ Future<void> showScheduledTransactionDetails(
               item.alertPreference,
               daysBefore: item.customAlertOffsetDays,
               timeMinutes: item.customAlertTimeMinutes ?? 9 * 60,
+              timeZone: item.reminderTimeZone,
             ),
           ),
+          if (item.reminderTimeZone != null && localReminder != null) ...[
+            const TransactionFormDivider(),
+            ScheduledTransactionDetailRow(
+              icon: AppIcon.schedule,
+              label: 'Reminder on this device',
+              value:
+                  '${fullMonthDateLabel(localReminder)} · ${alertTimeInput(localReminder.hour * 60 + localReminder.minute)} ${localReminder.timeZoneName}',
+            ),
+          ],
           if (item.note.trim().isNotEmpty) ...[
             TransactionFormDivider(),
             ScheduledTransactionDetailRow(
@@ -21350,6 +21365,7 @@ Future<void> restoreScheduledTransactionAfterOccurrence(
           : null,
       alertPreference: item.alertPreference,
       customAlertTimeMinutes: item.customAlertTimeMinutes,
+      reminderTimeZone: item.reminderTimeZone,
       customAlertOffsetDays: item.customAlertOffsetDays,
       scheduledTimeMinutes: item.scheduledTimeMinutes,
       repeatAlertUntilResolved: item.repeatAlertUntilResolved,
@@ -21551,6 +21567,7 @@ Future<void> editScheduledTransactionFromOccurrence(
     endDate: item.endDate,
     alertPreference: item.alertPreference,
     customAlertTimeMinutes: item.customAlertTimeMinutes,
+    reminderTimeZone: item.reminderTimeZone,
     customAlertOffsetDays: item.customAlertOffsetDays,
     scheduledTimeMinutes: item.scheduledTimeMinutes,
     repeatAlertUntilResolved: item.repeatAlertUntilResolved,
@@ -22564,6 +22581,7 @@ Future<void> duplicateScheduledTransaction(
       endDate: item.endDate,
       alertPreference: item.alertPreference,
       customAlertTimeMinutes: item.customAlertTimeMinutes,
+      reminderTimeZone: item.reminderTimeZone,
       customAlertOffsetDays: item.customAlertOffsetDays,
       scheduledTimeMinutes: item.scheduledTimeMinutes,
       repeatAlertUntilResolved: item.repeatAlertUntilResolved,
@@ -22783,6 +22801,7 @@ Future<void> showTransactionDialog(
   );
   final newCategoryName = TextEditingController();
   final newCategoryFocusNode = FocusNode();
+  var amountFocusRequest = 0;
   final futureSchedule =
       initialFutureSchedule ??
       FutureScheduleDraft(
@@ -22887,6 +22906,7 @@ Future<void> showTransactionDialog(
           v2_scheduled.RecurrenceFrequency scheduledFrequency,
           v2_scheduled.AlertPreference scheduledAlertPreference,
           int reminderTimeMinutes,
+          String? reminderTimeZone,
           int customAlertOffsetDays,
           ReservationContainerType? reservationContainerType,
           String? reservationContainerId,
@@ -23382,6 +23402,7 @@ Future<void> showTransactionDialog(
                 scheduledFrequency: futureSchedule.frequency,
                 scheduledAlertPreference: futureSchedule.alertPreference,
                 reminderTimeMinutes: futureSchedule.reminderTimeMinutes,
+                reminderTimeZone: futureSchedule.reminderTimeZone,
                 customAlertOffsetDays: futureSchedule.customAlertOffsetDays,
                 reservationContainerType: reservationContainerType,
                 reservationContainerId: reservationContainerId,
@@ -23800,10 +23821,12 @@ Future<void> showTransactionDialog(
                                     accounts: activeAccounts,
                                     selectedAccountId: accountId,
                                   );
+                              if (!context.mounted) return;
                               if (selectedAccountId != null) {
-                                setDialogState(
-                                  () => accountId = selectedAccountId,
-                                );
+                                setDialogState(() {
+                                  accountId = selectedAccountId;
+                                  amountFocusRequest++;
+                                });
                               }
                             },
                     ),
@@ -23820,8 +23843,8 @@ Future<void> showTransactionDialog(
                           initialMinor: amountMinor,
                           currency: dataStore.preferences.currency,
                           labelText: null,
-                          autofocus:
-                              transaction == null && accountId.isNotEmpty,
+                          autofocus: transaction == null,
+                          focusRequest: amountFocusRequest,
                           textAlign: TextAlign.left,
                           decoration: const InputDecoration(
                             border: InputBorder.none,
@@ -24150,6 +24173,7 @@ Future<void> showTransactionDialog(
         frequency: result.scheduledFrequency,
         alertPreference: result.scheduledAlertPreference,
         customAlertTimeMinutes: result.reminderTimeMinutes,
+        reminderTimeZone: result.reminderTimeZone,
         scheduledTimeMinutes: result.scheduledTimeMinutes,
         customAlertOffsetDays: result.customAlertOffsetDays,
         reservationContainerType: result.reservationContainerType,
@@ -24234,6 +24258,7 @@ Future<void> showTransactionDialog(
       frequency: result.scheduledFrequency,
       alertPreference: result.scheduledAlertPreference,
       customAlertTimeMinutes: result.reminderTimeMinutes,
+      reminderTimeZone: result.reminderTimeZone,
       scheduledTimeMinutes: result.scheduledTimeMinutes,
       customAlertOffsetDays: result.customAlertOffsetDays,
       reservationContainerType: result.reservationContainerType,
@@ -25763,18 +25788,28 @@ String reminderRuleLabel(
   v2_scheduled.AlertPreference preference, {
   required int daysBefore,
   required int timeMinutes,
+  String? timeZone,
 }) {
-  if (preference != v2_scheduled.AlertPreference.custom) {
-    return alertPreferenceLabel(preference);
-  }
+  if (preference == v2_scheduled.AlertPreference.none) return 'No alert';
   final days = daysBefore == 0
       ? 'Same day'
       : '$daysBefore ${daysBefore == 1 ? 'day' : 'days'} before';
-  return '$days · ${alertTimeInput(timeMinutes)}';
+  final when = preference == v2_scheduled.AlertPreference.custom
+      ? days
+      : alertPreferenceLabel(preference);
+  final zone = timeZone == null
+      ? 'Device time'
+      : reminderTimeZoneLabel(timeZone);
+  return '$when · ${alertTimeInput(timeMinutes)} · $zone';
 }
 
 Future<
-  ({v2_scheduled.AlertPreference preference, int daysBefore, int timeMinutes})?
+  ({
+    v2_scheduled.AlertPreference preference,
+    int daysBefore,
+    int timeMinutes,
+    String? timeZone,
+  })?
 >
 pickReminderRule(
   BuildContext context, {
@@ -25782,6 +25817,7 @@ pickReminderRule(
   required int daysBefore,
   required int timeMinutes,
   required int scheduledTimeMinutes,
+  String? timeZone,
 }) async {
   FocusManager.instance.primaryFocus?.unfocus();
   final selected = await showScheduledChoicePicker(
@@ -25796,39 +25832,54 @@ pickReminderRule(
         : alertPreferenceLabel(value),
   );
   if (selected == null || !context.mounted) return null;
-  if (selected != v2_scheduled.AlertPreference.custom) {
+  if (selected == v2_scheduled.AlertPreference.none) {
     return (
       preference: selected,
       daysBefore: daysBefore,
       timeMinutes: timeMinutes,
+      timeZone: timeZone,
     );
   }
+  final initialDays = switch (selected) {
+    v2_scheduled.AlertPreference.oneDayBefore => 1,
+    v2_scheduled.AlertPreference.threeDaysBefore => 3,
+    v2_scheduled.AlertPreference.oneWeekBefore => 7,
+    v2_scheduled.AlertPreference.custom => daysBefore,
+    _ => 0,
+  };
   final result = await showCustomReminderDialog(
     context,
-    daysBefore: daysBefore,
+    daysBefore: initialDays,
     timeMinutes: timeMinutes,
     scheduledTimeMinutes: scheduledTimeMinutes,
+    timeZone: timeZone,
   );
   if (result == null) return null;
   return (
-    preference: selected,
+    preference: result.daysBefore == initialDays
+        ? selected
+        : v2_scheduled.AlertPreference.custom,
     daysBefore: result.daysBefore,
     timeMinutes: result.timeMinutes,
+    timeZone: result.timeZone,
   );
 }
 
-Future<({int daysBefore, int timeMinutes})?> showCustomReminderDialog(
+Future<({int daysBefore, int timeMinutes, String? timeZone})?>
+showCustomReminderDialog(
   BuildContext context, {
   required int daysBefore,
   required int timeMinutes,
   required int scheduledTimeMinutes,
+  String? timeZone,
 }) async {
-  return showDialog<({int daysBefore, int timeMinutes})>(
+  return showDialog<({int daysBefore, int timeMinutes, String? timeZone})>(
     context: context,
     builder: (_) => _CustomReminderDialog(
       daysBefore: daysBefore,
       timeMinutes: timeMinutes,
       scheduledTimeMinutes: scheduledTimeMinutes,
+      timeZone: timeZone,
     ),
   );
 }
@@ -25838,10 +25889,12 @@ class _CustomReminderDialog extends StatefulWidget {
     required this.daysBefore,
     required this.timeMinutes,
     required this.scheduledTimeMinutes,
+    this.timeZone,
   });
   final int daysBefore;
   final int timeMinutes;
   final int scheduledTimeMinutes;
+  final String? timeZone;
 
   @override
   State<_CustomReminderDialog> createState() => _CustomReminderDialogState();
@@ -25850,6 +25903,7 @@ class _CustomReminderDialog extends StatefulWidget {
 class _CustomReminderDialogState extends State<_CustomReminderDialog> {
   late final days = TextEditingController(text: '${widget.daysBefore}');
   late int reminderTime = widget.timeMinutes;
+  late String? timeZone = widget.timeZone;
 
   @override
   void dispose() {
@@ -25874,6 +25928,7 @@ class _CustomReminderDialogState extends State<_CustomReminderDialog> {
             ? () => Navigator.pop(context, (
                 daysBefore: offset,
                 timeMinutes: reminderTime,
+                timeZone: timeZone,
               ))
             : null,
       ),
@@ -25882,7 +25937,7 @@ class _CustomReminderDialogState extends State<_CustomReminderDialog> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Repeats before every occurrence at this local time.',
+            'Remind before each occurrence at the time and timezone below.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -25962,7 +26017,42 @@ class _CustomReminderDialogState extends State<_CustomReminderDialog> {
               }
             },
           ),
-          if (atOrAfter) ...[
+          const TransactionFormDivider(),
+          const TransactionFormLabel('Timezone'),
+          PolishedFormValueRow(
+            key: const ValueKey('reminder-timezone'),
+            icon: AppIcon.schedule,
+            value: reminderTimeZoneLabel(timeZone),
+            secondary: timeZone == null
+                ? 'Follows the clock on each device when you travel'
+                : 'Same instant everywhere; follows daylight saving in this zone',
+            onTap: () async {
+              final selected = await showScheduledChoicePicker<String>(
+                context,
+                title: 'Reminder timezone',
+                values: [
+                  '',
+                  ...reminderTimeZones.keys,
+                  if (timeZone != null &&
+                      !reminderTimeZones.containsKey(timeZone))
+                    timeZone!,
+                ],
+                selected: timeZone ?? '',
+                label: (id) => reminderTimeZoneLabel(id.isEmpty ? null : id),
+              );
+              if (selected != null && mounted) {
+                setState(() => timeZone = selected.isEmpty ? null : selected);
+              }
+            },
+          ),
+          if (timeZone != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Use this option only after updating Trackmark on all your synced devices. Older builds do not understand fixed timezones.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+          if (atOrAfter && timeZone == null) ...[
             const SizedBox(height: AppSpacing.sm),
             Semantics(
               liveRegion: true,
@@ -25993,6 +26083,7 @@ String alertTimeInput(int minutesAfterMidnight) {
 
 class FutureScheduleDraft {
   FutureScheduleDraft({
+    this.reminderTimeZone,
     required DateTime firstDate,
     this.frequency = v2_scheduled.RecurrenceFrequency.monthly,
     this.alertPreference = v2_scheduled.AlertPreference.none,
@@ -26008,6 +26099,7 @@ class FutureScheduleDraft {
   v2_scheduled.RecurrenceFrequency frequency;
   v2_scheduled.AlertPreference alertPreference;
   int reminderTimeMinutes;
+  String? reminderTimeZone;
   int customAlertOffsetDays;
 
   DateTime parsedFirstDate(DateTime fallback) =>
@@ -26173,6 +26265,7 @@ class InlineFutureScheduleSection extends StatelessWidget {
             draft.alertPreference,
             daysBefore: draft.customAlertOffsetDays,
             timeMinutes: draft.reminderTimeMinutes,
+            timeZone: draft.reminderTimeZone,
           ),
           onTap: () async {
             FocusManager.instance.primaryFocus?.unfocus();
@@ -26181,12 +26274,14 @@ class InlineFutureScheduleSection extends StatelessWidget {
               preference: draft.alertPreference,
               daysBefore: draft.customAlertOffsetDays,
               timeMinutes: draft.reminderTimeMinutes,
+              timeZone: draft.reminderTimeZone,
               scheduledTimeMinutes: draft.timeMinutes,
             );
             if (selected != null) {
               draft.alertPreference = selected.preference;
               draft.customAlertOffsetDays = selected.daysBefore;
               draft.reminderTimeMinutes = selected.timeMinutes;
+              draft.reminderTimeZone = selected.timeZone;
               onChanged();
             }
           },

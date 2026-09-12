@@ -124,11 +124,7 @@ class _TrackmarkOnboardingState extends State<TrackmarkOnboarding> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isReplay = widget.onClose != null;
-    final mediaSize = MediaQuery.sizeOf(context);
-    final separateMoneyExampleFromNavigation =
-        _page == 1 &&
-        (mediaSize.shortestSide >= 600 ||
-            (theme.platform == TargetPlatform.macOS && mediaSize.width >= 600));
+    final separateMoneyExampleFromNavigation = _page == 1;
     final reducedMotion =
         MediaQuery.disableAnimationsOf(context) ||
         MediaQuery.accessibleNavigationOf(context);
@@ -143,7 +139,7 @@ class _TrackmarkOnboardingState extends State<TrackmarkOnboarding> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -182,7 +178,7 @@ class _TrackmarkOnboardingState extends State<TrackmarkOnboarding> {
                           ),
                       ],
                     ),
-                    const SizedBox(height: AppSpacing.md),
+                    const SizedBox(height: AppSpacing.sm),
                     Expanded(
                       child: AnimatedSwitcher(
                         layoutBuilder: (currentChild, previousChildren) =>
@@ -197,7 +193,9 @@ class _TrackmarkOnboardingState extends State<TrackmarkOnboarding> {
                         child: SingleChildScrollView(
                           key: ValueKey('onboarding-page-$_page'),
                           primary: false,
-                          padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+                          padding: EdgeInsets.only(
+                            bottom: _page == 1 ? AppSpacing.sm : AppSpacing.lg,
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
@@ -205,15 +203,22 @@ class _TrackmarkOnboardingState extends State<TrackmarkOnboarding> {
                                 header: true,
                                 child: Text(
                                   _onboardingTitles[_page],
-                                  style: theme.textTheme.headlineMedium
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.w800,
-                                        height: 1.15,
-                                        letterSpacing: 0,
-                                      ),
+                                  style:
+                                      (_page == 1
+                                              ? theme.textTheme.headlineSmall
+                                              : theme.textTheme.headlineMedium)
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w800,
+                                            height: 1.15,
+                                            letterSpacing: 0,
+                                          ),
                                 ),
                               ),
-                              const SizedBox(height: AppSpacing.lg),
+                              SizedBox(
+                                height: _page == 1
+                                    ? AppSpacing.sm
+                                    : AppSpacing.lg,
+                              ),
                               _OnboardingContent(
                                 page: _page,
                                 explainBalanceEffects: true,
@@ -340,32 +345,37 @@ class _OnboardingContent extends StatelessWidget {
     1 => Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _WelcomeDefinition(
+        _WelcomeDefinition(
           'Balance',
           'Cleared money currently in the account.',
+          compact: explainBalanceEffects,
         ),
         _WelcomeDefinition(
           'Pending',
           explainBalanceEffects
               ? 'Transactions that are known but not cleared yet. Pending affects Available to Spend, but does not change Balance until the transaction is cleared. It does not affect Reserved.'
               : 'Money you know about that has not cleared yet.',
+          compact: explainBalanceEffects,
         ),
         _WelcomeDefinition(
           'Reserved',
           explainBalanceEffects
               ? 'Money assigned to Funds or Goals. Reserved reduces Available to Spend, but does not change Balance until that money is actually spent.'
               : 'Money assigned to Funds or Goals.',
+          compact: explainBalanceEffects,
         ),
-        const _WelcomeDefinition(
+        _WelcomeDefinition(
           'Available to Spend',
           'Money still free after pending commitments and reservations.',
+          compact: explainBalanceEffects,
         ),
         const SizedBox(height: AppSpacing.xs),
-        const _ReservationExample(),
-        const SizedBox(height: AppSpacing.md),
-        const _WelcomeParagraph(
+        _ReservationExample(compact: explainBalanceEffects),
+        SizedBox(height: explainBalanceEffects ? AppSpacing.sm : AppSpacing.md),
+        _WelcomeParagraph(
           'The money doesn’t move. Its job changes.',
           emphasis: true,
+          compact: explainBalanceEffects,
         ),
       ],
     ),
@@ -433,47 +443,71 @@ class _WelcomeParagraph extends StatelessWidget {
     this.text, {
     this.secondary = false,
     this.emphasis = false,
+    this.compact = false,
   });
   final String text;
   final bool secondary;
   final bool emphasis;
+  final bool compact;
   @override
   Widget build(BuildContext context) => Text(
     text,
-    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-      height: 1.45,
-      color: secondary ? Theme.of(context).colorScheme.onSurfaceVariant : null,
-      fontWeight: emphasis ? FontWeight.w700 : FontWeight.w400,
-    ),
+    style:
+        (compact
+                ? Theme.of(context).textTheme.bodyMedium
+                : Theme.of(context).textTheme.bodyLarge)
+            ?.copyWith(
+              height: 1.45,
+              color: secondary
+                  ? Theme.of(context).colorScheme.onSurfaceVariant
+                  : null,
+              fontWeight: emphasis ? FontWeight.w700 : FontWeight.w400,
+            ),
   );
 }
 
 class _WelcomeDefinition extends StatelessWidget {
-  const _WelcomeDefinition(this.title, this.body);
+  const _WelcomeDefinition(this.title, this.body, {this.compact = false});
   final String title;
   final String body;
+  final bool compact;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          body,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            height: 1.35,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+    padding: EdgeInsets.only(bottom: compact ? AppSpacing.xs : AppSpacing.md),
+    child: compact
+        ? Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '$title. ',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                TextSpan(text: body),
+              ],
+            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(height: 1.35),
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                body,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  height: 1.35,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
-        ),
-      ],
-    ),
   );
 }
 
@@ -523,11 +557,12 @@ class _PlanIntroduction extends StatelessWidget {
 
 /// Educational figures, not live financial records or a second calculator.
 class _ReservationExample extends StatelessWidget {
-  const _ReservationExample();
+  const _ReservationExample({this.compact = false});
+  final bool compact;
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(AppSpacing.md),
+      padding: EdgeInsets.all(compact ? AppSpacing.sm : AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -537,24 +572,25 @@ class _ReservationExample extends StatelessWidget {
               context,
             ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: AppSpacing.md),
-          const _ExampleStep(1, r'Reserve $500 for Bills', [
+          SizedBox(height: compact ? AppSpacing.xs : AppSpacing.md),
+          if (compact) const _ExampleColumnLabels(),
+          _ExampleStep(1, r'Reserve $500 for Bills', const [
             r'$2,000',
             r'$500',
             r'$1,500',
-          ]),
-          const Divider(height: 24),
-          const _ExampleStep(2, r'Spend $100 from the Bills Fund', [
+          ], compact: compact),
+          Divider(height: compact ? 12 : 24),
+          _ExampleStep(2, r'Spend $100 from the Bills Fund', const [
             r'$1,900',
             r'$400',
             r'$1,500',
-          ]),
-          const Divider(height: 24),
-          const _ExampleStep(3, r'Return $200 from the Fund', [
+          ], compact: compact),
+          Divider(height: compact ? 12 : 24),
+          _ExampleStep(3, r'Return $200 from the Fund', const [
             r'$1,900',
             r'$200',
             r'$1,700',
-          ]),
+          ], compact: compact),
         ],
       ),
     ),
@@ -562,10 +598,16 @@ class _ReservationExample extends StatelessWidget {
 }
 
 class _ExampleStep extends StatelessWidget {
-  const _ExampleStep(this.step, this.title, this.values);
+  const _ExampleStep(
+    this.step,
+    this.title,
+    this.values, {
+    this.compact = false,
+  });
   final int step;
   final String title;
   final List<String> values;
+  final bool compact;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -581,7 +623,7 @@ class _ExampleStep extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: AppSpacing.sm),
+          SizedBox(height: compact ? AppSpacing.xs : AppSpacing.sm),
           LayoutBuilder(
             builder: (context, constraints) {
               final stacked =
@@ -602,12 +644,13 @@ class _ExampleStep extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              labels[index],
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
+                            if (!compact || stacked)
+                              Text(
+                                labels[index],
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
                               ),
-                            ),
                             Text(
                               values[index],
                               style: AppTextStyles.money(context, fontSize: 16),
@@ -624,6 +667,38 @@ class _ExampleStep extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One aligned column key replaces repeated labels in the onboarding example.
+/// Large text falls back to labels on every stacked value instead.
+class _ExampleColumnLabels extends StatelessWidget {
+  const _ExampleColumnLabels();
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      if (constraints.maxWidth <
+          220 * MediaQuery.textScalerOf(context).scale(14) / 14) {
+        return const SizedBox.shrink();
+      }
+      return Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+        child: Row(
+          children: [
+            for (final label in ['Balance', 'Reserved', 'Available']) ...[
+              if (label != 'Balance') const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    },
+  );
 }
 
 void showTrackmarkGuides(BuildContext context) {

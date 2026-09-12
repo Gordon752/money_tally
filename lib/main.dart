@@ -64,6 +64,7 @@ import 'src/ledger/running_balance_calculator.dart';
 import 'src/ledger/transaction_account_preview.dart';
 import 'src/notifications/local_notification_scheduler.dart';
 import 'src/notifications/notification_scheduler.dart';
+import 'src/notifications/reminder_time_zone.dart';
 import 'src/onboarding/onboarding_preferences.dart';
 import 'src/persistence/backup_codec.dart';
 import 'src/persistence/backup_restore_service.dart';
@@ -179,9 +180,12 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
           scheduledNotificationLaunchPayload.value = payload ?? 'scheduled';
         },
       );
-      await localNotificationScheduler.initialize();
       notificationScheduler = localNotificationScheduler;
+      await localNotificationScheduler.initialize();
     } catch (error, stackTrace) {
+      reminderSchedulingError.value =
+          'Reminders are unavailable on this device. Restart Trackmark to retry. '
+          'Your records are safe.';
       debugPrint('Local notification initialization failed: $error');
       debugPrintStack(stackTrace: stackTrace);
     }

@@ -67,11 +67,41 @@ FinanceDataSet _data(ScheduledTransactionRecord item) => FinanceDataSet(
 );
 
 void main() {
+  test(
+    'fixed-zone backup uses schema 8 and preserves zone; legacy stays schema 7',
+    () {
+      final local = _data(_schedule());
+      expect(
+        jsonDecode(const BackupCodec().encodeJson(local))['schemaVersion'],
+        7,
+      );
+      final fixed = _data(
+        _schedule().copyWith(reminderTimeZone: 'America/New_York'),
+      );
+      final raw = const BackupCodec().encodeJson(fixed);
+      expect(jsonDecode(raw)['schemaVersion'], 8);
+      final validated = const BackupRestoreValidator().validate(raw);
+      expect(
+        validated.dataSet.scheduledTransactions.single.reminderTimeZone,
+        'America/New_York',
+      );
+      final invalid = _data(
+        _schedule().copyWith(reminderTimeZone: 'Invalid/Zone'),
+      );
+      expect(
+        () => const BackupRestoreValidator().validate(
+          const BackupCodec().encodeJson(invalid),
+        ),
+        throwsA(isA<BackupValidationException>()),
+      );
+    },
+  );
+
   for (final (days, time, label) in [
-    (0, 705, 'Same day · 11:45 AM'),
-    (1, 1080, '1 day before · 6:00 PM'),
-    (3, 480, '3 days before · 8:00 AM'),
-    (7, 570, '7 days before · 9:30 AM'),
+    (0, 705, 'Same day · 11:45 AM · Device time'),
+    (1, 1080, '1 day before · 6:00 PM · Device time'),
+    (3, 480, '3 days before · 8:00 AM · Device time'),
+    (7, 570, '7 days before · 9:30 AM · Device time'),
   ]) {
     test(
       'custom $label resolves to an exact local occurrence-relative time',
@@ -169,7 +199,7 @@ void main() {
           ..remove('scheduledTimeMinutes'),
       ];
       final migrated = const BackupRestoreValidator().validate(jsonEncode(old));
-      expect(migrated.schemaVersion, 7);
+      expect(migrated.schemaVersion, currentBackupSchemaVersion);
       expect(
         migrated.dataSet.scheduledTransactions.single.customAlertOffsetDays,
         0,
@@ -364,7 +394,10 @@ void main() {
       await _tap(tester, find.byKey(const ValueKey('custom-reminder-time')));
       await _chooseTime(tester, const TimeOfDay(hour: 8, minute: 0));
       await _tap(tester, find.byKey(const ValueKey('custom-reminder-save')));
-      expect(find.text('3 days before · 8:00 AM'), findsOneWidget);
+      expect(
+        find.text('3 days before · 8:00 AM · Device time'),
+        findsOneWidget,
+      );
       expect(find.text('12:00 PM'), findsOneWidget);
       await _tap(tester, find.byKey(const ValueKey('scheduled-alert')));
       await _tap(tester, find.textContaining('Custom ·'));
@@ -381,7 +414,10 @@ void main() {
       await _tap(tester, find.byKey(const ValueKey('custom-reminder-save')));
       await _tap(tester, find.byKey(const ValueKey('scheduled-alert-time')));
       await _chooseTime(tester, const TimeOfDay(hour: 15, minute: 30));
-      expect(find.text('3 days before · 8:00 AM'), findsOneWidget);
+      expect(
+        find.text('3 days before · 8:00 AM · Device time'),
+        findsOneWidget,
+      );
       await _tap(tester, find.text('Save').last);
       final saved = store.scheduledTransactions.single;
       expect(saved.customAlertOffsetDays, 3);
@@ -475,7 +511,10 @@ void main() {
         await _tap(tester, find.byKey(const ValueKey('custom-reminder-time')));
         await _chooseTime(tester, const TimeOfDay(hour: 9, minute: 30));
         await _tap(tester, find.byKey(const ValueKey('custom-reminder-save')));
-        expect(find.text('7 days before · 9:30 AM'), findsOneWidget);
+        expect(
+          find.text('7 days before · 9:30 AM · Device time'),
+          findsOneWidget,
+        );
         await _tap(tester, find.widgetWithText(FilledButton, 'Save'));
         final saved = store.scheduledTransactions.single;
         expect(saved.alertPreference, AlertPreference.custom);
@@ -502,9 +541,12 @@ void main() {
         (context) =>
             app.showScheduledTransactionDialog(context, existing: item),
       );
-      expect(find.text('Same day · 6:00 PM'), findsOneWidget);
+      expect(find.text('Same day · 6:00 PM · Device time'), findsOneWidget);
       await _tap(tester, find.byKey(const ValueKey('scheduled-alert')));
-      await _tap(tester, find.text('Custom · Same day · 6:00 PM'));
+      await _tap(
+        tester,
+        find.text('Custom · Same day · 6:00 PM · Device time'),
+      );
       expect(
         tester
             .widget<TextField>(
@@ -526,7 +568,7 @@ void main() {
         '3',
       );
       await _tap(tester, find.text('Cancel').last);
-      expect(find.text('Same day · 6:00 PM'), findsOneWidget);
+      expect(find.text('Same day · 6:00 PM · Device time'), findsOneWidget);
       await _tap(tester, find.widgetWithText(FilledButton, 'Save'));
       final saved = store.scheduledTransactions.single;
       expect(saved.customAlertOffsetDays, 0);

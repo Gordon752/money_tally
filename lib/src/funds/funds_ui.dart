@@ -922,6 +922,7 @@ Future<void> showAllocateFundsSheet(BuildContext context) async {
                     Expanded(
                       child: AmountEntryField(
                         fieldKey: const ValueKey('allocate-funds-total'),
+                        visualStyle: AmountEntryVisualStyle.inline,
                         initialMinor: totalAmountMinor,
                         autofocus: true,
                         replaceZeroOnFirstInput: true,
@@ -1039,6 +1040,7 @@ Future<void> showAllocateFundsSheet(BuildContext context) async {
                             fieldKey: ValueKey(
                               'allocate-funds-amount-${allocations[index].id}',
                             ),
+                            visualStyle: AmountEntryVisualStyle.allocation,
                             initialMinor: allocations[index].amountMinor,
                             replaceZeroOnFirstInput: true,
                             currency: store.preferences.currency,
@@ -1141,7 +1143,7 @@ Future<void> showAllocateFundsSheet(BuildContext context) async {
                       child: TextField(
                         key: const ValueKey('allocate-funds-note'),
                         controller: noteController,
-                        decoration: const InputDecoration(
+                        decoration: polishedFormTextDecoration(
                           hintText: 'Add a note (optional)',
                         ),
                       ),
@@ -1214,6 +1216,7 @@ Future<bool> showScheduledFundFundingDialog(
   var alertPreference =
       existing?.alertPreference ?? v2_scheduled.AlertPreference.none;
   var customAlertTimeMinutes = existing?.customAlertTimeMinutes ?? 9 * 60;
+  var reminderTimeZone = existing?.reminderTimeZone;
   var customAlertOffsetDays = existing?.customAlertOffsetDays ?? 0;
   final scheduledTimeMinutes = existing?.scheduledTimeMinutes ?? 9 * 60;
   var repeatAlertUntilResolved = existing?.repeatAlertUntilResolved ?? false;
@@ -1275,6 +1278,7 @@ Future<bool> showScheduledFundFundingDialog(
                     endDate: existing?.endDate,
                     alertPreference: alertPreference,
                     customAlertTimeMinutes: customAlertTimeMinutes,
+                    reminderTimeZone: reminderTimeZone,
                     customAlertOffsetDays: customAlertOffsetDays,
                     scheduledTimeMinutes: scheduledTimeMinutes,
                     repeatAlertUntilResolved: repeatAlertUntilResolved,
@@ -1361,6 +1365,7 @@ Future<bool> showScheduledFundFundingDialog(
                         fieldKey: const ValueKey(
                           'scheduled-fund-funding-amount',
                         ),
+                        visualStyle: AmountEntryVisualStyle.inline,
                         initialMinor: amountMinor,
                         replaceZeroOnFirstInput: true,
                         currency: store.preferences.currency,
@@ -1412,6 +1417,7 @@ Future<bool> showScheduledFundFundingDialog(
                     alertPreference,
                     daysBefore: customAlertOffsetDays,
                     timeMinutes: customAlertTimeMinutes,
+                    timeZone: reminderTimeZone,
                   ),
                   onTap: () async {
                     final selected = await pickReminderRule(
@@ -1419,6 +1425,7 @@ Future<bool> showScheduledFundFundingDialog(
                       preference: alertPreference,
                       daysBefore: customAlertOffsetDays,
                       timeMinutes: customAlertTimeMinutes,
+                      timeZone: reminderTimeZone,
                       scheduledTimeMinutes: scheduledTimeMinutes,
                     );
                     if (selected != null) {
@@ -1426,6 +1433,7 @@ Future<bool> showScheduledFundFundingDialog(
                         alertPreference = selected.preference;
                         customAlertOffsetDays = selected.daysBefore;
                         customAlertTimeMinutes = selected.timeMinutes;
+                        reminderTimeZone = selected.timeZone;
                       });
                     }
                   },
@@ -1449,7 +1457,7 @@ Future<bool> showScheduledFundFundingDialog(
                   controller: note,
                   minLines: 1,
                   maxLines: 3,
-                  decoration: const InputDecoration(
+                  decoration: polishedFormTextDecoration(
                     hintText: 'Add a note (optional)',
                   ),
                 ),
@@ -1772,209 +1780,195 @@ Future<void> showReservationAmountDialog(
   int? savingReservedMinor;
   int? savingAvailableMinor;
   String? error;
-  final amountFocusNode = FocusNode();
-  var requestedInitialFocus = false;
-  try {
-    await showDialog<void>(
-      context: context,
-      useRootNavigator: false,
-      builder: (dialogContext) {
-        if (!requestedInitialFocus) {
-          requestedInitialFocus = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (dialogContext.mounted) amountFocusNode.requestFocus();
-          });
-        }
-        return StatefulBuilder(
-          builder: (dialogContext, setState) {
-            final liveReservedMinor = store.reservationAmountMinor(
-              containerType: containerType,
-              containerId: containerId,
-            );
-            final liveAvailableMinor = store.availableToSpendForAccount(
-              fundingAccountId,
-            );
-            // Once Save begins, keep the preview anchored to its pre-submit
-            // baseline. The store notifies listeners immediately after the
-            // successful mutation; using that new value while the draft is
-            // still visible would apply the amount twice for one frame.
-            final reservedMinor = isSaving && savingReservedMinor != null
-                ? savingReservedMinor!
-                : liveReservedMinor;
-            final availableMinor = isSaving && savingAvailableMinor != null
-                ? savingAvailableMinor!
-                : liveAvailableMinor;
-            final resultMinor = isReturn
-                ? reservedMinor - amountMinor
-                : availableMinor - amountMinor;
-            final exceedsReservation = isReturn && amountMinor > reservedMinor;
-            final overcommitted = !isReturn && resultMinor < 0;
-            final theme = Theme.of(dialogContext);
-            final contextStyle = theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.25,
-            );
-            return TransactionSheetFrame(
-              title: isReturn
-                  ? isGoal
-                        ? 'Return Goal Reservation'
-                        : 'Return Funds'
-                  : 'Allocate to $containerName',
-              actions: TransactionFormActions(
-                onCancel: () => Navigator.pop(dialogContext),
-                canSave: amountMinor > 0 && !exceedsReservation,
-                isSaving: isSaving,
-                saveLabel: isReturn ? 'Return' : 'Allocate',
-                onSave: () async {
-                  if (isSaving) return;
-                  setState(() {
-                    isSaving = true;
-                    savingReservedMinor = reservedMinor;
-                    savingAvailableMinor = availableMinor;
-                    error = null;
-                  });
-                  try {
-                    if (isReturn) {
-                      await store.returnReservation(
-                        containerType: containerType,
-                        containerId: containerId,
-                        amountMinor: amountMinor,
-                        date: DateTime.now(),
-                        waitForRemote: false,
-                      );
-                    } else {
-                      await store.allocateReservation(
-                        containerType: containerType,
-                        containerId: containerId,
-                        amountMinor: amountMinor,
-                        date: DateTime.now(),
-                        waitForRemote: false,
-                      );
-                    }
-                    if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  } catch (exception) {
-                    if (!dialogContext.mounted) return;
-                    setState(() {
-                      isSaving = false;
-                      savingReservedMinor = null;
-                      savingAvailableMinor = null;
-                      error = exception.toString();
-                    });
+  await showDialog<void>(
+    context: context,
+    useRootNavigator: false,
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (dialogContext, setState) {
+          final liveReservedMinor = store.reservationAmountMinor(
+            containerType: containerType,
+            containerId: containerId,
+          );
+          final liveAvailableMinor = store.availableToSpendForAccount(
+            fundingAccountId,
+          );
+          // Once Save begins, keep the preview anchored to its pre-submit
+          // baseline. The store notifies listeners immediately after the
+          // successful mutation; using that new value while the draft is
+          // still visible would apply the amount twice for one frame.
+          final reservedMinor = isSaving && savingReservedMinor != null
+              ? savingReservedMinor!
+              : liveReservedMinor;
+          final availableMinor = isSaving && savingAvailableMinor != null
+              ? savingAvailableMinor!
+              : liveAvailableMinor;
+          final resultMinor = isReturn
+              ? reservedMinor - amountMinor
+              : availableMinor - amountMinor;
+          final exceedsReservation = isReturn && amountMinor > reservedMinor;
+          final overcommitted = !isReturn && resultMinor < 0;
+          final theme = Theme.of(dialogContext);
+          final contextStyle = theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            height: 1.25,
+          );
+          return TransactionSheetFrame(
+            title: isReturn
+                ? isGoal
+                      ? 'Return Goal Reservation'
+                      : 'Return Funds'
+                : 'Allocate to $containerName',
+            actions: TransactionFormActions(
+              onCancel: () => Navigator.pop(dialogContext),
+              canSave: amountMinor > 0 && !exceedsReservation,
+              isSaving: isSaving,
+              saveLabel: isReturn ? 'Return' : 'Allocate',
+              onSave: () async {
+                if (isSaving) return;
+                setState(() {
+                  isSaving = true;
+                  savingReservedMinor = reservedMinor;
+                  savingAvailableMinor = availableMinor;
+                  error = null;
+                });
+                try {
+                  if (isReturn) {
+                    await store.returnReservation(
+                      containerType: containerType,
+                      containerId: containerId,
+                      amountMinor: amountMinor,
+                      date: DateTime.now(),
+                      waitForRemote: false,
+                    );
+                  } else {
+                    await store.allocateReservation(
+                      containerType: containerType,
+                      containerId: containerId,
+                      amountMinor: amountMinor,
+                      date: DateTime.now(),
+                      waitForRemote: false,
+                    );
                   }
-                },
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (isReturn) ...[
-                    Text(
-                      '$containerName ${isGoal ? 'Goal' : 'Fund'}',
-                      key: const ValueKey('reservation-container-context'),
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                } catch (exception) {
+                  if (!dialogContext.mounted) return;
+                  setState(() {
+                    isSaving = false;
+                    savingReservedMinor = null;
+                    savingAvailableMinor = null;
+                    error = exception.toString();
+                  });
+                }
+              },
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (isReturn) ...[
+                  Text(
+                    '$containerName ${isGoal ? 'Goal' : 'Fund'}',
+                    key: const ValueKey('reservation-container-context'),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Reserved ${money(reservedMinor, store.preferences.currency)}',
+                    key: const ValueKey('reservation-current-context'),
+                    style: contextStyle,
+                  ),
+                  Text(
+                    'Returns to ${fundingAccount.name}',
+                    key: const ValueKey('reservation-funding-account'),
+                    style: contextStyle,
+                  ),
+                ] else ...[
+                  Text(
+                    'From ${fundingAccount.name}',
+                    key: const ValueKey('reservation-funding-account'),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Available to Spend ${money(availableMinor, store.preferences.currency)}',
+                    key: const ValueKey('reservation-current-context'),
+                    style: contextStyle,
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.md),
+                TransactionFormLabel('Amount'),
+                Row(
+                  children: [
+                    TransactionFormIcon(AppIcon.money),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: AmountEntryField(
+                        fieldKey: const ValueKey('fund-operation-amount'),
+                        visualStyle: AmountEntryVisualStyle.inline,
+                        labelText: null,
+                        initialMinor: 0,
+                        autofocus: true,
+                        replaceZeroOnFirstInput: true,
+                        currency: store.preferences.currency,
+                        onChanged: (value) => setState(() {
+                          amountMinor = value.abs();
+                          error = null;
+                        }),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Reserved ${money(reservedMinor, store.preferences.currency)}',
-                      key: const ValueKey('reservation-current-context'),
-                      style: contextStyle,
-                    ),
-                    Text(
-                      'Returns to ${fundingAccount.name}',
-                      key: const ValueKey('reservation-funding-account'),
-                      style: contextStyle,
-                    ),
-                  ] else ...[
-                    Text(
-                      'From ${fundingAccount.name}',
-                      key: const ValueKey('reservation-funding-account'),
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Available to Spend ${money(availableMinor, store.preferences.currency)}',
-                      key: const ValueKey('reservation-current-context'),
-                      style: contextStyle,
                     ),
                   ],
-                  const SizedBox(height: AppSpacing.md),
-                  TransactionFormLabel('Amount'),
-                  Row(
-                    children: [
-                      TransactionFormIcon(AppIcon.money),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: AmountEntryField(
-                          fieldKey: const ValueKey('fund-operation-amount'),
-                          initialMinor: 0,
-                          autofocus: true,
-                          focusNode: amountFocusNode,
-                          replaceZeroOnFirstInput: true,
-                          currency: store.preferences.currency,
-                          onChanged: (value) => setState(() {
-                            amountMinor = value.abs();
-                            error = null;
-                          }),
-                        ),
-                      ),
-                    ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  isReturn
+                      ? 'After return · ${money(resultMinor, store.preferences.currency)} reserved'
+                      : 'After allocation · ${money(resultMinor, store.preferences.currency)} available',
+                  key: const ValueKey('reservation-live-result'),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: exceedsReservation
+                        ? AppColors.danger
+                        : overcommitted
+                        ? AppColors.warning
+                        : theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(height: AppSpacing.sm),
+                ),
+                if (exceedsReservation) ...[
+                  const SizedBox(height: AppSpacing.xxs),
                   Text(
-                    isReturn
-                        ? 'After return · ${money(resultMinor, store.preferences.currency)} reserved'
-                        : 'After allocation · ${money(resultMinor, store.preferences.currency)} available',
-                    key: const ValueKey('reservation-live-result'),
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: exceedsReservation
-                          ? AppColors.danger
-                          : overcommitted
-                          ? AppColors.warning
-                          : theme.colorScheme.onSurfaceVariant,
+                    'Return cannot exceed the currently reserved amount.',
+                    key: const ValueKey('reservation-return-exceeds'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.danger,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  if (exceedsReservation) ...[
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      'Return cannot exceed the currently reserved amount.',
-                      key: const ValueKey('reservation-return-exceeds'),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.danger,
-                        fontWeight: FontWeight.w700,
-                      ),
+                ] else if (overcommitted) ...[
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    'This exceeds the account’s available money.',
+                    key: const ValueKey('reservation-overcommit-warning'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.warning,
+                      fontWeight: FontWeight.w700,
                     ),
-                  ] else if (overcommitted) ...[
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      'This exceeds the account’s available money.',
-                      key: const ValueKey('reservation-overcommit-warning'),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.warning,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                  if (error != null) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      error!,
-                      style: const TextStyle(color: AppColors.danger),
-                    ),
-                  ],
+                  ),
                 ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  } finally {
-    amountFocusNode.dispose();
-  }
+                if (error != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(error!, style: const TextStyle(color: AppColors.danger)),
+                ],
+              ],
+            ),
+          );
+        },
+      );
+    },
+  );
 }
 
 enum _FundTargetTiming { none, endOfMonth, fixedDay }
@@ -2066,7 +2060,7 @@ Future<void> showFundEditor(
                       key: const ValueKey('fund-name'),
                       controller: name,
                       autofocus: true,
-                      decoration: const InputDecoration(hintText: 'Bills'),
+                      decoration: polishedFormTextDecoration(hintText: 'Bills'),
                       onChanged: (_) => setState(() {}),
                     ),
                   ),
@@ -2132,6 +2126,8 @@ Future<void> showFundEditor(
                   Expanded(
                     child: AmountEntryField(
                       fieldKey: const ValueKey('fund-target-amount'),
+                      visualStyle: AmountEntryVisualStyle.inline,
+                      labelText: null,
                       initialMinor: targetMinor,
                       currency: store.preferences.currency,
                       onChanged: (value) =>
@@ -2221,7 +2217,7 @@ Future<void> showFundEditor(
                   Expanded(
                     child: TextField(
                       controller: description,
-                      decoration: const InputDecoration(
+                      decoration: polishedFormTextDecoration(
                         hintText: 'Optional description',
                       ),
                     ),

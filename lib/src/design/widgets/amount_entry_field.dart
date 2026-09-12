@@ -5,6 +5,8 @@ import '../../domain/money.dart';
 import '../design_tokens.dart';
 import '../money_format.dart';
 
+enum AmountEntryVisualStyle { standard, inline, allocation }
+
 class AmountEntryField extends StatefulWidget {
   const AmountEntryField({
     required this.onChanged,
@@ -12,6 +14,7 @@ class AmountEntryField extends StatefulWidget {
     this.currency = const CurrencyFormatSettings(),
     this.labelText = 'Amount',
     this.autofocus = false,
+    this.focusRequest = 0,
     this.allowNegative = false,
     this.forceNegative = false,
     this.selectAllOnFocus = false,
@@ -22,6 +25,7 @@ class AmountEntryField extends StatefulWidget {
     this.decoration,
     this.fieldKey,
     this.focusNode,
+    this.visualStyle = AmountEntryVisualStyle.standard,
     super.key,
   });
 
@@ -29,6 +33,10 @@ class AmountEntryField extends StatefulWidget {
   final CurrencyFormatSettings currency;
   final String? labelText;
   final bool autofocus;
+
+  /// Increment to return focus after a related picker closes. The field keeps
+  /// ownership of its node and ignores queued requests after it is disposed.
+  final int focusRequest;
   final bool allowNegative;
   final bool forceNegative;
   final bool selectAllOnFocus;
@@ -39,6 +47,7 @@ class AmountEntryField extends StatefulWidget {
   final InputDecoration? decoration;
   final Key? fieldKey;
   final FocusNode? focusNode;
+  final AmountEntryVisualStyle visualStyle;
   final ValueChanged<int> onChanged;
 
   @override
@@ -76,6 +85,11 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
   @override
   void didUpdateWidget(covariant AmountEntryField oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusRequest != widget.focusRequest) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
     if (oldWidget.initialMinor != widget.initialMinor ||
         oldWidget.currency != widget.currency) {
       _setText(_formatter.formatMinor(widget.initialMinor));
@@ -95,6 +109,8 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
 
   @override
   Widget build(BuildContext context) {
+    final inline = widget.visualStyle == AmountEntryVisualStyle.inline;
+    final allocation = widget.visualStyle == AmountEntryVisualStyle.allocation;
     return TextField(
       key: widget.fieldKey,
       controller: _controller,
@@ -107,7 +123,7 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
           TextInputType.numberWithOptions(
             signed: widget.allowNegative && !widget.forceNegative,
           ),
-      textAlign: widget.textAlign,
+      textAlign: inline ? TextAlign.left : widget.textAlign,
       textAlignVertical: TextAlignVertical.center,
       autofocus: widget.autofocus,
       inputFormatters: [
@@ -117,21 +133,37 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
       ],
       decoration:
           widget.decoration ??
-          InputDecoration(
-            labelText: widget.labelText,
-            floatingLabelBehavior: widget.labelText == null
-                ? FloatingLabelBehavior.never
-                : FloatingLabelBehavior.always,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
-            ),
-          ),
+          (inline
+              ? const InputDecoration(
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  filled: false,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 10),
+                )
+              : InputDecoration(
+                  labelText: widget.labelText,
+                  floatingLabelBehavior: widget.labelText == null
+                      ? FloatingLabelBehavior.never
+                      : FloatingLabelBehavior.always,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.sm,
+                  ),
+                )),
       style:
           widget.textStyle ??
           Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontSize: inline
+                ? 22
+                : allocation
+                ? 18
+                : null,
             fontFeatures: const [FontFeature.tabularFigures()],
-            fontWeight: FontWeight.w900,
+            fontWeight: inline || allocation
+                ? FontWeight.w600
+                : FontWeight.w900,
           ),
       onTap: _moveCursorToEnd,
       onTapOutside: (_) => _focusNode.unfocus(),

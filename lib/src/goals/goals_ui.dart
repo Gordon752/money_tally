@@ -1173,7 +1173,7 @@ Future<void> showGoalEditor(
                         autofocus: true,
                         onTapOutside: (_) =>
                             FocusManager.instance.primaryFocus?.unfocus(),
-                        decoration: const InputDecoration(
+                        decoration: polishedFormTextDecoration(
                           hintText: 'Emergency Fund',
                         ),
                         onChanged: (_) => setDialogState(() {}),
@@ -1264,6 +1264,7 @@ Future<void> showGoalEditor(
                     Expanded(
                       child: AmountEntryField(
                         fieldKey: const ValueKey('goal-target-amount'),
+                        visualStyle: AmountEntryVisualStyle.inline,
                         initialMinor: targetMinor,
                         currency: store.preferences.currency,
                         labelText: null,
@@ -1321,7 +1322,7 @@ Future<void> showGoalEditor(
                         key: const ValueKey('goal-description'),
                         controller: descriptionController,
                         maxLines: 3,
-                        decoration: const InputDecoration(
+                        decoration: polishedFormTextDecoration(
                           hintText: 'Add a description (optional)',
                         ),
                       ),
@@ -1628,6 +1629,7 @@ Future<void> showFundGoalsSheet(
                     Expanded(
                       child: AmountEntryField(
                         fieldKey: const ValueKey('fund-goals-total'),
+                        visualStyle: AmountEntryVisualStyle.inline,
                         initialMinor: totalAmountMinor,
                         autofocus: true,
                         replaceZeroOnFirstInput: true,
@@ -1746,6 +1748,7 @@ Future<void> showFundGoalsSheet(
                             fieldKey: ValueKey(
                               'fund-goals-amount-${allocations[index].id}',
                             ),
+                            visualStyle: AmountEntryVisualStyle.allocation,
                             initialMinor: allocations[index].amountMinor,
                             replaceZeroOnFirstInput: true,
                             currency: store.preferences.currency,
@@ -1836,7 +1839,7 @@ Future<void> showFundGoalsSheet(
                       child: TextField(
                         key: const ValueKey('fund-goals-note'),
                         controller: noteController,
-                        decoration: const InputDecoration(
+                        decoration: polishedFormTextDecoration(
                           hintText: 'Add a note (optional)',
                         ),
                       ),
@@ -1940,6 +1943,7 @@ Future<bool> showScheduledGoalFundingDialog(
   var alertPreference =
       existing?.alertPreference ?? v2_scheduled.AlertPreference.none;
   var customAlertTimeMinutes = existing?.customAlertTimeMinutes ?? 9 * 60;
+  var reminderTimeZone = existing?.reminderTimeZone;
   var customAlertOffsetDays = existing?.customAlertOffsetDays ?? 0;
   final scheduledTimeMinutes = existing?.scheduledTimeMinutes ?? 9 * 60;
   var repeatAlertUntilResolved = existing?.repeatAlertUntilResolved ?? false;
@@ -2068,6 +2072,7 @@ Future<bool> showScheduledGoalFundingDialog(
                     endDate: existing?.endDate,
                     alertPreference: alertPreference,
                     customAlertTimeMinutes: customAlertTimeMinutes,
+                    reminderTimeZone: reminderTimeZone,
                     customAlertOffsetDays: customAlertOffsetDays,
                     scheduledTimeMinutes: scheduledTimeMinutes,
                     repeatAlertUntilResolved: repeatAlertUntilResolved,
@@ -2142,6 +2147,7 @@ Future<bool> showScheduledGoalFundingDialog(
                         fieldKey: const ValueKey(
                           'scheduled-goal-funding-total',
                         ),
+                        visualStyle: AmountEntryVisualStyle.inline,
                         initialMinor: totalAmountMinor,
                         replaceZeroOnFirstInput: true,
                         currency: store.preferences.currency,
@@ -2227,6 +2233,7 @@ Future<bool> showScheduledGoalFundingDialog(
                             fieldKey: ValueKey(
                               'scheduled-goal-funding-amount-${allocations[index].id}',
                             ),
+                            visualStyle: AmountEntryVisualStyle.allocation,
                             initialMinor: allocations[index].amountMinor,
                             replaceZeroOnFirstInput: true,
                             currency: store.preferences.currency,
@@ -2286,6 +2293,7 @@ Future<bool> showScheduledGoalFundingDialog(
                     alertPreference,
                     daysBefore: customAlertOffsetDays,
                     timeMinutes: customAlertTimeMinutes,
+                    timeZone: reminderTimeZone,
                   ),
                   onTap: () async {
                     final selected = await pickReminderRule(
@@ -2293,6 +2301,7 @@ Future<bool> showScheduledGoalFundingDialog(
                       preference: alertPreference,
                       daysBefore: customAlertOffsetDays,
                       timeMinutes: customAlertTimeMinutes,
+                      timeZone: reminderTimeZone,
                       scheduledTimeMinutes: scheduledTimeMinutes,
                     );
                     if (selected != null) {
@@ -2300,6 +2309,7 @@ Future<bool> showScheduledGoalFundingDialog(
                         alertPreference = selected.preference;
                         customAlertOffsetDays = selected.daysBefore;
                         customAlertTimeMinutes = selected.timeMinutes;
+                        reminderTimeZone = selected.timeZone;
                       });
                     }
                   },
@@ -2323,7 +2333,7 @@ Future<bool> showScheduledGoalFundingDialog(
                   controller: note,
                   minLines: 1,
                   maxLines: 3,
-                  decoration: const InputDecoration(
+                  decoration: polishedFormTextDecoration(
                     hintText: 'Add a note (optional)',
                   ),
                 ),
@@ -2387,7 +2397,11 @@ class GoalAllocationSummary extends StatelessWidget {
                   : 'Remaining\n${money(remaining.abs(), currency)}',
               textAlign: TextAlign.right,
               style: TextStyle(
-                color: balanced ? AppTheme.accent : AppColors.danger,
+                color: balanced
+                    ? AppTheme.accent
+                    : remaining == 0
+                    ? Theme.of(context).colorScheme.onSurfaceVariant
+                    : AppColors.danger,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -2472,6 +2486,7 @@ Future<void> showAddGoalContributionSheet(
                     Expanded(
                       child: AmountEntryField(
                         fieldKey: const ValueKey('goal-contribution-amount'),
+                        visualStyle: AmountEntryVisualStyle.inline,
                         autofocus: true,
                         replaceZeroOnFirstInput: true,
                         initialMinor: amountMinor,
@@ -2507,7 +2522,7 @@ Future<void> showAddGoalContributionSheet(
                       child: TextField(
                         key: const ValueKey('goal-contribution-note'),
                         controller: noteController,
-                        decoration: const InputDecoration(
+                        decoration: polishedFormTextDecoration(
                           hintText: 'Add a note (optional)',
                         ),
                       ),

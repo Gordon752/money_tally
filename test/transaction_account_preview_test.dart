@@ -85,6 +85,112 @@ TransactionAccountPreview _preview(
 );
 
 void main() {
+  for (final scheduled in [false, true]) {
+    testWidgets(
+      '${scheduled ? 'scheduled' : 'transfer'} focuses amount without an account and after choosing one',
+      (tester) async {
+        final store = FinanceDataStore(dataSet: _dataSet());
+        await _open(tester, store, (context) async {
+          if (scheduled) {
+            await app.showScheduledTransactionDialog(context);
+          } else {
+            await app.showTransferDialog(context);
+          }
+        }, width: 393);
+        final field = find.byKey(
+          ValueKey(scheduled ? 'scheduled-amount' : 'transfer-amount'),
+        );
+        TextField amount() => tester.widget<TextField>(field);
+        expect(amount().focusNode!.hasFocus, isTrue);
+        await tester.enterText(field, '12345');
+        for (final name in ['Checking', 'Chase']) {
+          final row = find.byKey(
+            ValueKey(scheduled ? 'scheduled-account' : 'transfer-from-account'),
+          );
+          await tester.ensureVisible(row);
+          await tester.tap(row);
+          await tester.pumpAndSettle();
+          await tester.tap(find.widgetWithText(ListTile, name));
+          await tester.pumpAndSettle();
+          expect(amount().focusNode!.hasFocus, isTrue);
+          expect(amount().controller!.text, r'$123.45');
+        }
+        expect(store.transactions, isEmpty);
+        expect(store.scheduledTransactions, isEmpty);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        store.dispose();
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.iOS,
+        TargetPlatform.macOS,
+      }),
+    );
+  }
+  for (final mode in [
+    AccountDefaultMode.none,
+    AccountDefaultMode.specific,
+    AccountDefaultMode.lastUsed,
+  ]) {
+    testWidgets(
+      'new transaction focuses amount with $mode and after account selection',
+      (tester) async {
+        final store = FinanceDataStore(
+          dataSet: _dataSet().copyWith(
+            preferences: UserPreferences(
+              defaultTransactionAccountMode: mode,
+              defaultTransactionAccountId: 'card',
+              lastUsedTransactionAccountId: 'card',
+            ),
+          ),
+        );
+        await _open(
+          tester,
+          store,
+          app.showDefaultTransactionDialog,
+          width: 393,
+        );
+        final field = find.byKey(const ValueKey('transaction-amount'));
+        TextField amount() => tester.widget<TextField>(field);
+        expect(amount().focusNode!.hasFocus, isTrue);
+        final accountRow = find.byKey(
+          const ValueKey('transaction-account-row'),
+        );
+        expect(
+          find.descendant(
+            of: accountRow,
+            matching: find.text('Choose account'),
+          ),
+          mode == AccountDefaultMode.none ? findsOneWidget : findsNothing,
+        );
+        // Entering money must survive selecting or changing the account.
+        await tester.enterText(field, '12345');
+        await tester.pump();
+        for (final name in ['Checking', 'Chase']) {
+          await tester.ensureVisible(accountRow);
+          await tester.tap(accountRow);
+          await tester.pumpAndSettle();
+          await tester.tap(find.widgetWithText(ListTile, name));
+          await tester.pumpAndSettle();
+          expect(amount().focusNode!.hasFocus, isTrue);
+          expect(amount().controller!.text, r'$123.45');
+          expect(amount().controller!.selection.isCollapsed, isTrue);
+        }
+        expect(store.transactions, isEmpty);
+        expect(store.preferences.defaultTransactionAccountMode, mode);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        store.dispose();
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.iOS,
+        TargetPlatform.macOS,
+      }),
+    );
+  }
+
   test(
     'preview reuses signed expense/income/transfer deltas for assets and liabilities',
     () {

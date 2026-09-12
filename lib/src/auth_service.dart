@@ -286,6 +286,10 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       final store = _currentDataStore;
       if (store != null) {
         unawaited(_runAutomaticBackupCatchUp(store));
+        final scheduler = store.notificationScheduler;
+        if (scheduler is LocalNotificationScheduler) {
+          unawaited(scheduler.refreshDeviceTimeZone());
+        }
       }
       if (user != null && store != null && !user.isLocalOnly) {
         unawaited(_refreshSyncStateAndCatchUp(user, store));

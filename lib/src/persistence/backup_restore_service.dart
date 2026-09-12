@@ -11,8 +11,15 @@ import '../domain/scheduled_transaction.dart';
 import '../domain/transaction.dart';
 import '../domain/user_preferences.dart';
 
-const currentBackupSchemaVersion = 7;
-const supportedBackupSchemaVersions = {2, 4, 5, 6, currentBackupSchemaVersion};
+const currentBackupSchemaVersion = 8;
+const supportedBackupSchemaVersions = {
+  2,
+  4,
+  5,
+  6,
+  7,
+  currentBackupSchemaVersion,
+};
 
 class BackupValidationException implements Exception {
   const BackupValidationException(this.message);
@@ -178,7 +185,7 @@ class BackupRestoreValidator {
     int sourceVersion,
   ) {
     if (sourceVersion == currentBackupSchemaVersion) return root;
-    if (sourceVersion == 6) {
+    if (sourceVersion == 6 || sourceVersion == 7) {
       // Missing reminder offset is same-day. ScheduledTransactionRecord keeps
       // the old shared time for both clocks without inferring another rule.
       return {...root, 'schemaVersion': currentBackupSchemaVersion};

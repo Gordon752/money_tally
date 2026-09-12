@@ -2680,6 +2680,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('1 day before').last);
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('custom-reminder-save')));
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
@@ -3077,6 +3079,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('1 day before').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('custom-reminder-save')));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
       await tester.tap(
@@ -4444,7 +4448,7 @@ void main() {
       tester
           .widget<TextField>(find.byKey(const ValueKey('scheduled-amount')))
           .autofocus,
-      isFalse,
+      isTrue,
     );
     expect(find.text('Choose account'), findsOneWidget);
     expect(find.text('Choose category'), findsWidgets);
@@ -9239,7 +9243,7 @@ void main() {
 
     expect(find.text('Time'), findsOneWidget);
     expect(find.text('9:00 AM'), findsOneWidget);
-    expect(find.text('Same day · 11:15 AM'), findsOneWidget);
+    expect(find.text('Same day · 11:15 AM · Device time'), findsOneWidget);
     await tester.ensureVisible(
       find.byKey(const ValueKey('scheduled-repeat-alert')),
     );

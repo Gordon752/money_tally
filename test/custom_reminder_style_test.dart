@@ -97,7 +97,7 @@ void main() {
     testWidgets(
       'Custom Reminder uses Trackmark form layout: ${layout.name}',
       (tester) async {
-        ({int daysBefore, int timeMinutes})? result;
+        ({int daysBefore, int timeMinutes, String? timeZone})? result;
         await _open(
           tester,
           size: layout.size,
@@ -110,8 +110,8 @@ void main() {
         expect(find.byType(AlertDialog), findsNothing);
         expect(find.byType(app.TransactionSheetFrame), findsOneWidget);
         expect(find.byType(app.TransactionFormActions), findsOneWidget);
-        expect(find.byType(app.TransactionFormDivider), findsOneWidget);
-        expect(find.byType(app.TransactionFormIcon), findsNWidgets(2));
+        expect(find.byType(app.TransactionFormDivider), findsNWidgets(2));
+        expect(find.byType(app.TransactionFormIcon), findsNWidgets(3));
         expect(find.byKey(_timeKey), findsOneWidget);
         expect(
           tester.widget(find.byKey(_timeKey)),
@@ -196,7 +196,7 @@ void main() {
         expect(find.byKey(_warningKey), findsNothing);
         await tester.tap(find.byKey(_saveKey));
         await tester.pumpAndSettle();
-        expect(result, (daysBefore: 3, timeMinutes: 540));
+        expect(result, (daysBefore: 3, timeMinutes: 540, timeZone: null));
         expect(tester.takeException(), isNull);
       },
       variant: TargetPlatformVariant({layout.platform}),
@@ -234,7 +234,7 @@ void main() {
     'Standard Cancel discards edits without returning a reminder rule',
     (tester) async {
       var completed = false;
-      ({int daysBefore, int timeMinutes})? result;
+      ({int daysBefore, int timeMinutes, String? timeZone})? result;
       await _open(
         tester,
         onResult: (value) {
@@ -259,7 +259,8 @@ Future<void> _open(
   double scale = 1,
   double keyboard = 0,
   bool dark = false,
-  void Function(({int daysBefore, int timeMinutes})?)? onResult,
+  void Function(({int daysBefore, int timeMinutes, String? timeZone})?)?
+  onResult,
 }) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;

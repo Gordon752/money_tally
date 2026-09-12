@@ -1,6 +1,8 @@
 import '../domain/scheduled_transaction.dart';
 import '../domain/scheduled_occurrence_authority.dart';
 import '../domain/transaction.dart';
+import 'reminder_time_zone.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 abstract interface class NotificationScheduler {
   Future<bool> requestPermissionIfNeeded();
@@ -204,6 +206,17 @@ class ScheduledNotificationPlanner {
         : minutes;
     // Subtract calendar dates, not 24-hour durations: DST days can contain
     // 23/25 hours. Construct the chosen wall clock directly on the result day.
+    final zone = scheduledTransaction.reminderTimeZone;
+    if (zone != null) {
+      return tz.TZDateTime(
+        reminderLocation(zone),
+        dueDate.year,
+        dueDate.month,
+        dueDate.day - offsetDays,
+        timeMinutes ~/ 60,
+        timeMinutes % 60,
+      );
+    }
     return localCalendarDateTime(
       dueDate.year,
       dueDate.month,

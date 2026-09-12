@@ -1,4 +1,5 @@
 import 'json_helpers.dart';
+import '../notifications/reminder_time_zone.dart';
 import 'reservation.dart';
 import 'sync_metadata.dart';
 import 'transaction.dart';
@@ -307,6 +308,7 @@ class ScheduledTransactionRecord {
     this.alertPreference = AlertPreference.none,
     this.customAlertTimeMinutes,
     this.customAlertOffsetDays = 0,
+    this.reminderTimeZone,
     int? scheduledTimeMinutes,
     this.repeatAlertUntilResolved = false,
     this.scheduledNotificationIds = const [],
@@ -350,6 +352,9 @@ class ScheduledTransactionRecord {
   /// Civil calendar days before each occurrence; legacy Custom meant same day.
   final int customAlertOffsetDays;
 
+  /// IANA zone for fixed-time reminders; absent in legacy/local reminders.
+  final String? reminderTimeZone;
+
   /// Independent of the reminder clock. Legacy records displayed the latter
   /// in the transaction Time row, so preserve that value when first loaded.
   final int scheduledTimeMinutes;
@@ -373,6 +378,7 @@ class ScheduledTransactionRecord {
 
   bool get hasAlert => alertPreference != AlertPreference.none;
   bool get hasValidReminderTiming =>
+      validReminderTimeZone(reminderTimeZone) &&
       customAlertOffsetDays >= 0 &&
       customAlertOffsetDays <= 36500 &&
       scheduledTimeMinutes >= 0 &&
@@ -455,6 +461,8 @@ class ScheduledTransactionRecord {
     AlertPreference? alertPreference,
     int? customAlertTimeMinutes,
     int? customAlertOffsetDays,
+    String? reminderTimeZone,
+    bool clearReminderTimeZone = false,
     int? scheduledTimeMinutes,
     bool? repeatAlertUntilResolved,
     List<int>? scheduledNotificationIds,
@@ -498,6 +506,9 @@ class ScheduledTransactionRecord {
       alertPreference: alertPreference ?? this.alertPreference,
       customAlertOffsetDays:
           customAlertOffsetDays ?? this.customAlertOffsetDays,
+      reminderTimeZone: clearReminderTimeZone
+          ? null
+          : reminderTimeZone ?? this.reminderTimeZone,
       scheduledTimeMinutes: scheduledTimeMinutes ?? this.scheduledTimeMinutes,
       customAlertTimeMinutes: clearCustomAlertTime
           ? null
@@ -552,6 +563,7 @@ class ScheduledTransactionRecord {
       'alertPreference': alertPreference.name,
       'customAlertTimeMinutes': customAlertTimeMinutes,
       'customAlertOffsetDays': customAlertOffsetDays,
+      'reminderTimeZone': reminderTimeZone,
       'scheduledTimeMinutes': scheduledTimeMinutes,
       'repeatAlertUntilResolved': repeatAlertUntilResolved,
       'scheduledNotificationIds': scheduledNotificationIds,
@@ -610,6 +622,7 @@ class ScheduledTransactionRecord {
       ),
       customAlertTimeMinutes: json['customAlertTimeMinutes'] as int?,
       customAlertOffsetDays: json['customAlertOffsetDays'] as int? ?? 0,
+      reminderTimeZone: json['reminderTimeZone'] as String?,
       scheduledTimeMinutes: json['scheduledTimeMinutes'] as int?,
       repeatAlertUntilResolved:
           json['repeatAlertUntilResolved'] as bool? ?? false,
