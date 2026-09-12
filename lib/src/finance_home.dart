@@ -4703,7 +4703,7 @@ class LedgerMonthlySummary extends StatelessWidget {
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.18),
         ),
       ),
-      child: Row(
+      child: _LedgerSummaryLayout(
         children: [
           Expanded(
             child: _LedgerMonthlySummaryMetric(
@@ -4766,7 +4766,7 @@ class LedgerMonthlyCompactSummary extends StatelessWidget {
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.14),
         ),
       ),
-      child: Row(
+      child: _LedgerSummaryLayout(
         children: [
           Expanded(
             child: _LedgerMonthlySummaryMetric(
@@ -4808,6 +4808,67 @@ class LedgerMonthlyCompactSummary extends StatelessWidget {
       ),
     );
   }
+}
+
+class _LedgerSummaryLayout extends StatelessWidget {
+  const _LedgerSummaryLayout({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final metrics = children
+          .whereType<Expanded>()
+          .map((item) => item.child as _LedgerMonthlySummaryMetric)
+          .toList();
+      final cellWidth = (box.maxWidth - 2) / 3 - 12;
+      final fits = metrics.every(
+        (metric) =>
+            MoneyText.measuredWidth(
+              context,
+              MoneyFormatter(metric.currency).formatMinor(
+                metric.amountMinor,
+                showPositiveSign: metric.showPositiveSign,
+              ),
+              metric.compact ? 12 : 13,
+            ) <=
+            cellWidth,
+      );
+      if (fits) return Row(children: children);
+      return Column(
+        key: const ValueKey('ledger-summary-stacked'),
+        children: [
+          for (final metric in metrics)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      metric.label,
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    flex: 3,
+                    child: MoneyText(
+                      amountMinor: metric.amountMinor,
+                      currency: metric.currency,
+                      fontSize: metric.compact ? 13 : 15,
+                      minimumFontSize: metric.compact ? 12 : 13,
+                      textAlign: TextAlign.right,
+                      showPositiveSign: metric.showPositiveSign,
+                      color: metric.color,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      );
+    },
+  );
 }
 
 class _LedgerMonthlySummaryDivider extends StatelessWidget {
@@ -4863,6 +4924,8 @@ class _LedgerMonthlySummaryMetric extends StatelessWidget {
           amountMinor: amountMinor,
           currency: currency,
           fontSize: compact ? 13 : 15,
+          minimumFontSize: compact ? 12 : 13,
+          textAlign: TextAlign.center,
           fontWeight: FontWeight.w800,
           showPositiveSign: showPositiveSign,
           color: color,
@@ -5015,8 +5078,8 @@ class LedgerJournalRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
-        child: SizedBox(
-          height: 72,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 72),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
@@ -5061,40 +5124,73 @@ class LedgerJournalRow extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              transaction.payee,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodyLarge
-                                  ?.copyWith(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: -0.15,
-                                  ),
+                      LayoutBuilder(
+                        builder: (context, box) {
+                          final positive =
+                              transaction.type == TransactionType.income;
+                          final value = MoneyFormatter(currency).formatMinor(
+                            signedAmount,
+                            showPositiveSign: positive,
+                          );
+                          final naturalWidth = MoneyText.measuredWidth(
+                            context,
+                            value,
+                            16,
+                          );
+                          final slot = max(
+                            104.0,
+                            min(naturalWidth + 1, box.maxWidth * .5),
+                          ).clamp(0.0, box.maxWidth * .6).toDouble();
+                          final fits =
+                              MoneyText.measuredWidth(context, value, 14) <=
+                              slot - 1;
+                          final title = Text(
+                            transaction.payee,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.15,
+                                ),
+                          );
+                          final amount = MoneyText(
+                            key: ValueKey(
+                              'ledger-primary-amount-${transaction.id}',
                             ),
-                          ),
-                          const SizedBox(width: AppSpacing.sm),
-                          SizedBox(
-                            width: 104,
-                            child: Align(
-                              alignment: Alignment.centerRight,
-                              child: MoneyText(
-                                amountMinor: signedAmount,
-                                currency: currency,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                showPositiveSign:
-                                    transaction.type == TransactionType.income,
-                                color: signedAmount < 0
-                                    ? AppColors.danger
-                                    : null,
-                              ),
+                            amountMinor: signedAmount,
+                            currency: currency,
+                            fontSize: 16,
+                            minimumFontSize: 14,
+                            textAlign: TextAlign.right,
+                            showPositiveSign: positive,
+                            color: signedAmount < 0 ? AppColors.danger : null,
+                          );
+                          if (fits) {
+                            return Row(
+                              children: [
+                                Expanded(child: title),
+                                const SizedBox(width: AppSpacing.sm),
+                                SizedBox(width: slot, child: amount),
+                              ],
+                            );
+                          }
+                          return Padding(
+                            key: ValueKey(
+                              'ledger-amount-stacked-${transaction.id}',
                             ),
-                          ),
-                        ],
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                title,
+                                const SizedBox(height: 4),
+                                amount,
+                              ],
+                            ),
+                          );
+                        },
                       ),
                       if (resolvedMetadataDetails.isNotEmpty) ...[
                         const SizedBox(height: 3),
@@ -10050,17 +10146,8 @@ class _SettingsViewState extends State<SettingsView> {
                       ? 'This session'
                       : 'Not available'),
               showDivider: widget.onSyncNow != null || widget.onSignOut != null,
+              onTap: _showSyncDetails,
             ),
-            if (widget.onSyncNow != null)
-              SettingsActionRow(
-                icon: AppIcon.reports,
-                title: 'Last sync activity',
-                subtitle:
-                    widget.syncDiagnosticLabel ??
-                    'Run Sync now to collect details',
-                subtitleMaxLines: 6,
-                showDivider: true,
-              ),
             if (widget.onSyncNow != null)
               SettingsActionRow(
                 icon: AppIcon.sync,
@@ -10368,14 +10455,10 @@ class _SettingsViewState extends State<SettingsView> {
               showDivider: true,
               onTap: _openDataManagement,
             ),
-            SettingsActionRow(
-              key: const ValueKey('settings-help-guides'),
-              icon: AppIcon.info,
+            const TrackmarkSupportLinkRow(
+              key: ValueKey('settings-help-guides'),
+              link: TrackmarkSupportLink.help,
               title: 'Help & Guides',
-              subtitle:
-                  'A quick guide to understanding and planning your money',
-              showDivider: true,
-              onTap: () => showTrackmarkGuides(context),
             ),
             SettingsActionRow(
               key: const ValueKey('settings-replay-onboarding'),
@@ -10401,6 +10484,39 @@ class _SettingsViewState extends State<SettingsView> {
     );
   }
 
+  Future<void> _showSyncDetails() => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => TransactionSheetFrame(
+      title: 'Sync Details',
+      actions: TextButton(
+        onPressed: () => Navigator.pop(dialogContext),
+        child: const Text('Done'),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Status: ${widget.syncLabel}'),
+          if (widget.syncErrorLabel != null) Text(widget.syncErrorLabel!),
+          const SizedBox(height: 12),
+          Text(
+            'Last successful sync: ${widget.lastSuccessfulSyncLabel ?? (widget.syncLabel == 'Synced' ? 'This session' : 'Not available')}',
+          ),
+          const SizedBox(height: 16),
+          const Text('Last sync activity'),
+          const SizedBox(height: 4),
+          SelectableText(
+            widget.syncDiagnosticLabel ?? 'Run Sync now to collect details',
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Technical details for troubleshooting. Read and write counts are estimates, not a billing statement.',
+          ),
+        ],
+      ),
+    ),
+  );
+
   Future<void> _confirmAndDeleteAccount() async {
     final deleteAccount = widget.onDeleteAccount;
     if (deleteAccount == null || _isDeletingAccount) return;
@@ -10422,7 +10538,9 @@ class _SettingsViewState extends State<SettingsView> {
         ..showSnackBar(
           const SnackBar(
             content: Text(
-              'Trackmark could not delete the account. Nothing was deleted.',
+              'Account deletion could not be confirmed. Some data may already '
+              'have been deleted. Cloud sync is paused; retry deletion or '
+              'contact support.',
             ),
           ),
         );
@@ -11393,8 +11511,8 @@ Future<bool> _showDeleteTrackmarkAccountConfirmation(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'This permanently deletes your Sign in with Apple '
-                    'account and all Trackmark financial data stored in '
+                    'This permanently deletes your Trackmark account '
+                    '(not your Apple Account) and all financial data stored in '
                     'Trackmark cloud sync. This cannot be undone.',
                   ),
                   const SizedBox(height: AppSpacing.md),

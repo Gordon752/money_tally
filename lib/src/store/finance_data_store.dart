@@ -1572,6 +1572,17 @@ class FinanceDataStore extends ChangeNotifier {
     userId = null;
   }
 
+  /// Stop queued publication and settle already-submitted effects before a
+  /// destructive account operation. Local financial data remains untouched.
+  Future<void> suspendRemoteSyncForAccountDeletion() async {
+    final attempt = _syncAttempt;
+    final edits = _editUploadAuthority;
+    detachRemoteSync();
+    await attempt?.drain();
+    await edits.drain();
+    await _remoteCommitTail;
+  }
+
   Future<FinanceDataSet> pushAllRecordsToRemote({
     FinanceDataSet? baseline,
   }) async {

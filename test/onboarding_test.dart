@@ -439,9 +439,15 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await _tap(tester, find.byKey(const ValueKey('settings-help-guides')));
-      expect(find.byType(app.TrackmarkGuidesPage), findsOneWidget);
-      await _tap(tester, find.byTooltip('Back'));
+      expect(
+        tester
+            .widget<app.TrackmarkSupportLinkRow>(
+              find.byKey(const ValueKey('settings-help-guides')),
+            )
+            .title,
+        'Help & Guides',
+      );
+      expect(find.byType(app.TrackmarkGuidesPage), findsNothing);
       await _tap(tester, find.byKey(const ValueKey('data-management-row')));
       await _tap(tester, find.byKey(const ValueKey('reset-preferences-row')));
       expect(find.text('Reset Preferences?'), findsOneWidget);

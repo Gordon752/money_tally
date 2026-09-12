@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/src/domain/account.dart';
@@ -19,6 +20,8 @@ import 'package:money_tally/src/sync/automatic_sync_service.dart';
 import 'package:money_tally/src/sync/cloud_sync_coordinator.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   group('automatic sync preferences and policy', () {
     test(
       'defaults off and persists preferred time through JSON and backup',

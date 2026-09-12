@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_tally/src/domain/account.dart';
@@ -11,6 +12,8 @@ import 'package:money_tally/src/store/finance_data_store.dart';
 import 'package:money_tally/src/sync/cloud_sync_coordinator.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   testWidgets(
     'timed-out persistence cannot leave a concurrent edit stale on disk',
     (tester) async {

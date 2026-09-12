@@ -6,12 +6,14 @@ class TrackmarkSupportLinkRow extends StatefulWidget {
     required this.link,
     this.showDivider = true,
     this.service,
+    this.title,
     super.key,
   });
 
   final TrackmarkSupportLink link;
   final bool showDivider;
   final SupportLinkService? service;
+  final String? title;
 
   @override
   State<TrackmarkSupportLinkRow> createState() =>
@@ -54,7 +56,7 @@ class _TrackmarkSupportLinkRowState extends State<TrackmarkSupportLinkRow> {
       TrackmarkSupportLink.support => AppIcon.support,
       TrackmarkSupportLink.privacy => AppIcon.shield,
     },
-    title: widget.link.title,
+    title: widget.title ?? widget.link.title,
     subtitle: widget.link.subtitle,
     subtitleMaxLines: 4,
     showDivider: widget.showDivider,

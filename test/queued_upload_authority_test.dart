@@ -10,6 +10,42 @@ import 'package:money_tally/src/persistence/finance_record_repository.dart';
 import 'package:money_tally/src/store/finance_data_store.dart';
 
 void main() {
+  testWidgets(
+    'deletion drains submitted edits, drops queued uploads, and preserves local data',
+    (tester) async {
+      final remote = _Remote();
+      final store = FinanceDataStore(
+        dataSet: _data(),
+        remoteRepository: remote,
+        userId: 'user',
+      );
+      final first = store.saveAccount(
+        store.accounts.single.copyWith(name: 'First'),
+      );
+      await tester.pump();
+      final second = store.saveAccount(
+        store.accounts.single.copyWith(name: 'Queued'),
+      );
+      await tester.pump();
+      var finished = false;
+      final suspended = store.suspendRemoteSyncForAccountDeletion().then(
+        (_) => finished = true,
+      );
+      await tester.pump();
+      expect(finished, isFalse);
+      remote.release.complete();
+      await tester.pump();
+      await Future.wait([first, second, suspended]);
+      expect(remote.names, ['First']);
+      expect(store.accounts.single.name, 'Queued');
+      await store.saveAccount(
+        store.accounts.single.copyWith(name: 'Local only'),
+      );
+      expect(remote.names, ['First']);
+      expect(store.accounts.single.name, 'Local only');
+      store.dispose();
+    },
+  );
   for (final boundary in ['restore', 'reset', 'sign-out/reconnect']) {
     testWidgets('queued edits cannot cross $boundary', (tester) async {
       final remote = _Remote();

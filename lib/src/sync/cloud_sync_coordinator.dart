@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../persistence/finance_record_repository.dart';
 import '../store/finance_data_store.dart';
 import 'sync_attempt_authority.dart';
+import 'account_deletion_state.dart';
 
 enum CloudSyncStatus { idle, syncing, synced, issue }
 
@@ -313,6 +314,24 @@ class CloudSyncCoordinator extends ChangeNotifier {
     required Duration timeout,
   }) async {
     final session = _session;
+    // Includes background entry points and prevents cross-account uploads while
+    // the device still holds data from an unconfirmed deletion.
+    try {
+      if (await AccountDeletionState.pendingUser() != null) {
+        _lastErrorDescription =
+            'Cloud sync is paused while account deletion '
+            'is unconfirmed. Retry deletion or contact support.';
+        _setStatus(CloudSyncStatus.issue);
+        return false;
+      }
+    } on Object {
+      _lastErrorDescription =
+          'Could not check account deletion recovery state. '
+          'Cloud sync has been paused for safety.';
+      _setStatus(CloudSyncStatus.issue);
+      return false;
+    }
+    if (session != _session) return false;
     final acquired = await executionStateStore.tryAcquireLease(
       userId,
       now: now(),

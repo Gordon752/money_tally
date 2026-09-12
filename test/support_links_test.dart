@@ -211,18 +211,13 @@ void main() {
       );
       final guides = find.byKey(const ValueKey('settings-help-guides'));
       await tester.ensureVisible(guides);
-      await tester.tap(guides);
-      await tester.pumpAndSettle();
-      expect(find.byType(app.TrackmarkGuidesPage), findsOneWidget);
-      final help = find.byKey(const ValueKey('guides-website-link'));
-      expect(help.hitTestable(), findsOneWidget);
+      expect(guides.hitTestable(), findsOneWidget);
       expect(
-        tester.widget<app.TrackmarkSupportLinkRow>(help).link,
+        tester.widget<app.TrackmarkSupportLinkRow>(guides).link,
         TrackmarkSupportLink.help,
       );
-      expect(find.text('Know what your money is doing'), findsOneWidget);
-      await tester.tap(find.byTooltip('Back'));
-      await tester.pumpAndSettle();
+      expect(find.byType(app.TrackmarkGuidesPage), findsNothing);
+      expect(find.text('Setup tips and answers online'), findsOneWidget);
       expect(find.byType(app.SettingsView), findsOneWidget);
       expect(store.dataSet.toJson(), before);
       expect(tester.takeException(), isNull);

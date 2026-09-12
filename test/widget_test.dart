@@ -10519,11 +10519,17 @@ void main() {
 
     expect(find.text('Your data is securely synced'), findsOneWidget);
     expect(find.text('Today at 8:39 AM'), findsOneWidget);
+    expect(find.text('Last sync activity'), findsNothing);
+    await tester.tap(find.text('Last successful sync'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sync Details'), findsOneWidget);
     expect(find.text('Last sync activity'), findsOneWidget);
     expect(
       find.text('Incremental · ~13 reads · 1 write · manual'),
       findsOneWidget,
     );
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
     expect(find.text('Automatic Sync'), findsOneWidget);
     expect(find.text('Preferred Daily Sync Time'), findsOneWidget);
     await tester.tap(find.widgetWithText(ListTile, 'Sync now'));
@@ -10647,6 +10653,9 @@ void main() {
     await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
 
+    expect(find.text('Last sync activity'), findsNothing);
+    await tester.tap(find.text('Last successful sync'));
+    await tester.pumpAndSettle();
     expect(find.text('Last sync activity'), findsOneWidget);
     expect(find.text('Run Sync now to collect details'), findsOneWidget);
   });

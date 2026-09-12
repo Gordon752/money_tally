@@ -80,6 +80,7 @@ import 'src/store/finance_data_store_scope.dart';
 import 'src/support/support_links.dart';
 import 'src/sync/automatic_sync_service.dart';
 import 'src/sync/cloud_sync_coordinator.dart';
+import 'src/sync/account_deletion_state.dart';
 
 part 'src/app_theme.dart';
 part 'src/accounts/manage_accounts.dart';

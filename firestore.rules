@@ -7,7 +7,14 @@ service cloud.firestore {
     }
 
     function ownsUserData(userId) {
-      return signedIn() && request.auth.uid == userId;
+      return signedIn() && request.auth.uid == userId
+        && !exists(/databases/$(database)/documents/accountDeletions/$(userId));
+    }
+
+    // Server-only, intentionally outside the recursively deleted user tree.
+    // No client may remove the barrier, including the deleted account's devices.
+    match /accountDeletions/{userId} {
+      allow read, write: if false;
     }
 
     match /users/{userId}/accounts/{documentId} {

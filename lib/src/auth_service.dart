@@ -106,6 +106,7 @@ class FirebaseAuthService implements AuthService {
 
   @override
   Future<void> deleteAccountWithApple() async {
+    if (await AccountDeletionState.isConfirmed()) return;
     final currentUser = _auth.currentUser;
     if (currentUser == null) {
       throw const AuthException(
@@ -113,40 +114,50 @@ class FirebaseAuthService implements AuthService {
       );
     }
 
+    var stage = 'Apple verification';
     try {
-      final rawNonce = _randomNonce();
-      final nonce = sha256.convert(utf8.encode(rawNonce)).toString();
-      final appleCredential = await SignInWithApple.getAppleIDCredential(
-        scopes: [
-          AppleIDAuthorizationScopes.email,
-          AppleIDAuthorizationScopes.fullName,
-        ],
-        nonce: nonce,
-      );
-      final identityToken = appleCredential.identityToken;
-      if (identityToken == null) {
-        throw const AuthException(
-          'Apple could not verify the account deletion request.',
+      // A lost response must retry the existing request, not require another
+      // Apple authorization after the original grant has been revoked.
+      if (!await AccountDeletionState.requestWasSent()) {
+        final rawNonce = _randomNonce();
+        final nonce = sha256.convert(utf8.encode(rawNonce)).toString();
+        final appleCredential = await SignInWithApple.getAppleIDCredential(
+          scopes: [
+            AppleIDAuthorizationScopes.email,
+            AppleIDAuthorizationScopes.fullName,
+          ],
+          nonce: nonce,
         );
-      }
-      final authorizationCode = appleCredential.authorizationCode.trim();
-      if (authorizationCode.isEmpty) {
-        throw const AuthException(
-          'Apple did not authorize the account deletion request.',
-        );
+        final identityToken = appleCredential.identityToken;
+        if (identityToken == null) {
+          throw const AuthException(
+            'Apple could not verify the account deletion request.',
+          );
+        }
+        final authorizationCode = appleCredential.authorizationCode.trim();
+        if (authorizationCode.isEmpty) {
+          throw const AuthException(
+            'Apple did not authorize the account deletion request.',
+          );
+        }
+
+        final credential =
+            firebase_auth.AppleAuthProvider.credentialWithIDToken(
+              identityToken,
+              rawNonce,
+              firebase_auth.AppleFullPersonName(
+                givenName: appleCredential.givenName,
+                familyName: appleCredential.familyName,
+              ),
+            );
+        stage = 'Apple reauthentication';
+        await currentUser.reauthenticateWithCredential(credential);
+        stage = 'Apple authorization revocation';
+        await _auth.revokeTokenWithAuthorizationCode(authorizationCode);
+        await AccountDeletionState.markRequestSent();
       }
 
-      final credential = firebase_auth.AppleAuthProvider.credentialWithIDToken(
-        identityToken,
-        rawNonce,
-        firebase_auth.AppleFullPersonName(
-          givenName: appleCredential.givenName,
-          familyName: appleCredential.familyName,
-        ),
-      );
-      await currentUser.reauthenticateWithCredential(credential);
-      await _auth.revokeTokenWithAuthorizationCode(authorizationCode);
-
+      stage = 'Cloud deletion request';
       final result = await _functions
           .httpsCallable('deleteTrackmarkAccount')
           .call<Object?>();
@@ -156,18 +167,37 @@ class FirebaseAuthService implements AuthService {
           'Trackmark could not confirm that the account was deleted.',
         );
       }
-      await _auth.signOut();
+      // Keep the local session until device cleanup is durable. On restart the
+      // gate can finish cleanup without asking a deleted identity to sign in.
+      await AccountDeletionState.markConfirmed();
     } on SignInWithAppleAuthorizationException catch (error) {
       if (error.code == AuthorizationErrorCode.canceled) {
-        throw const AuthException('Account deletion was cancelled.');
+        throw const AuthException(
+          'Account deletion was cancelled.',
+          deletionNotStarted: true,
+        );
       }
       throw const AuthException(
         'Apple could not verify the account deletion request. Try again.',
       );
     } on firebase_auth.FirebaseAuthException catch (error) {
-      throw AuthException(_accountDeletionAuthMessage(error.code));
+      throw AuthException(
+        '${_accountDeletionAuthMessage(error.code)}\n\n'
+        'Step: $stage. Code: ${accountDeletionDiagnosticCode(error.code)}.',
+      );
     } on FirebaseFunctionsException catch (error) {
-      throw AuthException(_accountDeletionCloudMessage(error.code));
+      if (error.code == 'failed-precondition') {
+        // The server only uses this error before creating the deletion barrier.
+        await AccountDeletionState.markRequestSent(sent: false);
+        throw const AuthException(
+          'Please verify with Apple again to confirm account deletion.',
+          deletionNotStarted: true,
+        );
+      }
+      throw AuthException(
+        '${_accountDeletionCloudMessage(error.code)}\n\n'
+        'Step: $stage. Code: ${accountDeletionDiagnosticCode(error.code)}.',
+      );
     }
   }
 
@@ -183,18 +213,25 @@ String _accountDeletionAuthMessage(String code) => switch (code) {
   _ => 'Trackmark could not delete the account. Try again.',
 };
 
+// Show only a bounded SDK error code, never raw exception messages, identity
+// tokens, authorization codes, emails or other account details.
+String accountDeletionDiagnosticCode(String code) =>
+    RegExp(r'^[a-z0-9-]{1,80}$').hasMatch(code) ? code : 'unknown';
+
 String _accountDeletionCloudMessage(String code) => switch (code) {
   'unauthenticated' =>
-    'Your sign-in expired. Sign in again before deleting the account.',
-  'unavailable' || 'deadline-exceeded' =>
-    'Trackmark cloud is temporarily unavailable. Nothing was deleted.',
-  _ => 'Trackmark could not delete the cloud account. Nothing was deleted.',
+    'Your sign-in expired before deletion could be confirmed. Cloud sync '
+        'remains paused. Contact support if retrying deletion does not complete.',
+  _ =>
+    'Account deletion could not be confirmed. Some data may already have '
+        'been deleted. Cloud sync is paused; retry deletion or contact support.',
 };
 
 class AuthException implements Exception {
-  const AuthException(this.message);
+  const AuthException(this.message, {this.deletionNotStarted = false});
 
   final String message;
+  final bool deletionNotStarted;
 
   @override
   String toString() => message;
@@ -249,6 +286,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   String? _automaticSyncConfiguration;
   String? _foregroundCatchUpAttempt;
   var _isDeletingAccount = false;
+  var _deletionStateLoaded = false;
+  String? _deletionRecoveryError;
+  String? _pendingDeletionUid;
   FinanceDataStore? _currentDataStore;
   MoneyTallyUser? _currentUser;
   CloudSyncCoordinator? _syncCoordinator;
@@ -261,10 +301,44 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _authStateStream = widget.authService.authStateChanges();
+    // A strictly local-only service has no cloud identity or uploader. Keep its
+    // first frame synchronous; cloud-capable sessions must pass recovery first.
+    _deletionStateLoaded =
+        widget.authService is LocalOnlyAuthService &&
+        widget.recordRepository == null &&
+        widget.remoteRepository == null;
+    if (!_deletionStateLoaded) unawaited(_loadAccountDeletionState());
     final repository = widget.recordRepository;
     if (repository != null) {
       _syncCoordinator = CloudSyncCoordinator(recordRepository: repository)
         ..addListener(_handleSyncStateChanged);
+    }
+  }
+
+  Future<void> _loadAccountDeletionState() async {
+    try {
+      final uid = await AccountDeletionState.pendingUser();
+      if (!mounted) return;
+      _pendingDeletionUid = uid;
+      if (uid != null && await AccountDeletionState.isConfirmed()) {
+        if (!mounted) return;
+        await _finishDeletedAccountCleanup(
+          uid,
+          FinanceDataStoreScope.read(context),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _deletionRecoveryError = null;
+        _deletionStateLoaded = true;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(
+        () => _deletionRecoveryError =
+            'Account recovery could not finish. Sync remains paused. '
+            'Please retry or contact Trackmark support.',
+      );
     }
   }
 
@@ -329,6 +403,36 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    if (_deletionRecoveryError case final String error) {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(error, textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () {
+                    setState(() => _deletionRecoveryError = null);
+                    unawaited(_loadAccountDeletionState());
+                  },
+                  child: const Text('Retry recovery'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    if (!_deletionStateLoaded || _isDeletingAccount) {
+      return _FullScreenProgress(
+        message: _isDeletingAccount
+            ? 'Deleting Trackmark account'
+            : 'Checking account recovery',
+      );
+    }
     if (_localOnly) {
       final dataStore = FinanceDataStoreScope.read(context);
       dataStore.detachRemoteSync();
@@ -369,7 +473,11 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
           });
           return SignInView(
             isSigningIn: _isSigningIn,
-            errorMessage: _authError,
+            errorMessage: _pendingDeletionUid != null
+                ? 'A previous account deletion is unconfirmed. Cloud sync '
+                      'remains paused. Contact Trackmark support before '
+                      'creating or syncing another account.'
+                : _authError,
             onAppleSignIn: _signInWithApple,
             onContinueLocal: () => setState(() => _localOnly = true),
           );
@@ -382,7 +490,9 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
           if (mounted) unawaited(_prepareSignedInExperience(user, dataStore));
         });
         final coordinator = _syncCoordinator;
-        final syncLabel = user.isLocalOnly
+        final syncLabel = _pendingDeletionUid != null
+            ? 'Deletion unconfirmed'
+            : user.isLocalOnly
             ? 'Local only'
             : switch (coordinator?.status) {
                 CloudSyncStatus.syncing => 'Syncing',
@@ -392,13 +502,17 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
         final lastSuccessfulSyncAt = coordinator?.lastSuccessfulSyncAt;
         return FinanceHome(
           syncLabel: syncLabel,
-          syncErrorLabel: coordinator?.lastErrorDescription,
+          syncErrorLabel: _pendingDeletionUid != null
+              ? 'Cloud sync is paused. Retry account deletion or contact support.'
+              : coordinator?.lastErrorDescription,
           syncDiagnosticLabel: coordinator?.lastDiagnostic?.conciseDescription,
           lastSuccessfulSyncLabel: lastSuccessfulSyncAt == null
               ? null
               : '${shortDate(lastSuccessfulSyncAt.toLocal())} '
                     '${TimeOfDay.fromDateTime(lastSuccessfulSyncAt.toLocal()).format(context)}',
-          onSyncNow: user.isLocalOnly ? null : () => _syncNow(user, dataStore),
+          onSyncNow: user.isLocalOnly || _pendingDeletionUid != null
+              ? null
+              : () => _syncNow(user, dataStore),
           onSignOut: user.isLocalOnly ? null : widget.authService.signOut,
           onDeleteAccount: user.isLocalOnly
               ? null
@@ -433,12 +547,18 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     FinanceDataStore dataStore,
   ) async {
     final coordinator = _syncCoordinator;
+    if (!_deletionStateLoaded ||
+        _isDeletingAccount ||
+        _pendingDeletionUid != null) {
+      return;
+    }
     if (user.isLocalOnly || coordinator == null) return;
     if (_loadedSyncStateUid != user.uid) {
       _loadedSyncStateUid = user.uid;
       await coordinator.loadStateForUser(user.uid);
     }
     await _configureAutomaticSync(dataStore.preferences);
+    if (_isDeletingAccount || _pendingDeletionUid != null) return;
     var attemptedInitialSync = false;
     if (_syncedUid != user.uid && _autoSyncAttemptedUid != user.uid) {
       attemptedInitialSync = true;
@@ -457,6 +577,11 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   }
 
   Future<void> _configureAutomaticSync(UserPreferences preferences) async {
+    if (!_deletionStateLoaded ||
+        _isDeletingAccount ||
+        _pendingDeletionUid != null) {
+      return;
+    }
     final signature =
         '${preferences.automaticSyncEnabled}:${preferences.preferredDailySyncMinutes}:'
         '${preferences.automaticBackupsEnabled}:${preferences.preferredAutomaticBackupMinutes}';
@@ -477,6 +602,11 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   }
 
   Future<void> _runAutomaticBackupCatchUp(FinanceDataStore dataStore) async {
+    if (!_deletionStateLoaded ||
+        _isDeletingAccount ||
+        _pendingDeletionUid != null) {
+      return;
+    }
     try {
       await _automaticBackupService.createIfDue(
         dataSet: dataStore.dataSet,
@@ -492,6 +622,11 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     FinanceDataStore dataStore,
   ) async {
     final coordinator = _syncCoordinator;
+    if (!_deletionStateLoaded ||
+        _isDeletingAccount ||
+        _pendingDeletionUid != null) {
+      return;
+    }
     if (coordinator == null || user.isLocalOnly || coordinator.isSyncing) {
       return;
     }
@@ -518,6 +653,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   }
 
   Future<void> _syncNow(MoneyTallyUser user, FinanceDataStore dataStore) async {
+    if (_isDeletingAccount || _pendingDeletionUid != null) return;
     final coordinator = _syncCoordinator;
     if (coordinator == null || coordinator.isSyncing) return;
     _syncedUid = null;
@@ -563,40 +699,114 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       );
     }
 
-    _isDeletingAccount = true;
-    try {
-      await widget.authService.deleteAccountWithApple();
-
-      dataStore.detachRemoteSync();
-      coordinator?.reset();
-      await widget.automaticSyncScheduler.cancel();
-
-      try {
-        await dataStore.resetTrackmarkData(resetAppSettings: true);
-      } on Object {
-        // The server-side account deletion has already completed. Removing
-        // the durable local snapshot is the final safety net if notification
-        // reconciliation or another device-only cleanup step fails.
-        await dataStore.localRepository?.clear();
-      }
-
-      await dataStore.localRepository?.clearAcknowledgedRestoreGeneration(
-        user.uid,
+    if (_pendingDeletionUid != null && _pendingDeletionUid != user.uid) {
+      throw const AuthException(
+        'A previous account deletion needs recovery. '
+        'Contact support before syncing another account on this device.',
       );
-      final repository = widget.recordRepository;
-      if (repository case final DeletedAccountLocalStateCleaner cleaner) {
-        await cleaner.clearDeletedAccountLocalState(user.uid);
+    }
+    setState(() {
+      _isDeletingAccount = true;
+      _authError = null;
+    });
+    String? deletionFailure;
+    try {
+      await AccountDeletionState.begin(user.uid);
+      _pendingDeletionUid = user.uid;
+      coordinator?.reset();
+      await dataStore.suspendRemoteSyncForAccountDeletion();
+      await widget.automaticSyncScheduler.cancel();
+      await widget.authService.deleteAccountWithApple();
+      await AccountDeletionState.markConfirmed();
+      await _finishDeletedAccountCleanup(user.uid, dataStore);
+    } on AuthException catch (error) {
+      deletionFailure = error.message;
+      if (!await AccountDeletionState.requestWasSent() &&
+          !await AccountDeletionState.isConfirmed()) {
+        await AccountDeletionState.clear();
+        _pendingDeletionUid = null;
+        _autoSyncAttemptedUid = null;
+        _syncedUid = null;
+        _automaticSyncConfiguration = null;
       }
-      await coordinator?.executionStateStore.clearForDeletedUser(user.uid);
-
-      _syncedUid = null;
-      _autoSyncAttemptedUid = null;
-      _loadedSyncStateUid = null;
-      _automaticSyncConfiguration = null;
-      _foregroundCatchUpAttempt = null;
+      _authError = error.message;
+      rethrow;
+    } on Object {
+      deletionFailure =
+          'Account deletion could not be confirmed. Some data may already '
+          'have been deleted. Cloud sync remains paused. Retry account '
+          'deletion or contact Trackmark support.';
+      _authError = deletionFailure;
+      rethrow;
     } finally {
       _isDeletingAccount = false;
+      if (mounted) {
+        setState(() {});
+        if (deletionFailure case final String message) {
+          // The loading screen unmounts Settings, so its catch/snackbar cannot
+          // report this error. AuthGate survives and owns the acknowledgement.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            unawaited(
+              showDialog<void>(
+                context: context,
+                barrierDismissible: false,
+                builder: (dialogContext) => AlertDialog(
+                  title: const Text('Account deletion not completed'),
+                  content: SingleChildScrollView(child: Text(message)),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('OK'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          });
+        }
+      }
     }
+  }
+
+  Future<void> _finishDeletedAccountCleanup(
+    String uid,
+    FinanceDataStore dataStore,
+  ) async {
+    final coordinator = _syncCoordinator;
+    dataStore.detachRemoteSync();
+    coordinator?.reset();
+    await widget.automaticSyncScheduler.cancel();
+
+    try {
+      await dataStore.resetTrackmarkData(resetAppSettings: true);
+    } on Object {
+      // The server-side account deletion has already completed. Removing
+      // the durable local snapshot is the final safety net if notification
+      // reconciliation or another device-only cleanup step fails.
+      await dataStore.localRepository?.clear();
+      // Do not report success while in-memory cleanup is still uncertain. The
+      // confirmed recovery marker lets the next attempt/relaunch finish safely.
+      rethrow;
+    }
+
+    await dataStore.localRepository?.clearAcknowledgedRestoreGeneration(uid);
+    final repository = widget.recordRepository;
+    if (repository case final DeletedAccountLocalStateCleaner cleaner) {
+      await cleaner.clearDeletedAccountLocalState(uid);
+    }
+    await coordinator?.executionStateStore.clearForDeletedUser(uid);
+    // A prior failed attempt must not appear on the post-deletion sign-in page.
+    _authError = null;
+    await widget.authService.signOut();
+    await AccountDeletionState.clear();
+    _pendingDeletionUid = null;
+
+    _syncedUid = null;
+    _autoSyncAttemptedUid = null;
+    _loadedSyncStateUid = null;
+    _automaticSyncConfiguration = null;
+    _foregroundCatchUpAttempt = null;
   }
 }
 
