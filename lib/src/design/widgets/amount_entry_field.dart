@@ -5,6 +5,8 @@ import '../../domain/money.dart';
 import '../design_tokens.dart';
 import '../money_format.dart';
 
+enum AmountEntryVisualStyle { standard, inline, allocation }
+
 class AmountEntryField extends StatefulWidget {
   const AmountEntryField({
     required this.onChanged,
@@ -12,9 +14,18 @@ class AmountEntryField extends StatefulWidget {
     this.currency = const CurrencyFormatSettings(),
     this.labelText = 'Amount',
     this.autofocus = false,
+    this.focusRequest = 0,
     this.allowNegative = false,
+    this.forceNegative = false,
+    this.selectAllOnFocus = false,
+    this.replaceZeroOnFirstInput = false,
     this.keyboardType,
+    this.textStyle,
+    this.textAlign = TextAlign.right,
+    this.decoration,
     this.fieldKey,
+    this.focusNode,
+    this.visualStyle = AmountEntryVisualStyle.standard,
     super.key,
   });
 
@@ -22,9 +33,21 @@ class AmountEntryField extends StatefulWidget {
   final CurrencyFormatSettings currency;
   final String? labelText;
   final bool autofocus;
+
+  /// Increment to return focus after a related picker closes. The field keeps
+  /// ownership of its node and ignores queued requests after it is disposed.
+  final int focusRequest;
   final bool allowNegative;
+  final bool forceNegative;
+  final bool selectAllOnFocus;
+  final bool replaceZeroOnFirstInput;
   final TextInputType? keyboardType;
+  final TextStyle? textStyle;
+  final TextAlign textAlign;
+  final InputDecoration? decoration;
   final Key? fieldKey;
+  final FocusNode? focusNode;
+  final AmountEntryVisualStyle visualStyle;
   final ValueChanged<int> onChanged;
 
   @override
@@ -34,79 +57,140 @@ class AmountEntryField extends StatefulWidget {
 class _AmountEntryFieldState extends State<AmountEntryField> {
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
+  late final bool _ownsFocusNode;
   var _isUpdating = false;
-  var _hasUserEdited = false;
+  var _hasAppliedInitialSelection = false;
+  var _replaceZeroOnNextInput = false;
 
   MoneyFormatter get _formatter => MoneyFormatter(widget.currency);
 
   @override
   void initState() {
     super.initState();
-    _focusNode = FocusNode()..addListener(_handleFocusChanged);
+    _ownsFocusNode = widget.focusNode == null;
+    _focusNode = (widget.focusNode ?? FocusNode())
+      ..addListener(_handleFocusChanged);
     _controller = TextEditingController(
       text: _formatter.formatMinor(widget.initialMinor),
     );
+    _replaceZeroOnNextInput =
+        widget.replaceZeroOnFirstInput && widget.initialMinor == 0;
+    if (widget.autofocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
   }
 
   @override
   void didUpdateWidget(covariant AmountEntryField oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusRequest != widget.focusRequest) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
     if (oldWidget.initialMinor != widget.initialMinor ||
         oldWidget.currency != widget.currency) {
       _setText(_formatter.formatMinor(widget.initialMinor));
+    }
+    if (widget.initialMinor != 0) {
+      _replaceZeroOnNextInput = false;
     }
   }
 
   @override
   void dispose() {
-    _focusNode
-      ..removeListener(_handleFocusChanged)
-      ..dispose();
+    _focusNode.removeListener(_handleFocusChanged);
+    if (_ownsFocusNode) _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final inline = widget.visualStyle == AmountEntryVisualStyle.inline;
+    final allocation = widget.visualStyle == AmountEntryVisualStyle.allocation;
     return TextField(
       key: widget.fieldKey,
       controller: _controller,
       focusNode: _focusNode,
+      // Selection is managed below, including the explicit one-time opt-in
+      // for split editing. Desktop's default select-all must not override it.
+      selectAllOnFocus: false,
       keyboardType:
           widget.keyboardType ??
-          TextInputType.numberWithOptions(signed: widget.allowNegative),
-      textAlign: TextAlign.right,
+          TextInputType.numberWithOptions(
+            signed: widget.allowNegative && !widget.forceNegative,
+          ),
+      textAlign: inline ? TextAlign.left : widget.textAlign,
       textAlignVertical: TextAlignVertical.center,
       autofocus: widget.autofocus,
       inputFormatters: [
-        widget.allowNegative
+        widget.allowNegative && !widget.forceNegative
             ? FilteringTextInputFormatter.allow(RegExp(r'[-0-9]'))
             : FilteringTextInputFormatter.digitsOnly,
       ],
-      decoration: InputDecoration(
-        labelText: widget.labelText,
-        floatingLabelBehavior: widget.labelText == null
-            ? FloatingLabelBehavior.never
-            : FloatingLabelBehavior.always,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
-        ),
-      ),
-      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-        fontFeatures: const [FontFeature.tabularFigures()],
-        fontWeight: FontWeight.w900,
-      ),
-      onTap: _selectExistingAmount,
+      decoration:
+          widget.decoration ??
+          (inline
+              ? const InputDecoration(
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  filled: false,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 10),
+                )
+              : InputDecoration(
+                  labelText: widget.labelText,
+                  floatingLabelBehavior: widget.labelText == null
+                      ? FloatingLabelBehavior.never
+                      : FloatingLabelBehavior.always,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.sm,
+                  ),
+                )),
+      style:
+          widget.textStyle ??
+          Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontSize: inline
+                ? 22
+                : allocation
+                ? 18
+                : null,
+            fontFeatures: const [FontFeature.tabularFigures()],
+            fontWeight: inline || allocation
+                ? FontWeight.w600
+                : FontWeight.w900,
+          ),
+      onTap: _moveCursorToEnd,
+      onTapOutside: (_) => _focusNode.unfocus(),
       onChanged: _handleChanged,
     );
   }
 
   void _handleChanged(String rawValue) {
     if (_isUpdating) return;
-    _hasUserEdited = true;
-    final isNegative = widget.allowNegative && rawValue.trim().startsWith('-');
-    final digits = rawValue.replaceAll(RegExp(r'[^0-9]'), '');
+    final isNegative =
+        widget.forceNegative ||
+        (widget.allowNegative && rawValue.trim().startsWith('-'));
+    var digits = rawValue.replaceAll(RegExp(r'[^0-9]'), '');
+    if (_replaceZeroOnNextInput) {
+      final placeholderDigits = _formatter
+          .formatMinor(0)
+          .replaceAll(RegExp(r'[^0-9]'), '');
+      final enteredDigits =
+          digits.startsWith(placeholderDigits) &&
+              digits.length > placeholderDigits.length
+          ? digits.substring(placeholderDigits.length)
+          : digits;
+      if (enteredDigits != placeholderDigits) {
+        digits = enteredDigits;
+        _replaceZeroOnNextInput = false;
+      }
+    }
     final unsignedMinor = _formatter.parseDigitsToMinor(digits);
     final minor = isNegative ? -unsignedMinor : unsignedMinor;
     widget.onChanged(minor);
@@ -114,16 +198,27 @@ class _AmountEntryFieldState extends State<AmountEntryField> {
   }
 
   void _handleFocusChanged() {
-    if (_focusNode.hasFocus) {
-      _selectExistingAmount();
+    if (!_focusNode.hasFocus) return;
+    if (widget.replaceZeroOnFirstInput && widget.initialMinor == 0) {
+      _replaceZeroOnNextInput = true;
     }
+    if (widget.selectAllOnFocus && !_hasAppliedInitialSelection) {
+      _hasAppliedInitialSelection = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_focusNode.hasFocus) return;
+        _controller.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _controller.text.length,
+        );
+      });
+      return;
+    }
+    _moveCursorToEnd();
   }
 
-  void _selectExistingAmount() {
-    if (_hasUserEdited || widget.initialMinor == 0) return;
-    _controller.selection = TextSelection(
-      baseOffset: 0,
-      extentOffset: _controller.text.length,
+  void _moveCursorToEnd() {
+    _controller.selection = TextSelection.collapsed(
+      offset: _controller.text.length,
     );
   }
 

@@ -1,9 +1,9 @@
-# Money Tally Implementation Notes
+# Trackmark Money Implementation Notes
 
 ## Current Direction
 
 - Flutter app targeting iPhone, iPad, Mac, and future Android.
-- App name: Money Tally.
+- App name: Trackmark Money.
 - Visual direction follows the first expense app: restrained green accent, white panels, compact operational layout.
 - Initial scope excludes attachments and bank sync.
 

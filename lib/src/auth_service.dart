@@ -23,6 +23,7 @@ abstract interface class AuthService {
   MoneyTallyUser? get currentUser;
   Stream<MoneyTallyUser?> authStateChanges();
   Future<MoneyTallyUser> signInWithApple();
+  Future<void> deleteAccountWithApple();
   Future<void> signOut();
 }
 
@@ -42,14 +43,26 @@ class LocalOnlyAuthService implements AuthService {
   Future<MoneyTallyUser> signInWithApple() async => _user;
 
   @override
+  Future<void> deleteAccountWithApple() async {
+    throw const AuthException(
+      'Account deletion is only available for a signed-in account.',
+    );
+  }
+
+  @override
   Future<void> signOut() async {}
 }
 
 class FirebaseAuthService implements AuthService {
-  FirebaseAuthService({firebase_auth.FirebaseAuth? auth})
-    : _auth = auth ?? firebase_auth.FirebaseAuth.instance;
+  FirebaseAuthService({
+    firebase_auth.FirebaseAuth? auth,
+    FirebaseFunctions? functions,
+  }) : _auth = auth ?? firebase_auth.FirebaseAuth.instance,
+       _functions =
+           functions ?? FirebaseFunctions.instanceFor(region: 'us-central1');
 
   final firebase_auth.FirebaseAuth _auth;
+  final FirebaseFunctions _functions;
 
   @override
   MoneyTallyUser? get currentUser => _auth.currentUser?.toMoneyTallyUser();
@@ -92,13 +105,133 @@ class FirebaseAuthService implements AuthService {
   }
 
   @override
+  Future<void> deleteAccountWithApple() async {
+    if (await AccountDeletionState.isConfirmed()) return;
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      throw const AuthException(
+        'Sign in again before deleting your Trackmark account.',
+      );
+    }
+
+    var stage = 'Apple verification';
+    try {
+      // A lost response must retry the existing request, not require another
+      // Apple authorization after the original grant has been revoked.
+      if (!await AccountDeletionState.requestWasSent()) {
+        final rawNonce = _randomNonce();
+        final nonce = sha256.convert(utf8.encode(rawNonce)).toString();
+        final appleCredential = await SignInWithApple.getAppleIDCredential(
+          scopes: [
+            AppleIDAuthorizationScopes.email,
+            AppleIDAuthorizationScopes.fullName,
+          ],
+          nonce: nonce,
+        );
+        final identityToken = appleCredential.identityToken;
+        if (identityToken == null) {
+          throw const AuthException(
+            'Apple could not verify the account deletion request.',
+          );
+        }
+        final authorizationCode = appleCredential.authorizationCode.trim();
+        if (authorizationCode.isEmpty) {
+          throw const AuthException(
+            'Apple did not authorize the account deletion request.',
+          );
+        }
+
+        final credential =
+            firebase_auth.AppleAuthProvider.credentialWithIDToken(
+              identityToken,
+              rawNonce,
+              firebase_auth.AppleFullPersonName(
+                givenName: appleCredential.givenName,
+                familyName: appleCredential.familyName,
+              ),
+            );
+        stage = 'Apple reauthentication';
+        await currentUser.reauthenticateWithCredential(credential);
+        stage = 'Apple authorization revocation';
+        await _auth.revokeTokenWithAuthorizationCode(authorizationCode);
+        await AccountDeletionState.markRequestSent();
+      }
+
+      stage = 'Cloud deletion request';
+      final result = await _functions
+          .httpsCallable('deleteTrackmarkAccount')
+          .call<Object?>();
+      final data = result.data;
+      if (data is! Map || data['deleted'] != true) {
+        throw const AuthException(
+          'Trackmark could not confirm that the account was deleted.',
+        );
+      }
+      // Keep the local session until device cleanup is durable. On restart the
+      // gate can finish cleanup without asking a deleted identity to sign in.
+      await AccountDeletionState.markConfirmed();
+    } on SignInWithAppleAuthorizationException catch (error) {
+      if (error.code == AuthorizationErrorCode.canceled) {
+        throw const AuthException(
+          'Account deletion was cancelled.',
+          deletionNotStarted: true,
+        );
+      }
+      throw const AuthException(
+        'Apple could not verify the account deletion request. Try again.',
+      );
+    } on firebase_auth.FirebaseAuthException catch (error) {
+      throw AuthException(
+        '${_accountDeletionAuthMessage(error.code)}\n\n'
+        'Step: $stage. Code: ${accountDeletionDiagnosticCode(error.code)}.',
+      );
+    } on FirebaseFunctionsException catch (error) {
+      if (error.code == 'failed-precondition') {
+        // The server only uses this error before creating the deletion barrier.
+        await AccountDeletionState.markRequestSent(sent: false);
+        throw const AuthException(
+          'Please verify with Apple again to confirm account deletion.',
+          deletionNotStarted: true,
+        );
+      }
+      throw AuthException(
+        '${_accountDeletionCloudMessage(error.code)}\n\n'
+        'Step: $stage. Code: ${accountDeletionDiagnosticCode(error.code)}.',
+      );
+    }
+  }
+
+  @override
   Future<void> signOut() => _auth.signOut();
 }
 
+String _accountDeletionAuthMessage(String code) => switch (code) {
+  'requires-recent-login' =>
+    'Apple needs you to sign in again before deleting this account.',
+  'network-request-failed' =>
+    'Trackmark could not reach Apple. Check your connection and try again.',
+  _ => 'Trackmark could not delete the account. Try again.',
+};
+
+// Show only a bounded SDK error code, never raw exception messages, identity
+// tokens, authorization codes, emails or other account details.
+String accountDeletionDiagnosticCode(String code) =>
+    RegExp(r'^[a-z0-9-]{1,80}$').hasMatch(code) ? code : 'unknown';
+
+String _accountDeletionCloudMessage(String code) => switch (code) {
+  'unauthenticated' =>
+    'Your sign-in expired before deletion could be confirmed. Cloud sync '
+        'remains paused. Contact support if retrying deletion does not complete.',
+  _ =>
+    'Account deletion could not be confirmed. Some data may already have '
+        'been deleted. Cloud sync is paused; retry deletion or contact support.',
+};
+
 class AuthException implements Exception {
-  const AuthException(this.message);
+  const AuthException(this.message, {this.deletionNotStarted = false});
 
   final String message;
+  final bool deletionNotStarted;
 
   @override
   String toString() => message;
@@ -130,49 +263,189 @@ class AuthGate extends StatefulWidget {
     required this.authService,
     this.remoteRepository,
     this.recordRepository,
+    this.automaticSyncScheduler = const WorkmanagerAutomaticSyncTaskScheduler(),
     super.key,
   });
 
   final AuthService authService;
   final FinanceRemoteRepository? remoteRepository;
   final FinanceRecordRepository? recordRepository;
+  final AutomaticSyncTaskScheduler automaticSyncScheduler;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
 
-class _AuthGateState extends State<AuthGate> {
+class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   var _localOnly = false;
   var _isSigningIn = false;
-  var _syncLabel = 'Synced';
   String? _authError;
-  String? _syncingUid;
   String? _syncedUid;
-  FinanceStore? _listeningStore;
-  FinanceRemoteRepository? _listeningRemoteRepository;
-  String? _listeningUserId;
-  Timer? _pushDebounce;
+  String? _autoSyncAttemptedUid;
+  String? _loadedSyncStateUid;
+  String? _automaticSyncConfiguration;
+  String? _foregroundCatchUpAttempt;
+  var _isDeletingAccount = false;
+  var _deletionStateLoaded = false;
+  String? _deletionRecoveryError;
+  String? _pendingDeletionUid;
+  FinanceDataStore? _currentDataStore;
+  MoneyTallyUser? _currentUser;
+  CloudSyncCoordinator? _syncCoordinator;
+  final AutomaticBackupService _automaticBackupService =
+      AutomaticBackupService();
   late final Stream<MoneyTallyUser?> _authStateStream;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _authStateStream = widget.authService.authStateChanges();
+    // A strictly local-only service has no cloud identity or uploader. Keep its
+    // first frame synchronous; cloud-capable sessions must pass recovery first.
+    _deletionStateLoaded =
+        widget.authService is LocalOnlyAuthService &&
+        widget.recordRepository == null &&
+        widget.remoteRepository == null;
+    if (!_deletionStateLoaded) unawaited(_loadAccountDeletionState());
+    final repository = widget.recordRepository;
+    if (repository != null) {
+      _syncCoordinator = CloudSyncCoordinator(recordRepository: repository)
+        ..addListener(_handleSyncStateChanged);
+    }
+  }
+
+  Future<void> _loadAccountDeletionState() async {
+    try {
+      final uid = await AccountDeletionState.pendingUser();
+      if (!mounted) return;
+      _pendingDeletionUid = uid;
+      if (uid != null && await AccountDeletionState.isConfirmed()) {
+        if (!mounted) return;
+        await _finishDeletedAccountCleanup(
+          uid,
+          FinanceDataStoreScope.read(context),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _deletionRecoveryError = null;
+        _deletionStateLoaded = true;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(
+        () => _deletionRecoveryError =
+            'Account recovery could not finish. Sync remains paused. '
+            'Please retry or contact Trackmark support.',
+      );
+    }
   }
 
   @override
   void dispose() {
-    _detachStoreSync();
+    WidgetsBinding.instance.removeObserver(this);
+    _currentDataStore?.removeListener(_handleDataStoreChanged);
+    _syncCoordinator
+      ?..removeListener(_handleSyncStateChanged)
+      ..dispose();
     super.dispose();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _foregroundCatchUpAttempt = null;
+      final user = _currentUser;
+      final store = _currentDataStore;
+      if (store != null) {
+        unawaited(_runAutomaticBackupCatchUp(store));
+        final scheduler = store.notificationScheduler;
+        if (scheduler is LocalNotificationScheduler) {
+          unawaited(scheduler.refreshDeviceTimeZone());
+        }
+      }
+      if (user != null && store != null && !user.isLocalOnly) {
+        unawaited(_refreshSyncStateAndCatchUp(user, store));
+      }
+    }
+  }
+
+  Future<void> _refreshSyncStateAndCatchUp(
+    MoneyTallyUser user,
+    FinanceDataStore dataStore,
+  ) async {
+    await _syncCoordinator?.loadStateForUser(user.uid, force: true);
+    await _runForegroundCatchUp(user, dataStore);
+  }
+
+  void _handleSyncStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleDataStoreChanged() {
+    final user = _currentUser;
+    final dataStore = _currentDataStore;
+    if (dataStore == null) return;
+    unawaited(_configureAutomaticSync(dataStore.preferences));
+    unawaited(_runAutomaticBackupCatchUp(dataStore));
+    if (user != null && !user.isLocalOnly) {
+      unawaited(_runForegroundCatchUp(user, dataStore));
+    }
+  }
+
+  void _bindDataStore(FinanceDataStore? dataStore) {
+    if (identical(_currentDataStore, dataStore)) return;
+    _currentDataStore?.removeListener(_handleDataStoreChanged);
+    _currentDataStore = dataStore;
+    dataStore?.addListener(_handleDataStoreChanged);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_deletionRecoveryError case final String error) {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(error, textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () {
+                    setState(() => _deletionRecoveryError = null);
+                    unawaited(_loadAccountDeletionState());
+                  },
+                  child: const Text('Retry recovery'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    if (!_deletionStateLoaded || _isDeletingAccount) {
+      return _FullScreenProgress(
+        message: _isDeletingAccount
+            ? 'Deleting Trackmark account'
+            : 'Checking account recovery',
+      );
+    }
     if (_localOnly) {
-      _detachStoreSync();
-      FinanceDataStoreScope.read(context).detachRemoteSync();
+      final dataStore = FinanceDataStoreScope.read(context);
+      dataStore.detachRemoteSync();
       _syncedUid = null;
-      _syncingUid = null;
+      _autoSyncAttemptedUid = null;
+      _loadedSyncStateUid = null;
+      _currentUser = null;
+      _bindDataStore(dataStore);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_configureAutomaticSync(dataStore.preferences));
+        unawaited(_runAutomaticBackupCatchUp(dataStore));
+      });
       return const FinanceHome(syncLabel: 'Local only');
     }
 
@@ -186,26 +459,64 @@ class _AuthGateState extends State<AuthGate> {
           return const _FullScreenProgress(message: 'Checking sign-in');
         }
         if (user == null) {
-          _detachStoreSync();
-          FinanceDataStoreScope.read(context).detachRemoteSync();
+          final dataStore = FinanceDataStoreScope.read(context);
+          dataStore.detachRemoteSync();
           _syncedUid = null;
-          _syncingUid = null;
+          _autoSyncAttemptedUid = null;
+          _loadedSyncStateUid = null;
+          _currentUser = null;
+          _bindDataStore(dataStore);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            unawaited(_configureAutomaticSync(dataStore.preferences));
+            unawaited(_runAutomaticBackupCatchUp(dataStore));
+          });
           return SignInView(
             isSigningIn: _isSigningIn,
-            errorMessage: _authError,
+            errorMessage: _pendingDeletionUid != null
+                ? 'A previous account deletion is unconfirmed. Cloud sync '
+                      'remains paused. Contact Trackmark support before '
+                      'creating or syncing another account.'
+                : _authError,
             onAppleSignIn: _signInWithApple,
             onContinueLocal: () => setState(() => _localOnly = true),
           );
         }
 
-        final store = FinanceStoreScope.read(context);
         final dataStore = FinanceDataStoreScope.read(context);
+        _currentUser = user;
+        _bindDataStore(dataStore);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _syncIfNeeded(user, store, dataStore);
+          if (mounted) unawaited(_prepareSignedInExperience(user, dataStore));
         });
+        final coordinator = _syncCoordinator;
+        final syncLabel = _pendingDeletionUid != null
+            ? 'Deletion unconfirmed'
+            : user.isLocalOnly
+            ? 'Local only'
+            : switch (coordinator?.status) {
+                CloudSyncStatus.syncing => 'Syncing',
+                CloudSyncStatus.issue => 'Sync issue',
+                _ => 'Synced',
+              };
+        final lastSuccessfulSyncAt = coordinator?.lastSuccessfulSyncAt;
         return FinanceHome(
-          syncLabel: user.isLocalOnly ? 'Local only' : _syncLabel,
+          syncLabel: syncLabel,
+          syncErrorLabel: _pendingDeletionUid != null
+              ? 'Cloud sync is paused. Retry account deletion or contact support.'
+              : coordinator?.lastErrorDescription,
+          syncDiagnosticLabel: coordinator?.lastDiagnostic?.conciseDescription,
+          lastSuccessfulSyncLabel: lastSuccessfulSyncAt == null
+              ? null
+              : '${shortDate(lastSuccessfulSyncAt.toLocal())} '
+                    '${TimeOfDay.fromDateTime(lastSuccessfulSyncAt.toLocal()).format(context)}',
+          onSyncNow: user.isLocalOnly || _pendingDeletionUid != null
+              ? null
+              : () => _syncNow(user, dataStore),
           onSignOut: user.isLocalOnly ? null : widget.authService.signOut,
+          onDeleteAccount: user.isLocalOnly
+              ? null
+              : () => _deleteAccount(user, dataStore),
         );
       },
     );
@@ -231,113 +542,271 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  void _syncIfNeeded(
+  Future<void> _prepareSignedInExperience(
     MoneyTallyUser user,
-    FinanceStore store,
     FinanceDataStore dataStore,
-  ) {
-    final remoteRepository = widget.remoteRepository;
-    final recordRepository = widget.recordRepository;
-    if (user.isLocalOnly ||
-        (remoteRepository == null && recordRepository == null)) {
+  ) async {
+    final coordinator = _syncCoordinator;
+    if (!_deletionStateLoaded ||
+        _isDeletingAccount ||
+        _pendingDeletionUid != null) {
       return;
     }
-    if (_syncedUid == user.uid || _syncingUid == user.uid) return;
+    if (user.isLocalOnly || coordinator == null) return;
+    if (_loadedSyncStateUid != user.uid) {
+      _loadedSyncStateUid = user.uid;
+      await coordinator.loadStateForUser(user.uid);
+    }
+    await _configureAutomaticSync(dataStore.preferences);
+    if (_isDeletingAccount || _pendingDeletionUid != null) return;
+    var attemptedInitialSync = false;
+    if (_syncedUid != user.uid && _autoSyncAttemptedUid != user.uid) {
+      attemptedInitialSync = true;
+      _autoSyncAttemptedUid = user.uid;
+      final succeeded = await coordinator.synchronize(
+        userId: user.uid,
+        dataStore: dataStore,
+        retryAfterTransientFailure: true,
+        trigger: CloudSyncTrigger.initial,
+      );
+      if (succeeded) _syncedUid = user.uid;
+    }
+    if (!attemptedInitialSync) {
+      await _runForegroundCatchUp(user, dataStore);
+    }
+  }
 
-    _syncingUid = user.uid;
-    unawaited(
-      _syncUser(user.uid, remoteRepository, recordRepository, store, dataStore),
+  Future<void> _configureAutomaticSync(UserPreferences preferences) async {
+    if (!_deletionStateLoaded ||
+        _isDeletingAccount ||
+        _pendingDeletionUid != null) {
+      return;
+    }
+    final signature =
+        '${preferences.automaticSyncEnabled}:${preferences.preferredDailySyncMinutes}:'
+        '${preferences.automaticBackupsEnabled}:${preferences.preferredAutomaticBackupMinutes}';
+    if (_automaticSyncConfiguration == signature) return;
+    try {
+      final preferred = preferredAutomaticMaintenanceMinutes(preferences);
+      if (preferred != null) {
+        await widget.automaticSyncScheduler.schedule(
+          preferredMinutes: preferred,
+        );
+      } else {
+        await widget.automaticSyncScheduler.cancel();
+      }
+      _automaticSyncConfiguration = signature;
+    } on Object catch (error) {
+      debugPrint('Could not update automatic sync schedule: $error');
+    }
+  }
+
+  Future<void> _runAutomaticBackupCatchUp(FinanceDataStore dataStore) async {
+    if (!_deletionStateLoaded ||
+        _isDeletingAccount ||
+        _pendingDeletionUid != null) {
+      return;
+    }
+    try {
+      await _automaticBackupService.createIfDue(
+        dataSet: dataStore.dataSet,
+        now: DateTime.now(),
+      );
+    } on Object catch (error) {
+      debugPrint('Automatic backup failed: $error');
+    }
+  }
+
+  Future<void> _runForegroundCatchUp(
+    MoneyTallyUser user,
+    FinanceDataStore dataStore,
+  ) async {
+    final coordinator = _syncCoordinator;
+    if (!_deletionStateLoaded ||
+        _isDeletingAccount ||
+        _pendingDeletionUid != null) {
+      return;
+    }
+    if (coordinator == null || user.isLocalOnly || coordinator.isSyncing) {
+      return;
+    }
+    final now = DateTime.now();
+    final preferences = dataStore.preferences;
+    if (!AutomaticSyncPolicy.isCatchUpDue(
+      preferences: preferences,
+      now: now,
+      lastSuccessfulSync: coordinator.lastSuccessfulSyncAt,
+    )) {
+      return;
+    }
+    final window = AutomaticSyncPolicy.preferredTimeForDay(
+      day: now,
+      preferredMinutes: preferences.preferredDailySyncMinutes,
+    ).toIso8601String();
+    if (_foregroundCatchUpAttempt == window) return;
+    _foregroundCatchUpAttempt = window;
+    await coordinator.synchronize(
+      userId: user.uid,
+      dataStore: dataStore,
+      trigger: CloudSyncTrigger.foregroundCatchUp,
     );
   }
 
-  Future<void> _syncUser(
-    String userId,
-    FinanceRemoteRepository? remoteRepository,
-    FinanceRecordRepository? recordRepository,
-    FinanceStore store,
+  Future<void> _syncNow(MoneyTallyUser user, FinanceDataStore dataStore) async {
+    if (_isDeletingAccount || _pendingDeletionUid != null) return;
+    final coordinator = _syncCoordinator;
+    if (coordinator == null || coordinator.isSyncing) return;
+    _syncedUid = null;
+    final succeeded = await coordinator.synchronize(
+      userId: user.uid,
+      dataStore: dataStore,
+      trigger: CloudSyncTrigger.manual,
+    );
+    if (!mounted) return;
+    if (!succeeded) {
+      final message = coordinator.lastErrorDescription ?? 'Cloud sync failed';
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+      return;
+    }
+    _syncedUid = user.uid;
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle_outline, color: Colors.white),
+              SizedBox(width: 10),
+              Text('Sync completed'),
+            ],
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
+  }
+
+  Future<void> _deleteAccount(
+    MoneyTallyUser user,
     FinanceDataStore dataStore,
   ) async {
+    if (_isDeletingAccount) return;
+    final coordinator = _syncCoordinator;
+    if (coordinator?.isSyncing == true) {
+      throw const AuthException(
+        'Wait for cloud sync to finish before deleting the account.',
+      );
+    }
+
+    if (_pendingDeletionUid != null && _pendingDeletionUid != user.uid) {
+      throw const AuthException(
+        'A previous account deletion needs recovery. '
+        'Contact support before syncing another account on this device.',
+      );
+    }
+    setState(() {
+      _isDeletingAccount = true;
+      _authError = null;
+    });
+    String? deletionFailure;
     try {
-      if (remoteRepository != null) {
-        final pulled = await store.pullSnapshot(
-          remoteRepository: remoteRepository,
-          userId: userId,
-        );
-        if (!pulled) {
-          await store.pushSnapshot(
-            remoteRepository: remoteRepository,
-            userId: userId,
-          );
+      await AccountDeletionState.begin(user.uid);
+      _pendingDeletionUid = user.uid;
+      coordinator?.reset();
+      await dataStore.suspendRemoteSyncForAccountDeletion();
+      await widget.automaticSyncScheduler.cancel();
+      await widget.authService.deleteAccountWithApple();
+      await AccountDeletionState.markConfirmed();
+      await _finishDeletedAccountCleanup(user.uid, dataStore);
+    } on AuthException catch (error) {
+      deletionFailure = error.message;
+      if (!await AccountDeletionState.requestWasSent() &&
+          !await AccountDeletionState.isConfirmed()) {
+        await AccountDeletionState.clear();
+        _pendingDeletionUid = null;
+        _autoSyncAttemptedUid = null;
+        _syncedUid = null;
+        _automaticSyncConfiguration = null;
+      }
+      _authError = error.message;
+      rethrow;
+    } on Object {
+      deletionFailure =
+          'Account deletion could not be confirmed. Some data may already '
+          'have been deleted. Cloud sync remains paused. Retry account '
+          'deletion or contact Trackmark support.';
+      _authError = deletionFailure;
+      rethrow;
+    } finally {
+      _isDeletingAccount = false;
+      if (mounted) {
+        setState(() {});
+        if (deletionFailure case final String message) {
+          // The loading screen unmounts Settings, so its catch/snackbar cannot
+          // report this error. AuthGate survives and owns the acknowledgement.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            unawaited(
+              showDialog<void>(
+                context: context,
+                barrierDismissible: false,
+                builder: (dialogContext) => AlertDialog(
+                  title: const Text('Account deletion not completed'),
+                  content: SingleChildScrollView(child: Text(message)),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('OK'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          });
         }
       }
-      if (recordRepository != null) {
-        await dataStore.attachRemoteSync(
-          remoteRepository: recordRepository,
-          userId: userId,
-        );
-      }
-      if (!mounted) return;
-      setState(() {
-        _syncedUid = userId;
-        _syncingUid = null;
-        _syncLabel = 'Synced';
-      });
-      if (remoteRepository != null) {
-        _attachStoreSync(userId, remoteRepository, store);
-      }
-    } on Exception {
-      if (!mounted) return;
-      setState(() {
-        _syncingUid = null;
-        _syncLabel = 'Sync issue';
-      });
     }
   }
 
-  void _attachStoreSync(
-    String userId,
-    FinanceRemoteRepository remoteRepository,
-    FinanceStore store,
-  ) {
-    if (_listeningUserId == userId && _listeningStore == store) return;
-    _detachStoreSync();
-    _listeningUserId = userId;
-    _listeningRemoteRepository = remoteRepository;
-    _listeningStore = store;
-    store.addListener(_queuePush);
-  }
-
-  void _detachStoreSync() {
-    _pushDebounce?.cancel();
-    _pushDebounce = null;
-    _listeningStore?.removeListener(_queuePush);
-    _listeningStore = null;
-    _listeningRemoteRepository = null;
-    _listeningUserId = null;
-  }
-
-  void _queuePush() {
-    _pushDebounce?.cancel();
-    _pushDebounce = Timer(const Duration(milliseconds: 800), _pushLocalChanges);
-  }
-
-  Future<void> _pushLocalChanges() async {
-    final store = _listeningStore;
-    final remoteRepository = _listeningRemoteRepository;
-    final userId = _listeningUserId;
-    if (store == null || remoteRepository == null || userId == null) return;
+  Future<void> _finishDeletedAccountCleanup(
+    String uid,
+    FinanceDataStore dataStore,
+  ) async {
+    final coordinator = _syncCoordinator;
+    dataStore.detachRemoteSync();
+    coordinator?.reset();
+    await widget.automaticSyncScheduler.cancel();
 
     try {
-      await store.pushSnapshot(
-        remoteRepository: remoteRepository,
-        userId: userId,
-      );
-      if (mounted && _syncLabel != 'Synced') {
-        setState(() => _syncLabel = 'Synced');
-      }
-    } on Exception {
-      if (mounted) setState(() => _syncLabel = 'Sync issue');
+      await dataStore.resetTrackmarkData(resetAppSettings: true);
+    } on Object {
+      // The server-side account deletion has already completed. Removing
+      // the durable local snapshot is the final safety net if notification
+      // reconciliation or another device-only cleanup step fails.
+      await dataStore.localRepository?.clear();
+      // Do not report success while in-memory cleanup is still uncertain. The
+      // confirmed recovery marker lets the next attempt/relaunch finish safely.
+      rethrow;
     }
+
+    await dataStore.localRepository?.clearAcknowledgedRestoreGeneration(uid);
+    final repository = widget.recordRepository;
+    if (repository case final DeletedAccountLocalStateCleaner cleaner) {
+      await cleaner.clearDeletedAccountLocalState(uid);
+    }
+    await coordinator?.executionStateStore.clearForDeletedUser(uid);
+    // A prior failed attempt must not appear on the post-deletion sign-in page.
+    _authError = null;
+    await widget.authService.signOut();
+    await AccountDeletionState.clear();
+    _pendingDeletionUid = null;
+
+    _syncedUid = null;
+    _autoSyncAttemptedUid = null;
+    _loadedSyncStateUid = null;
+    _automaticSyncConfiguration = null;
+    _foregroundCatchUpAttempt = null;
   }
 }
 
@@ -357,87 +826,144 @@ class SignInView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark
+        ? TrackmarkBrandPalette.deepGreen
+        : TrackmarkBrandPalette.ivory;
+    final primaryText = isDark
+        ? TrackmarkBrandPalette.warmWhite
+        : TrackmarkBrandPalette.deepGreen;
+    final secondaryText = isDark
+        ? TrackmarkBrandPalette.paleGold
+        : TrackmarkBrandPalette.deepGreen.withValues(alpha: 0.72);
     return Scaffold(
+      backgroundColor: background,
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Icon(
-                    Icons.account_balance_wallet_outlined,
-                    color: AppTheme.accent,
-                    size: 52,
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Money Tally',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppTheme.ink,
-                      fontSize: 34,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Sign in to keep your accounts, ledgers, budgets, and scheduled transactions synced across iPhone, iPad, and Mac.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppTheme.ink.withValues(alpha: 0.7),
-                      height: 1.35,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-                  FilledButton.icon(
-                    onPressed: isSigningIn ? null : onAppleSignIn,
-                    icon: isSigningIn
-                        ? const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.apple),
-                    label: Text(
-                      isSigningIn ? 'Signing in' : 'Sign in with Apple',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: isSigningIn ? null : onContinueLocal,
-                    child: const Text('Continue local-only'),
-                  ),
-                  if (errorMessage != null) ...[
-                    const SizedBox(height: 16),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: AppTheme.rose.withValues(alpha: 0.08),
-                        border: Border.all(
-                          color: AppTheme.rose.withValues(alpha: 0.3),
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 30),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Align(
+                alignment: const Alignment(0, -0.30),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 390),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: TrackmarkBrandLockup(
+                          bright: isDark,
+                          markSize: 160,
+                          wordmarkSize: 32,
                         ),
-                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text(
-                          errorMessage!,
+                      const SizedBox(height: 46),
+                      Text(
+                        'Manage your money with confidence.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: primaryText,
+                          height: 1.3,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'Securely sync your data across your Apple devices.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: secondaryText,
+                          height: 1.42,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 44),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(56),
+                          backgroundColor: isDark
+                              ? TrackmarkBrandPalette.warmWhite
+                              : TrackmarkBrandPalette.deepGreen,
+                          foregroundColor: isDark
+                              ? TrackmarkBrandPalette.deepGreen
+                              : TrackmarkBrandPalette.ivory,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: isSigningIn ? null : onAppleSignIn,
+                        icon: isSigningIn
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(AppIcon.apple),
+                        label: Text(
+                          isSigningIn ? 'Signing in' : 'Sign in with Apple',
                           style: const TextStyle(
-                            color: AppTheme.rose,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            height: 1.3,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                ],
+                      const SizedBox(height: 14),
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(56),
+                          foregroundColor: primaryText,
+                          side: BorderSide(
+                            color: isDark
+                                ? TrackmarkBrandPalette.paleGold
+                                : TrackmarkBrandPalette.deepGreen,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: isSigningIn ? null : onContinueLocal,
+                        child: const Text(
+                          'Continue Local-Only',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (errorMessage != null) ...[
+                        const SizedBox(height: 16),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: AppTheme.rose.withValues(alpha: 0.08),
+                            border: Border.all(
+                              color: AppTheme.rose.withValues(alpha: 0.3),
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(
+                              errorMessage!,
+                              style: const TextStyle(
+                                color: AppTheme.rose,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
           ),

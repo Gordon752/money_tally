@@ -6,12 +6,124 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function ownsUserDocument(userId) {
-      return signedIn() && request.auth.uid == userId;
+    function ownsUserData(userId) {
+      return signedIn() && request.auth.uid == userId
+        && !exists(/databases/$(database)/documents/accountDeletions/$(userId));
     }
 
+    // Server-only, intentionally outside the recursively deleted user tree.
+    // No client may remove the barrier, including the deleted account's devices.
+    match /accountDeletions/{userId} {
+      allow read, write: if false;
+    }
+
+    match /users/{userId}/accounts/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/categories/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/transactions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/scheduledTransactions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/budgets/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/goals/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/funds/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/reservationOperations/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/goalContributions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/goalFundingEvents/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/preferences/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    // A confirmed backup restore stages a complete record generation, then
+    // atomically activates it through this user-owned authority marker.
+    match /users/{userId}/metadata/restoreAuthority {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    // Per-user server timestamp checkpoint used to bound incremental sync
+    // queries. It contains no financial data and remains private to its owner.
+    match /users/{userId}/metadata/syncClock {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    // Restored generations remain isolated from legacy record collections so
+    // older beta clients cannot read staged records as duplicates. Keep the
+    // allowed shape limited to Trackmark's known record collections.
+    match /users/{userId}/restoreGenerations/{generation}/accounts/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/categories/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/transactions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/scheduledTransactions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/budgets/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/goals/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/funds/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/reservationOperations/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/goalContributions/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/goalFundingEvents/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    match /users/{userId}/restoreGenerations/{generation}/preferences/{documentId} {
+      allow read, write: if ownsUserData(userId);
+    }
+
+    // Retain access to the legacy snapshot while existing installations
+    // complete migration to the record-based collections above.
     match /users/{userId}/finance/{documentId} {
-      allow read, write: if ownsUserDocument(userId);
+      allow read, write: if ownsUserData(userId);
     }
   }
 }

@@ -10,6 +10,8 @@ class ScheduledTransactionRow extends StatelessWidget {
   const ScheduledTransactionRow({
     required this.scheduledTransaction,
     this.currency = const CurrencyFormatSettings(),
+    this.needsAttention = false,
+    this.metadata,
     this.onTap,
     this.onLongPress,
     super.key,
@@ -17,6 +19,8 @@ class ScheduledTransactionRow extends StatelessWidget {
 
   final ScheduledTransactionRecord scheduledTransaction;
   final CurrencyFormatSettings currency;
+  final bool needsAttention;
+  final String? metadata;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
@@ -30,7 +34,10 @@ class ScheduledTransactionRow extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: AppSpacing.sm,
+        ),
         child: Row(
           children: [
             Expanded(
@@ -38,18 +45,32 @@ class ScheduledTransactionRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    scheduledTransaction.payee,
+                    scheduledTransaction.isScheduledFundFunding
+                        ? scheduledTransaction.payee
+                        : scheduledTransaction.isScheduledGoalFunding
+                        ? 'Goal Funding'
+                        : scheduledTransaction.payee,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xxs),
                   Text(
-                    _compactDate(scheduledTransaction.nextDate),
+                    metadata ?? _compactDate(scheduledTransaction.nextDate),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                  if (needsAttention) ...[
+                    const SizedBox(height: AppSpacing.xxs),
+                    Text(
+                      'Needs attention',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: AppColors.danger,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

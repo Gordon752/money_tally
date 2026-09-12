@@ -6,8 +6,18 @@ import '../domain/transaction.dart';
 class BackupCodec {
   const BackupCodec();
 
-  String encodeJson(FinanceDataSet dataSet) {
-    return const JsonEncoder.withIndent('  ').convert(dataSet.toJson());
+  String encodeJson(FinanceDataSet dataSet, {DateTime? exportedAt}) {
+    final data = dataSet.toJson();
+    data['scheduledTransactions'] = [
+      for (final schedule in dataSet.scheduledTransactions)
+        schedule.toJson()
+          ..remove('scheduledNotificationIds')
+          ..remove('lastReminderScheduledAt'),
+    ];
+    return const JsonEncoder.withIndent('  ').convert({
+      ...data,
+      'exportedAt': (exportedAt ?? DateTime.now()).toUtc().toIso8601String(),
+    });
   }
 
   FinanceDataSet decodeJson(String rawJson) {
@@ -41,8 +51,8 @@ class BackupCodec {
     ];
 
     for (final transaction in dataSet.transactions) {
-      if (transaction.isSplit) {
-        for (final splitLine in transaction.splitLines) {
+      if (transaction.isCategorySplit) {
+        for (final splitLine in transaction.effectiveCategoryAllocations) {
           rows.add(
             _transactionCsvRow(
               transaction,
@@ -54,11 +64,14 @@ class BackupCodec {
         }
         continue;
       }
+      final effectiveCategoryId =
+          transaction.effectiveCategoryAllocations.firstOrNull?.categoryId;
       rows.add(
         _transactionCsvRow(
           transaction,
           accountsById: accountsById,
           categoriesById: categoriesById,
+          categoryIdOverride: effectiveCategoryId,
         ),
       );
     }
@@ -71,8 +84,10 @@ class BackupCodec {
     required Map<String, String> accountsById,
     required Map<String, String> categoriesById,
     TransactionSplitLine? splitLine,
+    String? categoryIdOverride,
   }) {
-    final categoryId = splitLine?.categoryId ?? transaction.categoryId;
+    final categoryId =
+        splitLine?.categoryId ?? categoryIdOverride ?? transaction.categoryId;
     final amountMinor = splitLine?.amountMinor ?? transaction.amountMinor;
     return [
       transaction.id,

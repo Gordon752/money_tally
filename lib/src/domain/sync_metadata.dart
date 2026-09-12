@@ -47,6 +47,15 @@ class SyncMetadata {
     );
   }
 
+  SyncMetadata restored({DateTime? now, String? deviceId}) {
+    return SyncMetadata(
+      createdAt: createdAt,
+      updatedAt: now ?? DateTime.now().toUtc(),
+      deviceId: deviceId ?? this.deviceId,
+      version: version + 1,
+    );
+  }
+
   Map<String, Object?> toJson() {
     return {
       'createdAt': createdAt.toIso8601String(),

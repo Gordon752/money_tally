@@ -3,52 +3,108 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:firebase_core/firebase_core.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'firebase_options.dart';
+import 'src/design/app_icons.dart';
+import 'src/design/app_haptics.dart';
+import 'src/design/accent_color_catalog.dart';
+import 'src/design/account_balance_presentation.dart';
+import 'src/design/category_icon_catalog.dart';
+import 'src/design/credit_card_appearance.dart';
 import 'src/design/design_tokens.dart';
 import 'src/design/money_format.dart';
 import 'src/design/widgets/amount_entry_field.dart';
 import 'src/design/widgets/budget_progress_bar.dart';
+import 'src/design/widgets/category_icon_badge.dart';
+import 'src/design/widgets/category_icon_picker.dart';
 import 'src/design/widgets/account_card.dart';
+import 'src/design/widgets/account_balance_text.dart';
 import 'src/design/widgets/floating_action_button.dart';
 import 'src/design/widgets/floating_action_menu.dart';
 import 'src/design/widgets/money_text.dart';
+import 'src/design/widgets/percentage_entry_field.dart';
 import 'src/design/widgets/scheduled_transaction_row.dart';
 import 'src/design/widgets/transaction_row.dart';
+import 'src/design/widgets/trackmark_switch.dart';
+import 'src/budgets/budget_calculator.dart';
+import 'src/credit/credit_insights_calculator.dart';
+import 'src/credit/credit_insights_completeness_ui.dart';
 import 'src/domain/budget.dart';
 import 'src/domain/account.dart' as v2_account;
 import 'src/domain/category.dart' as v2_category;
-import 'src/domain/finance_data_set.dart';
+import 'src/domain/goal.dart';
+import 'src/domain/goal_funding.dart';
+import 'src/domain/fund.dart';
+import 'src/domain/reservation.dart';
 import 'src/domain/money.dart';
 import 'src/domain/scheduled_transaction.dart' as v2_scheduled;
 import 'src/domain/sync_metadata.dart' as v2_sync;
 import 'src/domain/transaction.dart';
+import 'src/domain/transaction.dart' as v2_transaction;
 import 'src/domain/user_preferences.dart';
+import 'src/export/export_file_service.dart';
+import 'src/funds/recurring_fund_cycle_calculator.dart';
+import 'src/goals/goal_calculator.dart';
 import 'src/migration/v1_snapshot_migrator.dart';
+import 'src/migration/finance_data_bootstrapper.dart';
+import 'src/management/management_ledger_index.dart';
+import 'src/ledger/ledger_projection.dart';
+import 'src/ledger/pending_ledger_summary.dart';
+import 'src/ledger/reservation_ledger_activity.dart';
+import 'src/ledger/running_balance_calculator.dart';
+import 'src/ledger/transaction_account_preview.dart';
+import 'src/notifications/local_notification_scheduler.dart';
+import 'src/notifications/notification_scheduler.dart';
+import 'src/notifications/reminder_time_zone.dart';
+import 'src/onboarding/onboarding_preferences.dart';
 import 'src/persistence/backup_codec.dart';
+import 'src/persistence/backup_restore_service.dart';
+import 'src/persistence/backup_storage.dart';
+import 'src/persistence/automatic_backup_service.dart';
+import 'src/persistence/local_finance_data_set_repository.dart';
+import 'src/persistence/local_data_recovery_service.dart';
 import 'src/persistence/finance_record_repository.dart';
 import 'src/persistence/firestore_record_repository.dart';
-import 'src/persistence/local_finance_data_set_repository.dart';
+import 'src/reporting/report_calculator.dart';
 import 'src/store/finance_data_store.dart';
 import 'src/store/finance_data_store_scope.dart';
+import 'src/support/support_links.dart';
+import 'src/sync/automatic_sync_service.dart';
+import 'src/sync/cloud_sync_coordinator.dart';
+import 'src/sync/account_deletion_state.dart';
 
 part 'src/app_theme.dart';
+part 'src/accounts/manage_accounts.dart';
 part 'src/auth_service.dart';
+part 'src/onboarding/onboarding_view.dart';
+part 'src/support/support_link_row.dart';
 part 'src/domain.dart';
 part 'src/finance_home.dart';
+part 'src/goals/goals_ui.dart';
+part 'src/funds/funds_ui.dart';
 part 'src/finance_store.dart';
 part 'src/firestore_finance_repository.dart';
 part 'src/local_finance_repository.dart';
+part 'src/recovery/local_data_recovery_view.dart';
+
+final scheduledNotificationLaunchPayload = ValueNotifier<String?>(null);
+
+/// Public presentation only. Internal identifiers and persistence keys remain
+/// intentionally stable during the product rename.
+const trackmarkMoneyName = 'Trackmark Money';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeTrackmarkBackgroundSync();
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('Flutter startup error: ${details.exceptionAsString()}');
@@ -64,54 +120,112 @@ class MoneyTallyBootstrap extends StatefulWidget {
 }
 
 class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
-  late final Future<AppStores> _startup = _load();
-  AppStores? _stores;
+  static const _minimumLaunchPresentation = Duration(milliseconds: 600);
+  late Future<AppStores> _startup = _load();
+
+  void _retryStartup() => setState(() => _startup = _load());
+
+  Future<RecoveryCloudTarget> _recoveryCloudTarget() async {
+    // Determine the existing session without attaching sync or loading cloud
+    // finance data. If this fails, recovery must not guess local-only mode.
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
+    );
+    final user = await firebase_auth.FirebaseAuth.instance
+        .authStateChanges()
+        .first;
+    return user == null
+        ? const RecoveryCloudTarget()
+        : RecoveryCloudTarget(
+            repository: FirestoreRecordRepository(),
+            userId: user.uid,
+          );
+  }
 
   Future<AppStores> _load() async {
+    final launchStopwatch = Stopwatch()..start();
+    final currentVersion = await AppVersionIdentity.current();
+    final localRepository = const LocalFinanceDataSetRepository();
+    var preMigrationDataSet = await localRepository.load();
+    if (preMigrationDataSet == null) {
+      final legacy = await const V1SnapshotLocalLoader().call();
+      if (legacy != null) {
+        preMigrationDataSet = const V1SnapshotMigrator().migrate(legacy);
+      }
+    }
+    final updateBackupCoordinator = PreUpdateBackupCoordinator();
+    await updateBackupCoordinator.prepare(
+      currentVersion: currentVersion,
+      preMigrationDataSet: preMigrationDataSet,
+      now: DateTime.now(),
+    );
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    final legacyStore = await FinanceStore.load();
-    final dataStore = await _loadV2StoreFromLegacy(legacyStore);
-    final mirror = LegacyV2StoreMirror(
-      legacyStore: legacyStore,
-      dataStore: dataStore,
-    )..start();
-    final stores = AppStores(
-      legacyStore: legacyStore,
-      dataStore: dataStore,
-      mirror: mirror,
+    // Trackmark's v2 repository is the durable offline source of truth.
+    // Disabling Firestore's second disk cache prevents stale reads and pending
+    // mutation queues from masquerading as a completed cloud sync.
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
     );
-    _stores = stores;
+    NotificationScheduler notificationScheduler =
+        const NoopNotificationScheduler();
+    try {
+      final localNotificationScheduler = LocalNotificationScheduler(
+        onNotificationSelected: (payload) {
+          scheduledNotificationLaunchPayload.value = payload ?? 'scheduled';
+        },
+      );
+      notificationScheduler = localNotificationScheduler;
+      await localNotificationScheduler.initialize();
+    } catch (error, stackTrace) {
+      reminderSchedulingError.value =
+          'Reminders are unavailable on this device. Restart Trackmark to retry. '
+          'Your records are safe.';
+      debugPrint('Local notification initialization failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+    final dataStore = await _loadV2Store(
+      notificationScheduler: notificationScheduler,
+    );
+    try {
+      await dataStore.refreshScheduledNotifications();
+    } catch (error, stackTrace) {
+      debugPrint('Scheduled notification refresh failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+    await updateBackupCoordinator.markLaunchSuccessful(currentVersion);
+    final stores = AppStores(
+      dataStore: dataStore,
+      onboardingVersionSeen: await const OnboardingPreferences()
+          .readOnboardingVersionSeen(),
+    );
+    final remainingPresentation =
+        _minimumLaunchPresentation - launchStopwatch.elapsed;
+    if (!remainingPresentation.isNegative) {
+      await Future<void>.delayed(remainingPresentation);
+    }
     return stores;
   }
 
-  @override
-  void dispose() {
-    _stores?.mirror.dispose();
-    super.dispose();
-  }
-
-  Future<FinanceDataStore> _loadV2StoreFromLegacy(
-    FinanceStore legacyStore,
-  ) async {
-    final localRepository = const LocalFinanceDataSetRepository();
-    final localDataSet = await localRepository.load();
-    final migrated = const V1SnapshotMigrator().migrate(
-      legacyStore.snapshot().toJson(),
+  Future<FinanceDataStore> _loadV2Store({
+    required NotificationScheduler notificationScheduler,
+  }) async {
+    return FinanceDataBootstrapper().loadStore(
+      notificationScheduler: notificationScheduler,
     );
-    final dataSet = localDataSet == null
-        ? migrated
-        : mergeDataSetsPreferCurrent(incoming: migrated, current: localDataSet);
-    await localRepository.save(dataSet);
-    return FinanceDataStore(dataSet: dataSet, localRepository: localRepository);
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Money Tally',
+      title: trackmarkMoneyName,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       themeMode: ThemeMode.system,
@@ -119,7 +233,14 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
         future: _startup,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            debugPrint('Money Tally startup failed: ${snapshot.error}');
+            debugPrint('$trackmarkMoneyName startup failed: ${snapshot.error}');
+            if (snapshot.error case final UnreadableLocalFinanceData failure) {
+              return LocalDataRecoveryView(
+                failure: failure,
+                onRetry: _retryStartup,
+                loadCloudTarget: _recoveryCloudTarget,
+              );
+            }
             return StartupErrorView(error: snapshot.error.toString());
           }
           final stores = snapshot.data;
@@ -127,10 +248,9 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
             return const StartupLoadingView();
           }
           return MoneyTallyApp(
-            store: stores.legacyStore,
             dataStore: stores.dataStore,
+            initialOnboardingVersionSeen: stores.onboardingVersionSeen,
             authService: FirebaseAuthService(),
-            remoteRepository: FirestoreFinanceRepository(),
             recordRepository: FirestoreRecordRepository(),
           );
         },
@@ -141,230 +261,120 @@ class _MoneyTallyBootstrapState extends State<MoneyTallyBootstrap> {
 
 class AppStores {
   const AppStores({
-    required this.legacyStore,
     required this.dataStore,
-    required this.mirror,
+    required this.onboardingVersionSeen,
   });
 
-  final FinanceStore legacyStore;
   final FinanceDataStore dataStore;
-  final LegacyV2StoreMirror mirror;
+  final int onboardingVersionSeen;
 }
 
-class LegacyV2StoreMirror {
-  LegacyV2StoreMirror({required this.legacyStore, required this.dataStore});
+/// Brand palette used only by the public launch and sign-in surfaces. The
+/// operational product palette intentionally remains unchanged.
+abstract final class TrackmarkBrandPalette {
+  static const deepGreen = Color(0xFF0F3F2D);
+  static const forestGreen = Color(0xFF173F2D);
+  static const ivory = Color(0xFFF7F5F2);
+  static const warmWhite = Color(0xFFF7F5F2);
+  static const gold = Color(0xFFCA9B4A);
+  static const paleGold = Color(0xFFE5C98F);
+  static const slate = Color(0xFF6B6F72);
+}
 
-  final FinanceStore legacyStore;
-  final FinanceDataStore dataStore;
-  var _isRefreshing = false;
-  var _queuedRefresh = false;
+/// Shared production TM monogram for the public brand surfaces.
+class TrackmarkBrandMark extends StatelessWidget {
+  const TrackmarkBrandMark({this.size = 48, super.key});
 
-  void start() {
-    legacyStore.addListener(_queueRefresh);
-  }
+  final double size;
 
-  void dispose() {
-    legacyStore.removeListener(_queueRefresh);
-  }
-
-  void _queueRefresh() {
-    if (dataStore.userId != null) return;
-    if (_isRefreshing) {
-      _queuedRefresh = true;
-      return;
-    }
-    unawaited(_refresh());
-  }
-
-  Future<void> _refresh() async {
-    _isRefreshing = true;
-    try {
-      do {
-        _queuedRefresh = false;
-        final migrated = const V1SnapshotMigrator().migrate(
-          legacyStore.snapshot().toJson(),
-        );
-        final dataSet = mergeDataSetsPreferCurrent(
-          incoming: migrated,
-          current: dataStore.dataSet,
-        );
-        // Persist the tombstone-preserving merge. Legacy code must never write
-        // a raw migrated snapshot directly over the v2 data set.
-        await dataStore.replaceDataSet(dataSet);
-      } while (_queuedRefresh);
-    } finally {
-      _isRefreshing = false;
-    }
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '$trackmarkMoneyName monogram',
+      image: true,
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: Image.asset(
+          'assets/branding/trackmark_tm_monogram.png',
+          fit: BoxFit.contain,
+          excludeFromSemantics: true,
+        ),
+      ),
+    );
   }
 }
 
-FinanceDataSet mergeDataSetsPreferCurrent({
-  required FinanceDataSet incoming,
-  required FinanceDataSet current,
-}) {
-  return incoming.copyWith(
-    accounts: mergeAccountsPreferCurrent(
-      incoming: incoming.accounts,
-      current: current.accounts,
-    ),
-    categories: mergeCategoriesPreferCurrent(
-      incoming: incoming.categories,
-      current: current.categories,
-    ),
-    transactions: mergeTransactionsPreferCurrent(
-      incoming: incoming.transactions,
-      current: current.transactions,
-    ),
-    scheduledTransactions: mergeScheduledTransactionsPreferCurrent(
-      incoming: incoming.scheduledTransactions,
-      current: current.scheduledTransactions,
-    ),
-    budgets: mergeBudgetsPreferCurrent(
-      incoming: incoming.budgets,
-      current: current.budgets,
-    ),
-    preferences: current.preferences,
-  );
+/// Editorial wordmark layout from the approved Trackmark identity.
+class TrackmarkBrandLockup extends StatelessWidget {
+  const TrackmarkBrandLockup({
+    this.bright = false,
+    this.markSize = 60,
+    this.wordmarkSize = 28,
+    super.key,
+  });
+
+  final bool bright;
+  final double markSize;
+  final double wordmarkSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = bright
+        ? TrackmarkBrandPalette.warmWhite
+        : TrackmarkBrandPalette.deepGreen;
+    return Semantics(
+      label: trackmarkMoneyName,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TrackmarkBrandMark(size: markSize),
+          SizedBox(height: markSize * 0.16),
+          Text(
+            'TRACKMARK',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: primary,
+              fontSize: wordmarkSize,
+              fontWeight: FontWeight.w700,
+              letterSpacing: wordmarkSize * 0.115,
+              height: 1,
+            ),
+          ),
+          SizedBox(height: wordmarkSize * 0.17),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _BrandRule(color: TrackmarkBrandPalette.gold),
+              const SizedBox(width: 12),
+              Text(
+                'MONEY',
+                style: TextStyle(
+                  color: TrackmarkBrandPalette.gold,
+                  fontSize: wordmarkSize * 0.52,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: wordmarkSize * 0.145,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(width: 12),
+              _BrandRule(color: TrackmarkBrandPalette.gold),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-T _preferCurrentRecord<T>({
-  required T incoming,
-  required T current,
-  required v2_sync.SyncMetadata Function(T item) syncOf,
-}) {
-  final currentSync = syncOf(current);
-  final incomingSync = syncOf(incoming);
-  if (currentSync.isDeleted) return current;
-  if (incomingSync.isDeleted) return incoming;
-  return currentSync.updatedAt.isAfter(incomingSync.updatedAt) ||
-          currentSync.updatedAt.isAtSameMomentAs(incomingSync.updatedAt)
-      ? current
-      : incoming;
-}
+class _BrandRule extends StatelessWidget {
+  const _BrandRule({required this.color});
 
-List<TransactionRecord> mergeV2OnlyTransactions({
-  required List<TransactionRecord> migrated,
-  required List<TransactionRecord> current,
-}) {
-  return mergeTransactionsPreferCurrent(incoming: migrated, current: current);
-}
+  final Color color;
 
-List<TransactionRecord> mergeTransactionsPreferCurrent({
-  required List<TransactionRecord> incoming,
-  required List<TransactionRecord> current,
-}) {
-  final currentById = {
-    for (final transaction in current) transaction.id: transaction,
-  };
-  final incomingIds = incoming.map((transaction) => transaction.id).toSet();
-  return [
-    for (final transaction in incoming)
-      if (currentById[transaction.id] case final currentTransaction?)
-        _preferCurrentRecord(
-          incoming: transaction,
-          current: currentTransaction,
-          syncOf: (item) => item.sync,
-        )
-      else
-        transaction,
-    for (final transaction in current)
-      if (!incomingIds.contains(transaction.id)) transaction,
-  ];
-}
-
-List<v2_account.AccountRecord> mergeAccountsPreferCurrent({
-  required List<v2_account.AccountRecord> incoming,
-  required List<v2_account.AccountRecord> current,
-}) {
-  final currentById = {for (final account in current) account.id: account};
-  final incomingIds = incoming.map((account) => account.id).toSet();
-  return [
-    for (final account in incoming)
-      if (currentById[account.id] case final currentAccount?)
-        _preferCurrentRecord(
-          incoming: account,
-          current: currentAccount,
-          syncOf: (item) => item.sync,
-        )
-      else
-        account,
-    for (final account in current)
-      if (!incomingIds.contains(account.id)) account,
-  ];
-}
-
-List<v2_category.CategoryRecord> mergeCategoriesPreferCurrent({
-  required List<v2_category.CategoryRecord> incoming,
-  required List<v2_category.CategoryRecord> current,
-}) {
-  final currentById = {for (final category in current) category.id: category};
-  final incomingIds = incoming.map((category) => category.id).toSet();
-  return [
-    for (final category in incoming)
-      if (currentById[category.id] case final currentCategory?)
-        _preferCurrentRecord(
-          incoming: category,
-          current: currentCategory,
-          syncOf: (item) => item.sync,
-        )
-      else
-        category,
-    for (final category in current)
-      if (!incomingIds.contains(category.id)) category,
-  ];
-}
-
-List<v2_scheduled.ScheduledTransactionRecord> mergeV2OnlyScheduledTransactions({
-  required List<v2_scheduled.ScheduledTransactionRecord> migrated,
-  required List<v2_scheduled.ScheduledTransactionRecord> current,
-}) {
-  return mergeScheduledTransactionsPreferCurrent(
-    incoming: migrated,
-    current: current,
-  );
-}
-
-List<v2_scheduled.ScheduledTransactionRecord>
-mergeScheduledTransactionsPreferCurrent({
-  required List<v2_scheduled.ScheduledTransactionRecord> incoming,
-  required List<v2_scheduled.ScheduledTransactionRecord> current,
-}) {
-  final currentById = {for (final item in current) item.id: item};
-  final incomingIds = incoming.map((scheduled) => scheduled.id).toSet();
-  return [
-    for (final scheduled in incoming)
-      if (currentById[scheduled.id] case final currentScheduled?)
-        _preferCurrentRecord(
-          incoming: scheduled,
-          current: currentScheduled,
-          syncOf: (item) => item.sync,
-        )
-      else
-        scheduled,
-    for (final scheduled in current)
-      if (!incomingIds.contains(scheduled.id)) scheduled,
-  ];
-}
-
-List<BudgetRecord> mergeBudgetsPreferCurrent({
-  required List<BudgetRecord> incoming,
-  required List<BudgetRecord> current,
-}) {
-  final currentById = {for (final budget in current) budget.id: budget};
-  final incomingIds = incoming.map((budget) => budget.id).toSet();
-  return [
-    for (final budget in incoming)
-      if (currentById[budget.id] case final currentBudget?)
-        _preferCurrentRecord(
-          incoming: budget,
-          current: currentBudget,
-          syncOf: (item) => item.sync,
-        )
-      else
-        budget,
-    for (final budget in current)
-      if (!incomingIds.contains(budget.id)) budget,
-  ];
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: 48, height: 1, color: color.withValues(alpha: 0.9));
 }
 
 class StartupLoadingView extends StatelessWidget {
@@ -372,24 +382,55 @@ class StartupLoadingView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.account_balance_wallet_outlined,
-              color: AppTheme.accent,
-              size: 48,
+    final safeInsets = MediaQuery.paddingOf(context);
+    return Scaffold(
+      backgroundColor: TrackmarkBrandPalette.deepGreen,
+      // The native launch storyboard and this surface both use the raw screen
+      // center. Keeping a single, explicitly full-width composition here
+      // avoids SafeArea/padding geometry changing the brand's horizontal
+      // position during the native-to-Flutter handoff.
+      body: SizedBox.expand(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            32,
+            safeInsets.top + 28,
+            32,
+            safeInsets.bottom + 28,
+          ),
+          child: RepaintBoundary(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Spacer(flex: 4),
+                const TrackmarkBrandLockup(
+                  bright: true,
+                  markSize: 92,
+                  wordmarkSize: 34,
+                ),
+                const Spacer(flex: 4),
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: TrackmarkBrandPalette.gold,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Smart today. Secure tomorrow.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: TrackmarkBrandPalette.paleGold,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.15,
+                  ),
+                ),
+                const Spacer(),
+              ],
             ),
-            SizedBox(height: 16),
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text(
-              'Opening Money Tally',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -409,19 +450,19 @@ class StartupErrorView extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(
-                    Icons.error_outline,
+                  Icon(
+                    AppIcon.error,
                     color: AppTheme.rose,
-                    size: 48,
+                    size: AppIconSize.brand,
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    'Money Tally could not start',
+                    '$trackmarkMoneyName could not start',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
                   ),
@@ -447,72 +488,87 @@ class StartupErrorView extends StatelessWidget {
 
 class MoneyTallyApp extends StatelessWidget {
   factory MoneyTallyApp({
+    // Retained for legacy widget-test fixtures only. Production bootstrap does
+    // not construct or provide a v1 store.
     FinanceStore? store,
     FinanceDataStore? dataStore,
     AuthService? authService,
     FinanceRemoteRepository? remoteRepository,
     FinanceRecordRepository? recordRepository,
+    int? initialOnboardingVersionSeen,
     Key? key,
   }) {
-    final legacyStore = store ?? FinanceStore.seeded();
+    // Widget fixtures historically construct MoneyTallyApp directly. Keep
+    // their deterministic in-memory seed, while production bootstrap always
+    // passes an already-loaded v2 store and never constructs this snapshot.
+    final fixtureStore = store ?? FinanceStore.seeded();
     final financeDataStore =
         dataStore ??
         FinanceDataStore(
           dataSet: const V1SnapshotMigrator().migrate(
-            legacyStore.snapshot().toJson(),
+            fixtureStore.snapshot().toJson(),
           ),
         );
     return MoneyTallyApp._(
-      store: legacyStore,
+      store: store,
       dataStore: financeDataStore,
       authService: authService ?? LocalOnlyAuthService(),
       remoteRepository: remoteRepository,
       recordRepository: recordRepository,
+      initialOnboardingVersionSeen: initialOnboardingVersionSeen,
       key: key,
     );
   }
 
   const MoneyTallyApp._({
-    required this.store,
+    this.store,
     required this.dataStore,
     required this.authService,
     this.remoteRepository,
     this.recordRepository,
+    this.initialOnboardingVersionSeen,
     super.key,
   });
 
-  final FinanceStore store;
+  final FinanceStore? store;
   final FinanceDataStore dataStore;
   final AuthService authService;
   final FinanceRemoteRepository? remoteRepository;
   final FinanceRecordRepository? recordRepository;
+  // Loaded with startup state so the first app frame is already the right page.
+  final int? initialOnboardingVersionSeen;
 
   @override
   Widget build(BuildContext context) {
-    return FinanceStoreScope(
-      store: store,
-      child: FinanceDataStoreScope(
-        store: dataStore,
-        child: Builder(
-          builder: (context) {
-            final preferences = FinanceDataStoreScope.watch(
-              context,
-            ).preferences;
-            return MaterialApp(
-              debugShowCheckedModeBanner: false,
-              title: 'Money Tally',
-              theme: AppTheme.light(),
-              darkTheme: AppTheme.dark(),
-              themeMode: themeModeFor(preferences.appearanceMode),
-              home: AuthGate(
+    final app = FinanceDataStoreScope(
+      store: dataStore,
+      child: Builder(
+        builder: (context) {
+          final preferences = FinanceDataStoreScope.watch(context).preferences;
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            title: trackmarkMoneyName,
+            theme: AppTheme.light(),
+            darkTheme: AppTheme.dark(),
+            themeMode: themeModeFor(preferences.appearanceMode),
+            navigatorObservers: [TrackmarkNavigationObserver()],
+            home: OnboardingGate(
+              initialVersionSeen: initialOnboardingVersionSeen,
+              child: AuthGate(
                 authService: authService,
                 remoteRepository: remoteRepository,
                 recordRepository: recordRepository,
               ),
-            );
-          },
-        ),
+            ),
+          );
+        },
       ),
     );
+    // The scope remains available only for historical widget fixtures while
+    // the old UI classes are compiled. Production never supplies a v1 store.
+    final legacyStore = store;
+    return legacyStore == null
+        ? app
+        : FinanceStoreScope(store: legacyStore, child: app);
   }
 }

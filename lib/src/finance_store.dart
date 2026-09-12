@@ -10,6 +10,17 @@ class FinanceStore extends ChangeNotifier {
     this.repository,
   });
 
+  factory FinanceStore.empty({LocalFinanceRepository? repository}) {
+    return FinanceStore(
+      repository: repository,
+      accounts: [],
+      categories: [],
+      transactions: [],
+      scheduled: [],
+      budgets: [],
+    );
+  }
+
   factory FinanceStore.seeded({LocalFinanceRepository? repository}) {
     final now = DateTime.now();
     return FinanceStore(
@@ -163,7 +174,7 @@ class FinanceStore extends ChangeNotifier {
     LocalFinanceRepository repository = const LocalFinanceRepository(),
   }) async {
     final snapshot = await repository.load();
-    if (snapshot == null) return FinanceStore.seeded(repository: repository);
+    if (snapshot == null) return FinanceStore.empty(repository: repository);
     return FinanceStore(
       accounts: snapshot.accounts,
       categories: snapshot.categories,
@@ -371,7 +382,6 @@ class FinanceStore extends ChangeNotifier {
     }
     notifyListeners();
   }
-
 }
 
 class FinanceStoreScope extends InheritedNotifier<FinanceStore> {

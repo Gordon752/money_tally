@@ -71,6 +71,16 @@ class AppTheme {
           ),
         ),
       ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? accent : null,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? accent.withValues(alpha: isDark ? 0.46 : 0.38)
+              : null,
+        ),
+      ),
     );
   }
 }

@@ -14,10 +14,15 @@ class BudgetProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isOver = spentMinor > budgetMinor && budgetMinor > 0;
-    final progress = budgetMinor <= 0
-        ? 0.0
-        : (spentMinor / budgetMinor).clamp(0.0, 1.0);
+    final ratio = budgetMinor <= 0 ? 0.0 : spentMinor / budgetMinor;
+    final progress = budgetMinor <= 0 ? 0.0 : ratio.clamp(0.0, 1.0);
+    final color = spentMinor == 0
+        ? Theme.of(context).colorScheme.outlineVariant
+        : ratio >= 1
+        ? AppColors.danger
+        : ratio >= .75
+        ? AppColors.warning
+        : AppColors.accent;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppRadii.pill),
@@ -28,7 +33,7 @@ class BudgetProgressBar extends StatelessWidget {
           backgroundColor: Theme.of(
             context,
           ).colorScheme.surfaceContainerHighest,
-          color: isOver ? AppColors.danger : AppColors.accent,
+          color: color,
         ),
       ),
     );
